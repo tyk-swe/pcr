@@ -31,7 +31,7 @@ crate::reflective_layer! {
 }
 message_codec!(SsdpCodec, Ssdp, ssdp_schema);
 
-const NAME: &str = "ssdp";
+const NAME: &str = crate::protocol::BuiltinProtocol::Ssdp.as_str();
 impl Ssdp {
     fn encode_wire(&self, c: &EncodeContext<'_>) -> Result<Vec<u8>, Error> {
         let w = super::text_message::encode(

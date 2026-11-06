@@ -238,15 +238,8 @@ const MAX_TCP_FLAGS: u16 = 0x1ff;
 
 /// Decimal or `0x` hexadecimal TCP flag bits within the nine defined bits.
 fn parse_tcp_flags(token: &str) -> Result<u16, String> {
-    let parsed = match token
-        .strip_prefix("0x")
-        .or_else(|| token.strip_prefix("0X"))
-    {
-        Some(hex) => u16::from_str_radix(hex, 16),
-        None => token.parse::<u16>(),
-    };
-    match parsed {
-        Ok(flags) if flags <= MAX_TCP_FLAGS => Ok(flags),
+    match crate::command_options::parse_unsigned::<u16>(token) {
+        Some(flags) if flags <= MAX_TCP_FLAGS => Ok(flags),
         _ => Err(format!(
             "invalid TCP flags `{token}`: expected a decimal or 0x hexadecimal value within 0..={MAX_TCP_FLAGS:#x}"
         )),

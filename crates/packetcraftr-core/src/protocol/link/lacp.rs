@@ -66,7 +66,7 @@ crate::reflective_layer! {
 }
 message_codec!(LacpCodec, Lacp, lacp_schema);
 
-const NAME: &str = "lacp";
+const NAME: &str = crate::protocol::BuiltinProtocol::Lacp.as_str();
 impl Lacp {
     fn encode_wire(&self, c: &EncodeContext<'_>) -> Result<Vec<u8>, Error> {
         if self.reserved.len() != 68 {

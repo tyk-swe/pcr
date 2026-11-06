@@ -18,7 +18,6 @@ use crate::neighbor::{needs_resolution, request_wire_bytes};
 use crate::probe;
 use crate::scan::Error;
 use crate::scan::Request;
-use crate::scan::error::probe_error;
 use crate::scan::plan::{adaptive_worst_case_duration, ip_worst_case_duration, probe_count};
 use crate::scan::{IPV4_PROBE_BYTES, IPV6_PROBE_BYTES};
 
@@ -57,7 +56,7 @@ pub(super) fn approve<A: Authorizer + ResolveTarget>(
     let endpoints = request.planned_endpoints()?.to_vec();
     // Only the serial path reuses `collection` to retain each exchange's frames.
     if request.max_in_flight == 1 {
-        check_collection_evidence(probe_error, &request.collection, request.limits.evidence)?;
+        check_collection_evidence::<Error>(&request.collection, request.limits.evidence)?;
     }
     // Implementations must authorize the declared target before DNS and every
     // answer before anything below constructs a probe; `admit_selection` owns
@@ -65,7 +64,6 @@ pub(super) fn approve<A: Authorizer + ResolveTarget>(
     let (selected, plan) = admit_selection(
         authorizer,
         deadline,
-        probe_error,
         DeclaredTargets {
             selection: &request.targets,
             family: FamilyGate::new(request.address_family, Error::family),
@@ -211,8 +209,7 @@ pub(super) fn plan(
     let neighbor_requests = explicit_requests
         .checked_add(implicit_requests)
         .ok_or_else(overflow)?;
-    check_probe_count(
-        probe_error,
+    check_probe_count::<Error>(
         total_probes
             .checked_add(neighbor_requests)
             .ok_or_else(overflow)?,
@@ -245,12 +242,7 @@ pub(super) fn plan(
         actual: Duration::MAX,
         limit: request.limits.max_duration,
     };
-    let pause = rate_delay(
-        probe_error,
-        "probes_per_second",
-        1,
-        request.probes_per_second,
-    )?;
+    let pause = rate_delay::<Error>("probes_per_second", 1, request.probes_per_second)?;
     // Every neighbor request waits its attempt timeout and paces like a probe,
     // except a last request no probe follows; a paced request's wait counts
     // toward its pause, so it holds the next transmission back by the longer.
@@ -292,7 +284,7 @@ pub(super) fn plan(
     .into_iter()
     .try_fold(Duration::ZERO, Duration::checked_add)
     .ok_or_else(too_long)?;
-    check_probe_duration(probe_error, worst_case, request.limits.max_duration)?;
+    check_probe_duration::<Error>(worst_case, request.limits.max_duration)?;
     Ok(Plan {
         total_probes,
         resolves_neighbors: resolves_next_hops || explicit_requests > 0,

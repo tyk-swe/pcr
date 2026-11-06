@@ -46,8 +46,8 @@ pub(crate) fn client(
 ) -> Client {
     let client = Client::new(registry, policy, SystemProviders)
         .with_runtime(self::runtime(invocation, runtime))
-        .with_cancellation(invocation.cancellation.clone());
-    match &invocation.deadline {
+        .with_cancellation(invocation.control.cancellation.clone());
+    match &invocation.control.deadline {
         Some(deadline) => client.with_deadline((**deadline).clone()),
         None => client,
     }

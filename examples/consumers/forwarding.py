@@ -4,7 +4,7 @@
 """Bounded reference consumer for the forwarding contract.
 
 This validates the protocol and forwarding invariants it uses, not the complete
-JSON Schema. It accepts only packetcraftr.output/v19. Additive fields
+JSON Schema. It accepts only the current output schema named below. Additive fields
 are accepted; unknown semantic enums are rejected. An error envelope is an execution failure, not a forwarding verdict.
 """
 from __future__ import annotations

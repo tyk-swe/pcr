@@ -14,7 +14,28 @@ use crate::{
 };
 use packetcraftr_core::{self as core, frame::Frame};
 
+use crate::output::contract::PublishedType;
+
 impl crate::commands::Spec for Args {
+    const PUBLISHED: &'static [PublishedType] = &[
+        PublishedType {
+            definition: "fragmentSuccess",
+            command: "fragment",
+            rust_types: &["crate::commands::packet::fragment::output::Report"],
+            events: &[],
+            example: "examples/documents/output-fragment-success.json",
+        },
+        PublishedType {
+            definition: "fragmentStreamSuccess",
+            command: "fragment",
+            rust_types: &[
+                "crate::commands::packet::fragment::output::Complete",
+                "crate::commands::packet::fragment::output::Fragment",
+            ],
+            events: &["complete", "fragment"],
+            example: "examples/documents/output-fragment-complete.json",
+        },
+    ];
     const FORMATS: &'static [crate::output::contract::Format] = &[
         crate::output::contract::Format::Text,
         crate::output::contract::Format::Json,
@@ -51,8 +72,12 @@ pub(crate) fn run(
 ) -> Result<(), CliError> {
     let compression = args.compression.for_output(format)?;
     let registry = core::protocol::builtin::registry();
-    let packet =
-        crate::input::read_recipe(invocation, args.recipe, &registry, args.budget.max_layers)?;
+    let packet = crate::input::read_recipe(
+        &invocation.control,
+        args.recipe,
+        &registry,
+        args.budget.max_layers,
+    )?;
     invocation.check()?;
     let link_type = core::transform::fragment_link_type(&packet).map_err(CliError::classified)?;
     let built = core::build::Builder::new(registry)

@@ -21,7 +21,7 @@ use crate::target::ResolveTarget;
 use crate::{Client, Sink, Stats};
 
 use super::EVIDENCE_DIAGNOSTICS;
-use super::error::{Error, attempt_error};
+use super::error::Error;
 use super::executor::{Exchange, TcpQuerier};
 use super::plan::{OperationLimits, operation_limits};
 use super::{Event, EventContext, Outcome, Report, Request, batch};
@@ -168,12 +168,7 @@ where
     deadline.check_cancelled()?;
     let mut prepared = PreparedOperation::new(request)?;
     // Approved before server resolution, unlike `admit_operation`'s resolve-first order.
-    approve_operation(
-        authorizer,
-        Operation::Dns(prepared.limits),
-        deadline,
-        attempt_error,
-    )?;
+    approve_operation::<_, Error>(authorizer, Operation::Dns(prepared.limits), deadline)?;
     prepared.execute(authorizer, registry, executor, clock, deadline, emit)?;
     Ok(prepared.report)
 }
@@ -251,7 +246,7 @@ impl<'a> PreparedOperation<'a> {
             authorizer,
             registry,
             executor,
-            execution: Context::new(deadline, clock, attempt_error),
+            execution: Context::new(deadline, clock),
             query: self.query.clone(),
             delay: self.delay,
             context,

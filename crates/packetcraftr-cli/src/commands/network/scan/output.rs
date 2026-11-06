@@ -21,7 +21,7 @@ use packetcraftr::probe::Transport;
 
 use packetcraftr::scan as library;
 
-pub(crate) use crate::output::scan_failure::{Scope, Sent, Stage};
+use crate::output::scan_failure::Scope;
 pub(crate) use event::Event;
 pub(crate) use probe::{ApplicationStatus, Probe};
 

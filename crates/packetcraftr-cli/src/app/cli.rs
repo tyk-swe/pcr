@@ -172,7 +172,7 @@ pub(crate) struct Cli {
     pub(crate) command: CommandLine,
 }
 
-#[derive(Clone, Copy, Debug, Default, ValueEnum)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
 pub(crate) enum ColorChoice {
     /// Use colour only when the destination supports it.
     #[default]

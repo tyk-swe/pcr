@@ -45,10 +45,10 @@ where
         // lookups, so their setup cannot extend its expiry; it starts before
         // the `started` marker so it cannot end later.
         let mut operation =
-            crate::engine::operation::Operation::new(self, scan.limits.max_duration);
-        operation.neighbor_mode = crate::engine::operation::NeighborMode::Authorized;
+            crate::engine::operation::Operation::new(self, scan.limits.max_duration)
+                .with_neighbor_mode(crate::engine::operation::NeighborMode::Authorized);
         if lookup.is_some() {
-            crate::scan::NeighborBounds::authorize(&scan, &mut operation)?;
+            operation = crate::scan::NeighborBounds::authorize(&scan, operation)?;
         }
         let started = self.now();
         let delivery = sink.delivery();
@@ -103,11 +103,11 @@ where
         let mut stats = scan_report.stats.clone();
         let mut trace_report = None;
         let mut trace_sent = None;
-        operation.spent = stats.clone();
+        operation = operation.with_spent(stats.clone());
         if let Some(stage) = &stage {
             let mut trace_operation = operation.isolated();
             if let Some(runtime) = trace.as_ref().and_then(|trace| trace.runtime.clone()) {
-                trace_operation.runtime = runtime;
+                trace_operation = trace_operation.with_runtime(runtime);
             }
             let retained = *retained.lock().unwrap_or_else(PoisonError::into_inner);
             let trace_sink = Arc::clone(&sink);
@@ -130,7 +130,7 @@ where
         }
         // The lookups' sends, bytes, and time count in this scan's reported
         // statistics, and run in the allowance the scan and trace left over.
-        operation.spent = stats.clone();
+        operation = operation.with_spent(stats.clone());
         let reverse_dns = names(
             lookup.as_ref(),
             self,
@@ -181,7 +181,7 @@ where
             .as_ref()
             .is_some_and(|reverse| reverse.transport != crate::dns::TransportMode::Tcp)
         {
-            crate::scan::NeighborBounds::authorize(&scan, &mut operation)?;
+            operation = crate::scan::NeighborBounds::authorize(&scan, operation)?;
         }
         let started = self.now();
         // Probe events stream as they settle; the tracker keeps only what

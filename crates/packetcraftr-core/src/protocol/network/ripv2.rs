@@ -43,7 +43,7 @@ crate::reflective_layer! {
 }
 message_codec!(Ripv2Codec, Ripv2, ripv2_schema);
 
-const NAME: &str = "ripv2";
+const NAME: &str = crate::protocol::BuiltinProtocol::Ripv2.as_str();
 impl Ripv2 {
     fn encode_wire(&self, c: &EncodeContext<'_>) -> Result<Vec<u8>, Error> {
         if !matches!(self.command, 1 | 2) {

@@ -89,6 +89,25 @@ impl std::fmt::Display for Timestamp {
     }
 }
 
+#[derive(Debug, Serialize)]
+pub(crate) struct Source {
+    pub number: u64,
+    pub timestamp: Timestamp,
+}
+
+impl TryFrom<&packetcraftr_core::analysis::provenance::SourceFrame> for Source {
+    type Error = Error;
+
+    fn try_from(
+        frame: &packetcraftr_core::analysis::provenance::SourceFrame,
+    ) -> Result<Self, Error> {
+        Ok(Self {
+            number: frame.number,
+            timestamp: Timestamp::try_from(frame.timestamp)?,
+        })
+    }
+}
+
 pub use packetcraftr_core::frame::Direction;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]

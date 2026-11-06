@@ -21,7 +21,35 @@ use crate::invocation::StreamEncoder;
 use analysis::follow::{Chunk, Collector};
 use rendering::State;
 
+use crate::output::contract::PublishedType;
+
 impl crate::commands::Spec for Args {
+    const PUBLISHED: &'static [PublishedType] = &[
+        PublishedType {
+            definition: "followSuccess",
+            command: "follow",
+            rust_types: &["crate::commands::analyze::follow::output::Report"],
+            events: &[],
+            example: "examples/documents/output-follow-complete.json",
+        },
+        PublishedType {
+            definition: "followStreamSuccess",
+            command: "follow",
+            rust_types: &[
+                "crate::commands::analyze::follow::output::Chunk",
+                "crate::commands::analyze::follow::output::Report",
+                "crate::commands::offline_analysis::output::reassembly::Event",
+            ],
+            events: &[
+                "chunk",
+                "complete",
+                "ip_datagram_completed",
+                "ip_datagram_incomplete",
+                "ip_overlap_resolved",
+            ],
+            example: "examples/documents/output-follow-complete.json",
+        },
+    ];
     const FORMATS: &'static [crate::output::contract::Format] = &[
         crate::output::contract::Format::Text,
         crate::output::contract::Format::Json,
@@ -89,14 +117,19 @@ pub(super) fn run(
             )
         })
         .transpose()?;
-    let mut reader = open_capture(invocation, &arguments.path, capture_limits)?;
+    let mut reader = open_capture(
+        &invocation.control,
+        &invocation.output,
+        &arguments.path,
+        capture_limits,
+    )?;
 
     // Indices stay capture-global, so the index stats reports is the index extracted here.
     let session = analysis::Session::new(
         prepared.registry.clone(),
-        analysis::Options {
+        analysis::SessionOptions {
             stream: Some(selector),
-            ..prepared.options(invocation)
+            ..prepared.session_options(invocation)
         },
         Collector::new(selector),
     );

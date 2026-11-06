@@ -11,9 +11,9 @@
 //!
 //! | Layer | Modules |
 //! | --- | --- |
-//! | 1. Primitives | `deadline`, `link`, `bounded` |
+//! | 1. Primitives | `deadline`, `entropy`, `link`, `bounded` |
 //! | 2. Infrastructure | `unsupported`, `resources`, `workers` |
-//! | 3. Provider contracts | `error`, `interface`, `route`, `capture`, `transmit`, `tcp`, `udp`, `tls`, `resolution` |
+//! | 3. Provider contracts | `error`, `native`, `interface`, `route`, `capture`, `transmit`, `tcp`, `udp`, `tls`, `resolution` |
 //! | 4. Native backends | `platform` |
 //!
 //! The one sanctioned upward edge is dispatch: a contract's system provider
@@ -40,6 +40,8 @@ mod error;
 pub mod interface;
 #[forbid(unsafe_code)]
 pub mod link;
+#[forbid(unsafe_code)]
+mod native;
 mod platform;
 #[forbid(unsafe_code)]
 pub mod resolution;

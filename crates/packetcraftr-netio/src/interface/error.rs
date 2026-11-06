@@ -35,11 +35,11 @@ impl Error {
     }
 
     #[cfg(native_route)]
-    pub(crate) fn native(error: crate::route::Error) -> Self {
+    pub(crate) fn native(error: crate::native::Error) -> Self {
         match error {
-            crate::route::Error::Unsupported(unsupported) => unsupported.into(),
-            crate::route::Error::Cancelled(cancelled) => cancelled.into(),
-            crate::route::Error::DeadlineExceeded { operation } => {
+            crate::native::Error::Unsupported(unsupported) => unsupported.into(),
+            crate::native::Error::Cancelled(cancelled) => cancelled.into(),
+            crate::native::Error::DeadlineExceeded { operation } => {
                 Self::DeadlineExceeded { operation }
             }
             error => Self::Discovery {

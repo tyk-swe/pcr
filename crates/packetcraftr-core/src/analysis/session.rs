@@ -55,11 +55,7 @@ macro_rules! application_collector {
                 Self::observe(self, record).map_err(BoundaryError::from_error)
             }
 
-            fn finish(self, run: &RunSummary) -> Result<(Vec<Event>, Summary), BoundaryError> {
-                Self::finish(self, run).map_err(BoundaryError::from_error)
-            }
-
-            fn finish_controlled(
+            fn finish(
                 self,
                 run: &RunSummary,
                 deadline: &crate::budget::Deadline,
@@ -102,27 +98,17 @@ pub trait Collector {
 
     fn observe(&mut self, record: &FrameRecord<'_>) -> Result<Vec<Self::Event>, BoundaryError>;
 
-    fn finish(self, run: &Summary) -> Result<(Vec<Self::Event>, Self::Summary), BoundaryError>;
-
     /// Finalize under the original run control, delivering terminal events in
-    /// order. Override this for large finalizers to check control internally
-    /// and avoid retaining the complete terminal event list. The default keeps
-    /// existing collectors compatible. A synchronous callback must cooperate:
-    /// it cannot be interrupted while it is blocked.
-    fn finish_controlled(
+    /// order through `event_sink`. Check the deadline during large
+    /// finalizations instead of retaining the complete terminal event list.
+    /// A synchronous callback must cooperate: it cannot be interrupted while
+    /// it is blocked.
+    fn finish(
         self,
         run: &Summary,
         deadline: &Deadline,
         event_sink: &mut dyn FnMut(Self::Event) -> Result<(), BoundaryError>,
-    ) -> Result<Self::Summary, BoundaryError>
-    where
-        Self: Sized,
-    {
-        check(deadline)?;
-        let (events, summary) = self.finish(run)?;
-        deliver(deadline, events, event_sink)?;
-        Ok(summary)
-    }
+    ) -> Result<Self::Summary, BoundaryError>;
 }
 
 pub(super) fn check(deadline: &Deadline) -> Result<(), BoundaryError> {
@@ -169,7 +155,7 @@ impl<C: Collector> Pass<C> {
         check(&self.deadline).map_err(super::Error::Collector)?;
         let summary = self
             .collector
-            .finish_controlled(&self.run, &self.deadline, event_sink)
+            .finish(&self.run, &self.deadline, event_sink)
             .map_err(super::Error::Collector)?;
         check(&self.deadline).map_err(super::Error::Collector)?;
         Ok(Outcome {
@@ -196,7 +182,21 @@ impl<C: Collector> Outcome<C> {
     }
 }
 
-/// Replaces `options.plan` and raises `tcp_events`/`track_sources` to cover collector needs.
+/// Caller-owned inputs for one [`Session`] run. The plan, TCP event
+/// delivery, and source tracking a run needs are derived from the
+/// collector's [`CollectorNeeds`], not supplied here.
+#[derive(Clone, Debug, Default)]
+pub struct SessionOptions<'a> {
+    /// Shared invocation ceiling; a local phase limit may tighten it.
+    pub deadline: Option<Arc<Deadline>>,
+    pub cancellation: Option<crate::budget::Cancellation>,
+    pub filter: Option<&'a crate::filter::Filter>,
+    pub stream: Option<StreamRef>,
+    pub time_bounds: Option<crate::frame::TimeBounds>,
+    pub ip_overlap: crate::analysis::reassembly::ip::OverlapPolicy,
+    pub limits: super::Limits,
+}
+
 pub struct Session<'a, C> {
     collector: C,
     options: Options<'a>,
@@ -205,11 +205,20 @@ pub struct Session<'a, C> {
 
 impl<'a, C: Collector> Session<'a, C> {
     /// `max_flows` bounds each transport capture-wide, so a plan that indexes at all indexes both.
-    pub fn new(registry: Arc<Registry>, mut options: Options<'a>, collector: C) -> Self {
+    pub fn new(registry: Arc<Registry>, options: SessionOptions<'a>, collector: C) -> Self {
         let needs = collector.needs();
-        options.plan = Plan::for_collector(needs, options.filter, options.stream);
-        options.tcp_events |= needs.tcp_events;
-        options.track_sources |= needs.track_sources;
+        let options = Options {
+            plan: Plan::for_collector(needs, options.filter, options.stream),
+            deadline: options.deadline,
+            track_sources: needs.track_sources,
+            cancellation: options.cancellation,
+            filter: options.filter,
+            stream: options.stream,
+            time_bounds: options.time_bounds,
+            tcp_events: needs.tcp_events,
+            ip_overlap: options.ip_overlap,
+            limits: options.limits,
+        };
         Self {
             collector,
             options,

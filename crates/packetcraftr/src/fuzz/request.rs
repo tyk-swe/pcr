@@ -14,7 +14,7 @@ use crate::engine::execution::limits::check_rate;
 use crate::evidence::Limits as EvidenceLimits;
 use crate::{exchange, route, send};
 
-use super::error::{Error, case_error};
+use super::error::Error;
 
 #[derive(Clone, Debug)]
 pub struct Request {
@@ -63,7 +63,7 @@ impl Request {
                 maximum: MAX_WAIT,
             });
         }
-        check_rate(case_error, "cases_per_second", self.cases_per_second)?;
+        check_rate::<Error>("cases_per_second", self.cases_per_second)?;
         self.campaign.validate()?;
         Ok(())
     }

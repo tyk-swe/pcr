@@ -70,7 +70,7 @@ impl<P: PacketProviders, K: Clock> Native<'_, P, K> {
         }
         // Apply neighbor-specific capture minima only to routes that need
         // resolution, retaining the one answer for all later exchanges.
-        self.operation.neighbors = self
+        let narrowed = self
             .operation
             .neighbors
             .one_attempt(
@@ -81,6 +81,7 @@ impl<P: PacketProviders, K: Clock> Native<'_, P, K> {
                 1,
             )
             .map_err(BoundaryError::from_error)?;
+        *self.operation = self.operation.clone().with_neighbors(narrowed);
         crate::engine::preparation::authorize_neighbor_request(
             &self.operation.policy(&self.client.policy),
             &request,

@@ -1,7 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-mod error;
 mod models;
 #[cfg(any(native_route, test))]
 #[cfg_attr(not(native_route), allow(dead_code))]
@@ -14,7 +13,7 @@ use packetcraftr_core::error::Classified;
 
 use crate::interface::Id as InterfaceId;
 
-pub use error::Error;
+pub use crate::native::Error;
 pub use models::{Decision, Scope, SelectionReason};
 
 /// Passive route and interface lookups.

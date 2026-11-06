@@ -115,15 +115,17 @@ impl NeighborBounds {
     /// paces its neighbor requests at the scan's probe rate.
     pub(crate) fn authorize(
         request: &Request,
-        operation: &mut crate::engine::operation::Operation,
-    ) -> Result<(), crate::neighbor::Error> {
-        operation.neighbors = Self::of(request).narrow(&operation.neighbors)?;
-        operation.neighbor_mode = crate::engine::operation::NeighborMode::Authorized;
-        operation.neighbor_pause = request
+        operation: crate::engine::operation::Operation,
+    ) -> Result<crate::engine::operation::Operation, crate::neighbor::Error> {
+        let pause = request
             .probes_per_second
             .and_then(|rate| Duration::from_secs(1).checked_div(rate))
             .unwrap_or_default();
-        Ok(())
+        let narrowed = Self::of(request).narrow(&operation.neighbors)?;
+        Ok(operation
+            .with_neighbors(narrowed)
+            .with_neighbor_mode(crate::engine::operation::NeighborMode::Authorized)
+            .with_neighbor_pause(pause))
     }
 }
 
@@ -225,7 +227,7 @@ impl<'c, P: PacketProviders, K: Clock> ClientExecutor<'c, P, K> {
         let base = self.send.clone();
         let services = self.client;
         let client = self.configured()?;
-        let packet = route_probe(target).packet();
+        let packet = route_probe(target).packet(&client.registry);
         let interface = target.interface();
         let route_with = |send: &crate::send::Options| {
             services
@@ -312,8 +314,9 @@ fn route_probe(target: &SelectedAddress) -> Probe {
 impl<P: PacketProviders, K: Clock> Executor<Batch<Probe>> for ClientExecutor<'_, P, K> {
     fn execute(&mut self, batch: &Batch<Probe>) -> Result<Evidence, BoundaryError> {
         let first = batch.probe()?;
-        let packet = first.packet();
-        if !sent_probe_matches(first, &packet) {
+        let registry = std::sync::Arc::clone(&self.configured()?.registry);
+        let packet = first.packet(&registry);
+        if !sent_probe_matches(&registry, first, &packet) {
             return Err(EXECUTOR_FAULT.invalid("scan packet does not match its correlated probe"));
         }
         let executor = self.exchange()?;

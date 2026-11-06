@@ -35,7 +35,38 @@ use packetcraftr_core::error::Classified;
 use packetcraftr_core::filter::FrameSelector;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
+use crate::output::contract::PublishedType;
+
 impl crate::commands::Spec for Args {
+    const PUBLISHED: &'static [PublishedType] = &[
+        PublishedType {
+            definition: "captureAggregateSuccess",
+            command: "capture",
+            rust_types: &["crate::output::capture::Summary"],
+            events: &[],
+            example: "examples/documents/output-capture-complete.json",
+        },
+        PublishedType {
+            definition: "captureSuccess",
+            command: "capture",
+            rust_types: &[
+                "crate::output::capture::Summary",
+                "crate::commands::files::read::output::Frame",
+            ],
+            events: &["complete", "frame"],
+            example: "examples/documents/output-capture-complete.json",
+        },
+        PublishedType {
+            definition: "projectionStreamSuccess",
+            command: "capture",
+            rust_types: &[
+                "crate::output::projection::Complete",
+                "crate::output::projection::RowEvent",
+            ],
+            events: &["complete", "fields"],
+            example: "examples/documents/output-dissect-complete.json",
+        },
+    ];
     const FORMATS: &'static [crate::output::contract::Format] = &[
         crate::output::contract::Format::Text,
         crate::output::contract::Format::Json,
@@ -232,7 +263,7 @@ fn validate_output(args: &Args, format: Format) -> Result<Compression, CliError>
             Vec::new(),
         ));
     }
-    args.tree.validate_format(format == Format::Text, format)?;
+    args.tree.validate_format(format)?;
     if (args.dissect || !args.fields.is_empty()) && !matches!(format, Format::Text | Format::Ndjson)
     {
         return Err(CliError::from_classification(

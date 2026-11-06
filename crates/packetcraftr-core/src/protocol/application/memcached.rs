@@ -51,7 +51,7 @@ crate::reflective_layer! {
 }
 message_codec!(MemcachedCodec, Memcached, memcached_schema);
 
-const NAME: &str = "memcached";
+const NAME: &str = crate::protocol::BuiltinProtocol::Memcached.as_str();
 impl Memcached {
     fn encode_wire(&self, c: &EncodeContext<'_>) -> Result<Vec<u8>, Error> {
         if !matches!(self.magic, 0x80 | 0x81) {

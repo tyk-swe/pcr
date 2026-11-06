@@ -133,6 +133,16 @@ macro_rules! commands {
             }
         }
 
+        /// Every published command's output-schema definitions, collected
+        /// from the `PUBLISHED` rows beside each command's own types.
+        #[allow(
+            dead_code,
+            reason = "consumed by the published_rows_cover_every_command_exactly guard test and scripts/check_output_schema.py"
+        )]
+        pub(crate) const PUBLISHED: &[&[crate::output::contract::PublishedType]] = &[
+            $( $( commands!(@published $name, <$arguments as Spec>::PUBLISHED), )? )*
+        ];
+
         // Inventory positions preserve workflow order independently of declaration order.
         pub(crate) const INVENTORY: &[Entry] = &{
             const POSITIONS: &[usize] = &[ $( $position, )* ];
@@ -380,5 +390,41 @@ impl clap::Subcommand for CommandLine {
 
     fn has_subcommand(name: &str) -> bool {
         GROUPS.iter().any(|(group, _)| *group == name)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Command, PUBLISHED};
+    use std::collections::BTreeSet;
+
+    #[test]
+    fn published_rows_cover_every_command_exactly() {
+        let rows: Vec<_> = PUBLISHED.iter().flat_map(|rows| rows.iter()).collect();
+        let names: BTreeSet<&str> = Command::ALL
+            .iter()
+            .map(|command| command.as_str())
+            .collect();
+        let mut pairs = BTreeSet::new();
+        for row in &rows {
+            assert!(
+                names.contains(row.command),
+                "{} names unknown command {}",
+                row.definition,
+                row.command
+            );
+            assert!(
+                pairs.insert((row.definition, row.command)),
+                "duplicate published row {}/{}",
+                row.definition,
+                row.command
+            );
+        }
+        for name in names {
+            assert!(
+                rows.iter().any(|row| row.command == name),
+                "command {name} publishes no output-schema row"
+            );
+        }
     }
 }

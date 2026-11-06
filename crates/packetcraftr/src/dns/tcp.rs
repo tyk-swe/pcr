@@ -5,7 +5,6 @@
 
 use packetcraftr_netio::tcp::{self, Provider, Stream};
 use packetcraftr_netio::{bounded, deadline::POLL_INTERVAL};
-use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
@@ -333,7 +332,9 @@ fn map_connect_error(endpoint: SocketAddr, error: packetcraftr_netio::tcp::Error
                 cancelled,
             };
         }
-        TcpError::Socket(source) if is_timeout(&source) => return timeout,
+        TcpError::Socket(source) if packetcraftr_netio::bounded::timed_out(&source) => {
+            return timeout;
+        }
         TcpError::DeadlineExceeded => return timeout,
         TcpError::Socket(source) => Source::new(source),
         error => Source::new(error),
@@ -386,7 +387,7 @@ fn write_exact<S: Stream>(
                     source: None,
                 })?;
             }
-            Err(source) if is_retryable(&source) => {}
+            Err(source) if packetcraftr_netio::bounded::retryable(&source) => {}
             Err(source) => {
                 return Err(Error::Write {
                     written: *written,
@@ -408,7 +409,7 @@ fn write_exact<S: Stream>(
             })?;
         match stream.flush() {
             Ok(()) => return Ok(()),
-            Err(source) if is_retryable(&source) => {}
+            Err(source) if packetcraftr_netio::bounded::retryable(&source) => {}
             Err(source) => {
                 return Err(Error::Write {
                     written: *written,
@@ -453,7 +454,7 @@ fn read_exact<S: Stream>(
                     source: None,
                 })?;
             }
-            Err(source) if is_retryable(&source) => {}
+            Err(source) if packetcraftr_netio::bounded::retryable(&source) => {}
             Err(source) => {
                 return Err(Error::Read {
                     phase,
@@ -467,23 +468,11 @@ fn read_exact<S: Stream>(
     Ok(read)
 }
 
-/// The wait loops retry these after re-checking cancellation and the deadline.
-fn is_retryable(error: &io::Error) -> bool {
-    error.kind() == io::ErrorKind::Interrupted || is_timeout(error)
-}
-
-fn is_timeout(error: &io::Error) -> bool {
-    matches!(
-        error.kind(),
-        io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::collections::VecDeque;
-    use std::io::{Cursor, Read, Write};
+    use std::io::{self, Cursor, Read, Write};
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicUsize, Ordering};
 

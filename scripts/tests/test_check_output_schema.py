@@ -118,6 +118,29 @@ class DocumentValidationTests(unittest.TestCase):
             with self.assertRaisesRegex(checker.CheckError, 'jsonschema'):
                 checker.load_validator(SCHEMA)
 
+    def test_missing_jsonschema_reports_install_steps_through_check(self):
+        with patch.dict(sys.modules, {'jsonschema': None}):
+            with self.assertRaisesRegex(checker.CheckError, 'jsonschema'):
+                checker.check(ROOT)
+
+    def test_published_codes_skip_test_sources(self):
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            live = root / 'crates/mini/src/live.rs'
+            live.parent.mkdir(parents=True)
+            live.write_text(
+                '// #[cfg(test)] appears only in this example\n'
+                'const DOC: &str = r#"#[cfg(test)]"#;\n'
+                'fn f() { let _ = "cli.live"; }\n'
+                '#[cfg(test)]\nmod tests {\n'
+                '    fn g() { assert!(1 < 2); let _ = "cli.inline_test"; }\n}\n'
+                'fn after_tests() { let _ = "cli.after"; }\n'
+            )
+            tests = root / 'crates/mini/tests/check.rs'
+            tests.parent.mkdir(parents=True)
+            tests.write_text('fn g() { let _ = "cli.test_file"; }\n')
+            self.assertEqual(checker.published_codes(root), {'cli.live', 'cli.after'})
+
     def test_invalid_schema_is_rejected(self):
         with self.assertRaises(checker.CheckError):
             checker.load_validator(dict(SCHEMA, type=7))
@@ -215,7 +238,7 @@ class RegistryTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         root = Path(temporary.name)
         files = {
-            checker.REGISTRY: registry_source,
+            'crates/packetcraftr-cli/src/output/contract.rs': registry_source,
             'crates/packetcraftr-cli/src/output/build.rs':
                 'pub struct Report {}\npub struct Complete {}\n'
                 'pub struct PacketEvent {}\n'
@@ -236,18 +259,18 @@ class RegistryTests(unittest.TestCase):
 
     def test_agreeing_registry_passes(self):
         root = self.workspace(REGISTRY_SOURCE)
-        self.assertEqual(checker.registry_problems(root, REGISTRY_SCHEMA), [])
+        self.assertEqual(checker.registry_problems(root, REGISTRY_SCHEMA, checker.load_jsonschema()), [])
 
     def test_reports_unused_schema_definitions(self):
         root = self.workspace(REGISTRY_SOURCE.replace('buildSuccess"', 'goneSuccess"'))
-        problems = checker.registry_problems(root, REGISTRY_SCHEMA)
+        problems = checker.registry_problems(root, REGISTRY_SCHEMA, checker.load_jsonschema())
         self.assertTrue(any('no such schema definition' in problem for problem in problems))
         self.assertTrue(any('buildSuccess claims' in problem for problem in problems))
 
     def test_unregistered_stream_type_is_reported(self):
         source = REGISTRY_SOURCE.replace('"crate::output::build::PacketEvent", ', '')
         root = self.workspace(source)
-        problems = checker.registry_problems(root, REGISTRY_SCHEMA)
+        problems = checker.registry_problems(root, REGISTRY_SCHEMA, checker.load_jsonschema())
         self.assertTrue(any('PacketEvent' in problem for problem in problems))
 
     def registered_at(self, module):
@@ -257,7 +280,7 @@ class RegistryTests(unittest.TestCase):
         path = root / checker.CLI_SRC / f'{relative}.rs'
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text('pub struct Report {}\n')
-        return checker.registry_problems(root, REGISTRY_SCHEMA)
+        return checker.registry_problems(root, REGISTRY_SCHEMA, checker.load_jsonschema())
 
     def test_published_type_in_a_command_output_module_passes(self):
         self.assertEqual(self.registered_at('crate::commands::packet::build::output'), [])

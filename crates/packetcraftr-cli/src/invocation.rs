@@ -19,14 +19,80 @@ use std::{
     time::Duration,
 };
 
+/// One command's stop conditions. Consumers that only read inputs or run
+/// bounded work take this without the command's output state.
+#[derive(Clone, Debug)]
+pub(crate) struct Control {
+    pub(crate) deadline: Option<Arc<Deadline>>,
+    pub(crate) cancellation: Cancellation,
+}
+
+impl Control {
+    pub(crate) fn new(duration: Option<Duration>, cancellation: Cancellation) -> Self {
+        let deadline = duration.map(|duration| {
+            Arc::new(Deadline::new(duration).with_cancellation(Some(cancellation.clone())))
+        });
+        Self {
+            deadline,
+            cancellation,
+        }
+    }
+
+    /// Terminal error cleanup is allowed after the execution/publication ceiling.
+    pub(crate) fn terminal() -> Self {
+        Self {
+            deadline: None,
+            cancellation: Cancellation::default(),
+        }
+    }
+
+    /// The control the output encoder enforces, always finite in effect
+    /// through cancellation even without a duration.
+    fn output_control(&self) -> Arc<Deadline> {
+        self.deadline.clone().unwrap_or_else(|| {
+            Arc::new(
+                Deadline::new(Duration::MAX).with_cancellation(Some(self.cancellation.clone())),
+            )
+        })
+    }
+
+    pub(crate) fn check_interrupted(&self) -> Result<(), Interrupted> {
+        self.cancellation.check()?;
+        if let Some(deadline) = &self.deadline {
+            deadline.enforce()?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn check(&self) -> Result<(), CliError> {
+        self.check_interrupted().map_err(CliError::classified)
+    }
+
+    pub(crate) fn passive_lookup(&self) -> Deadline {
+        Deadline::new(packetcraftr::deadline::PASSIVE_LOOKUP_TIMEOUT)
+            .with_parent(self.deadline.clone())
+            .with_cancellation(Some(self.cancellation.clone()))
+    }
+
+    pub(crate) fn reader<R: std::io::Read>(
+        &self,
+        reader: packetcraftr_core::capture_file::Reader<R>,
+    ) -> packetcraftr_core::capture_file::Reader<R> {
+        let reader = reader.with_cancellation(self.cancellation.clone());
+        match &self.deadline {
+            Some(deadline) => reader.with_deadline(deadline.clone()),
+            None => reader,
+        }
+    }
+}
+
 /// One command's output, stop conditions, and optional resource diagnostics.
 /// Clones passed to workers share these bounds and diagnostics, never ambient state.
 #[derive(Clone)]
 pub(crate) struct Invocation {
     pub(crate) format: Format,
     pub(crate) output: StreamEncoder,
-    pub(crate) deadline: Option<Arc<Deadline>>,
-    pub(crate) cancellation: Cancellation,
+    pub(crate) control: Control,
     pub(crate) diagnostics: Option<Arc<Diagnostics>>,
     json_attempted: Arc<AtomicBool>,
     stdout_batch: Arc<Mutex<Option<Vec<u8>>>>,
@@ -40,14 +106,10 @@ impl Invocation {
         cancellation: Cancellation,
         diagnostics: Option<Arc<Diagnostics>>,
     ) -> Self {
-        let deadline = duration.map(|duration| {
-            Arc::new(Deadline::new(duration).with_cancellation(Some(cancellation.clone())))
-        });
         Self {
             format,
             output,
-            deadline,
-            cancellation,
+            control: Control::new(duration, cancellation),
             diagnostics,
             json_attempted: Arc::new(AtomicBool::new(false)),
             stdout_batch: Arc::default(),
@@ -73,12 +135,7 @@ impl Invocation {
     }
 
     fn configure_output(mut self) -> Self {
-        let control = self.deadline.clone().unwrap_or_else(|| {
-            Arc::new(
-                Deadline::new(Duration::MAX).with_cancellation(Some(self.cancellation.clone())),
-            )
-        });
-        let output = self.output.with_control(control);
+        let output = self.output.with_control(self.control.output_control());
         self.output = match &self.diagnostics {
             Some(diagnostics) => {
                 let diagnostics = diagnostics.clone();
@@ -92,23 +149,18 @@ impl Invocation {
     /// Terminal error cleanup is allowed after the execution/publication ceiling.
     pub(crate) fn terminal(&self) -> Self {
         Self {
-            deadline: None,
+            control: Control::terminal(),
             output: self.output.clone().terminal(),
-            cancellation: Cancellation::default(),
             ..self.clone()
         }
     }
 
     pub(crate) fn check_interrupted(&self) -> Result<(), Interrupted> {
-        self.cancellation.check()?;
-        if let Some(deadline) = &self.deadline {
-            deadline.enforce()?;
-        }
-        Ok(())
+        self.control.check_interrupted()
     }
 
     pub(crate) fn check(&self) -> Result<(), CliError> {
-        self.check_interrupted().map_err(CliError::classified)
+        self.control.check()
     }
 
     pub(crate) fn json_attempted(&self) -> bool {
@@ -127,20 +179,7 @@ impl Invocation {
     }
 
     pub(crate) fn passive_lookup(&self) -> Deadline {
-        Deadline::new(packetcraftr::deadline::PASSIVE_LOOKUP_TIMEOUT)
-            .with_parent(self.deadline.clone())
-            .with_cancellation(Some(self.cancellation.clone()))
-    }
-
-    pub(crate) fn reader<R: std::io::Read>(
-        &self,
-        reader: packetcraftr_core::capture_file::Reader<R>,
-    ) -> packetcraftr_core::capture_file::Reader<R> {
-        let reader = reader.with_cancellation(self.cancellation.clone());
-        match &self.deadline {
-            Some(deadline) => reader.with_deadline(deadline.clone()),
-            None => reader,
-        }
+        self.control.passive_lookup()
     }
 
     pub(crate) fn decorate<T>(&self, envelope: Envelope<T>) -> Envelope<T> {
@@ -180,7 +219,7 @@ impl std::fmt::Debug for Invocation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Invocation")
             .field("format", &self.format)
-            .field("deadline", &self.deadline)
+            .field("deadline", &self.control.deadline)
             .finish_non_exhaustive()
     }
 }

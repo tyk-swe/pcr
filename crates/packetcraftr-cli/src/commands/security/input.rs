@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use super::invalid;
+use crate::commands::Command;
 use crate::errors::CliError;
 use packetcraftr_core::security::{Report, Source, input};
 use sha2::{Digest, Sha256};
@@ -14,12 +15,12 @@ pub(in crate::commands) fn read(
 ) -> Result<Vec<u8>, CliError> {
     if path == Path::new("-") {
         crate::input::read_stdin_bounded_allow_empty(
-            invocation,
+            &invocation.control,
             limit,
             crate::input::InputKind::SecurityDocument,
         )
     } else {
-        crate::input::read_bounded_json_document(invocation, path, limit)
+        crate::input::read_bounded_json_document(&invocation.control, path, limit)
     }
 }
 
@@ -51,12 +52,12 @@ pub(in crate::commands) fn report(bytes: &[u8]) -> Result<Report, CliError> {
     let envelope = input::aggregate::<Report>(
         bytes,
         &[
-            "hunt",
-            "dns-anomalies",
-            "beacons",
-            "audit-tls",
-            "audit-http",
-            "scan-diff",
+            Command::Hunt.as_str(),
+            Command::DnsAnomalies.as_str(),
+            Command::Beacons.as_str(),
+            Command::AuditTls.as_str(),
+            Command::AuditHttp.as_str(),
+            Command::ScanDiff.as_str(),
         ],
     )
     .map_err(|error| invalid(error.to_string()))?;

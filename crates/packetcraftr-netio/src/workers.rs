@@ -35,7 +35,9 @@ pub(crate) use admission::{
 #[cfg(all(native_route, target_os = "linux"))]
 pub(crate) use context::NAMESPACE_PATH;
 pub(crate) use context::{ExecutionContext, current as execution_context};
-pub(crate) use task::{Task, Waited, discard_panic_payload, unwind_after_cleanup};
+#[cfg(any(all(native_route, target_os = "linux"), native_layer2, test))]
+pub(crate) use task::Waited;
+pub(crate) use task::{Blocked, Task, discard_panic_payload, unwind_after_cleanup};
 
 pub(crate) const CAPACITY: usize = crate::resources::WORKER_CAPACITY;
 
@@ -113,7 +115,7 @@ impl Pool {
     pub(crate) fn new(capacity: usize) -> Self {
         Self {
             capacity,
-            data_capacity: capacity.saturating_sub((capacity / 4).max(usize::from(capacity > 1))),
+            data_capacity: crate::resources::data_capacity(capacity),
             state: Mutex::new(State::default()),
             changed: Condvar::new(),
             retirement_service: Mutex::new(None),

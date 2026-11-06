@@ -329,7 +329,7 @@ impl Codec for TftpCodec {
     }
 
     fn accepts_decoded_protocol(&self, protocol: &crate::layer::Id) -> bool {
-        matches!(protocol.as_str(), "tftp" | "raw")
+        protocol == self.protocol_id() || protocol == &crate::layer::Raw::ID
     }
 
     fn encode(

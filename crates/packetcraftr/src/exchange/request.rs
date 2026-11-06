@@ -52,20 +52,44 @@ impl Request {
     }
 
     pub fn validate(&self) -> Result<(), Error> {
-        if duration_violation(self.timeout, MAX_WAIT) {
-            return Err(Error::InvalidRequest {
-                field: "timeout",
-                message: format!("must be greater than zero and not exceed {MAX_WAIT:?}"),
-            });
-        }
-        if self.max_template_packets == 0 {
-            return Err(Error::InvalidRequest {
-                field: "max_template_packets",
-                message: "must be greater than zero".to_owned(),
-            });
-        }
-        self.collection.validate()
+        validate_window(self.timeout, self.max_template_packets, &self.collection)
     }
+}
+
+/// One workflow step's exchange, without the public request's stop condition.
+/// Workflows stop through their own predicate passed to the hooked exchange.
+pub(crate) struct Step {
+    pub(crate) template: Template,
+    pub(crate) send: crate::send::Options,
+    pub(crate) timeout: Duration,
+    pub(crate) max_template_packets: usize,
+    pub(crate) collection: Collection,
+}
+
+impl Step {
+    pub(crate) fn validate(&self) -> Result<(), Error> {
+        validate_window(self.timeout, self.max_template_packets, &self.collection)
+    }
+}
+
+fn validate_window(
+    timeout: Duration,
+    max_template_packets: usize,
+    collection: &Collection,
+) -> Result<(), Error> {
+    if duration_violation(timeout, MAX_WAIT) {
+        return Err(Error::InvalidRequest {
+            field: "timeout",
+            message: format!("must be greater than zero and not exceed {MAX_WAIT:?}"),
+        });
+    }
+    if max_template_packets == 0 {
+        return Err(Error::InvalidRequest {
+            field: "max_template_packets",
+            message: "must be greater than zero".to_owned(),
+        });
+    }
+    collection.validate()
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

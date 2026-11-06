@@ -68,7 +68,7 @@ crate::reflective_layer! {
 }
 message_codec!(SflowCodec, Sflow, sflow_schema);
 
-const NAME: &str = "sflow";
+const NAME: &str = crate::protocol::BuiltinProtocol::Sflow.as_str();
 const FLOW: &[&str] = &[
     "sequence",
     "source_id",

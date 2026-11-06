@@ -53,7 +53,7 @@ crate::reflective_layer! {
 }
 message_codec!(CoapCodec, Coap, coap_schema);
 
-const NAME: &str = "coap";
+const NAME: &str = crate::protocol::BuiltinProtocol::Coap.as_str();
 impl Coap {
     fn encode_wire(&self, c: &EncodeContext<'_>) -> Result<Vec<u8>, Error> {
         if self.version != 1 || self.message_type > 3 || self.token.len() > 8 {

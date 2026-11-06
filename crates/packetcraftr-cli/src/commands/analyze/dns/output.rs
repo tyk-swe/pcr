@@ -1,12 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-pub(in crate::commands) mod provenance;
-use crate::commands::analyze::dns::output::provenance::Source;
 use crate::commands::offline_analysis::output::{
     ScopedFlowKey, StreamTransport, analysis_complete,
 };
 use crate::output::contract::Error;
+use crate::output::frame::Source;
 use crate::output::hex::compact_hex;
 use crate::output::published_enum;
 use crate::output::stream::StreamRecord;

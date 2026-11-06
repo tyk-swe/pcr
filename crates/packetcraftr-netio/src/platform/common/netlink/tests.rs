@@ -227,7 +227,7 @@ fn registry_wait_respects_parent_elapsed_limit() {
     waiter.join().unwrap();
     assert!(matches!(
         returned_under_control.expect("checked-out registry ignored inherited elapsed control"),
-        Err(super::route::Error::DeadlineExceeded {
+        Err(super::native::Error::DeadlineExceeded {
             operation: "waiting for netlink worker admission"
         })
     ));
@@ -260,7 +260,7 @@ fn full_inbox_rejects_expired_requests() {
         started.send(()).unwrap();
         let observed =
             match submitting.submit(request(), &caller, Instant::now() + Duration::from_secs(30)) {
-                Err(Refused::Interrupted(super::route::Error::DeadlineExceeded { operation })) => {
+                Err(Refused::Interrupted(super::native::Error::DeadlineExceeded { operation })) => {
                     Some(operation)
                 }
                 _ => None,
@@ -293,12 +293,12 @@ fn native_operation_wait_checks_parent_cancellation() {
     let mut connection = runtime.spawn(std::future::pending::<()>());
     cancellation.cancel();
     let result = runtime.block_on(super::await_netlink_operation(
-        std::future::pending::<Result<(), super::route::Error>>(),
+        std::future::pending::<Result<(), super::native::Error>>(),
         &mut connection,
         Duration::from_secs(30),
         &control,
     ));
-    assert!(matches!(result, Err(super::route::Error::Cancelled(_))));
+    assert!(matches!(result, Err(super::native::Error::Cancelled(_))));
     connection.abort();
 }
 
@@ -322,7 +322,7 @@ fn native_wait_respects_parent_and_local_limits() {
             super::await_netlink_operation(
                 async move {
                     advanced.store(1_000, std::sync::atomic::Ordering::SeqCst);
-                    std::future::pending::<Result<(), super::route::Error>>().await
+                    std::future::pending::<Result<(), super::native::Error>>().await
                 },
                 &mut connection,
                 Duration::from_secs(30),
@@ -334,7 +334,7 @@ fn native_wait_respects_parent_and_local_limits() {
     });
     assert!(matches!(
         result,
-        Err(super::route::Error::DeadlineExceeded {
+        Err(super::native::Error::DeadlineExceeded {
             operation: super::EXECUTING_OPERATION
         })
     ));
@@ -375,12 +375,12 @@ fn parent_interruption_prevents_native_success() {
         if elapsed {
             assert!(matches!(
                 result,
-                Err(super::route::Error::DeadlineExceeded {
+                Err(super::native::Error::DeadlineExceeded {
                     operation: super::EXECUTING_OPERATION
                 })
             ));
         } else {
-            assert!(matches!(result, Err(super::route::Error::Cancelled(_))));
+            assert!(matches!(result, Err(super::native::Error::Cancelled(_))));
         }
         connection.abort();
     }

@@ -44,7 +44,7 @@ crate::reflective_layer! {
 }
 message_codec!(RadiusCodec, Radius, radius_schema);
 
-const NAME: &str = "radius";
+const NAME: &str = crate::protocol::BuiltinProtocol::Radius.as_str();
 impl Radius {
     fn encode_wire(&self, c: &EncodeContext<'_>) -> Result<Vec<u8>, Error> {
         if self.code == 0 || self.authenticator.len() != 16 {

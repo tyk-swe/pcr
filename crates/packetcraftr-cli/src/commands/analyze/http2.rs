@@ -15,12 +15,43 @@ use crate::commands::offline_analysis::{
 use crate::errors::CliError;
 use crate::output::contract::Command;
 
+use crate::output::contract::PublishedType;
+
 impl crate::commands::Spec for Args {
-    const FORMATS: &'static [crate::output::contract::Format] = &[
-        crate::output::contract::Format::Text,
-        crate::output::contract::Format::Json,
-        crate::output::contract::Format::Ndjson,
+    const PUBLISHED: &'static [PublishedType] = &[
+        PublishedType {
+            definition: "http2Success",
+            command: "http2",
+            rust_types: &["crate::commands::analyze::http2::output::Report"],
+            events: &[],
+            example: "examples/documents/output-http2-success.json",
+        },
+        PublishedType {
+            definition: "http2StreamSuccess",
+            command: "http2",
+            rust_types: &[
+                "crate::commands::analyze::http2::output::Connection",
+                "crate::commands::analyze::http2::output::Issue",
+                "crate::commands::analyze::http2::output::Message",
+                "crate::commands::analyze::http2::output::Report",
+                "crate::commands::analyze::http2::output::frame::Frame",
+                "crate::commands::offline_analysis::output::reassembly::Event",
+            ],
+            events: &[
+                "complete",
+                "http2_connection",
+                "http2_frame",
+                "http2_issue",
+                "http2_message",
+                "ip_datagram_completed",
+                "ip_datagram_incomplete",
+                "ip_overlap_resolved",
+            ],
+            example: "examples/documents/output-http2-complete.json",
+        },
     ];
+    const FORMATS: &'static [crate::output::contract::Format] =
+        crate::output::contract::TEXT_JSON_NDJSON;
     const CANCELLATION: bool = true;
     const OFFLINE: bool = true;
 
@@ -67,7 +98,7 @@ fn run(invocation: &crate::invocation::Invocation, args: Args) -> Result<(), Cli
     ports.extend([80, 8080]);
     let mut collector = Collector::new(application.core(), ports, args.http2_limits())
         .map_err(CliError::classified)?;
-    if let Some(deadline) = invocation.deadline.clone() {
+    if let Some(deadline) = invocation.control.deadline.clone() {
         collector = collector.with_deadline(deadline);
     }
     let selector = require_tcp_stream(args.stream.as_ref(), "HTTP/2")?;

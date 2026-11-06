@@ -10,7 +10,6 @@ use std::time::Duration;
 
 use super::Error;
 use super::Request;
-use super::error::probe_error;
 use crate::engine::execution::rate_delay;
 use crate::probe::{self, Batch, Stage};
 use packetcraftr_core::error::BoundaryError;
@@ -216,14 +215,9 @@ fn pacing_delay(request: &Request, delay_count: u32) -> Result<Duration, Error> 
     if delay_count == 0 {
         return Ok(Duration::ZERO);
     }
-    rate_delay(
-        probe_error,
-        "probes_per_second",
-        1,
-        request.probes_per_second,
-    )?
-    .checked_mul(delay_count)
-    .ok_or_else(|| overflow(request))
+    rate_delay::<Error>("probes_per_second", 1, request.probes_per_second)?
+        .checked_mul(delay_count)
+        .ok_or_else(|| overflow(request))
 }
 
 fn duration_with_windows(

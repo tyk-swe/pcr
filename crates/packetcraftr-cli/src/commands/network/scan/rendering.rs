@@ -487,7 +487,7 @@ pub(super) fn render_connect_text(
 
 fn endpoint_text(
     address: std::net::IpAddr,
-    scope: Option<&super::output::Scope>,
+    scope: Option<&crate::output::scan_failure::Scope>,
     endpoint_name: &str,
     classification: super::output::Classification,
 ) -> String {

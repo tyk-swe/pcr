@@ -25,12 +25,27 @@ struct PreparedLive {
     workflow: Workflow,
 }
 
+use crate::output::contract::PublishedType;
+
 impl crate::commands::Spec for Args {
-    const FORMATS: &'static [crate::output::contract::Format] = &[
-        crate::output::contract::Format::Text,
-        crate::output::contract::Format::Json,
-        crate::output::contract::Format::Ndjson,
+    const PUBLISHED: &'static [PublishedType] = &[
+        PublishedType {
+            definition: "fuzzSuccess",
+            command: "fuzz",
+            rust_types: &["crate::commands::packet::fuzz::output::Report"],
+            events: &[],
+            example: "examples/documents/output-fuzz-success.json",
+        },
+        PublishedType {
+            definition: "fuzzCaseSuccess",
+            command: "fuzz",
+            rust_types: &["crate::commands::packet::fuzz::output::Event"],
+            events: &["case", "complete"],
+            example: "examples/documents/output-fuzz-complete.json",
+        },
     ];
+    const FORMATS: &'static [crate::output::contract::Format] =
+        crate::output::contract::TEXT_JSON_NDJSON;
     const CANCELLATION: bool = true;
 
     fn run_time(&self) -> Option<&dyn crate::command_options::Bounded> {
@@ -71,7 +86,7 @@ pub(super) fn run(
     let mut live = prepare_live(&arguments, &request)?;
     let registry = packetcraftr_core::protocol::builtin::registry();
     let packet = read_recipe(
-        invocation,
+        &invocation.control,
         arguments.recipe,
         &registry,
         request.build.limits.max_layers,

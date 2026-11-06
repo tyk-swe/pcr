@@ -122,14 +122,22 @@ impl<P: PacketProviders, K: Clock> Pipeline<'_, P, K> {
                 .plan
                 .admission
                 .materialize_retained(retained, route, cost),
-            None => self.plan.admission.rebuild(probe.packet(), route, cost),
+            None => self.plan.admission.rebuild(
+                probe.packet(&self.executor.operation.registry),
+                route,
+                cost,
+            ),
         };
         self.retained -= preview_bytes;
         let prepared = prepared.map_err(|error| match error {
             RebuildError::Changed { admitted } => limit("changed preparation size", admitted),
             RebuildError::Preparation(source) => BoundaryError::from_error(source),
         })?;
-        if !crate::scan::plan::packet::sent_probe_matches(probe, &prepared.built().packet) {
+        if !crate::scan::plan::packet::sent_probe_matches(
+            &self.executor.operation.registry,
+            probe,
+            &prepared.built().packet,
+        ) {
             return Err(BoundaryError::internal_execution(
                 "materialized scan packet differs from its probe",
                 packetcraftr_core::error::Code::InternalScanProbeMismatch,

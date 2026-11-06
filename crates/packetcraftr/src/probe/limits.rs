@@ -8,13 +8,12 @@ use packetcraftr_core::budget::DeadlineExceeded;
 use crate::evidence::Limits as EvidenceLimits;
 use crate::exchange::Collection;
 
-pub(crate) fn check_probe_count<E>(
-    errors: fn(u64, crate::error::Failure) -> E,
+pub(crate) fn check_probe_count<E: crate::error::FromFailure>(
     total_probes: usize,
     max_probes: usize,
 ) -> Result<(), E> {
     if total_probes > max_probes {
-        return Err((errors)(
+        return Err(E::from_failure(
             0_u64,
             crate::error::Failure::InvalidLimit {
                 field: "probes",
@@ -26,8 +25,7 @@ pub(crate) fn check_probe_count<E>(
     Ok(())
 }
 
-pub(crate) fn check_collection_evidence<E>(
-    errors: fn(u64, crate::error::Failure) -> E,
+pub(crate) fn check_collection_evidence<E: crate::error::FromFailure>(
     collection: &Collection,
     limits: EvidenceLimits,
 ) -> Result<(), E> {
@@ -47,7 +45,7 @@ pub(crate) fn check_collection_evidence<E>(
         ),
     ] {
         if captured > limit {
-            return Err((errors)(
+            return Err(E::from_failure(
                 0_u64,
                 crate::error::Failure::InvalidLimit {
                     field,
@@ -60,13 +58,12 @@ pub(crate) fn check_collection_evidence<E>(
     Ok(())
 }
 
-pub(crate) fn check_probe_duration<E>(
-    errors: fn(u64, crate::error::Failure) -> E,
+pub(crate) fn check_probe_duration<E: crate::error::FromFailure>(
     worst_case: Duration,
     max_duration: Duration,
 ) -> Result<(), E> {
     if worst_case > max_duration {
-        return Err((errors)(
+        return Err(E::from_failure(
             0_u64,
             crate::error::Failure::DurationLimit(DeadlineExceeded {
                 actual: worst_case,

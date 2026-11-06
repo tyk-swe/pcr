@@ -225,7 +225,7 @@ mod tests {
     #[test]
     fn prepublication_cancellation_allows_terminal_report() {
         let invocation = invocation();
-        invocation.cancellation.cancel();
+        invocation.control.cancellation.cancel();
         let mut bytes = Vec::new();
         assert!(emit_json_to(&invocation, &(), &mut bytes).is_err());
         assert!(!invocation.json_attempted());
@@ -245,8 +245,10 @@ mod tests {
     fn envelope_identity_matches_published_schema() {
         let published: serde_json::Value = serde_json::from_slice(
             &std::fs::read(
-                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                    .join("../../schemas/packetcraftr.output.v19.schema.json"),
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
+                    "../../schemas/{}.schema.json",
+                    output::contract::SCHEMA.replace("/v", ".v")
+                )),
             )
             .unwrap(),
         )

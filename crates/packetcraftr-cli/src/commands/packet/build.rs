@@ -24,7 +24,28 @@ use crate::input::{apply_overrides, read_recipe};
 use crate::invocation::StreamEncoder;
 use crate::rendering::{render_diagnostics_stderr, stream_capture_error, stream_limits};
 
+use crate::output::contract::PublishedType;
+
 impl crate::commands::Spec for Args {
+    const PUBLISHED: &'static [PublishedType] = &[
+        PublishedType {
+            definition: "buildSuccess",
+            command: "build",
+            rust_types: &["crate::commands::packet::build::output::Report"],
+            events: &[],
+            example: "examples/documents/output-build-event.json",
+        },
+        PublishedType {
+            definition: "buildStreamSuccess",
+            command: "build",
+            rust_types: &[
+                "crate::commands::packet::build::output::Complete",
+                "crate::commands::packet::build::output::PacketEvent",
+            ],
+            events: &["complete", "packet"],
+            example: "examples/documents/output-build-complete.json",
+        },
+    ];
     const FORMATS: &'static [crate::output::contract::Format] = &[
         crate::output::contract::Format::Text,
         crate::output::contract::Format::Json,
@@ -75,7 +96,7 @@ pub(super) fn run(
         ));
     }
     // Recipe byte limits bound parsing; the builder owns the requested layer budget.
-    let mut packet = read_recipe(invocation, arguments.recipe, &registry, usize::MAX)?;
+    let mut packet = read_recipe(&invocation.control, arguments.recipe, &registry, usize::MAX)?;
     apply_overrides(&mut packet, &registry, &arguments.set)?;
     if let Some(capture) = &capture {
         capture.validate_root(&packet)?;

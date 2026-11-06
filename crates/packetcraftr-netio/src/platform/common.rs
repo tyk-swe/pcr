@@ -19,15 +19,15 @@ pub(in crate::platform) const READ_TIMEOUT_MILLIS: std::ffi::c_int = 50;
 use packetcraftr_core::error::Source;
 
 #[cfg(native_route)]
-use crate::route;
+use crate::native;
 
 /// Windows keeps its own because it also renders the Win32 status code.
 #[cfg(all(native_route, any(target_os = "linux", target_os = "macos")))]
 pub(in crate::platform) fn os_error(
     operation: &'static str,
     error: impl std::error::Error + Send + Sync + 'static,
-) -> route::Error {
-    route::Error::OperatingSystem {
+) -> native::Error {
+    native::Error::OperatingSystem {
         operation,
         message: "the operating system refused the request".to_owned(),
         source: Some(Source::new(error)),
@@ -35,8 +35,8 @@ pub(in crate::platform) fn os_error(
 }
 
 #[cfg(native_route)]
-pub(in crate::platform) fn refused(exhausted: crate::workers::Exhausted) -> route::Error {
-    route::Error::OperatingSystem {
+pub(in crate::platform) fn refused(exhausted: crate::workers::Exhausted) -> native::Error {
+    native::Error::OperatingSystem {
         operation: "reserve native worker",
         message: format!("native worker capacity {} is exhausted", exhausted.capacity),
         source: Some(Source::new(exhausted)),
@@ -47,39 +47,38 @@ pub(in crate::platform) fn refused(exhausted: crate::workers::Exhausted) -> rout
 pub(in crate::platform) fn on_worker<T: Send + 'static>(
     deadline: &packetcraftr_core::budget::Deadline,
     operation: &'static str,
-    query: impl FnOnce(&packetcraftr_core::budget::Deadline) -> Result<T, route::Error> + Send + 'static,
-) -> Result<T, route::Error> {
-    use crate::workers::Waited;
+    query: impl FnOnce(&packetcraftr_core::budget::Deadline) -> Result<T, native::Error>
+    + Send
+    + 'static,
+) -> Result<T, native::Error> {
+    use crate::workers::Blocked;
 
     let detached = deadline
         .detach()
-        .map_err(|interrupted| route::Error::interrupted(interrupted, operation))?;
+        .map_err(|interrupted| native::Error::interrupted(interrupted, operation))?;
     // Native calls spend wall time even when the caller's clock is frozen.
     let wait = detached
         .detach()
-        .map_err(|interrupted| route::Error::interrupted(interrupted, operation))?;
+        .map_err(|interrupted| native::Error::interrupted(interrupted, operation))?;
     let permit = crate::workers::shared().admit().map_err(refused)?;
-    let task = permit
-        .spawn_with_control(&wait, move || query(&detached))
+    let blocked = permit
+        .call(&wait, move || query(&detached))
         .map_err(|error| match wait.enforce() {
-            Err(interrupted) => route::Error::interrupted(interrupted, operation),
-            Ok(()) => route::Error::OperatingSystem {
+            Err(interrupted) => native::Error::interrupted(interrupted, operation),
+            Ok(()) => native::Error::OperatingSystem {
                 operation: "start native route worker",
                 message: "the operating system refused the request".to_owned(),
                 source: Some(Source::new(error)),
             },
         })?;
-    match task.wait(&wait) {
-        Waited::Finished(Ok(result)) => result,
-        Waited::Finished(Err(_)) => Err(route::Error::InvalidResponse {
+    match blocked {
+        Blocked::Finished(result) => result,
+        Blocked::Panicked => Err(native::Error::InvalidResponse {
             message: "native route worker panicked".to_owned(),
         }),
-        Waited::Pending(task) => {
-            task.retention_marker().mark_retained();
-            Err(match deadline.check_cancelled() {
-                Err(cancelled) => cancelled.into(),
-                Ok(()) => route::Error::DeadlineExceeded { operation },
-            })
-        }
+        Blocked::Pending => Err(match deadline.check_cancelled() {
+            Err(cancelled) => cancelled.into(),
+            Ok(()) => native::Error::DeadlineExceeded { operation },
+        }),
     }
 }

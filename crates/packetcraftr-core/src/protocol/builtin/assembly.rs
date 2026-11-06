@@ -48,21 +48,3 @@ where
     extra(&mut builder)?;
     builder.build()
 }
-
-/// Build the default registry with extra TCP ports dissected as TLS.
-/// ```
-/// use packetcraftr_core::protocol::builtin;
-///
-/// let registry = builtin::registry_with_tls_ports(&[4433]).expect("extra TLS port");
-/// assert_eq!(
-///     registry
-///         .child_for("tcp", packetcraftr_core::registry::Discriminator(4433))
-///         .map(|protocol| protocol.as_str()),
-///     Some("tls")
-/// );
-/// ```
-pub fn registry_with_tls_ports(
-    ports: &[u16],
-) -> Result<crate::registry::Registry, crate::registry::Error> {
-    registry_with(|builder| bindings::bind_tls_ports(builder, ports))
-}

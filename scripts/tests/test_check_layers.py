@@ -28,7 +28,14 @@ class CheckLayersTests(unittest.TestCase):
     def check(self, files, allowlist=()):
         temporary, root = workspace(files)
         self.addCleanup(temporary.cleanup)
-        return layers.check_workspace(root, layers=TABLE, allowlist=allowlist)
+        return layers.check_workspace(
+            root, layers=TABLE, allowlist=allowlist, require_documented=False
+        )
+
+    def check_documented(self, files):
+        temporary, root = workspace(files)
+        self.addCleanup(temporary.cleanup)
+        return layers.check_workspace(root, layers=TABLE, allowlist=())
 
     def check_with_tests(self, files, allowlist=()):
         temporary, root = workspace(files)
@@ -205,6 +212,58 @@ class CheckLayersTests(unittest.TestCase):
         problems = self.check({"mystery.rs": "pub struct Thing;"})
         self.assertEqual(len(problems), 1)
         self.assertIn("module mystery is not in the layer table", problems[0])
+
+    def test_documented_table_matching_the_layers_passes(self):
+        problems = self.check_documented({
+            "lib.rs": (
+                "//! | 1. Low | `low`, `engine::stats` |\n"
+                "//! | 2. High | `high` |\n"
+                "//! | 3. Top | `engine` |\n"
+            ),
+            "low.rs": "pub struct Thing;",
+        })
+        self.assertEqual(problems, [])
+
+    def test_documented_table_drift_fails(self):
+        problems = self.check_documented({
+            "lib.rs": (
+                "//! | 1. Low | `engine::stats` |\n"
+                "//! | 2. High | `high`, `low` |\n"
+                "//! | 3. Top | `engine` |\n"
+            ),
+            "low.rs": "pub struct Thing;",
+        })
+        self.assertTrue(any("documents low at layer 2" in p for p in problems))
+        self.assertTrue(any("does not document low at layer 1" in p for p in problems))
+
+    def test_missing_documented_table_fails(self):
+        problems = self.check_documented({
+            "lib.rs": "//! Layers are described in prose only.\n",
+            "low.rs": "pub struct Thing;",
+        })
+        self.assertTrue(any("documents no layer table" in p for p in problems))
+
+    def test_conflicting_documented_layers_fail(self):
+        problems = self.check_documented({
+            "lib.rs": (
+                "//! | 1. Low | `low`, `high`, `engine::stats` |\n"
+                "//! | 2. High | `high` |\n"
+                "//! | 3. Top | `engine` |\n"
+            ),
+            "low.rs": "pub struct Thing;",
+        })
+        self.assertTrue(any("documents high at layers 1 and 2" in p for p in problems))
+
+    def test_workspace_crate_without_layer_entry_is_reported(self):
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            extra = root / "crates" / "extra"
+            (extra / "src").mkdir(parents=True)
+            (extra / "Cargo.toml").write_text('[package]\nname = "extra"\n')
+            (extra / "src" / "lib.rs").write_text("pub struct Thing;")
+            problems = layers.check_workspace(root)
+        self.assertTrue(any("extra: workspace crate has no layer table entry" in p
+                            for p in problems))
 
 
 if __name__ == "__main__":

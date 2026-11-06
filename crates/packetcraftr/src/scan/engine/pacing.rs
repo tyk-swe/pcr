@@ -12,7 +12,6 @@ use super::Prober;
 use super::pipelined::add_stats;
 use crate::scan::Error;
 use crate::scan::Request;
-use crate::scan::error::probe_error;
 
 /// Transmissions whose rate pause is still owed, and when the last of them
 /// began, if that is known.
@@ -73,17 +72,12 @@ pub(super) fn pace<C: Clock>(
     spent: Duration,
     stats: &mut crate::Stats,
 ) -> Result<(), Error> {
-    let delay = rate_delay(
-        probe_error,
-        "probes_per_second",
-        items,
-        request.probes_per_second,
-    )?
-    .saturating_sub(spent);
+    let delay = rate_delay::<Error>("probes_per_second", items, request.probes_per_second)?
+        .saturating_sub(spent);
     if delay.is_zero() {
         return Ok(());
     }
-    pause(deadline, clock, delay).map_err(|paused| paused.into_error(probe_error, 0))?;
+    pause(deadline, clock, delay).map_err(|paused| paused.into_error::<Error>(0))?;
     add_stats(
         stats,
         &crate::Stats {

@@ -4,16 +4,51 @@
 //! Modbus TCP MBAP and common function PDUs. Packet-only decoding preserves direction-ambiguous PDUs as raw; interpret uses an established connection role.
 
 use crate::codec::{DecodeContext, EncodeContext, Error};
-use crate::protocol::common::{invalid, unsupported};
+use crate::field;
+use crate::protocol::common::{invalid, out_of_range, unsupported, wrong_type};
 use crate::protocol::message::{Reader, Writer, message_codec};
 use bytes::Bytes;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PduForm {
+    Request,
+    Response,
+    Exception,
+    /// Direction not yet known; the PDU body stays in `data`.
+    Raw,
+}
+
+impl PduForm {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Request => "request",
+            Self::Response => "response",
+            Self::Exception => "exception",
+            Self::Raw => "raw",
+        }
+    }
+}
+
+fn set_form(layer: &mut ModbusTcp, value: field::Value, name: &str) -> Result<(), field::Error> {
+    let field::Value::Text(text) = value else {
+        return Err(wrong_type(modbustcp_schema(), name, "text"));
+    };
+    layer.form = match text.as_str() {
+        _ if text.eq_ignore_ascii_case("request") => PduForm::Request,
+        _ if text.eq_ignore_ascii_case("response") => PduForm::Response,
+        _ if text.eq_ignore_ascii_case("exception") => PduForm::Exception,
+        _ if text.eq_ignore_ascii_case("raw") => PduForm::Raw,
+        _ => return Err(out_of_range(modbustcp_schema(), name)),
+    };
+    Ok(())
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ModbusTcp {
     pub transaction_id: u16,
     pub unit_id: u8,
     pub function: u8,
-    pub form: String,
+    pub form: PduForm,
     pub address: u16,
     pub quantity: u16,
     pub value: u16,
@@ -26,7 +61,7 @@ impl Default for ModbusTcp {
             transaction_id: 0,
             unit_id: 1,
             function: 3,
-            form: "request".into(),
+            form: PduForm::Request,
             address: 0,
             quantity: 1,
             value: 0,
@@ -41,7 +76,7 @@ crate::reflective_layer! {
     "transaction_id" => { kind: Unsigned, derived: false, required: false, description: "transaction id", reflect: transaction_id },
     "unit_id" => { kind: Unsigned, derived: false, required: false, description: "unit id", reflect: unit_id },
     "function" => { kind: Unsigned, derived: false, required: false, description: "function", reflect: function },
-    "form" => { kind: Text, derived: false, required: false, description: "request, response, exception or raw (unknown direction)", reflect: form },
+    "form" => { kind: Text, derived: false, required: false, description: "request, response, exception or raw (unknown direction)", get |layer| Some(field::Value::Text(layer.form.as_str().to_owned())), set |layer, value, name| set_form(layer, value, name) },
     "address" => { kind: Unsigned, derived: false, required: false, description: "address", reflect: address },
     "quantity" => { kind: Unsigned, derived: false, required: false, description: "quantity", reflect: quantity },
     "value" => { kind: Unsigned, derived: false, required: false, description: "value", reflect: value },
@@ -51,7 +86,7 @@ crate::reflective_layer! {
 }
 message_codec!(ModbusTcpCodec, ModbusTcp, modbustcp_schema);
 
-const NAME: &str = "modbus_tcp";
+const NAME: &str = crate::protocol::BuiltinProtocol::ModbusTcp.as_str();
 impl ModbusTcp {
     pub(crate) fn interpret_layer(
         layer: &mut dyn crate::layer::Layer,
@@ -62,23 +97,23 @@ impl ModbusTcp {
             .map(|modbus| modbus.interpret(response))
     }
     fn validate_fields(&self) -> Result<(), Error> {
-        let quantity_limit = match (self.form.as_str(), self.function) {
-            ("request", 1 | 2) => Some(2000),
-            ("request", 3 | 4) => Some(125),
-            ("request" | "response", 15) => Some(1968),
-            ("request" | "response", 16) => Some(123),
+        let quantity_limit = match (self.form, self.function) {
+            (PduForm::Request, 1 | 2) => Some(2000),
+            (PduForm::Request, 3 | 4) => Some(125),
+            (PduForm::Request | PduForm::Response, 15) => Some(1968),
+            (PduForm::Request | PduForm::Response, 16) => Some(123),
             _ => None,
         };
         if quantity_limit.is_some_and(|limit| self.quantity == 0 || self.quantity > limit) {
             return Err(invalid(NAME, "quantity is outside the function's range"));
         }
-        if matches!(self.form.as_str(), "request" | "response")
+        if matches!(self.form, PduForm::Request | PduForm::Response)
             && self.function == 5
             && !matches!(self.value, 0 | 0xff00)
         {
             return Err(invalid(NAME, "single-coil value must be 0x0000 or 0xff00"));
         }
-        if self.form == "response"
+        if self.form == PduForm::Response
             && matches!(self.function, 1..=4)
             && (self.data.is_empty()
                 || self.data.len() > 250
@@ -92,13 +127,13 @@ impl ModbusTcp {
         self.validate_fields()?;
         let mut p = Writer::new(NAME, 252);
         let mut function = self.function;
-        match self.form.as_str() {
-            "raw" => p.put(&self.data)?,
-            "exception" => {
+        match self.form {
+            PduForm::Raw => p.put(&self.data)?,
+            PduForm::Exception => {
                 function |= 128;
                 p.u8(self.exception_code)?;
             }
-            "request" => match function {
+            PduForm::Request => match function {
                 1..=4 => {
                     p.u16(self.address)?;
                     p.u16(self.quantity)?;
@@ -123,7 +158,7 @@ impl ModbusTcp {
                 }
                 _ => return Err(unsupported(NAME, "unsupported request function")),
             },
-            "response" => match function {
+            PduForm::Response => match function {
                 1..=4 => {
                     p.u8(u8::try_from(self.data.len())
                         .map_err(|_| invalid(NAME, "response too long"))?)?;
@@ -139,7 +174,6 @@ impl ModbusTcp {
                 }
                 _ => return Err(unsupported(NAME, "unsupported response function")),
             },
-            _ => return Err(invalid(NAME, "unknown PDU form")),
         };
         let mut w = Writer::new(NAME, c.remaining_packet_bytes);
         w.u16(self.transaction_id)?;
@@ -171,7 +205,7 @@ impl ModbusTcp {
             transaction_id,
             unit_id,
             function,
-            form: "raw".into(),
+            form: PduForm::Raw,
             data: Bytes::copy_from_slice(r.rest()),
             ..Self::default()
         };
@@ -179,7 +213,7 @@ impl ModbusTcp {
             if s.data.len() != 1 {
                 return Err(invalid(NAME, "exception must contain one code"));
             }
-            s.form = "exception".into();
+            s.form = PduForm::Exception;
             s.exception_code = s.data[0];
             s.data = Bytes::new();
         }
@@ -187,15 +221,15 @@ impl ModbusTcp {
     }
     /// Interpret a direction-ambiguous PDU after its connection role is known.
     pub fn interpret(&mut self, response: bool) -> Result<(), Error> {
-        if self.form != "raw" {
+        if self.form != PduForm::Raw {
             return Ok(());
         }
         let mut r = Reader::new(NAME, &self.data);
         let mut result = self.clone();
         result.form = if response {
-            "response".into()
+            PduForm::Response
         } else {
-            "request".into()
+            PduForm::Request
         };
         match (self.function, response) {
             (1..=4, true) => {
@@ -235,5 +269,28 @@ impl ModbusTcp {
         result.validate_fields()?;
         *self = result;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::codec::Codec as _;
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn construction_rejects_unknown_form() {
+        let fields =
+            BTreeMap::from([("form".to_owned(), field::Value::Text("sideways".to_owned()))]);
+        assert!(ModbusTcpCodec.construct(&fields).is_err());
+        let fields = BTreeMap::from([(
+            "form".to_owned(),
+            field::Value::Text("exception".to_owned()),
+        )]);
+        let layer = ModbusTcpCodec.construct(&fields).unwrap();
+        assert_eq!(
+            layer.field_by_index(3),
+            Some(field::Value::Text("exception".to_owned()))
+        );
     }
 }

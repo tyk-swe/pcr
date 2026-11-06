@@ -183,7 +183,7 @@ pub(super) struct Feedback {
 
 pub(super) struct ProbeClassifier<'a> {
     pub(super) observation_quality: Option<packetcraftr_netio::capture::ObservationQuality>,
-    pub(super) registry: &'a Registry,
+    pub(super) registry: &'a std::sync::Arc<Registry>,
     pub(super) target: Arc<str>,
     pub(super) winners: HashMap<super::report::WinnerKey, Classification>,
     pub(super) rtt: RttAccumulator,
@@ -206,7 +206,7 @@ impl Classifier for ProbeClassifier<'_> {
     }
 
     fn sent_matches(&self, probe: &Probe, sent: &Packet) -> bool {
-        sent_probe_matches(probe, sent)
+        sent_probe_matches(self.registry, probe, sent)
     }
 
     fn classify(

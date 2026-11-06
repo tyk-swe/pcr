@@ -18,7 +18,7 @@ pub(crate) use policy::{
 pub(crate) use recipe::{BuildMode, RecipeArgs};
 pub(crate) use route::{LinkMode, RouteArgs, RouteSelectionArgs};
 pub(crate) use send::SendArgs;
-pub(crate) use template::{TemplateArgs, bytes_held};
+pub(crate) use template::{TemplateArgs, bytes_held, parse_unsigned};
 pub(crate) use tree::TreeArgs;
 
 mod address_family;

@@ -24,7 +24,7 @@ impl Codec for RawIpCodec {
         PROTOCOL
     }
     fn accepts_decoded_protocol(&self, protocol: &crate::layer::Id) -> bool {
-        matches!(protocol.as_str(), "ipv4" | "ipv6")
+        protocol == &BuiltinProtocol::Ipv4.id() || protocol == &BuiltinProtocol::Ipv6.id()
     }
     fn encode(
         &self,

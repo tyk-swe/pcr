@@ -21,7 +21,16 @@ impl NativeCapability {
     /// A built capability can still fail at run time, for example without
     /// the privilege to open a capture.
     pub fn check(self) -> Result<(), Unsupported> {
-        let (built, enabled, feature, operation) = match self {
+        let (built, _, _, operation) = self.build_facts();
+        if built {
+            Ok(())
+        } else {
+            Err(Unsupported::unbuilt(self, operation))
+        }
+    }
+
+    fn build_facts(self) -> (bool, bool, &'static str, &'static str) {
+        match self {
             Self::Route => (
                 cfg!(native_route),
                 cfg!(feature = "native-route"),
@@ -58,11 +67,6 @@ impl NativeCapability {
                 "native-layer2 or native-layer3",
                 "packet transmission",
             ),
-        };
-        if built {
-            Ok(())
-        } else {
-            Err(Unsupported::unbuilt(self, enabled, feature, operation))
         }
     }
 }
@@ -77,12 +81,8 @@ pub struct Unsupported {
 }
 
 impl Unsupported {
-    pub(crate) fn unbuilt(
-        capability: NativeCapability,
-        feature_enabled: bool,
-        feature: &str,
-        operation: &str,
-    ) -> Self {
+    pub(crate) fn unbuilt(capability: NativeCapability, operation: &str) -> Self {
+        let (_, feature_enabled, feature, _) = capability.build_facts();
         Self::new(
             capability,
             if feature_enabled {

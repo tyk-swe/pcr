@@ -347,11 +347,7 @@ impl session::Collector for Collector {
         Self::observe(self, record).map_err(BoundaryError::from_error)
     }
 
-    fn finish(self, run: &RunSummary) -> Result<(Vec<Event>, Summary), BoundaryError> {
-        Self::finish(self, run).map_err(BoundaryError::from_error)
-    }
-
-    fn finish_controlled(
+    fn finish(
         mut self,
         run: &RunSummary,
         deadline: &Deadline,

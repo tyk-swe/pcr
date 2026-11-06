@@ -24,12 +24,27 @@ use crate::output::capture::CaptureSource;
 
 const VERDICT_NOT_PASS: u8 = 1;
 
+use crate::output::contract::PublishedType;
+
 impl crate::commands::Spec for Args {
-    const FORMATS: &'static [crate::output::contract::Format] = &[
-        crate::output::contract::Format::Text,
-        crate::output::contract::Format::Json,
-        crate::output::contract::Format::Ndjson,
+    const PUBLISHED: &'static [PublishedType] = &[
+        PublishedType {
+            definition: "verifyForwardingSuccess",
+            command: "verify-forwarding",
+            rust_types: &["crate::commands::analyze::verify_forwarding::output::Report"],
+            events: &[],
+            example: "examples/documents/output-verify-forwarding-complete.json",
+        },
+        PublishedType {
+            definition: "verifyForwardingStreamSuccess",
+            command: "verify-forwarding",
+            rust_types: &["crate::commands::analyze::verify_forwarding::output::Report"],
+            events: &["complete"],
+            example: "examples/documents/output-verify-forwarding-complete.json",
+        },
     ];
+    const FORMATS: &'static [crate::output::contract::Format] =
+        crate::output::contract::TEXT_JSON_NDJSON;
     const CANCELLATION: bool = true;
     const OFFLINE: bool = true;
 
@@ -125,7 +140,7 @@ pub(super) fn run(
         &arguments.egress,
         egress_filter.as_ref(),
     )?;
-    let deadline = invocation.deadline.clone();
+    let deadline = invocation.control.deadline.clone();
     let report = forwarding::verify_with_limits(
         &rules,
         ingress,
@@ -135,7 +150,7 @@ pub(super) fn run(
             max_detail_bytes: arguments.max_detail_bytes,
             max_scratch_bytes: arguments.max_scratch_bytes,
         },
-        Some(&invocation.cancellation),
+        Some(&invocation.control.cancellation),
         deadline.as_deref(),
     )
     .map_err(CliError::classified)?;
@@ -196,7 +211,7 @@ impl Collection<'_> {
             limits,
             max_evidence_bytes,
         } = *self;
-        let (mut reader, fingerprint) = open_capture_hashed(invocation, path, limits)?;
+        let (mut reader, fingerprint) = open_capture_hashed(&invocation.control, path, limits)?;
         // Select physical packets in the callback: pipeline filters also see
         // reconstructed datagrams, whose provenance this report cannot represent.
         let mut options = prepared.options(invocation);

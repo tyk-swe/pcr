@@ -1,17 +1,14 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use pcap::{Capture, Error as PcapError};
+use pcap::Capture;
 
 use crate::{
     Error,
-    interface::Id as InterfaceId,
     platform::common::READ_TIMEOUT_MILLIS,
-    platform::common::libpcap::map_open_error,
-    platform::common::pcap_api::is_permission_denied,
+    platform::common::libpcap::{map_open_error, map_send_error},
     transmit::{self, Layer2Frame, Submission},
 };
-use packetcraftr_core::error::Source;
 
 pub(crate) fn send_layer2(frame: Layer2Frame<'_>) -> Result<transmit::Report, Error> {
     validate_length(frame)?;
@@ -58,22 +55,4 @@ mod session;
 #[cfg(target_os = "linux")]
 pub(super) fn session() -> impl crate::transmit::Provider {
     super::session::Bounded::new(session::Backend::new())
-}
-
-fn map_send_error(interface: &InterfaceId, error: PcapError) -> Error {
-    let message = error.to_string();
-    let source = Some(Source::new(error));
-    if is_permission_denied(&message) {
-        return Error::Privilege {
-            message: format!(
-                "cannot inject on {} through libpcap; grant link-layer injection privileges",
-                interface.name
-            ),
-            source,
-        };
-    }
-    Error::Send {
-        message: format!("libpcap injection on {} failed", interface.name),
-        source,
-    }
 }

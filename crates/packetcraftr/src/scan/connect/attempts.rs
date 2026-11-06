@@ -11,7 +11,6 @@ use std::time::{Duration, Instant, SystemTime};
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_netio::tcp::{self, Provider, Stream as _};
 
-use super::super::error::probe_error;
 use super::super::measurement::Measurement;
 use super::super::{Error, Request, Stage};
 use super::planning::StagePlan;
@@ -68,11 +67,10 @@ where
         let final_endpoints = [endpoint];
         let operation = SocketOperation::new(&final_endpoints, *stage.limits)
             .map_err(|source| execution(sequence, source))?;
-        approve_operation(
+        approve_operation::<_, Error>(
             self.authorizer,
             Operation::Socket(operation),
             self.deadline,
-            probe_error,
         )?;
         let timeout = self.deadline.bounded_timeout(self.request.timeout)?;
         let admitted = self.clock.now();
@@ -200,7 +198,7 @@ fn finish_probe<S: tcp::Stream>(
             let source = socket_error(error);
             probe.outcome = match source.kind() {
                 io::ErrorKind::ConnectionRefused => Outcome::Refused,
-                io::ErrorKind::TimedOut => Outcome::TimedOut,
+                _ if packetcraftr_netio::bounded::timed_out(&source) => Outcome::TimedOut,
                 io::ErrorKind::NetworkUnreachable | io::ErrorKind::HostUnreachable => {
                     Outcome::Unreachable
                 }

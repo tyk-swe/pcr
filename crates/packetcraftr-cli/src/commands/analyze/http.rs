@@ -17,12 +17,39 @@ use crate::commands::offline_analysis::{
 use crate::errors::CliError;
 use crate::output::contract::Command;
 
+use crate::output::contract::PublishedType;
+
 impl crate::commands::Spec for Args {
-    const FORMATS: &'static [crate::output::contract::Format] = &[
-        crate::output::contract::Format::Text,
-        crate::output::contract::Format::Json,
-        crate::output::contract::Format::Ndjson,
+    const PUBLISHED: &'static [PublishedType] = &[
+        PublishedType {
+            definition: "httpSuccess",
+            command: "http",
+            rust_types: &["crate::commands::analyze::http::output::Report"],
+            events: &[],
+            example: "examples/documents/output-http-success.json",
+        },
+        PublishedType {
+            definition: "httpStreamSuccess",
+            command: "http",
+            rust_types: &[
+                "crate::commands::analyze::http::output::Issue",
+                "crate::commands::analyze::http::output::Message",
+                "crate::commands::analyze::http::output::Report",
+                "crate::commands::offline_analysis::output::reassembly::Event",
+            ],
+            events: &[
+                "complete",
+                "http_message",
+                "http_stream_issue",
+                "ip_datagram_completed",
+                "ip_datagram_incomplete",
+                "ip_overlap_resolved",
+            ],
+            example: "examples/documents/output-http-complete.json",
+        },
     ];
+    const FORMATS: &'static [crate::output::contract::Format] =
+        crate::output::contract::TEXT_JSON_NDJSON;
     const CANCELLATION: bool = true;
     const OFFLINE: bool = true;
 

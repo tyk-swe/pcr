@@ -57,7 +57,7 @@ crate::reflective_layer! {
 }
 message_codec!(BacnetIpCodec, BacnetIp, bacnetip_schema);
 
-const NAME: &str = "bacnet_ip";
+const NAME: &str = crate::protocol::BuiltinProtocol::BacnetIp.as_str();
 impl BacnetIp {
     fn encode_wire(&self, c: &EncodeContext<'_>) -> Result<Vec<u8>, Error> {
         let mut p = Writer::new(NAME, c.remaining_packet_bytes);

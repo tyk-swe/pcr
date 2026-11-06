@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 use super::{Planned, limit};
+use crate::error::FromFailure as _;
 use crate::{
     clock::Clock,
     engine::preparation::{AdmittedCost, Admitting, AuthorizedRoute, RetainedAdmission},
@@ -100,7 +101,7 @@ pub(super) fn plan_with_limit<'c, P: PacketProviders, K: Clock>(
         .spent
         .checked_add_assign(&options.preceding)
         .map_err(|error| {
-            BoundaryError::from_error(crate::scan::error::probe_error(
+            BoundaryError::from_error(crate::scan::Error::from_failure(
                 0,
                 crate::error::Failure::StatsOverflow(error),
             ))
@@ -110,8 +111,12 @@ pub(super) fn plan_with_limit<'c, P: PacketProviders, K: Clock>(
         .map_err(BoundaryError::from_error)?;
     for (index, &Planned { probe, .. }) in planned.iter().enumerate() {
         super::check(client, deadline, preparation)?;
-        let packet = probe.packet();
-        if !crate::scan::plan::packet::sent_probe_matches(probe, &packet) {
+        let packet = probe.packet(&executor.operation.registry);
+        if !crate::scan::plan::packet::sent_probe_matches(
+            &executor.operation.registry,
+            probe,
+            &packet,
+        ) {
             return Err(BoundaryError::from_error(
                 crate::scan::profile::Error::Invalid(
                     "probe fields differ from its selected profile",
@@ -250,12 +255,13 @@ pub(super) fn plan_with_limit<'c, P: PacketProviders, K: Clock>(
 /// One bounded refill under the original stage admission and its cumulative budget.
 pub(super) fn admit_one<P: PacketProviders, K: Clock>(
     plan: &mut Plan<'_, P, K>,
+    registry: &std::sync::Arc<packetcraftr_core::registry::Registry>,
     probe: &crate::scan::Probe,
     maximum: usize,
     retain: bool,
 ) -> Result<(AuthorizedRoute, AdmittedProbe), BoundaryError> {
-    let packet = probe.packet();
-    if !crate::scan::plan::packet::sent_probe_matches(probe, &packet) {
+    let packet = probe.packet(registry);
+    if !crate::scan::plan::packet::sent_probe_matches(registry, probe, &packet) {
         return Err(BoundaryError::from_error(
             crate::scan::profile::Error::Invalid("probe fields differ from its selected profile"),
         ));

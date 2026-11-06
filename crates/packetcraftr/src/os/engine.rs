@@ -6,9 +6,10 @@ use std::sync::Arc;
 use packetcraftr_core::{budget::Deadline, document::os_fingerprints as core, registry::Registry};
 
 use super::{
-    Collector, Error, Event, Match, Outcome, Probe, Report, Request, error::probe_error,
-    evidence::Fingerprints, executor::Native, plan::PlannedProbe,
+    Collector, Error, Event, Match, Outcome, Probe, Report, Request, evidence::Fingerprints,
+    executor::Native, plan::PlannedProbe,
 };
+use crate::error::FromFailure as _;
 use crate::{
     Client, Sink,
     client::admission::{FamilyGate, admit_operation, wire_limits},
@@ -29,8 +30,7 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
         sink: S,
     ) -> Result<Report, Error> {
         request.validate()?;
-        let mut operation =
-            crate::engine::operation::Operation::new(self, request.limits.max_duration);
+        let operation = crate::engine::operation::Operation::new(self, request.limits.max_duration);
         let mut deadline = operation.deadline(self, request.limits.max_duration);
         let publish = crate::engine::execution::publisher(
             &self.runtime,
@@ -40,10 +40,13 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
         )?;
         let mut clock = self.clock.clone();
         let mut authorizer = self.admission();
-        operation.neighbors = self.neighbors.for_operation(1);
-        operation.neighbor_mode = crate::engine::operation::NeighborMode::Cached;
-        operation.packet_limit = request.limits.max_probes as u64;
-        operation.byte_limit = request.limits.max_probes as u64 * super::MAX_WIRE_BYTES;
+        let mut operation = operation
+            .with_neighbors(self.neighbors.for_operation(1))
+            .with_neighbor_mode(crate::engine::operation::NeighborMode::Cached)
+            .with_limits(
+                request.limits.max_probes as u64,
+                request.limits.max_probes as u64 * super::MAX_WIRE_BYTES,
+            );
         let mut executor = Native {
             client: self,
             operation: &mut operation,
@@ -88,7 +91,6 @@ where
     let (selected, ()) = admit_operation(
         authorizer,
         deadline,
-        probe_error,
         &request.target,
         FamilyGate::new(Family::Any, |_| {
             Error::Invalid("no numeric target selected".into())
@@ -113,8 +115,12 @@ where
             source: super::executor::failure(source),
         })?;
     let base_identity = u32::from_be_bytes(entropy[..4].try_into().expect("four entropy bytes"));
-    let source_port =
-        49152 + u16::from_be_bytes(entropy[4..6].try_into().expect("two entropy bytes")) % 16384;
+    let source_port = crate::engine::correlation::ephemeral_source_port(
+        crate::engine::correlation::EPHEMERAL_SOURCE_PORT_BASE,
+        u64::from(u16::from_be_bytes(
+            entropy[4..6].try_into().expect("two entropy bytes"),
+        )),
+    );
     let base = PlannedProbe {
         sequence: 1,
         attempt: 1,
@@ -164,7 +170,6 @@ where
     let state = internal.clone();
     let mut evidence = BatchEvidence::new_with_retention_limits(
         Workflow::Os,
-        probe_error,
         request.limits.evidence,
         limits,
         Fingerprints {
@@ -260,9 +265,9 @@ where
     )?;
     let retained_evidence_bytes = evidence.retained_evidence_bytes() + preparation_bytes;
     drop(evidence);
-    stats
-        .checked_add_assign(&prep_stats)
-        .map_err(|source| (probe_error)(sequence, crate::error::Failure::StatsOverflow(source)))?;
+    stats.checked_add_assign(&prep_stats).map_err(|source| {
+        Error::from_failure(sequence, crate::error::Failure::StatsOverflow(source))
+    })?;
     let observations = state.observations();
     let complete = !state.incomplete();
     let identification = if complete {

@@ -23,8 +23,8 @@ use packetcraftr_core::budget::{Deadline, Interrupted};
 use rtnetlink::{Handle, new_connection};
 
 use crate::{
+    native,
     platform::common::{os_error, refused},
-    route,
     workers::{self, ExecutionContext, NAMESPACE_PATH, Task, Waited},
 };
 
@@ -55,7 +55,7 @@ struct Namespace {
 }
 
 impl Namespace {
-    fn current() -> Result<Self, route::Error> {
+    fn current() -> Result<Self, native::Error> {
         let file = File::open(NAMESPACE_PATH)
             .map_err(|error| os_error("open caller network namespace", error))?;
         let id = ExecutionContext::of_namespace(&file)
@@ -106,14 +106,14 @@ static NEXT_GENERATION: AtomicU64 = AtomicU64::new(1);
 pub(in crate::platform) fn with_netlink<F, Fut, T>(
     caller: &Deadline,
     operation: F,
-) -> Result<T, route::Error>
+) -> Result<T, native::Error>
 where
     F: FnOnce(Handle) -> Fut + Send + 'static,
-    Fut: Future<Output = Result<T, route::Error>> + Send + 'static,
+    Fut: Future<Output = Result<T, native::Error>> + Send + 'static,
     T: Send + 'static,
 {
     let deadline = expires_at(caller).map_err(|interrupted| {
-        route::Error::interrupted(interrupted, "submitting the netlink request")
+        native::Error::interrupted(interrupted, "submitting the netlink request")
     })?;
     let namespace = Namespace::current()?;
     let (respond, finished) = mpsc::sync_channel(1);
@@ -167,13 +167,13 @@ where
         value
             .downcast::<T>()
             .map(|value| *value)
-            .map_err(|_| route::Error::InvalidResponse {
+            .map_err(|_| native::Error::InvalidResponse {
                 message: "Linux netlink worker returned a mismatched result type".to_owned(),
             })
     })
 }
 
-fn shared_workers(caller: &Deadline, deadline: Instant) -> Result<Checkout, route::Error> {
+fn shared_workers(caller: &Deadline, deadline: Instant) -> Result<Checkout, native::Error> {
     let mut workers = lock(&REGISTRY.workers);
     loop {
         let remaining = wait_remaining(caller, deadline, "waiting for netlink worker admission")?;
@@ -194,7 +194,7 @@ fn worker_inbox(
     namespace: &Namespace,
     caller: &Deadline,
     deadline: Instant,
-) -> Result<(u64, Arc<Inbox>), route::Error> {
+) -> Result<(u64, Arc<Inbox>), native::Error> {
     wait_remaining(caller, deadline, "reserving netlink namespace worker")?;
     let mut workers = shared_workers(caller, deadline)?;
     ensure_worker(
@@ -213,8 +213,8 @@ fn ensure_worker(
     caller: &Deadline,
     deadline: Instant,
     pool: &Arc<workers::Pool>,
-    start: impl FnOnce(&Namespace, &Deadline, Instant) -> Result<WorkerSlot, route::Error>,
-) -> Result<(u64, Arc<Inbox>), route::Error> {
+    start: impl FnOnce(&Namespace, &Deadline, Instant) -> Result<WorkerSlot, native::Error>,
+) -> Result<(u64, Arc<Inbox>), native::Error> {
     wait_remaining(caller, deadline, "reserving netlink namespace worker")?;
     // A finished service no longer needs a resident registry entry. Its pooled
     // executor can still retain the namespace until actual thread retirement.
@@ -251,16 +251,16 @@ fn ensure_worker(
     }
     let worker = workers
         .get(&namespace.id)
-        .ok_or_else(|| route::Error::InvalidResponse {
+        .ok_or_else(|| native::Error::InvalidResponse {
             message: "Linux netlink namespace worker missing after initialization".to_owned(),
         })?;
     wait_remaining(caller, deadline, "reserving netlink namespace worker")?;
     Ok((worker.generation, Arc::clone(&worker.inbox)))
 }
 
-fn check_namespace_capacity(count: usize) -> Result<(), route::Error> {
+fn check_namespace_capacity(count: usize) -> Result<(), native::Error> {
     if count >= RESIDENT_CAPACITY {
-        return Err(route::Error::OperatingSystem {
+        return Err(native::Error::OperatingSystem {
             operation: "reserve netlink namespace worker",
             message: "network namespace worker capacity is exhausted".to_owned(),
             source: None,
@@ -274,7 +274,7 @@ fn restart_worker(
     generation: u64,
     caller: &Deadline,
     deadline: Instant,
-) -> Result<(), route::Error> {
+) -> Result<(), native::Error> {
     let mut workers = shared_workers(caller, deadline)?;
     if workers
         .get(&namespace.id)
@@ -297,7 +297,7 @@ fn start_worker(
     namespace: &Namespace,
     caller: &Deadline,
     deadline: Instant,
-) -> Result<WorkerSlot, route::Error> {
+) -> Result<WorkerSlot, native::Error> {
     start_worker_with(namespace, caller, deadline, workers::shared(), run_worker)
 }
 
@@ -306,8 +306,8 @@ fn start_worker_with(
     caller: &Deadline,
     deadline: Instant,
     pool: &Arc<workers::Pool>,
-    initialize: impl FnOnce(&SyncSender<Result<(), route::Error>>, &Inbox) + Send + 'static,
-) -> Result<WorkerSlot, route::Error> {
+    initialize: impl FnOnce(&SyncSender<Result<(), native::Error>>, &Inbox) + Send + 'static,
+) -> Result<WorkerSlot, native::Error> {
     let remaining = wait_remaining(caller, deadline, "initializing netlink")?;
     let dispatch_control = caller
         .for_wait(remaining)
@@ -330,7 +330,7 @@ fn start_worker_with(
             initialize(&setup, &worker_inbox);
         })
         .map_err(|error| match dispatch_control.enforce() {
-            Err(interrupted) => route::Error::interrupted(interrupted, "initializing netlink"),
+            Err(interrupted) => native::Error::interrupted(interrupted, "initializing netlink"),
             Ok(()) => os_error("spawn netlink worker", error),
         })?;
     let result = loop {
@@ -379,7 +379,7 @@ fn settle(worker: Task<()>, caller: &Deadline, deadline: Instant) {
     }
 }
 
-fn run_worker(setup: &SyncSender<Result<(), route::Error>>, inbox: &Inbox) {
+fn run_worker(setup: &SyncSender<Result<(), native::Error>>, inbox: &Inbox) {
     let runtime = match tokio::runtime::Builder::new_current_thread()
         .enable_io()
         .enable_time()
@@ -407,7 +407,7 @@ fn run_worker(setup: &SyncSender<Result<(), route::Error>>, inbox: &Inbox) {
 
 fn open_connection(
     runtime: &tokio::runtime::Runtime,
-) -> Result<(Handle, tokio::task::JoinHandle<()>), route::Error> {
+) -> Result<(Handle, tokio::task::JoinHandle<()>), native::Error> {
     let (connection, handle, _) = runtime
         .block_on(async { new_connection() })
         .map_err(|error| os_error("open route netlink socket", error))?;
@@ -467,9 +467,9 @@ fn serve_requests(
             Ok(result) => {
                 let timed_out = matches!(
                     &result,
-                    Err(route::Error::DeadlineExceeded {
+                    Err(native::Error::DeadlineExceeded {
                         operation: EXECUTING_OPERATION,
-                    } | route::Error::Cancelled(_))
+                    } | native::Error::Cancelled(_))
                 );
                 (result, timed_out)
             }
@@ -492,16 +492,16 @@ async fn await_netlink_operation<F, T>(
     connection: &mut tokio::task::JoinHandle<()>,
     timeout: Duration,
     control: &Deadline,
-) -> Result<T, route::Error>
+) -> Result<T, native::Error>
 where
-    F: Future<Output = Result<T, route::Error>>,
+    F: Future<Output = Result<T, native::Error>>,
 {
     check_control(control, EXECUTING_OPERATION)?;
     let operation = std::pin::pin!(tokio::time::timeout(timeout, operation));
     let interrupted = std::pin::pin!(interrupted(control));
     let result = match select(connection, select(operation, interrupted)).await {
         Either::Left((joined, _)) => match joined {
-            Ok(()) => Err(route::Error::OperatingSystem {
+            Ok(()) => Err(native::Error::OperatingSystem {
                 operation: "drive netlink connection",
                 message: "route netlink connection stopped".to_owned(),
                 source: None,
@@ -512,7 +512,7 @@ where
             result.unwrap_or_else(|_| Err(netlink_timeout(EXECUTING_OPERATION)))
         }
         Either::Right((Either::Right((interrupted, _)), _)) => {
-            Err(route::Error::interrupted(interrupted, EXECUTING_OPERATION))
+            Err(native::Error::interrupted(interrupted, EXECUTING_OPERATION))
         }
     };
     check_control(control, EXECUTING_OPERATION)?;
@@ -528,8 +528,8 @@ async fn interrupted(control: &Deadline) -> Interrupted {
     }
 }
 
-fn netlink_worker_panicked() -> route::Error {
-    route::Error::InvalidResponse {
+fn netlink_worker_panicked() -> native::Error {
+    native::Error::InvalidResponse {
         message: "Linux netlink worker panicked".to_owned(),
     }
 }
@@ -537,21 +537,21 @@ fn netlink_worker_panicked() -> route::Error {
 const STARTING_OPERATION: &str = "starting the netlink operation";
 const EXECUTING_OPERATION: &str = "executing the netlink operation";
 
-fn netlink_timeout(operation: &'static str) -> route::Error {
-    route::Error::DeadlineExceeded { operation }
+fn netlink_timeout(operation: &'static str) -> native::Error {
+    native::Error::DeadlineExceeded { operation }
 }
 
-fn check_control(caller: &Deadline, operation: &'static str) -> Result<(), route::Error> {
+fn check_control(caller: &Deadline, operation: &'static str) -> Result<(), native::Error> {
     caller
         .enforce()
-        .map_err(|interrupted| route::Error::interrupted(interrupted, operation))
+        .map_err(|interrupted| native::Error::interrupted(interrupted, operation))
 }
 
 fn wait_remaining(
     caller: &Deadline,
     deadline: Instant,
     operation: &'static str,
-) -> Result<Duration, route::Error> {
+) -> Result<Duration, native::Error> {
     check_control(caller, operation)?;
     remaining_before(deadline).ok_or_else(|| netlink_timeout(operation))
 }

@@ -7,7 +7,6 @@ use packetcraftr_core as core;
 use packetcraftr_core::error::Classification;
 use packetcraftr_core::error::Coordinate;
 use packetcraftr_core::error::Kind;
-use packetcraftr_core::filter::Context;
 use packetcraftr_core::filter::Filter;
 use packetcraftr_core::filter::{FrameDecoder, FrameSelector};
 use packetcraftr_core::registry::Registry;
@@ -95,8 +94,4 @@ pub(crate) fn frame_error(
     error: impl core::error::Classified + std::fmt::Display,
 ) -> CliError {
     CliError::classified(error).with_context(Some(Coordinate::SourceFrame(source_frame)))
-}
-
-pub(crate) fn matches_decoded(filter: &Filter, context: &Context<'_>) -> Result<bool, CliError> {
-    filter.matches(context).map_err(CliError::classified)
 }

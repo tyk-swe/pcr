@@ -14,12 +14,15 @@ pub(crate) const NAMESPACE_PATH: &str = "/proc/thread-self/ns/net";
 
 #[cfg(target_os = "linux")]
 impl ExecutionContext {
-    pub(crate) fn of_namespace(file: &std::fs::File) -> std::io::Result<Self> {
+    pub(crate) fn of_metadata(metadata: &std::fs::Metadata) -> Self {
         use std::os::unix::fs::MetadataExt;
-        let metadata = file.metadata()?;
-        Ok(Self {
+        Self {
             namespace: (metadata.dev(), metadata.ino()),
-        })
+        }
+    }
+
+    pub(crate) fn of_namespace(file: &std::fs::File) -> std::io::Result<Self> {
+        Ok(Self::of_metadata(&file.metadata()?))
     }
 }
 

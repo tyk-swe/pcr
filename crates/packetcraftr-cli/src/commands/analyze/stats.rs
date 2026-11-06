@@ -22,7 +22,16 @@ use crate::errors::CliError;
 use crate::input::open_capture;
 use crate::rendering::emit_published;
 
+use crate::output::contract::PublishedType;
+
 impl crate::commands::Spec for Args {
+    const PUBLISHED: &'static [PublishedType] = &[PublishedType {
+        definition: "statsSuccess",
+        command: "stats",
+        rust_types: &["crate::commands::analyze::stats::output::Report"],
+        events: &[],
+        example: "examples/documents/output-stats-clock.json",
+    }];
     const FORMATS: &'static [crate::output::contract::Format] = &[
         crate::output::contract::Format::Text,
         crate::output::contract::Format::Json,
@@ -93,7 +102,12 @@ pub(super) fn run(
     )
     .map_err(CliError::classified)?;
 
-    let mut reader = open_capture(invocation, &arguments.path, capture_limits)?;
+    let mut reader = open_capture(
+        &invocation.control,
+        &invocation.output,
+        &arguments.path,
+        capture_limits,
+    )?;
 
     let options = prepared.options(invocation);
     let summary = analysis::run(&mut reader, prepared.registry.clone(), &options, |record| {

@@ -572,11 +572,7 @@ impl SessionCollector for Collector {
         Ok(Self::observe(self, record))
     }
 
-    fn finish(self, run: &RunSummary) -> Result<(Vec<SessionEvent>, Summary), BoundaryError> {
-        Ok(Self::finish(self, run))
-    }
-
-    fn finish_controlled(
+    fn finish(
         self,
         run: &RunSummary,
         deadline: &crate::budget::Deadline,

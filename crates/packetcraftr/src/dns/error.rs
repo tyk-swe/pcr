@@ -228,42 +228,44 @@ impl fmt::Display for EvidenceFault {
     }
 }
 
-pub(crate) fn attempt_error(step: u64, failure: crate::error::Failure) -> Error {
-    match failure {
-        crate::error::Failure::InvalidLimit {
-            field,
-            value,
-            reason,
-        } => Error::InvalidLimit {
-            field,
-            value,
-            reason,
-        },
-        crate::error::Failure::Authorization(source) => Error::Authorization(source),
-        crate::error::Failure::DurationLimit(source) => Error::from(source),
-        crate::error::Failure::Interrupted(source) => Error::from(source),
-        crate::error::Failure::Clock(source) => {
-            let attempt = step as u32;
+impl crate::error::FromFailure for Error {
+    fn from_failure(step: u64, failure: crate::error::Failure) -> Self {
+        match failure {
+            crate::error::Failure::InvalidLimit {
+                field,
+                value,
+                reason,
+            } => Self::InvalidLimit {
+                field,
+                value,
+                reason,
+            },
+            crate::error::Failure::Authorization(source) => Self::Authorization(source),
+            crate::error::Failure::DurationLimit(source) => Self::from(source),
+            crate::error::Failure::Interrupted(source) => Self::from(source),
+            crate::error::Failure::Clock(source) => {
+                let attempt = step as u32;
 
-            Error::Clock { attempt, source }
-        }
-        crate::error::Failure::Execution(source) => {
-            let attempt = step as u32;
-
-            Error::Execution { attempt, source }
-        }
-        crate::error::Failure::InvalidEvidence(source) => {
-            let attempt = step as u32;
-
-            Error::InvalidEvidence {
-                attempt,
-                fault: EvidenceFault::Exchange(source),
+                Self::Clock { attempt, source }
             }
-        }
-        crate::error::Failure::StatsOverflow(_) => {
-            let attempt = step as u32;
+            crate::error::Failure::Execution(source) => {
+                let attempt = step as u32;
 
-            Error::StatisticsOverflow { attempt }
+                Self::Execution { attempt, source }
+            }
+            crate::error::Failure::InvalidEvidence(source) => {
+                let attempt = step as u32;
+
+                Self::InvalidEvidence {
+                    attempt,
+                    fault: EvidenceFault::Exchange(source),
+                }
+            }
+            crate::error::Failure::StatsOverflow(_) => {
+                let attempt = step as u32;
+
+                Self::StatisticsOverflow { attempt }
+            }
         }
     }
 }

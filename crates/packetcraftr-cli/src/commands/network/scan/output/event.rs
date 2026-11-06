@@ -14,10 +14,11 @@ use packetcraftr::scan as library;
 
 use super::plan::{Inference, Plan};
 use super::probe::{Probe, Qualification};
-use super::{Classification, ClassificationCounts, Rtt, Scheduling, Scope, Sent, Unattributed};
+use super::{Classification, ClassificationCounts, Rtt, Scheduling, Unattributed};
 use crate::output::contract::Error;
 use crate::output::envelope::Published;
 use crate::output::frame::Captured;
+use crate::output::scan_failure::{Scope, Sent};
 use crate::output::stream::StreamRecord;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

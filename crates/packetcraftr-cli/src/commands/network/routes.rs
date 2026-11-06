@@ -27,11 +27,17 @@ impl Args {
     }
 }
 
+use crate::output::contract::PublishedType;
+
 impl crate::commands::Spec for Args {
-    const FORMATS: &'static [crate::output::contract::Format] = &[
-        crate::output::contract::Format::Text,
-        crate::output::contract::Format::Json,
-    ];
+    const PUBLISHED: &'static [PublishedType] = &[PublishedType {
+        definition: "routesSuccess",
+        command: "routes",
+        rust_types: &["crate::commands::network::routes::output::Report"],
+        events: &[],
+        example: "examples/documents/output-routes-success.json",
+    }];
+    const FORMATS: &'static [crate::output::contract::Format] = crate::output::contract::TEXT_JSON;
     const CANCELLATION: bool = false;
 
     fn run(

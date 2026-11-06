@@ -40,7 +40,7 @@ crate::reflective_layer! {
 }
 message_codec!(RipngCodec, Ripng, ripng_schema);
 
-const NAME: &str = "ripng";
+const NAME: &str = crate::protocol::BuiltinProtocol::Ripng.as_str();
 impl Ripng {
     fn encode_wire(&self, c: &EncodeContext<'_>) -> Result<Vec<u8>, Error> {
         if !matches!(self.command, 1 | 2) {

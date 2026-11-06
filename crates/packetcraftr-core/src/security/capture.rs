@@ -281,11 +281,7 @@ impl analysis::Collector for Collector {
         }
         Ok(Vec::new())
     }
-    fn finish(self, run: &analysis::Summary) -> Result<(Vec<Finding>, Report), BoundaryError> {
-        let report = self.finalize(run, &crate::budget::Deadline::new(std::time::Duration::MAX))?;
-        Ok((report.findings.clone(), report))
-    }
-    fn finish_controlled(
+    fn finish(
         self,
         run: &analysis::Summary,
         deadline: &crate::budget::Deadline,
@@ -308,19 +304,13 @@ impl Collector {
     ) -> Result<Report, BoundaryError> {
         deadline.enforce().map_err(BoundaryError::from_error)?;
         if let Some(d) = self.dns.take() {
-            analysis::Collector::finish_controlled(d, run, deadline, &mut |e| {
-                self.dns_events(vec![e])
-            })?;
+            analysis::Collector::finish(d, run, deadline, &mut |e| self.dns_events(vec![e]))?;
         }
         if let Some(h) = self.http.take() {
-            analysis::Collector::finish_controlled(h, run, deadline, &mut |e| {
-                self.http_events(vec![e])
-            })?;
+            analysis::Collector::finish(h, run, deadline, &mut |e| self.http_events(vec![e]))?;
         }
         if let Some(t) = self.tls.take() {
-            analysis::Collector::finish_controlled(t, run, deadline, &mut |e| {
-                self.tls_events(vec![e])
-            })?;
+            analysis::Collector::finish(t, run, deadline, &mut |e| self.tls_events(vec![e]))?;
         }
         if run.frames_matched == 0 {
             self.report
@@ -538,17 +528,19 @@ mod tests {
     #[test]
     fn controlled_finalization_preserves_evidence() {
         let run = analysis::Summary::default();
-        let (expected_events, expected_report) = collector().finish(&run).unwrap();
+        let expected_report = collector()
+            .finalize(&run, &Deadline::new(Duration::MAX))
+            .unwrap();
         let mut events = Vec::new();
         let report = collector()
-            .finish_controlled(&run, &Deadline::new(Duration::from_secs(1)), &mut |event| {
+            .finish(&run, &Deadline::new(Duration::from_secs(1)), &mut |event| {
                 events.push(event);
                 Ok(())
             })
             .unwrap();
         assert_eq!(
             serde_json::to_value(&events).unwrap(),
-            serde_json::to_value(expected_events).unwrap()
+            serde_json::to_value(&expected_report.findings).unwrap()
         );
         assert_eq!(
             serde_json::to_value(report).unwrap(),
@@ -562,7 +554,7 @@ mod tests {
         let run = analysis::Summary::default();
         let mut delivered = 0;
         let error = collector()
-            .finish_controlled(&run, &Deadline::new(Duration::from_secs(1)), &mut |_| {
+            .finish(&run, &Deadline::new(Duration::from_secs(1)), &mut |_| {
                 delivered += 1;
                 Err(BoundaryError::from_error(Error::Invalid(
                     "sink refused".into(),
@@ -573,7 +565,7 @@ mod tests {
         assert!(error.to_string().contains("sink refused"));
         assert!(
             collector()
-                .finish_controlled(&run, &Deadline::immediate(None), &mut |_| panic!(
+                .finish(&run, &Deadline::immediate(None), &mut |_| panic!(
                     "expired events must not be delivered"
                 ))
                 .is_err()
@@ -584,7 +576,7 @@ mod tests {
         let mut delivered = 0;
         assert!(
             collector()
-                .finish_controlled(&run, &deadline, &mut |_| {
+                .finish(&run, &deadline, &mut |_| {
                     delivered += 1;
                     cancellation.cancel();
                     Ok(())

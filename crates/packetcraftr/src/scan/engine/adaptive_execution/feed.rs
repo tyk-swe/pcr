@@ -184,12 +184,15 @@ where
         self.deadline.enforce().map_err(BoundaryError::from_error)?;
         match event {
             PipelineEvent::Sent { index, sent } => {
+                let registry = self.evidence.classifier_mut().registry;
                 let active = self
                     .active
                     .get(&index)
                     .ok_or_else(|| Self::invalid(index))?;
                 let batch = self.batch(active);
-                if active.sent || !sent_probe_matches(batch.probe()?, &sent.built().packet) {
+                if active.sent
+                    || !sent_probe_matches(registry, batch.probe()?, &sent.built().packet)
+                {
                     return Err(Self::invalid(index));
                 }
                 let active = self

@@ -12,13 +12,13 @@ import subprocess
 import sys
 from typing import Any, Iterable, NamedTuple
 
-from rust_source import is_test_path
+from rust_source import blank_comments, is_test_path, without_test_items
 from script_support import read_json, strict_json
 
 ROOT = Path(__file__).resolve().parent.parent
 CONTRACT = 'crates/packetcraftr-core/src/security.rs'
 RELEASE_ASSETS = 'scripts/release-assets.json'
-REGISTRY = 'crates/packetcraftr-cli/src/output/contract.rs'
+REGISTRY = 'published registry (Spec::PUBLISHED rows under crates/packetcraftr-cli/src)'
 CLI_SRC = 'crates/packetcraftr-cli/src'
 RUNTIME_IDENTIFIER = re.compile(
     r'^pub const OUTPUT_SCHEMA: &str = "(packetcraftr\.output/v([1-9][0-9]*))";$', re.MULTILINE)
@@ -102,12 +102,17 @@ def check_release_assets(assets: Iterable[str], identity: Identity) -> list[str]
     return problems
 
 
-def load_validator(schema: Any) -> Any:
+def load_jsonschema() -> Any:
     try:
         import jsonschema
     except ImportError as error:
         raise CheckError('full Draft 2020-12 validation requires the jsonschema package; '
                          'install python3-jsonschema or `pip install jsonschema`') from error
+    return jsonschema
+
+
+def load_validator(schema: Any) -> Any:
+    jsonschema = load_jsonschema()
     try:
         jsonschema.Draft202012Validator.check_schema(schema)
     except jsonschema.SchemaError as error:
@@ -148,7 +153,10 @@ def published_codes(root: Path) -> set[str]:
     """
     codes: set[str] = set()
     for path in (root / 'crates').rglob('*.rs'):
-        codes.update(CODE_LITERAL.findall(path.read_text(encoding='utf-8', errors='replace')))
+        if is_test_path(path.relative_to(root)):
+            continue
+        text = blank_comments(without_test_items(path.read_text(encoding='utf-8', errors='replace')))
+        codes.update(CODE_LITERAL.findall(text))
     return codes
 
 
@@ -314,16 +322,15 @@ def _type_defined(root: Path, rust_type: str, sources: dict[Path, str]) -> bool:
     return any(pattern.search(sources.get(path, '')) for path in candidates)
 
 
-def registry_problems(root: Path, schema: Any) -> list[str]:
+def registry_problems(root: Path, schema: Any, jsonschema: Any) -> list[str]:
     """The contract registry must agree with the schema, sources, and examples."""
-    import jsonschema
-
     problems: list[str] = []
-    rows = read_registry((root / REGISTRY).read_text(encoding='utf-8'))
+    sources = {path: without_test_items(path.read_text(encoding='utf-8'))
+               for path in _production_sources(root)}
+    rows = read_registry('\n'.join(sources.values()))
     if not rows:
         return [f'{REGISTRY}: no PublishedType rows found']
     definitions = schema.get('$defs', {})
-    sources = {path: path.read_text(encoding='utf-8') for path in _production_sources(root)}
     examples: dict[str, list[Any]] = {}
 
     def example_records(relative: str) -> list[Any]:
@@ -389,8 +396,8 @@ def check(root: Path, binary: Path | None = None) -> list[str]:
     schema = read_json(root / identity.schema_path)
     problems = check_identity(schema, identity)
     problems.extend(check_release_assets(read_json(root / RELEASE_ASSETS)['source_assets'], identity))
-    problems.extend(registry_problems(root, schema))
     validator = load_validator(schema)
+    problems.extend(registry_problems(root, schema, load_jsonschema()))
     published = published_codes(root)
     problems.extend(example_problems(root, validator, published))
     if binary is not None:

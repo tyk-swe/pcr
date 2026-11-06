@@ -42,84 +42,6 @@ pub(super) fn register(
         builder,
         &[
             (
-                BuiltinProtocol::Udp,
-                53,
-                BuiltinProtocol::Dns,
-                Priority::Primary,
-            ),
-            (
-                BuiltinProtocol::Udp,
-                69,
-                BuiltinProtocol::Tftp,
-                Priority::Primary,
-            ),
-            (
-                BuiltinProtocol::Udp,
-                123,
-                BuiltinProtocol::Ntp,
-                Priority::Primary,
-            ),
-            (
-                BuiltinProtocol::Udp,
-                514,
-                BuiltinProtocol::Syslog,
-                Priority::Primary,
-            ),
-            (
-                BuiltinProtocol::Udp,
-                5353,
-                BuiltinProtocol::Dns,
-                Priority::Primary,
-            ),
-            (
-                BuiltinProtocol::Udp,
-                5355,
-                BuiltinProtocol::Dns,
-                Priority::Primary,
-            ),
-            (
-                BuiltinProtocol::Udp,
-                67,
-                BuiltinProtocol::Dhcpv4,
-                Priority::Primary,
-            ),
-            (
-                BuiltinProtocol::Udp,
-                68,
-                BuiltinProtocol::Dhcpv4,
-                Priority::Primary,
-            ),
-            (
-                BuiltinProtocol::Udp,
-                546,
-                BuiltinProtocol::Dhcpv6,
-                Priority::Primary,
-            ),
-            (
-                BuiltinProtocol::Udp,
-                547,
-                BuiltinProtocol::Dhcpv6,
-                Priority::Primary,
-            ),
-            (
-                BuiltinProtocol::Tcp,
-                53,
-                BuiltinProtocol::Dns,
-                Priority::Primary,
-            ),
-            (
-                BuiltinProtocol::Tcp,
-                80,
-                BuiltinProtocol::Http,
-                Priority::Primary,
-            ),
-            (
-                BuiltinProtocol::Tcp,
-                8080,
-                BuiltinProtocol::Http,
-                Priority::Primary,
-            ),
-            (
                 BuiltinProtocol::Http,
                 0,
                 BuiltinProtocol::Raw,
@@ -127,6 +49,12 @@ pub(super) fn register(
             ),
             (
                 BuiltinProtocol::Dns,
+                0,
+                BuiltinProtocol::Raw,
+                Priority::Fallback,
+            ),
+            (
+                BuiltinProtocol::Tls,
                 0,
                 BuiltinProtocol::Raw,
                 Priority::Fallback,
@@ -188,48 +116,8 @@ pub(super) fn register(
         ],
     )?;
     register_messages(builder)?;
-    register_tls(builder)?;
+    register_ports(builder)?;
     super::filter_fields::register_filter_fields(builder)
-}
-
-pub const TLS_TCP_PORTS: &[u16] = &[443, 465, 636, 853, 993, 995, 8443];
-
-fn register_tls(builder: &mut crate::registry::Builder) -> Result<(), crate::registry::Error> {
-    bind_tls_ports(builder, TLS_TCP_PORTS)?;
-    bind_all(
-        builder,
-        &[(
-            BuiltinProtocol::Tls,
-            0,
-            BuiltinProtocol::Raw,
-            Priority::Fallback,
-        )],
-    )
-}
-
-/// Port 0 is refused as a conflict: TCP's discriminator 0 is the raw
-/// fallback.
-pub(crate) fn bind_tls_ports(
-    builder: &mut crate::registry::Builder,
-    ports: &[u16],
-) -> Result<(), crate::registry::Error> {
-    const TLS_PORT_PRIORITY: Priority = Priority::Primary;
-    for port in ports {
-        if *port == 0 {
-            return Err(crate::registry::Error::BindingConflict {
-                parent: BuiltinProtocol::Tcp.as_str().into(),
-                discriminator: 0,
-                priority: TLS_PORT_PRIORITY,
-            });
-        }
-        builder.bind(
-            BuiltinProtocol::Tcp.as_str(),
-            u64::from(*port),
-            BuiltinProtocol::Tls.as_str(),
-            TLS_PORT_PRIORITY,
-        )?;
-    }
-    Ok(())
 }
 
 fn register_link(builder: &mut crate::registry::Builder) -> Result<(), crate::registry::Error> {
@@ -796,7 +684,7 @@ fn register_messages(builder: &mut crate::registry::Builder) -> Result<(), crate
                 if protocol.stream_decode() {
                     protocol.as_str()
                 } else {
-                    "raw"
+                    BuiltinProtocol::Raw.as_str()
                 },
                 Priority::Primary,
             )?;
@@ -805,22 +693,28 @@ fn register_messages(builder: &mut crate::registry::Builder) -> Result<(), crate
                 builder.bind(
                     protocol.as_str(),
                     crate::protocol::message::OPAQUE_TAIL,
-                    "raw",
+                    BuiltinProtocol::Raw.as_str(),
                     Priority::Primary,
                 )?;
             }
-            for (parent, ports) in [
-                (BuiltinProtocol::Tcp, protocol.tcp_ports()),
-                (BuiltinProtocol::Udp, protocol.udp_ports()),
-            ] {
-                for &port in ports {
-                    builder.bind(
-                        parent.as_str(),
-                        u64::from(port),
-                        protocol.as_str(),
-                        Priority::Primary,
-                    )?;
-                }
+        }
+    }
+    Ok(())
+}
+
+fn register_ports(builder: &mut crate::registry::Builder) -> Result<(), crate::registry::Error> {
+    for protocol in BuiltinProtocol::ALL {
+        for (parent, ports) in [
+            (BuiltinProtocol::Tcp, protocol.tcp_ports()),
+            (BuiltinProtocol::Udp, protocol.udp_ports()),
+        ] {
+            for &port in ports {
+                builder.bind(
+                    parent.as_str(),
+                    u64::from(port),
+                    protocol.as_str(),
+                    Priority::Primary,
+                )?;
             }
         }
     }

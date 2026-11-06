@@ -40,15 +40,31 @@ impl AnalysisSetup {
         &self,
         invocation: &crate::invocation::Invocation,
     ) -> analysis::Options<'_> {
+        let session = self.session_options(invocation);
         analysis::Options {
             plan: analysis::Plan::default(),
-            deadline: invocation.deadline.clone(),
+            deadline: session.deadline,
             track_sources: false,
-            cancellation: Some(invocation.cancellation.clone()),
+            cancellation: session.cancellation,
+            filter: session.filter,
+            stream: session.stream,
+            time_bounds: session.time_bounds,
+            tcp_events: false,
+            ip_overlap: session.ip_overlap,
+            limits: session.limits,
+        }
+    }
+
+    pub(super) fn session_options(
+        &self,
+        invocation: &crate::invocation::Invocation,
+    ) -> analysis::SessionOptions<'_> {
+        analysis::SessionOptions {
+            deadline: invocation.control.deadline.clone(),
+            cancellation: Some(invocation.control.cancellation.clone()),
             filter: self.filter.as_ref(),
             stream: None,
             time_bounds: self.time_bounds,
-            tcp_events: false,
             ip_overlap: self.ip_overlap,
             limits: self.limits.clone(),
         }
@@ -127,16 +143,20 @@ pub(super) fn inspect<C: analysis::Collector>(
     } = inspection;
     let capture_limits = limits.capture.limits()?;
     let setup = prepare(capture_limits, limits, None, decode)?;
-    // The session raises the TCP/source-tracking flags from the collector's declared needs.
     let session = analysis::Session::new(
         setup.registry.clone(),
-        analysis::Options {
+        analysis::SessionOptions {
             stream: selector,
-            ..setup.options(invocation)
+            ..setup.session_options(invocation)
         },
         collector,
     );
-    let mut reader = crate::input::open_capture(invocation, path, capture_limits)?;
+    let mut reader = crate::input::open_capture(
+        &invocation.control,
+        &invocation.output,
+        path,
+        capture_limits,
+    )?;
     let mut output = EventOutput::new(invocation, application.max_output_bytes());
     let outcome = session
         .run(

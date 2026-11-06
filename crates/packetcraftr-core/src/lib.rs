@@ -13,7 +13,7 @@
 //!
 //! | Layer | Modules |
 //! | --- | --- |
-//! | 1. Kernel | `error`, `diagnostic`, `budget`, `field`, `layer`, `layout`, `codec`, `packet`, `registry`, `matcher`, `frame`, `template` |
+//! | 1. Kernel | `error`, `diagnostic`, `budget`, `field`, `layer`, `layout`, `codec`, `clock`, `packet`, `registry`, `matcher`, `frame`, `template` |
 //! | 2. Packet mechanics | `protocol`, `build`, `decode`, `expression`, `transform`, `conversation`, `document` |
 //! | 3. Captures and filters | `capture_file`, `filter` |
 //! | 4. Offline analysis | `analysis`, `security`, `fuzz` |

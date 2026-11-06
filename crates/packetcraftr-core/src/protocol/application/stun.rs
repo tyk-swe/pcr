@@ -42,7 +42,7 @@ crate::reflective_layer! {
 }
 message_codec!(StunCodec, Stun, stun_schema);
 
-const NAME: &str = "stun";
+const NAME: &str = crate::protocol::BuiltinProtocol::Stun.as_str();
 impl Stun {
     fn encode_wire(&self, c: &EncodeContext<'_>) -> Result<Vec<u8>, Error> {
         if !matches!(self.message_type, 1 | 0x11 | 0x101 | 0x111) {

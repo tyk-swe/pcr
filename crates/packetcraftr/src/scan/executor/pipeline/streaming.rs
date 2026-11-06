@@ -7,15 +7,13 @@ use super::{
     AdaptiveAdmission, BatchStorage, Descriptor, InitialState, Output, Pipeline, Planned,
     Streaming, check, correlation, expiry, limit, max_wait_secs, prepare, until,
 };
+use crate::error::FromFailure as _;
 use crate::{
     Stats,
     clock::Clock,
     exchange::WorkflowExecutor,
     providers::PacketProviders,
-    scan::{
-        error::probe_error,
-        executor::{PipelineFeed, PipelineOptions},
-    },
+    scan::executor::{PipelineFeed, PipelineOptions},
 };
 use packetcraftr_core::error::BoundaryError;
 use packetcraftr_netio::capture;
@@ -65,7 +63,7 @@ pub(in crate::scan::executor) fn run_stream<P: PacketProviders, K: Clock>(
             .clock
             .sleep(wait, &preparation)
             .map_err(|source| {
-                BoundaryError::from_error(probe_error(
+                BoundaryError::from_error(crate::scan::Error::from_failure(
                     0,
                     crate::error::Failure::Clock(Box::new(source)),
                 ))
@@ -321,8 +319,13 @@ impl<P: PacketProviders, K: Clock> Pipeline<'_, P, K> {
                 .retained
                 .saturating_add(maximum.saturating_mul(selected.saturating_add(1)))
                 <= self.options.max_prepared_bytes;
-            let (route, mut admitted) =
-                prepare::admit_one(&mut self.plan, probe, self.options.max_prepared_bytes, keep)?;
+            let (route, mut admitted) = prepare::admit_one(
+                &mut self.plan,
+                &self.executor.operation.registry,
+                probe,
+                self.options.max_prepared_bytes,
+                keep,
+            )?;
             let actual_description = 512usize
                 .saturating_add(
                     probe

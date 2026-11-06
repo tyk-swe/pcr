@@ -10,15 +10,14 @@ use std::net::IpAddr;
 
 use serde::Serialize;
 
-use packetcraftr::scan::Reply;
 use packetcraftr::scan::discovery;
 use packetcraftr::scan::followup;
 
-use super::Scope;
 use crate::commands::network::dns::output::{Outcome, QuestionStatus};
 use crate::output::contract::Error;
 use crate::output::frame::Timestamp;
 use crate::output::network::{InterfaceId, MacAddress};
+use crate::output::scan_failure::{Scope, reply_name};
 use crate::output::stream::StreamRecord;
 
 published_enum! {
@@ -52,28 +51,6 @@ published_enum! {
         Direct => "direct",
         Cached => "cached",
         PossibleProxy => "possible_proxy",
-    }
-}
-
-/// The published name of a correlated scan reply.
-pub(crate) const fn reply_name(reply: Reply) -> &'static str {
-    match reply {
-        Reply::TcpSynAck => "tcp_syn_ack",
-        Reply::TcpReset => "tcp_reset",
-        Reply::TcpOther => "tcp_other",
-        Reply::UdpPayload => "udp_payload",
-        Reply::SctpInitAck => "sctp_init_ack",
-        Reply::SctpAbort => "sctp_abort",
-        Reply::SctpOther => "sctp_other",
-        Reply::IcmpEchoReply => "icmp_echo_reply",
-        Reply::IcmpTimestampReply => "icmp_timestamp_reply",
-        Reply::IcmpNetmaskReply => "icmp_netmask_reply",
-        Reply::IpProtocolPayload => "ip_protocol_payload",
-        Reply::IcmpPortUnreachable => "icmp_port_unreachable",
-        Reply::IcmpProtocolUnreachable => "icmp_protocol_unreachable",
-        Reply::IcmpAdministrativelyProhibited => "icmp_administratively_prohibited",
-        Reply::IcmpDestinationUnreachable => "icmp_destination_unreachable",
-        Reply::IcmpTimeExceeded => "icmp_time_exceeded",
     }
 }
 

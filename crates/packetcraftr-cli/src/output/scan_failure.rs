@@ -38,6 +38,28 @@ published_enum! {
     }
 }
 
+/// The published name of a correlated scan reply.
+pub(crate) const fn reply_name(reply: library::Reply) -> &'static str {
+    match reply {
+        library::Reply::TcpSynAck => "tcp_syn_ack",
+        library::Reply::TcpReset => "tcp_reset",
+        library::Reply::TcpOther => "tcp_other",
+        library::Reply::UdpPayload => "udp_payload",
+        library::Reply::SctpInitAck => "sctp_init_ack",
+        library::Reply::SctpAbort => "sctp_abort",
+        library::Reply::SctpOther => "sctp_other",
+        library::Reply::IcmpEchoReply => "icmp_echo_reply",
+        library::Reply::IcmpTimestampReply => "icmp_timestamp_reply",
+        library::Reply::IcmpNetmaskReply => "icmp_netmask_reply",
+        library::Reply::IpProtocolPayload => "ip_protocol_payload",
+        library::Reply::IcmpPortUnreachable => "icmp_port_unreachable",
+        library::Reply::IcmpProtocolUnreachable => "icmp_protocol_unreachable",
+        library::Reply::IcmpAdministrativelyProhibited => "icmp_administratively_prohibited",
+        library::Reply::IcmpDestinationUnreachable => "icmp_destination_unreachable",
+        library::Reply::IcmpTimeExceeded => "icmp_time_exceeded",
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Protocol {

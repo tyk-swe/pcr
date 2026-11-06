@@ -205,7 +205,7 @@ fn mqtt_capture_outputs_json_envelope() {
         "JSON stdout should be a single object, got:\n{text}"
     );
     assert!(
-        trimmed.contains("\"packetcraftr.output/v19\""),
+        trimmed.contains(packetcraftr_core::security::OUTPUT_SCHEMA),
         "JSON stdout should carry the owned output schema value, got:\n{text}"
     );
     assert!(
@@ -652,14 +652,14 @@ fn scan_diff_reports_changes_and_provenance() {
     let before_path = dir.path().join("before.json");
     let after_path = dir.path().join("after.json");
     let before = json!({
-        "schema":"packetcraftr.output/v19", "command":"scan", "mode":"aggregate", "status":"success",
+        "schema": packetcraftr_core::security::OUTPUT_SCHEMA, "command":"scan", "mode":"aggregate", "status":"success",
         "result":{"method":"tcp_connect", "endpoints":[
             {"address":"192.0.2.1", "port":443, "inference":{"state":"closed", "supporting":[1]}},
             {"address":"192.0.2.2", "port":443, "inference":{"state":"open", "supporting":[2]}}
         ]}
     });
     let after = json!({
-        "schema":"packetcraftr.output/v19", "command":"scan", "mode":"aggregate", "status":"success",
+        "schema": packetcraftr_core::security::OUTPUT_SCHEMA, "command":"scan", "mode":"aggregate", "status":"success",
         "result":{"method":"tcp_connect", "endpoints":[
             {"address":"192.0.2.1", "port":443, "inference":{"state":"open", "supporting":[3]}}
         ]}
@@ -728,7 +728,14 @@ fn scan_diff_reports_changes_and_provenance() {
 fn scan_diff_rejects_invalid_input() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("invalid.json");
-    std::fs::write(&path, br#"{"schema":"packetcraftr.output/v19","command":"scan","mode":"aggregate","status":"failure"}"#).unwrap();
+    std::fs::write(
+        &path,
+        format!(
+            r#"{{"schema":"{}","command":"scan","mode":"aggregate","status":"failure"}}"#,
+            packetcraftr_core::security::OUTPUT_SCHEMA
+        ),
+    )
+    .unwrap();
     let path = path.to_str().unwrap();
     let args = ["--output", "json", "analyze", "scan-diff", path, path];
     let output = run(&args);
@@ -740,38 +747,32 @@ fn scan_diff_rejects_invalid_input() {
 
 mod differential {
     use packetcraftr::differential as lib;
-    use packetcraftr_cli::output::{DifferentialReport as Report, contract::Command, envelope};
     use serde_json::{Value, json};
     use std::process::Output;
 
     pub(super) fn campaign() -> Vec<u8> {
-        let attempts = [u32::MAX, 7]
-            .into_iter()
-            .map(|attempt_seq| lib::AttemptEvidence {
-                variant_index: 0,
-                attempt_seq,
-                answered: false,
-                packets_sent: 1,
-                payload_sha256: [0x11; 32],
-                reply: None,
+        let attempt = |attempt_seq: u32| {
+            json!({
+                "variant": "baseline",
+                "attempt_seq": attempt_seq,
+                "answered": false,
+                "packets_sent": 1,
+                "payload_sha256": "11".repeat(32),
             })
-            .collect::<Vec<_>>();
-        let published = envelope::Published::<Report>::try_from(lib::Aggregate {
-            valid: false,
-            provisional: true,
-            plan_digest: "fixture".into(),
-            source_port: 40000,
-            spoof_source: Some("192.0.2.1".parse().unwrap()),
-            rows: lib::rows_for(&attempts),
-            attempts,
-            diagnostics: Vec::new(),
-            stats: Default::default(),
-        })
-        .unwrap();
-        serde_json::to_vec(&envelope::Envelope::published(
-            Command::Differential,
-            published,
-        ))
+        };
+        serde_json::to_vec(&json!({
+            "schema": packetcraftr_core::security::OUTPUT_SCHEMA,
+            "command": "differential",
+            "mode": "aggregate",
+            "status": "success",
+            "result": {
+                "provisional": true,
+                "plan_digest": "fixture",
+                "source_port": 40000,
+                "spoof_source": "192.0.2.1",
+                "attempts": [attempt(u32::MAX), attempt(7)],
+            },
+        }))
         .unwrap()
     }
 

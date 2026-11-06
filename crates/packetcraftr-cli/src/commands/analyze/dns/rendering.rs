@@ -93,7 +93,7 @@ pub(super) fn render_complete(
     )
 }
 
-fn frames(sources: &[super::output::provenance::Source]) -> String {
+fn frames(sources: &[crate::output::frame::Source]) -> String {
     or_none(comma_separated(sources.iter().map(|source| source.number)))
 }
 

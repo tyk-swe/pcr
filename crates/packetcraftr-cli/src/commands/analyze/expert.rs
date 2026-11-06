@@ -15,12 +15,37 @@ use crate::errors::CliError;
 use crate::input::open_capture;
 use crate::invocation::StreamEncoder;
 
+use crate::output::contract::PublishedType;
+
 impl crate::commands::Spec for Args {
-    const FORMATS: &'static [crate::output::contract::Format] = &[
-        crate::output::contract::Format::Text,
-        crate::output::contract::Format::Json,
-        crate::output::contract::Format::Ndjson,
+    const PUBLISHED: &'static [PublishedType] = &[
+        PublishedType {
+            definition: "expertSuccess",
+            command: "expert",
+            rust_types: &["crate::commands::analyze::expert::output::Report"],
+            events: &[],
+            example: "examples/documents/output-expert-complete.json",
+        },
+        PublishedType {
+            definition: "expertStreamSuccess",
+            command: "expert",
+            rust_types: &[
+                "crate::commands::analyze::expert::output::Finding",
+                "crate::commands::analyze::expert::output::Report",
+                "crate::commands::offline_analysis::output::reassembly::Event",
+            ],
+            events: &[
+                "complete",
+                "finding",
+                "ip_datagram_completed",
+                "ip_datagram_incomplete",
+                "ip_overlap_resolved",
+            ],
+            example: "examples/documents/output-expert-complete.json",
+        },
     ];
+    const FORMATS: &'static [crate::output::contract::Format] =
+        crate::output::contract::TEXT_JSON_NDJSON;
     const CANCELLATION: bool = true;
     const OFFLINE: bool = true;
 
@@ -59,11 +84,16 @@ pub(super) fn run(
         arguments.filter.as_deref(),
         &arguments.decode,
     )?;
-    let mut reader = open_capture(invocation, &arguments.path, capture_limits)?;
+    let mut reader = open_capture(
+        &invocation.control,
+        &invocation.output,
+        &arguments.path,
+        capture_limits,
+    )?;
 
     let session = analysis::Session::new(
         prepared.registry.clone(),
-        prepared.options(invocation),
+        prepared.session_options(invocation),
         analysis::expert::Collector::default(),
     );
     let mut state = rendering::State::new(capture_limits.retention_ceiling());

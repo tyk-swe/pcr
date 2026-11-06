@@ -38,6 +38,18 @@ pub trait Provider: Send + Sync {
     ) -> Result<Reply, Error>;
 }
 
+fn receive(socket: &UdpSocket, buffer: &mut [u8]) -> io::Result<(usize, bool)> {
+    match socket.recv(buffer) {
+        Ok(count) => Ok((count, count == buffer.len())),
+        // Winsock recv fills the caller's buffer and discards the remainder
+        // of an oversized unreliable datagram before reporting WSAEMSGSIZE.
+        // https://learn.microsoft.com/windows/win32/api/winsock/nf-winsock-recv
+        #[cfg(target_os = "windows")]
+        Err(source) if source.raw_os_error() == Some(10040) => Ok((buffer.len(), true)),
+        Err(source) => Err(source),
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SystemProvider;
 
@@ -101,7 +113,7 @@ impl Provider for SystemProvider {
                 {
                     break 'exchange outcome;
                 }
-                match crate::platform::udp::receive(&socket, &mut response) {
+                match receive(&socket, &mut response) {
                     Ok((count, truncated)) => {
                         bytes_read = count.min(max_response);
                         if let Err(source) = deadline.live_remaining() {

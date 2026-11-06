@@ -44,8 +44,6 @@ macro_rules! published_enum {
 }
 pub(crate) use published_enum;
 
-pub use crate::commands::DifferentialReport;
-
 pub mod capture;
 pub mod contract;
 pub mod envelope;

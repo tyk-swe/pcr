@@ -108,7 +108,7 @@ pub(crate) fn validate_typed_child_discriminator(
     }
     if context
         .child_for(Discriminator(discriminator))
-        .is_some_and(|bound| bound.as_str() != "raw")
+        .is_some_and(|bound| bound != crate::layer::Raw::ID)
     {
         return Ok(());
     }

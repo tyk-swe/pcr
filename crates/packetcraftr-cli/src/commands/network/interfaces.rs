@@ -24,11 +24,17 @@ pub(crate) struct Args {
     pub(crate) timestamp_types: bool,
 }
 
+use crate::output::contract::PublishedType;
+
 impl crate::commands::Spec for Args {
-    const FORMATS: &'static [crate::output::contract::Format] = &[
-        crate::output::contract::Format::Text,
-        crate::output::contract::Format::Json,
-    ];
+    const PUBLISHED: &'static [PublishedType] = &[PublishedType {
+        definition: "interfacesSuccess",
+        command: "interfaces",
+        rust_types: &["crate::commands::network::interfaces::output::Report"],
+        events: &[],
+        example: "examples/documents/output-interfaces-success.json",
+    }];
+    const FORMATS: &'static [crate::output::contract::Format] = crate::output::contract::TEXT_JSON;
     const CANCELLATION: bool = false;
 
     fn run(

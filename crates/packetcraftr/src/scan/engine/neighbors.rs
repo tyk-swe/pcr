@@ -12,7 +12,6 @@ use super::pipelined::add_stats;
 use crate::probe::enforce_deadline;
 use crate::scan::Error;
 use crate::scan::discovery::{self, Composer};
-use crate::scan::error::probe_error;
 use crate::scan::executor::Pipelined;
 
 /// Marks `host` started and returns `None` when it has already expired.
@@ -92,7 +91,7 @@ pub(super) fn discover_neighbors<E: Pipelined, C: Clock>(
             if requests_neighbor(prober.executor, target, true, prober.deadline)? {
                 prober.settle(stats)?;
             }
-            enforce_deadline(probe_error, prober.deadline)?;
+            enforce_deadline::<Error>(prober.deadline)?;
             if host_expired(&mut controller, host, prober.clock.now()) {
                 break last;
             }
@@ -119,7 +118,7 @@ pub(super) fn discover_neighbors<E: Pipelined, C: Clock>(
             };
             // A resolver stopped by the deadline reports silence; the deadline
             // decides instead.
-            enforce_deadline(probe_error, prober.deadline)?;
+            enforce_deadline::<Error>(prober.deadline)?;
             if neighbor.attempts > 1 {
                 return Err(Error::InvalidEvidence {
                     sequence: 0,
@@ -201,7 +200,7 @@ pub(super) fn reach_next_hop<E: Pipelined, C: Clock>(
     if needs_request {
         prober.settle(stats)?;
     }
-    enforce_deadline(probe_error, prober.deadline)?;
+    enforce_deadline::<Error>(prober.deadline)?;
     if host_expired(&mut controller, host, prober.clock.now()) {
         return Ok(ReachOutcome::HostExpired);
     }
@@ -224,7 +223,7 @@ pub(super) fn reach_next_hop<E: Pipelined, C: Clock>(
     };
     // A resolver stopped by the deadline reports silence; the deadline
     // decides instead.
-    enforce_deadline(probe_error, prober.deadline)?;
+    enforce_deadline::<Error>(prober.deadline)?;
     add_stats(stats, &resolved.stats, sequence)?;
     // A request spends the rate like a probe, so it is spaced from the next
     // request or the stage's first probe.

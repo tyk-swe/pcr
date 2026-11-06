@@ -54,14 +54,7 @@ where
         }
         let (len, source) = match socket.recv_from(&mut buffer) {
             Ok(received) => received,
-            Err(error)
-                if matches!(
-                    error.kind(),
-                    io::ErrorKind::WouldBlock
-                        | io::ErrorKind::TimedOut
-                        | io::ErrorKind::Interrupted
-                ) =>
-            {
+            Err(error) if packetcraftr_netio::bounded::retryable(&error) => {
                 continue;
             }
             Err(error) => return Err(io_error(error)),

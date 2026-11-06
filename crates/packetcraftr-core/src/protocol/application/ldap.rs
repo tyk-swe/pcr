@@ -43,7 +43,7 @@ crate::reflective_layer! {
 }
 message_codec!(LdapCodec, Ldap, ldap_schema);
 
-const NAME: &str = "ldap";
+const NAME: &str = crate::protocol::BuiltinProtocol::Ldap.as_str();
 impl Ldap {
     fn encode_wire(&self, c: &EncodeContext<'_>) -> Result<Vec<u8>, Error> {
         let max = c.remaining_packet_bytes;

@@ -5,10 +5,7 @@
 
 use packetcraftr_core::error::BoundaryError;
 
-use super::{
-    Collection, Request, StopCondition, WorkflowEvidence, WorkflowResponseMatcher,
-    WorkflowStopPredicate,
-};
+use super::{Collection, Step, WorkflowEvidence, WorkflowResponseMatcher, WorkflowStopPredicate};
 use crate::clock::{Clock, SystemClock};
 use crate::engine::operation::Operation;
 use crate::route::Interface;
@@ -73,13 +70,12 @@ where
         }
         self.client
             .exchange_hooked(
-                Request {
+                Step {
                     template,
                     send,
                     timeout: overrides.timeout,
                     max_template_packets: overrides.max_template_packets,
                     collection,
-                    stop: StopCondition::Window,
                 },
                 self.operation,
                 Some(matches_request),

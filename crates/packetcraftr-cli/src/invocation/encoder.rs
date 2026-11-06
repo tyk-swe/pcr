@@ -39,6 +39,10 @@ impl StreamEncoder {
         output::stream::StreamEncoder::new(command, writer).into()
     }
 
+    pub(crate) fn unattributed(writer: impl std::io::Write + Send + 'static) -> Self {
+        output::stream::StreamEncoder::unattributed(writer).into()
+    }
+
     pub(crate) fn presentation(&self) -> Presentation {
         self.presentation
     }

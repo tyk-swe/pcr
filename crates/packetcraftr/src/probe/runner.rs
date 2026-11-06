@@ -123,6 +123,7 @@ where
     C: Clock,
     K: Classifier,
     F: FnMut(K::Event, &Deadline) -> Result<(), E>,
+    E: crate::error::FromFailure,
 {
     let mut batches = batches.into_iter();
     run_planned(
@@ -154,10 +155,10 @@ where
     C: Clock,
     K: Classifier,
     F: FnMut(K::Event, &Deadline) -> Result<(), E>,
+    E: crate::error::FromFailure,
     B: BorrowMut<Batch<K::Probe>>,
 {
-    let errors = evidence.errors();
-    let mut context = Context::new(deadline, clock, errors);
+    let mut context = Context::new(deadline, clock);
     let mut previous_probes = None;
     let mut last_sequence = 0;
 
@@ -166,13 +167,10 @@ where
         let sequence = batch.sequence;
         context.enforce(sequence)?;
         let delay = match (previous_probes, paced_after) {
-            (Some(previous_probes), _) => rate_delay(
-                errors,
-                "probes_per_second",
-                previous_probes,
-                probes_per_second,
-            )?,
-            (None, Some(after)) => rate_delay(errors, "probes_per_second", 1, probes_per_second)?
+            (Some(previous_probes), _) => {
+                rate_delay("probes_per_second", previous_probes, probes_per_second)?
+            }
+            (None, Some(after)) => rate_delay("probes_per_second", 1, probes_per_second)?
                 .saturating_sub(context.now().saturating_duration_since(after)),
             (None, None) => Duration::ZERO,
         };

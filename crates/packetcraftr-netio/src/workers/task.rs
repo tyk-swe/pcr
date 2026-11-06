@@ -131,6 +131,32 @@ pub(crate) enum Waited<T> {
     Pending(Task<T>),
 }
 
+pub(crate) enum Blocked<T> {
+    Finished(T),
+    Panicked,
+    Pending,
+}
+
+impl Permit {
+    /// A pending task is marked retained before its outcome is abandoned, so
+    /// admission accounting survives the caller giving up on it.
+    pub(crate) fn call<T: Send + 'static>(
+        self,
+        wait: &Deadline,
+        work: impl FnOnce() -> T + Send + 'static,
+    ) -> std::io::Result<Blocked<T>> {
+        let task = self.spawn_with_control(wait, work)?;
+        Ok(match task.wait(wait) {
+            Waited::Finished(Ok(value)) => Blocked::Finished(value),
+            Waited::Finished(Err(_)) => Blocked::Panicked,
+            Waited::Pending(task) => {
+                task.retention_marker().mark_retained();
+                Blocked::Pending
+            }
+        })
+    }
+}
+
 impl<T> Task<T> {
     pub(crate) fn retention_marker(&self) -> RetentionMarker {
         self.retention.clone()

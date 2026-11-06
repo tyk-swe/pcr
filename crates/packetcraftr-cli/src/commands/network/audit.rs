@@ -88,7 +88,26 @@ pub(crate) struct AuditHttp {
     max_response_bytes: usize,
 }
 impl Spec for AuditTls {
-    const FORMATS: &'static [Format] = &[Format::Text, Format::Json, Format::Ndjson];
+    const PUBLISHED: &'static [PublishedType] = &[
+        PublishedType {
+            definition: "securitySuccess",
+            command: "audit-tls",
+            rust_types: &["crate::commands::security::output::Report"],
+            events: &[],
+            example: "examples/documents/output-audit-tls-complete.json",
+        },
+        PublishedType {
+            definition: "securityStreamSuccess",
+            command: "audit-tls",
+            rust_types: &[
+                "crate::commands::security::output::FindingRecord",
+                "crate::commands::security::output::Report",
+            ],
+            events: &["complete", "finding"],
+            example: "examples/documents/output-audit-tls-complete.json",
+        },
+    ];
+    const FORMATS: &'static [Format] = crate::output::contract::TEXT_JSON_NDJSON;
     const CANCELLATION: bool = true;
     fn run_time(&self) -> Option<&dyn Bounded> {
         Some(&self.connection)
@@ -112,8 +131,29 @@ impl Spec for AuditTls {
         )
     }
 }
+use crate::output::contract::PublishedType;
+
 impl Spec for AuditHttp {
-    const FORMATS: &'static [Format] = &[Format::Text, Format::Json, Format::Ndjson];
+    const PUBLISHED: &'static [PublishedType] = &[
+        PublishedType {
+            definition: "securitySuccess",
+            command: "audit-http",
+            rust_types: &["crate::commands::security::output::Report"],
+            events: &[],
+            example: "examples/documents/output-audit-http-complete.json",
+        },
+        PublishedType {
+            definition: "securityStreamSuccess",
+            command: "audit-http",
+            rust_types: &[
+                "crate::commands::security::output::FindingRecord",
+                "crate::commands::security::output::Report",
+            ],
+            events: &["complete", "finding"],
+            example: "examples/documents/output-audit-http-complete.json",
+        },
+    ];
+    const FORMATS: &'static [Format] = crate::output::contract::TEXT_JSON_NDJSON;
     const CANCELLATION: bool = true;
     fn run_time(&self) -> Option<&dyn Bounded> {
         Some(&self.connection)

@@ -39,12 +39,15 @@ crate::reflective_layer! {
 }
 message_codec!(AmqpCodec, Amqp, amqp_schema);
 
-const NAME: &str = "amqp";
+const NAME: &str = crate::protocol::BuiltinProtocol::Amqp.as_str();
+
+/// The one supported protocol header, AMQP 0-9-1.
+pub(crate) const PREFACE: &[u8; 8] = b"AMQP\0\0\x09\x01";
 impl Amqp {
     fn encode_wire(&self, c: &EncodeContext<'_>) -> Result<Vec<u8>, Error> {
         let mut w = Writer::new(NAME, c.remaining_packet_bytes);
         if self.frame_type == 0 {
-            w.put(b"AMQP\0\0\x09\x01")?;
+            w.put(PREFACE)?;
             return Ok(w.bytes);
         }
         if !matches!(self.frame_type, 1 | 2 | 3 | 8) {
@@ -76,8 +79,8 @@ impl Amqp {
         b: Bytes,
         _: &DecodeContext<'_>,
     ) -> Result<(Self, Vec<crate::layout::FieldLayout>), Error> {
-        if b.starts_with(b"AMQP") {
-            return if b.as_ref() == b"AMQP\0\0\x09\x01" {
+        if b.starts_with(&PREFACE[..4]) {
+            return if b.as_ref() == PREFACE {
                 Ok((
                     Self {
                         frame_type: 0,

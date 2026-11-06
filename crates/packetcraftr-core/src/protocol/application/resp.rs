@@ -33,7 +33,7 @@ crate::reflective_layer! {
 }
 message_codec!(RespCodec, Resp, resp_schema);
 
-const NAME: &str = "resp";
+const NAME: &str = crate::protocol::BuiltinProtocol::Resp.as_str();
 impl Resp {
     fn encode_wire(&self, c: &EncodeContext<'_>) -> Result<Vec<u8>, Error> {
         let mut w = Writer::new(NAME, c.remaining_packet_bytes);

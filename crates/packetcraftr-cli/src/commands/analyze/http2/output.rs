@@ -14,7 +14,7 @@ use crate::output::hex::compact_hex;
 
 use crate::commands::analyze::http::output as http1;
 
-use crate::commands::analyze::dns::output::provenance::Source;
+use crate::output::frame::Source;
 
 use crate::output::stream::StreamRecord;
 use packetcraftr_core::analysis::http2 as analysis;

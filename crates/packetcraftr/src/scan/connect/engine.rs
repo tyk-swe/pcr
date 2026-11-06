@@ -9,7 +9,7 @@ use packetcraftr_netio::tcp::{self, Provider};
 
 use super::super::adaptive::Ceilings;
 use super::super::discovery::{Composer, Scan, scanned};
-use super::super::error::{duration_limit, probe_error};
+use super::super::error::duration_limit;
 use super::super::report::RttAccumulator;
 use super::super::{Error, Request, Stage};
 use super::accounting::{Progress, record};
@@ -82,7 +82,7 @@ where
     C: Clock,
     F: FnMut(ProbeEvidence, &Deadline) -> Result<(), Error>,
 {
-    enforce_deadline(probe_error, deadline)?;
+    enforce_deadline::<Error>(deadline)?;
     let (targets, planned) = planned(
         request,
         authorizer,
@@ -142,7 +142,7 @@ where
             hosts[index].scan = Scan::Incomplete;
         }
     }
-    enforce_deadline(probe_error, connector.deadline)?;
+    enforce_deadline::<Error>(connector.deadline)?;
     let Progress {
         mut stats,
         rtt,
@@ -196,7 +196,7 @@ where
     let effective = request.max_in_flight.min(tcp::MAX_PENDING_CONNECTIONS);
     let mut next = 0usize;
     while next < stage.count || !active.is_empty() {
-        enforce_deadline(probe_error, connector.deadline)?;
+        enforce_deadline::<Error>(connector.deadline)?;
         let mut admission_held = false;
         while next < stage.count && active.len() < effective && clock.now() >= progress.next_start {
             let Some(admitted) = connector.admit_next(stage, next)? else {
@@ -214,7 +214,7 @@ where
         }
         let mut index = 0;
         while index < active.len() {
-            enforce_deadline(probe_error, connector.deadline)?;
+            enforce_deadline::<Error>(connector.deadline)?;
             let Some((_, probe)) = settle_active(&mut active, index, clock.now())? else {
                 index += 1;
                 continue;
@@ -272,11 +272,11 @@ where
     );
     let mut active: Vec<Active<Q::Stream>> = Vec::new();
     loop {
-        enforce_deadline(probe_error, deadline)?;
+        enforce_deadline::<Error>(deadline)?;
         let mut index = 0;
         let mut settled = Vec::new();
         while index < active.len() {
-            enforce_deadline(probe_error, deadline)?;
+            enforce_deadline::<Error>(deadline)?;
             let Some((entry, probe)) = settle_active(&mut active, index, clock.now())? else {
                 index += 1;
                 continue;
@@ -334,12 +334,7 @@ where
             let final_endpoints = [endpoint];
             let operation = SocketOperation::new(&final_endpoints, *stage.limits)
                 .map_err(|source| execution(sequence, source))?;
-            approve_operation(
-                authorizer,
-                Operation::Socket(operation),
-                deadline,
-                probe_error,
-            )?;
+            approve_operation::<_, Error>(authorizer, Operation::Socket(operation), deadline)?;
             let now = clock.now();
             let host_remaining = selection.host_deadline.saturating_duration_since(now);
             if host_remaining.is_zero() {

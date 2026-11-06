@@ -25,8 +25,17 @@ pub(crate) struct Args {
     pub(crate) responder_log: PathBuf,
 }
 
+use crate::output::contract::PublishedType;
+
 impl crate::commands::Spec for Args {
-    const FORMATS: &'static [Format] = &[Format::Text, Format::Json];
+    const PUBLISHED: &'static [PublishedType] = &[PublishedType {
+        definition: "differentialJoinSuccess",
+        command: "differential-join",
+        rust_types: &["crate::commands::network::differential::output::Report"],
+        events: &[],
+        example: "examples/documents/output-differential-join-success.json",
+    }];
+    const FORMATS: &'static [Format] = crate::output::contract::TEXT_JSON;
     const CANCELLATION: bool = true;
     const OFFLINE: bool = true;
 

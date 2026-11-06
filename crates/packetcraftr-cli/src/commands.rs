@@ -14,7 +14,6 @@ use crate::output::contract::Format;
 use crate::resources::Settings;
 
 pub(crate) use dispatch::Launch;
-pub use network::differential::output::Report as DifferentialReport;
 pub use registry::Command;
 pub(crate) use registry::CommandLine;
 
@@ -31,6 +30,14 @@ mod security;
 
 pub(crate) trait Spec: Sized {
     const FORMATS: &'static [Format];
+
+    /// The output-schema definitions this command publishes, beside the
+    /// types that serialize to them.
+    #[allow(
+        dead_code,
+        reason = "consumed by the registry PUBLISHED collection's guard test and scripts/check_output_schema.py"
+    )]
+    const PUBLISHED: &'static [crate::output::contract::PublishedType] = &[];
 
     /// Whether shared cancellation is installed before dispatch.
     const CANCELLATION: bool;

@@ -44,7 +44,28 @@ struct ReplayRun {
     filtered: bool,
 }
 
+use crate::output::contract::PublishedType;
+
 impl crate::commands::Spec for Args {
+    const PUBLISHED: &'static [PublishedType] = &[
+        PublishedType {
+            definition: "replaySuccess",
+            command: "replay",
+            rust_types: &["crate::commands::network::replay::output::Report"],
+            events: &[],
+            example: "examples/documents/output-replay-bit-rate-success.json",
+        },
+        PublishedType {
+            definition: "replayFrameSuccess",
+            command: "replay",
+            rust_types: &[
+                "crate::commands::network::replay::output::Frame",
+                "crate::commands::network::replay::output::Report",
+            ],
+            events: &["complete", "frame"],
+            example: "examples/documents/output-replay-complete.json",
+        },
+    ];
     const FORMATS: &'static [crate::output::contract::Format] = &[
         crate::output::contract::Format::Text,
         crate::output::contract::Format::Json,
@@ -176,9 +197,9 @@ fn prepare(
         allow_permissive_live: arguments.allow_permissive_live,
     };
     options.validate().map_err(CliError::classified)?;
-    let mut input = open_capture_file(invocation, &arguments.path, capture_limits)?;
+    let mut input = open_capture_file(&invocation.control, &arguments.path, capture_limits)?;
     let reader = crate::input::snapshot_capture(
-        invocation,
+        &invocation.control,
         &mut input,
         capture_limits,
         capture::Limits {

@@ -26,11 +26,17 @@ pub(crate) struct Args {
     pub(crate) protocol: Option<String>,
 }
 
+use crate::output::contract::PublishedType;
+
 impl crate::commands::Spec for Args {
-    const FORMATS: &'static [crate::output::contract::Format] = &[
-        crate::output::contract::Format::Text,
-        crate::output::contract::Format::Json,
-    ];
+    const PUBLISHED: &'static [PublishedType] = &[PublishedType {
+        definition: "protocolsSuccess",
+        command: "protocols",
+        rust_types: &["crate::commands::reference::protocols::output::Summary"],
+        events: &[],
+        example: "examples/documents/output-protocols-detail-success.json",
+    }];
+    const FORMATS: &'static [crate::output::contract::Format] = crate::output::contract::TEXT_JSON;
     const CANCELLATION: bool = false;
 
     fn run(

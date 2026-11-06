@@ -234,7 +234,7 @@ macro_rules! message_codec {
                     })
             }
             fn accepts_decoded_protocol(&self, p: &crate::layer::Id) -> bool {
-                p == self.protocol_id() || p.as_str() == "raw"
+                p == self.protocol_id() || p == &crate::layer::Raw::ID
             }
             fn encode(
                 &self,
@@ -266,10 +266,9 @@ macro_rules! message_codec {
                         .map_err(|_| crate::protocol::common::invalid(name, "allocation failed"))?;
                     bytes.push(next);
                 }
-                let registry = crate::protocol::builtin::registry();
                 let decoded_context = crate::codec::DecodeContext {
                     parent: context.parent.map(|parent| parent.protocol),
-                    registry: &registry,
+                    registry: context.registry,
                     network: context.network_envelope().ok(),
                     hop_limit: None,
                     discriminator: None,
@@ -335,7 +334,7 @@ macro_rules! message_codec {
                         result.fields = fields;
                         if input.len() > len {
                             result.payload_len = input.len() - len;
-                            let tail = if name == "sip"
+                            let tail = if name == crate::protocol::BuiltinProtocol::Sip.as_str()
                                 && context.parent
                                     == Some(crate::protocol::BuiltinProtocol::Udp.id())
                             {

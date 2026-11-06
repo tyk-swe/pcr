@@ -396,7 +396,7 @@ fn abandoned_staging_cleans_up_entries() {
 
             let cancelled = invocation();
             let file = staged(StagedFile::stage, &cancelled, &destination, b"cancelled");
-            cancelled.cancellation.cancel();
+            cancelled.control.cancellation.cancel();
             assert!(file.persist().is_err());
             assert!(entries(temporary.path()).is_empty(), "{strategy:?}");
 

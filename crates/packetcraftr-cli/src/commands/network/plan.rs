@@ -50,11 +50,17 @@ impl PolicyArgs {
     }
 }
 
+use crate::output::contract::PublishedType;
+
 impl crate::commands::Spec for Args {
-    const FORMATS: &'static [crate::output::contract::Format] = &[
-        crate::output::contract::Format::Text,
-        crate::output::contract::Format::Json,
-    ];
+    const PUBLISHED: &'static [PublishedType] = &[PublishedType {
+        definition: "planSuccess",
+        command: "plan",
+        rust_types: &["crate::commands::network::plan::output::Report"],
+        events: &[],
+        example: "examples/documents/output-plan-success.json",
+    }];
+    const FORMATS: &'static [crate::output::contract::Format] = crate::output::contract::TEXT_JSON;
     const CANCELLATION: bool = false;
 
     fn resources(&self, settings: &mut crate::resources::Settings<'_>) {

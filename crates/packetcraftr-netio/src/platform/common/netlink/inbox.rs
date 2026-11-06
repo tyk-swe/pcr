@@ -16,7 +16,7 @@ use rtnetlink::Handle;
 
 use crate::{
     deadline::{POLL_INTERVAL, remaining_before},
-    route,
+    native,
 };
 
 use super::{lock, wait_remaining};
@@ -24,7 +24,7 @@ use super::{lock, wait_remaining};
 pub(super) const NETLINK_QUEUE_DEPTH: usize = crate::workers::CAPACITY;
 const IDLE_RETIREMENT: Duration = Duration::from_millis(250);
 
-type OperationResult = Result<Box<dyn Any + Send>, route::Error>;
+type OperationResult = Result<Box<dyn Any + Send>, native::Error>;
 type OperationFuture = Pin<Box<dyn Future<Output = OperationResult> + Send>>;
 type Operation = Box<dyn FnOnce(Handle) -> OperationFuture + Send>;
 
@@ -50,7 +50,7 @@ struct InboxState {
 pub(super) enum Refused {
     Retired(NetlinkRequest),
     Stopped(NetlinkRequest),
-    Interrupted(route::Error),
+    Interrupted(native::Error),
 }
 
 impl Inbox {

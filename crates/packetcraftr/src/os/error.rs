@@ -72,37 +72,39 @@ impl Classified for Error {
     }
 }
 
-pub(crate) fn probe_error(sequence: u64, failure: crate::error::Failure) -> Error {
-    match failure {
-        crate::error::Failure::InvalidLimit {
-            field,
-            value,
-            reason,
-        } => Error::Invalid(format!("{field}={value}: {reason}")),
-        crate::error::Failure::Authorization(source) => Error::Authorization(source),
-        crate::error::Failure::DurationLimit(source) => source.into(),
-        crate::error::Failure::Interrupted(source) => source.into(),
-        crate::error::Failure::Clock(source) => Error::Execution {
-            sequence,
-            source: BoundaryError::with_source(
-                "OS probe clock failed",
-                Classification::new(
-                    packetcraftr_core::error::Code::IoIdentifyOsClock,
-                    Kind::Io,
-                    None,
+impl crate::error::FromFailure for Error {
+    fn from_failure(sequence: u64, failure: crate::error::Failure) -> Self {
+        match failure {
+            crate::error::Failure::InvalidLimit {
+                field,
+                value,
+                reason,
+            } => Self::Invalid(format!("{field}={value}: {reason}")),
+            crate::error::Failure::Authorization(source) => Self::Authorization(source),
+            crate::error::Failure::DurationLimit(source) => source.into(),
+            crate::error::Failure::Interrupted(source) => source.into(),
+            crate::error::Failure::Clock(source) => Self::Execution {
+                sequence,
+                source: BoundaryError::with_source(
+                    "OS probe clock failed",
+                    Classification::new(
+                        packetcraftr_core::error::Code::IoIdentifyOsClock,
+                        Kind::Io,
+                        None,
+                    ),
+                    Vec::new(),
+                    std::io::Error::other(source),
                 ),
-                Vec::new(),
-                std::io::Error::other(source),
-            ),
-        },
-        crate::error::Failure::Execution(source) => Error::Execution { sequence, source },
-        crate::error::Failure::InvalidEvidence(source) => Error::Evidence {
-            sequence,
-            message: crate::probe::Workflow::Os.describe_evidence(&source),
-        },
-        crate::error::Failure::StatsOverflow(_) => Error::Evidence {
-            sequence,
-            message: "statistics overflow".into(),
-        },
+            },
+            crate::error::Failure::Execution(source) => Self::Execution { sequence, source },
+            crate::error::Failure::InvalidEvidence(source) => Self::Evidence {
+                sequence,
+                message: crate::probe::Workflow::Os.describe_evidence(&source),
+            },
+            crate::error::Failure::StatsOverflow(_) => Self::Evidence {
+                sequence,
+                message: "statistics overflow".into(),
+            },
+        }
     }
 }

@@ -942,7 +942,10 @@ fn modbus_preserves_roles_and_ambiguous_pdus() {
         frame::{Frame, LinkType},
         packet::Packet,
         protocol::{
-            application::modbus_tcp::ModbusTcp, builtin, link::Ethernet, network::Ipv4,
+            application::modbus_tcp::{ModbusTcp, PduForm},
+            builtin,
+            link::Ethernet,
+            network::Ipv4,
             transport::Tcp,
         },
     };
@@ -996,7 +999,7 @@ fn modbus_preserves_roles_and_ambiguous_pdus() {
             if payload {
                 packet.push(if server {
                     ModbusTcp {
-                        form: "response".into(),
+                        form: PduForm::Response,
                         data: Bytes::from_static(b"\0\x2a"),
                         ..Default::default()
                     }

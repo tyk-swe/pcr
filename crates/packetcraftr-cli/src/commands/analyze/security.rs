@@ -104,10 +104,15 @@ impl Capture {
         )?;
         let session = packetcraftr_core::analysis::Session::new(
             prepared.registry.clone(),
-            prepared.options(invocation),
+            prepared.session_options(invocation),
             collector,
         );
-        let mut reader = crate::input::open_capture(invocation, &self.path, capture_limits)?;
+        let mut reader = crate::input::open_capture(
+            &invocation.control,
+            &invocation.output,
+            &self.path,
+            capture_limits,
+        )?;
         let mut report = session
             .run(&mut reader, |_| Ok(()), |_| Ok(()))
             .map_err(CliError::classified)?
@@ -134,9 +139,10 @@ impl Capture {
     }
 }
 macro_rules! capture_spec {
-    ($ty:ty, $command:ident, $mode:expr) => {
+    ($ty:ty, $command:ident, $published:expr, $mode:expr) => {
         impl Spec for $ty {
-            const FORMATS: &'static [Format] = &[Format::Text, Format::Json, Format::Ndjson];
+            const PUBLISHED: &'static [PublishedType] = $published;
+            const FORMATS: &'static [Format] = crate::output::contract::TEXT_JSON_NDJSON;
             const CANCELLATION: bool = true;
             const OFFLINE: bool = true;
             fn run_time(&self) -> Option<&dyn Bounded> {
@@ -152,25 +158,90 @@ macro_rules! capture_spec {
         }
     };
 }
-capture_spec!(Dns, DnsAnomalies, |s: &Dns| security::capture::Mode::Dns(
-    security::capture::DnsOptions {
+capture_spec!(
+    Dns,
+    DnsAnomalies,
+    &[
+        PublishedType {
+            definition: "securitySuccess",
+            command: "dns-anomalies",
+            rust_types: &["crate::commands::security::output::Report"],
+            events: &[],
+            example: "examples/documents/output-dns-anomalies-complete.json",
+        },
+        PublishedType {
+            definition: "securityStreamSuccess",
+            command: "dns-anomalies",
+            rust_types: &[
+                "crate::commands::security::output::FindingRecord",
+                "crate::commands::security::output::Report",
+            ],
+            events: &["complete", "finding"],
+            example: "examples/documents/output-dns-anomalies-complete.json",
+        },
+    ],
+    |s: &Dns| security::capture::Mode::Dns(security::capture::DnsOptions {
         window_seconds: s.window_seconds,
         min_responses: s.min_responses,
         nxdomain_ratio: s.nxdomain_ratio,
         min_labels: s.min_labels,
         min_label_length: s.min_label_length,
         min_entropy: s.min_entropy
-    }
-));
-capture_spec!(Beacons, Beacons, |s: &Beacons| {
-    security::capture::Mode::Beacons(security::capture::BeaconOptions {
-        min_attempts: s.min_attempts,
-        min_interval_seconds: s.min_interval_seconds,
-        max_cv: s.max_cv,
     })
-});
+);
+capture_spec!(
+    Beacons,
+    Beacons,
+    &[
+        PublishedType {
+            definition: "securitySuccess",
+            command: "beacons",
+            rust_types: &["crate::commands::security::output::Report"],
+            events: &[],
+            example: "examples/documents/output-beacons-complete.json",
+        },
+        PublishedType {
+            definition: "securityStreamSuccess",
+            command: "beacons",
+            rust_types: &[
+                "crate::commands::security::output::FindingRecord",
+                "crate::commands::security::output::Report",
+            ],
+            events: &["complete", "finding"],
+            example: "examples/documents/output-beacons-complete.json",
+        },
+    ],
+    |s: &Beacons| {
+        security::capture::Mode::Beacons(security::capture::BeaconOptions {
+            min_attempts: s.min_attempts,
+            min_interval_seconds: s.min_interval_seconds,
+            max_cv: s.max_cv,
+        })
+    }
+);
+use crate::output::contract::PublishedType;
+
 impl Spec for Hunt {
-    const FORMATS: &'static [Format] = &[Format::Text, Format::Json, Format::Ndjson];
+    const PUBLISHED: &'static [PublishedType] = &[
+        PublishedType {
+            definition: "securitySuccess",
+            command: "hunt",
+            rust_types: &["crate::commands::security::output::Report"],
+            events: &[],
+            example: "examples/documents/output-hunt-complete.json",
+        },
+        PublishedType {
+            definition: "securityStreamSuccess",
+            command: "hunt",
+            rust_types: &[
+                "crate::commands::security::output::FindingRecord",
+                "crate::commands::security::output::Report",
+            ],
+            events: &["complete", "finding"],
+            example: "examples/documents/output-hunt-complete.json",
+        },
+    ];
+    const FORMATS: &'static [Format] = crate::output::contract::TEXT_JSON_NDJSON;
     const CANCELLATION: bool = true;
     const OFFLINE: bool = true;
     fn run_time(&self) -> Option<&dyn Bounded> {

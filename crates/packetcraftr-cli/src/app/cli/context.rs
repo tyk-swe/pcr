@@ -3,9 +3,11 @@
 
 use std::ffi::OsString;
 
+use clap::{CommandFactory, ValueEnum};
+
 use crate::output;
 
-use super::{ColorChoice, Format};
+use super::{Cli, ColorChoice, Format};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum MachineFormat {
@@ -20,83 +22,71 @@ pub(crate) struct Context {
     pub(crate) command: Option<output::contract::Command>,
 }
 
+/// Best-effort parse-failure context, scanning globals past argument errors
+/// with option spellings and values from the real command definition.
 pub(crate) fn parse(arguments: &[OsString]) -> Context {
-    let mut context = Context::default();
-    let mut saw_root_positional = false;
-    let mut group = None;
-    let mut arguments = arguments.iter().skip(1).peekable();
-    while let Some(raw) = arguments.next() {
-        if raw == "--" {
+    let definition = Cli::command();
+    let mut format = None;
+    let mut color = ColorChoice::default();
+    let raw = clap_lex::RawArgs::new(arguments.iter().skip(1));
+    let mut cursor = raw.cursor();
+    while let Some(argument) = raw.next(&mut cursor) {
+        if argument.is_escape() {
             break;
         }
-        let argument = raw.to_str();
-        let (name, inline) = argument.map_or(("", None), |argument| {
-            argument
-                .split_once('=')
-                .map_or((argument, None), |(name, value)| (name, Some(value)))
-        });
-        // Global options that take a value, so it is never mistaken for the root positional.
-        if matches!(
-            name,
-            "--output" | "--color" | "--output-timeout-ms" | "--resource-preset"
-        ) {
-            let value = inline.or_else(|| {
-                arguments
-                    .next_if(|value| {
-                        value
-                            .to_str()
-                            .is_none_or(|value| !value.starts_with('-') || value == "-")
-                    })
-                    .and_then(|value| value.to_str())
-            });
-            if name == "--output" {
-                if let Some(format) = value.and_then(parse_machine_format) {
-                    context.format = format;
-                }
-            } else if name == "--color"
-                && let Some(color) = value.and_then(parse_color_choice)
-            {
-                context.color = color;
+        let Some((Ok(name), inline)) = argument.to_long() else {
+            continue;
+        };
+        let Some(option) = definition.get_arguments().find(|option| {
+            matches!(option.get_id().as_str(), "format" | "color")
+                && option.get_long() == Some(name)
+        }) else {
+            continue;
+        };
+        let value = inline.or_else(|| {
+            let next = raw.peek(&cursor)?;
+            if next.is_escape() || next.is_long() || next.is_short() {
+                return None;
             }
-        } else if !saw_root_positional
-            && argument.is_none_or(|argument| !argument.starts_with('-') || argument == "-")
-        {
-            saw_root_positional = true;
-            group = argument.filter(|name| {
-                crate::commands::registry::GROUPS
-                    .iter()
-                    .any(|(group, _)| group == name)
-            });
-        } else if let Some(selected) = group
-            && argument.is_none_or(|argument| !argument.starts_with('-') || argument == "-")
-        {
-            context.command = argument.and_then(|name| {
-                crate::commands::registry::INVENTORY
-                    .iter()
-                    .find(|entry| entry.group == selected && entry.name == name)
-                    .and_then(|entry| parse_command(entry.identifier))
-            });
-            group = None;
+            raw.next_os(&mut cursor)
+        });
+        let Some(value) = value.and_then(|value| value.to_str()) else {
+            continue;
+        };
+        match option.get_id().as_str() {
+            "format" => {
+                if let Ok(value) = Format::from_str(value, false) {
+                    format = match value {
+                        Format::Json => Some(MachineFormat::Json),
+                        Format::Ndjson => Some(MachineFormat::Ndjson),
+                        _ => None,
+                    };
+                }
+            }
+            "color" => {
+                if let Ok(value) = ColorChoice::from_str(value, false) {
+                    color = value;
+                }
+            }
+            _ => {}
         }
     }
-    context
-}
-
-/// `None` for a value clap would reject, so the earlier choice stands;
-/// `Some(None)` for a format that cannot carry a structured error document.
-fn parse_machine_format(value: &str) -> Option<Option<MachineFormat>> {
-    let format = <Format as clap::ValueEnum>::from_str(value, false).ok()?;
-    Some(match format {
-        Format::Json => Some(MachineFormat::Json),
-        Format::Ndjson => Some(MachineFormat::Ndjson),
-        Format::Text | Format::Csv | Format::Hex | Format::Raw | Format::Pcap | Format::PcapNg => {
-            None
-        }
-    })
-}
-
-fn parse_color_choice(value: &str) -> Option<ColorChoice> {
-    <ColorChoice as clap::ValueEnum>::from_str(value, false).ok()
+    let matches = definition
+        .ignore_errors(true)
+        .args_override_self(true)
+        .get_matches_from(arguments);
+    let command = matches.subcommand().and_then(|(group, values)| {
+        let leaf = values.subcommand_name()?;
+        crate::commands::registry::INVENTORY
+            .iter()
+            .find(|entry| entry.group == group && entry.name == leaf)
+            .and_then(|entry| parse_command(entry.identifier))
+    });
+    Context {
+        format,
+        color,
+        command,
+    }
 }
 
 fn parse_command(value: &str) -> Option<output::contract::Command> {
@@ -104,4 +94,132 @@ fn parse_command(value: &str) -> Option<output::contract::Command> {
         .iter()
         .copied()
         .find(|command| command.as_str() == value)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn context(arguments: &[&str]) -> Context {
+        parse(&arguments.iter().map(OsString::from).collect::<Vec<_>>())
+    }
+
+    #[test]
+    fn reads_machine_format_before_and_after_the_command() {
+        assert_eq!(
+            context(&["packetcraftr", "--output", "ndjson", "badcmd"]).format,
+            Some(MachineFormat::Ndjson)
+        );
+        let after = context(&[
+            "packetcraftr",
+            "packet",
+            "build",
+            "--output",
+            "json",
+            "--bogus",
+        ]);
+        assert_eq!(after.format, Some(MachineFormat::Json));
+        assert_eq!(after.command, Some(output::contract::Command::Build));
+    }
+
+    #[test]
+    fn reads_globals_after_argument_errors() {
+        for (options, format) in [
+            (
+                vec!["--bogus", "--output", "json", "--color", "never"],
+                MachineFormat::Json,
+            ),
+            (
+                vec!["--bogus", "--output=ndjson", "--color=never"],
+                MachineFormat::Ndjson,
+            ),
+            (
+                vec![
+                    "--link-type",
+                    "bogus",
+                    "--output",
+                    "json",
+                    "--color",
+                    "never",
+                ],
+                MachineFormat::Json,
+            ),
+            (
+                vec!["--output", "bogus", "--output", "json", "--color", "never"],
+                MachineFormat::Json,
+            ),
+            (
+                vec!["--output", "--color", "never", "--output", "ndjson"],
+                MachineFormat::Ndjson,
+            ),
+        ] {
+            let arguments = ["packetcraftr", "packet", "build"]
+                .into_iter()
+                .chain(options)
+                .collect::<Vec<_>>();
+            let found = context(&arguments);
+            assert_eq!(found.format, Some(format), "{arguments:?}");
+            assert_eq!(found.color, ColorChoice::Never, "{arguments:?}");
+            assert_eq!(
+                found.command,
+                Some(output::contract::Command::Build),
+                "{arguments:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn clustered_short_flags_and_inline_values_parse() {
+        let found = context(&[
+            "packetcraftr",
+            "-v",
+            "--color=never",
+            "--output=json",
+            "badcmd",
+        ]);
+        assert_eq!(found.format, Some(MachineFormat::Json));
+        assert_eq!(found.color, ColorChoice::Never);
+    }
+
+    #[test]
+    fn repeated_output_keeps_the_last_valid_format() {
+        assert_eq!(
+            context(&[
+                "packetcraftr",
+                "--output",
+                "json",
+                "--bogus",
+                "--output",
+                "ndjson",
+                "--output",
+                "invalid",
+                "badcmd"
+            ])
+            .format,
+            Some(MachineFormat::Ndjson)
+        );
+    }
+
+    #[test]
+    fn unknown_spellings_and_values_stay_text() {
+        for arguments in [
+            vec!["packetcraftr", "--outp", "ndjson", "badcmd"],
+            vec!["packetcraftr", "--output", "bogus", "badcmd"],
+            vec!["packetcraftr", "packet", "build", "--", "--output", "json"],
+            vec!["packetcraftr", "packet", "build", "--packet=--output=json"],
+            vec![
+                "packetcraftr",
+                "--output",
+                "json",
+                "--bogus",
+                "--output=text",
+            ],
+        ] {
+            assert_eq!(context(&arguments).format, None, "{arguments:?}");
+        }
+        assert_eq!(
+            context(&["packetcraftr", "packet", "badleaf"]).command,
+            None
+        );
+    }
 }

@@ -169,14 +169,8 @@ fn mac(value: &str) -> Result<[u8; 6], CliError> {
 
 fn vlan(value: &str) -> Result<VlanRewrite, CliError> {
     fn number(value: &str) -> Result<u16, CliError> {
-        match value.strip_prefix("0x") {
-            Some(digits) if digits.bytes().all(|digit| digit.is_ascii_hexdigit()) => {
-                u16::from_str_radix(digits, 16).ok()
-            }
-            Some(_) => None,
-            None => value.parse().ok(),
-        }
-        .ok_or_else(|| CliError::new(Kind::Usage, "invalid VLAN number"))
+        crate::command_options::parse_unsigned(value)
+            .ok_or_else(|| CliError::new(Kind::Usage, "invalid VLAN number"))
     }
     let parts: Vec<_> = value.split(':').collect();
     let tag = match parts.as_slice() {

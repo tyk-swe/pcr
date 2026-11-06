@@ -77,7 +77,7 @@ crate::reflective_layer! {
 }
 message_codec!(BgpCodec, Bgp, bgp_schema);
 
-const NAME: &str = "bgp";
+const NAME: &str = crate::protocol::BuiltinProtocol::Bgp.as_str();
 impl Bgp {
     fn encode_wire(&self, c: &EncodeContext<'_>) -> Result<Vec<u8>, Error> {
         let mut p = Writer::new(NAME, c.remaining_packet_bytes);

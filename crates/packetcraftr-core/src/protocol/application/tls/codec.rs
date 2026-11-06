@@ -311,7 +311,7 @@ impl Codec for TlsCodec {
 
     /// A segment on a TLS port that is not TLS decodes as `raw`.
     fn accepts_decoded_protocol(&self, protocol: &crate::layer::Id) -> bool {
-        matches!(protocol.as_str(), NAME | "raw")
+        protocol == self.protocol_id() || protocol == &crate::layer::Raw::ID
     }
 
     fn schema(&self) -> Option<&'static crate::layer::Schema> {

@@ -24,7 +24,7 @@ use crate::evidence::retention::{EvidenceSink, EvidenceState};
 use crate::policy::Authorizer;
 use crate::target::ResolveTarget;
 
-use crate::dns::error::{Error, EvidenceFault, attempt_error};
+use crate::dns::error::{Error, EvidenceFault};
 use crate::dns::evidence::validate_dns_execution;
 use crate::dns::evidence::{
     ResponseClassification, candidate_evidence, classify_response, timeout_evidence,
@@ -191,12 +191,11 @@ where
 
     fn prepare_probe(&mut self, attempt: u32) -> Result<Probe, Error> {
         self.execution.enforce(u64::from(attempt))?;
-        let resolved = resolve_selected(
+        let resolved = resolve_selected::<_, Error>(
             self.authorizer,
             &self.request.server,
             self.request.address_family,
             self.execution.deadline(),
-            attempt_error,
         );
         self.execution.enforce(u64::from(attempt))?;
         let resolved = resolved?;

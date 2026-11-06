@@ -170,7 +170,8 @@ fn parse_head(name: &'static str, b: &[u8]) -> Result<Head, Error> {
         }
         let key_name = key.trim_ascii_end();
         if key_name.eq_ignore_ascii_case(b"content-length")
-            || (name == "sip" && key_name.eq_ignore_ascii_case(b"l"))
+            || (name == crate::protocol::BuiltinProtocol::Sip.as_str()
+                && key_name.eq_ignore_ascii_case(b"l"))
         {
             // Legal folding is checked above. Only SP and HTAB are optional whitespace.
             let unfolded = std::str::from_utf8(value)
@@ -211,7 +212,7 @@ fn valid_name(protocol: &'static str, key: &[u8]) -> bool {
 }
 
 pub(super) fn is_token(protocol: &'static str, value: &[u8]) -> bool {
-    let punctuation: &[u8] = if protocol == "sip" {
+    let punctuation: &[u8] = if protocol == crate::protocol::BuiltinProtocol::Sip.as_str() {
         b"-.!%*_+`'~"
     } else {
         b"!#$%&'*+-.^_`|~"

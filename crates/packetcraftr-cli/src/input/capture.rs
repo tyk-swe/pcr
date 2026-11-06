@@ -14,55 +14,51 @@ use super::source::{Source, interrupted_or};
 use crate::command_options::OfflineCaptureLimits;
 use crate::errors::CliError;
 
-fn capture_source(
-    invocation: &crate::invocation::Invocation,
-    path: &Path,
-) -> Result<Source, CliError> {
-    invocation.check()?;
+fn capture_source(control: &crate::invocation::Control, path: &Path) -> Result<Source, CliError> {
+    control.check()?;
     if path == Path::new("-") {
-        redirected_stdin(invocation, InputKind::Capture)
+        redirected_stdin(control, InputKind::Capture)
     } else {
-        open_file(invocation, path)
+        open_file(control, path)
     }
 }
 
 pub(crate) fn open_capture(
-    invocation: &crate::invocation::Invocation,
+    control: &crate::invocation::Control,
+    output: &crate::invocation::StreamEncoder,
     path: &Path,
     limits: OfflineCaptureLimits,
 ) -> Result<Reader<Box<dyn Read>>, CliError> {
-    let source = capture_source(invocation, path)?;
-    invocation
-        .output
-        .observe_input(source.is_regular_file() && !io::stdout().is_terminal());
-    capture_reader(invocation, source, limits)
+    let source = capture_source(control, path)?;
+    output.observe_input(source.is_regular_file() && !io::stdout().is_terminal());
+    capture_reader(control, source, limits)
 }
 
 pub(crate) fn open_capture_hashed(
-    invocation: &crate::invocation::Invocation,
+    control: &crate::invocation::Control,
     path: &Path,
     limits: OfflineCaptureLimits,
 ) -> Result<(Reader<Box<dyn Read>>, Fingerprint), CliError> {
-    let (source, fingerprint) = fingerprint::Hashed::new(capture_source(invocation, path)?);
-    Ok((capture_reader(invocation, source, limits)?, fingerprint))
+    let (source, fingerprint) = fingerprint::Hashed::new(capture_source(control, path)?);
+    Ok((capture_reader(control, source, limits)?, fingerprint))
 }
 
 pub(crate) fn open_capture_file(
-    invocation: &crate::invocation::Invocation,
+    control: &crate::invocation::Control,
     path: &Path,
     limits: OfflineCaptureLimits,
 ) -> Result<Reader<Box<dyn Read>>, CliError> {
-    capture_reader(invocation, open_file(invocation, path)?, limits)
+    capture_reader(control, open_file(control, path)?, limits)
 }
 
 pub(crate) fn snapshot_capture<R: Read>(
-    invocation: &crate::invocation::Invocation,
+    control: &crate::invocation::Control,
     input: &mut Reader<R>,
     capture_limits: OfflineCaptureLimits,
     limits: core::capture_file::Limits,
 ) -> Result<Reader<io::BufReader<File>>, CliError> {
     use core::capture_file;
-    invocation.check()?;
+    control.check()?;
     let snapshot = tempfile::tempfile()
         .map_err(capture_file::Error::from)
         .map_err(CliError::classified)?;
@@ -71,27 +67,27 @@ pub(crate) fn snapshot_capture<R: Read>(
         io::BufWriter::with_capacity(64 * 1024, snapshot),
         limits,
     )
-    .map_err(|error| interrupted_or(invocation, CliError::classified(error)))?;
+    .map_err(|error| interrupted_or(control, CliError::classified(error)))?;
     let mut snapshot = snapshot
         .into_inner()
         .map_err(|error| CliError::classified(capture_file::Error::from(error.into_error())))?;
     std::io::Seek::rewind(&mut snapshot)
         .map_err(capture_file::Error::from)
         .map_err(CliError::classified)?;
-    invocation.check()?;
+    control.check()?;
     bounded_reader(
-        invocation,
+        control,
         io::BufReader::with_capacity(64 * 1024, snapshot),
         capture_limits,
     )
 }
 
 fn capture_reader<R: Read + 'static>(
-    invocation: &crate::invocation::Invocation,
+    control: &crate::invocation::Control,
     source: R,
     limits: OfflineCaptureLimits,
 ) -> Result<Reader<Box<dyn Read>>, CliError> {
-    invocation.check()?;
+    control.check()?;
     let bounds = limits.reader_bounds();
     let source: Box<dyn Read> = Box::new(
         core::capture_file::compression::Input::new(
@@ -102,15 +98,15 @@ fn capture_reader<R: Read + 'static>(
                 ..Default::default()
             },
         )
-        .map_err(|error| interrupted_or(invocation, CliError::classified(error)))?,
+        .map_err(|error| interrupted_or(control, CliError::classified(error)))?,
     );
-    let reader = bounded_reader(invocation, source, limits)?;
-    invocation.check()?;
+    let reader = bounded_reader(control, source, limits)?;
+    control.check()?;
     Ok(reader)
 }
 
 fn bounded_reader<R: Read>(
-    invocation: &crate::invocation::Invocation,
+    control: &crate::invocation::Control,
     source: R,
     limits: OfflineCaptureLimits,
 ) -> Result<Reader<R>, CliError> {
@@ -123,8 +119,8 @@ fn bounded_reader<R: Read>(
             ..ReaderLimits::default()
         },
     )
-    .map(|reader| invocation.reader(reader.with_cancellation(invocation.cancellation.clone())))
-    .map_err(|error| interrupted_or(invocation, CliError::classified(error)))
+    .map(|reader| control.reader(reader.with_cancellation(control.cancellation.clone())))
+    .map_err(|error| interrupted_or(control, CliError::classified(error)))
 }
 
 #[cfg(test)]
@@ -170,11 +166,11 @@ mod tests {
         for format in [Format::Pcap, Format::PcapNg] {
             let bytes = capture(format);
             let cancellation = packetcraftr_core::budget::Cancellation::default();
-            let invocation = super::super::source::test_invocation(None, cancellation.clone());
+            let control = super::super::source::test_control(None, cancellation.clone());
             let mut source =
                 Reader::with_limits(Cursor::new(bytes.clone()), Default::default()).unwrap();
             let mut snapshot =
-                snapshot_capture(&invocation, &mut source, limits(), limits().stream_limits())
+                snapshot_capture(&control, &mut source, limits(), limits().stream_limits())
                     .unwrap();
             let frames = snapshot.by_ref().collect::<Result<Vec<_>, _>>().unwrap();
             assert_eq!(frames.len(), 128);
@@ -188,12 +184,12 @@ mod tests {
             ));
             assert!(snapshot.rewind().is_err());
 
-            let invocation = super::super::source::test_invocation(None, Default::default());
+            let control = super::super::source::test_control(None, Default::default());
             let mut source =
                 Reader::with_limits(Cursor::new(bytes.clone()), Default::default()).unwrap();
             assert!(
                 snapshot_capture(
-                    &invocation,
+                    &control,
                     &mut source,
                     limits(),
                     packetcraftr_core::capture_file::Limits {
@@ -208,7 +204,7 @@ mod tests {
             let mut source =
                 Reader::with_limits(Cursor::new(truncated), Default::default()).unwrap();
             assert!(
-                snapshot_capture(&invocation, &mut source, limits(), limits().stream_limits())
+                snapshot_capture(&control, &mut source, limits(), limits().stream_limits())
                     .is_err()
             );
         }

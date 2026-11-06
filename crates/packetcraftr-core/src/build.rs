@@ -243,6 +243,7 @@ impl Builder {
                     layer,
                     bytes.as_slice(),
                     &EncodeContext {
+                        registry: &self.registry,
                         addresses: context,
                         mode: options.mode,
                         child: facts.child.as_ref(),

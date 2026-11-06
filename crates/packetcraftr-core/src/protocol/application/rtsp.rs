@@ -43,7 +43,7 @@ crate::reflective_layer! {
 }
 message_codec!(RtspCodec, Rtsp, rtsp_schema);
 
-const NAME: &str = "rtsp";
+const NAME: &str = crate::protocol::BuiltinProtocol::Rtsp.as_str();
 impl Rtsp {
     /// Fields the framing mode leaves off the wire must keep their defaults, which is also what
     /// decoding produces, so encoding never silently discards a caller's value.

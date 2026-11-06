@@ -33,7 +33,7 @@ use super::Error;
 use super::WORKFLOW;
 use super::adaptive::{Ceilings, Controller};
 use super::discovery::{self, Composer};
-use super::error::{duration_limit, probe_error};
+use super::error::duration_limit;
 use super::evidence::ProbeClassifier;
 use super::executor::{AdaptiveAdmission, ClientExecutor, Pipelined};
 use super::plan::probe_count;
@@ -178,7 +178,7 @@ impl Scheduler {
 pub(crate) fn run<A, E, C, F>(
     request: &Request,
     authorizer: &mut A,
-    registry: &Registry,
+    registry: &std::sync::Arc<Registry>,
     executor: &mut E,
     clock: &mut C,
     deadline: &mut Deadline,
@@ -190,11 +190,11 @@ where
     C: Clock,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
-    enforce_deadline(probe_error, deadline)?;
+    enforce_deadline::<Error>(deadline)?;
     let approved = approve(request, authorizer, deadline)?;
     let options = &request.discovery;
     executor.resolves_neighbors(approved.resolves_neighbors);
-    enforce_deadline(probe_error, deadline)?;
+    enforce_deadline::<Error>(deadline)?;
     let mut scheduler = match request.adaptive {
         Some(config) => {
             let mut controller = Controller::new(config, request.timeout, request.max_in_flight);
@@ -250,7 +250,6 @@ where
     };
     let mut evidence = BatchEvidence::new_with_retention_limits(
         WORKFLOW,
-        probe_error,
         request.limits.evidence,
         request.limits.evidence,
         ProbeClassifier {
@@ -345,7 +344,7 @@ where
         } else {
             discovery_probes
         };
-        // probe_error skipped after a silent neighbor or next hop hold no
+        // Probes skipped after a silent neighbor or next hop hold no
         // response capacity; only the remaining targets' probes are
         // outstanding.
         let scan_probes = probe_count(

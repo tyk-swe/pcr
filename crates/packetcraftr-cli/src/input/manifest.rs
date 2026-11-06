@@ -8,7 +8,7 @@ use packetcraftr_core::error::Kind;
 
 use super::bounded::{InputKind, read_file_capped, read_stdin_capped};
 use crate::errors::CliError;
-use crate::invocation::Invocation;
+use crate::invocation::Control;
 
 pub(crate) const MAX_MANIFEST_BYTES: usize = 1024 * 1024;
 pub(crate) const MAX_MANIFEST_LINES: usize = 4_096;
@@ -135,7 +135,7 @@ pub(crate) struct ManifestBudget {
 }
 
 pub(crate) fn read_with_budget(
-    invocation: &Invocation,
+    control: &Control,
     sources: &[ManifestSource],
     budget: &mut ManifestBudget,
 ) -> Result<Vec<Declaration>, CliError> {
@@ -153,9 +153,7 @@ pub(crate) fn read_with_budget(
     for source in sources {
         let source_name = source.declaration_source();
         let bytes = match source {
-            ManifestSource::File(path) => {
-                read_file_capped(invocation, path, budget.remaining_bytes)?
-            }
+            ManifestSource::File(path) => read_file_capped(control, path, budget.remaining_bytes)?,
             ManifestSource::Stdin => {
                 if budget.stdin_used {
                     return Err(manifest_error(
@@ -165,7 +163,7 @@ pub(crate) fn read_with_budget(
                     ));
                 }
                 budget.stdin_used = true;
-                read_stdin_capped(invocation, budget.remaining_bytes, MANIFEST_KIND)?
+                read_stdin_capped(control, budget.remaining_bytes, MANIFEST_KIND)?
             }
         };
         if bytes.len() > budget.remaining_bytes {
@@ -260,7 +258,7 @@ mod tests {
         let path = directory.path().join("targets.txt");
         std::fs::write(&path, b"# comment\n\n\xff").unwrap();
         let error = read_with_budget(
-            &crate::input::source::test_invocation(None, Default::default()),
+            &crate::input::source::test_control(None, Default::default()),
             &[ManifestSource::File(path.clone())],
             &mut ManifestBounds::default().budget(),
         )

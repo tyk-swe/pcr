@@ -20,13 +20,15 @@ pub(crate) enum Paused {
 }
 
 impl Paused {
-    pub(crate) fn into_error<E>(self, errors: fn(u64, crate::error::Failure) -> E, step: u64) -> E {
+    pub(crate) fn into_error<E: crate::error::FromFailure>(self, step: u64) -> E {
         match self {
             Self::DurationLimit(source) => {
-                (errors)(step, crate::error::Failure::DurationLimit(source))
+                E::from_failure(step, crate::error::Failure::DurationLimit(source))
             }
-            Self::Interrupted(source) => (errors)(step, crate::error::Failure::Interrupted(source)),
-            Self::Clock(source) => (errors)(step, crate::error::Failure::Clock(source)),
+            Self::Interrupted(source) => {
+                E::from_failure(step, crate::error::Failure::Interrupted(source))
+            }
+            Self::Clock(source) => E::from_failure(step, crate::error::Failure::Clock(source)),
         }
     }
 }
@@ -47,14 +49,13 @@ pub(crate) fn pause<C: Clock>(
     deadline.account(delay).map_err(Paused::DurationLimit)
 }
 
-pub(crate) fn rate_delay<E>(
-    errors: fn(u64, crate::error::Failure) -> E,
+pub(crate) fn rate_delay<E: crate::error::FromFailure>(
     field: &'static str,
     items: usize,
     rate: Option<u32>,
 ) -> Result<Duration, E> {
     crate::clock::rate_delay(items, rate).ok_or_else(|| {
-        (errors)(
+        E::from_failure(
             0_u64,
             crate::error::Failure::InvalidLimit {
                 field,
@@ -79,23 +80,20 @@ pub(crate) struct Grant {
 pub(crate) struct Context<'a, C, E> {
     deadline: &'a mut Deadline,
     clock: &'a mut C,
-    errors: fn(u64, crate::error::Failure) -> E,
+    error: std::marker::PhantomData<fn() -> E>,
     stats: Stats,
 }
 
 impl<'a, C, E> Context<'a, C, E>
 where
     C: Clock,
+    E: crate::error::FromFailure,
 {
-    pub(crate) fn new(
-        deadline: &'a mut Deadline,
-        clock: &'a mut C,
-        errors: fn(u64, crate::error::Failure) -> E,
-    ) -> Self {
+    pub(crate) fn new(deadline: &'a mut Deadline, clock: &'a mut C) -> Self {
         Self {
             deadline,
             clock,
-            errors,
+            error: std::marker::PhantomData,
             stats: Stats::default(),
         }
     }
@@ -115,19 +113,18 @@ where
     pub(crate) fn enforce(&self, step: u64) -> Result<(), E> {
         self.deadline
             .enforce()
-            .map_err(|source| (self.errors)(step, crate::error::Failure::Interrupted(source)))
+            .map_err(|source| E::from_failure(step, crate::error::Failure::Interrupted(source)))
     }
 
     /// On overflow the merged statistics are left untouched.
     pub(crate) fn account(&mut self, step: u64, stats: &Stats) -> Result<(), E> {
         self.stats
             .checked_add_assign(stats)
-            .map_err(|source| (self.errors)(step, crate::error::Failure::StatsOverflow(source)))
+            .map_err(|source| E::from_failure(step, crate::error::Failure::StatsOverflow(source)))
     }
 
     pub(crate) fn pace(&mut self, step: u64, delay: Duration) -> Result<(), E> {
-        pause(self.deadline, self.clock, delay)
-            .map_err(|paused| paused.into_error(self.errors, step))?;
+        pause(self.deadline, self.clock, delay).map_err(|paused| paused.into_error(step))?;
         self.account(
             step,
             &Stats {
@@ -154,11 +151,12 @@ where
         self.enforce(step)?;
         self.deadline
             .start_accounting(Duration::ZERO)
-            .map_err(|source| (self.errors)(step, crate::error::Failure::DurationLimit(source)))?;
-        let timeout = self
-            .deadline
-            .bounded_timeout(timeout)
-            .map_err(|source| (self.errors)(step, crate::error::Failure::DurationLimit(source)))?;
+            .map_err(|source| {
+                E::from_failure(step, crate::error::Failure::DurationLimit(source))
+            })?;
+        let timeout = self.deadline.bounded_timeout(timeout).map_err(|source| {
+            E::from_failure(step, crate::error::Failure::DurationLimit(source))
+        })?;
         let grant = Grant {
             timeout,
             permit: ExecutionPermit::new(),
@@ -167,19 +165,19 @@ where
         let interrupted = self
             .deadline
             .enforce()
-            .map_err(|source| (self.errors)(step, crate::error::Failure::Interrupted(source)));
+            .map_err(|source| E::from_failure(step, crate::error::Failure::Interrupted(source)));
         let execution = match execution {
             Ok(execution) => execution,
             Err(source) => {
                 interrupted?;
-                return Err((self.errors)(
+                return Err(E::from_failure(
                     step,
                     crate::error::Failure::Execution(source),
                 ));
             }
         };
         if execution.permit() != grant.permit {
-            return Err((self.errors)(
+            return Err(E::from_failure(
                 step,
                 crate::error::Failure::InvalidEvidence(crate::evidence::Error::PermitMismatch),
             ));
@@ -189,7 +187,9 @@ where
         interrupted?;
         self.deadline
             .account(execution.stats().elapsed)
-            .map_err(|source| (self.errors)(step, crate::error::Failure::DurationLimit(source)))?;
+            .map_err(|source| {
+                E::from_failure(step, crate::error::Failure::DurationLimit(source))
+            })?;
         self.enforce(step)?;
         Ok((execution, grant))
     }

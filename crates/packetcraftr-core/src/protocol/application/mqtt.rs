@@ -77,7 +77,10 @@ crate::reflective_layer! {
 }
 message_codec!(MqttCodec, Mqtt, mqtt_schema);
 
-const NAME: &str = "mqtt";
+const NAME: &str = crate::protocol::BuiltinProtocol::Mqtt.as_str();
+
+/// The one supported CONNECT protocol level, MQTT 3.1.1.
+pub(crate) const SUPPORTED_LEVEL: u8 = 4;
 
 /// Read a CONNECT's protocol level before selecting a version-specific parser.
 /// The caller has already established the complete packet boundary.
@@ -227,7 +230,7 @@ impl Mqtt {
         match self.packet_type {
             1 => {
                 w.bytes16(b"MQTT")?;
-                w.u8(4)?;
+                w.u8(SUPPORTED_LEVEL)?;
                 w.u8(self.connect_flags)?;
                 w.u16(self.keep_alive)?;
                 w.bytes16(&self.client_id)?;
@@ -314,7 +317,7 @@ impl Mqtt {
         s.validate()?;
         match s.packet_type {
             1 => {
-                if r.bytes16()?.as_ref() != b"MQTT" || r.u8()? != 4 {
+                if r.bytes16()?.as_ref() != b"MQTT" || r.u8()? != SUPPORTED_LEVEL {
                     return Err(unsupported(NAME, "only MQTT 3.1.1 CONNECT is supported"));
                 }
                 s.connect_flags = r.u8()?;

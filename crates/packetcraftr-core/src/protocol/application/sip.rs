@@ -37,7 +37,7 @@ crate::reflective_layer! {
 }
 message_codec!(SipCodec, Sip, sip_schema);
 
-const NAME: &str = "sip";
+const NAME: &str = crate::protocol::BuiltinProtocol::Sip.as_str();
 impl Sip {
     fn encode_wire(&self, c: &EncodeContext<'_>) -> Result<Vec<u8>, Error> {
         let b = super::text_message::encode(

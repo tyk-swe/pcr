@@ -9,6 +9,7 @@ use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
 use super::Probe;
 use super::WORKFLOW;
 use super::report::PendingEvidence;
+use crate::error::FromFailure as _;
 use crate::target::{Family, SelectionError};
 use packetcraftr_core::error::BoundaryError;
 use packetcraftr_netio::{Error as LiveIoError, capture};
@@ -217,8 +218,32 @@ impl Classified for Error {
     }
 }
 
-crate::error::workflow_probe_error!();
+impl crate::error::FromFailure for Error {
+    fn from_failure(sequence: u64, failure: crate::error::Failure) -> Self {
+        match failure {
+            crate::error::Failure::InvalidLimit {
+                field,
+                value,
+                reason,
+            } => Self::InvalidLimit {
+                field,
+                value,
+                reason,
+            },
+            crate::error::Failure::Authorization(source) => Self::Authorization(source),
+            crate::error::Failure::DurationLimit(source) => source.into(),
+            crate::error::Failure::Interrupted(source) => source.into(),
+            crate::error::Failure::Clock(source) => Self::Clock { sequence, source },
+            crate::error::Failure::Execution(source) => Self::Execution { sequence, source },
+            crate::error::Failure::InvalidEvidence(source) => Self::InvalidEvidence {
+                sequence,
+                message: WORKFLOW.describe_evidence(&source),
+            },
+            crate::error::Failure::StatsOverflow(_source) => Self::StatisticsOverflow { sequence },
+        }
+    }
+}
 
 pub(super) fn duration_limit(sequence: u64, error: DeadlineExceeded) -> Error {
-    probe_error(sequence, crate::error::Failure::DurationLimit(error))
+    Error::from_failure(sequence, crate::error::Failure::DurationLimit(error))
 }

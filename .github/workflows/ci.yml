@@ -26,8 +26,8 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install the JSON Schema validator
-        run: sudo apt-get update && sudo apt-get install --yes python3-jsonschema
+      - name: Install the JSON Schema validator and YAML parser
+        run: sudo apt-get update && sudo apt-get install --yes python3-jsonschema python3-yaml
       - name: Check Python tools and run unit tests
         run: |
           python3 --version
@@ -174,7 +174,7 @@ jobs:
       fail-fast: false
       matrix:
         # The release workflow builds on these images; keep CI on the same baselines.
-        os: [macos-14, macos-15-intel, windows-2022]
+        os: [macos-15, macos-15-intel, windows-2022]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 35
     steps:
@@ -212,7 +212,7 @@ jobs:
       fail-fast: false
       matrix:
         # The release workflow builds on these images; keep CI on the same baselines.
-        os: [macos-14, macos-15-intel, windows-2022]
+        os: [macos-15, macos-15-intel, windows-2022]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 35
     steps:
@@ -407,8 +407,8 @@ jobs:
                 -f crates/packetcraftr-cli/src/input/source.rs \
                 -E 'replace \| with \^ in (Directory::open|Directory::stage|anchored)' \
                 -E 'unix.rs:65:76: replace \| with & in Directory::stage' \
-                -E 'source.rs:(91|96):5: replace (open|stdin) -> io::Result<Source>' \
-                -E 'source.rs:152:24: replace match guard .* with false' \
+                -E 'source.rs:(88|93):5: replace (open|stdin) -> io::Result<Source>' \
+                -E 'source.rs:147:24: replace match guard .* with false' \
                 -E 'match guard \[Errno::INVAL, Errno::NOSYS, Errno::OPNOTSUPP, Errno::NOTSUP\]' \
                 -E 'replace <impl StagedEntry for StagingName>::remove with \(\)' ;;
           esac

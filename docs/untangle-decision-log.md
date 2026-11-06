@@ -40,12 +40,11 @@ their ceilings. Everything below is what those counters cannot see.
     identity, and `scripts/check_output_schema.py` never reads it.
   - The frozen historical schema matches its ADR 0003 hash today, but
     nothing fails if it is edited.
-  - Status. done. `scripts/check_documents.py` validates every JSON
+  - Status. done. `scripts/check_documents.py` validates every JSON and YAML
     document that claims an input schema, fails on unclaimed schemas and
     twin drift, ties the forwarding consumer to `OUTPUT_SCHEMA`, and pins
-    the frozen schema by a hash it also ties to ADR 0003. The one YAML
-    document, `packet-raw.yaml`, is built end to end by a core test, and
-    the checker fails if a new YAML claimant appears without coverage.
+    the frozen schema by a hash it also ties to ADR 0003. The YAML example
+    `packet-raw.yaml` is also built end to end by a core test.
     The missing port catalog schema now exists.
 
 - Remove dead weight from `scripts/check_coupling.py`.

@@ -85,21 +85,28 @@ class CheckDocumentsTests(unittest.TestCase):
         })
         self.assertTrue(any("byte-identical" in problem for problem in problems))
 
-    def test_stale_yaml_cover_fails(self):
-        problems = self.check({
-            "examples/documents/indicators.json": '{"schema": "packetcraftr.indicators/v1"}',
-            "examples/documents/packet-raw.yaml": "schema: packetcraftr.packet/v1\n",
-        })
-        self.assertTrue(
-            any("listed as covered elsewhere" in problem for problem in problems)
-        )
+    def test_yaml_documents_are_validated_without_test_sources(self):
+        for name in ("packet-raw.yaml", "new.yaml", "new.yml"):
+            with self.subTest(name=name):
+                path = f"examples/documents/{name}"
+                source = "schema: packetcraftr.indicators/v1\n"
+                self.assertEqual(self.check({path: source}), [])
+                problems = self.check({path: source + "extra: 1\n"})
+                self.assertTrue(any(name in problem and "extra" in problem for problem in problems))
 
-    def test_uncovered_yaml_claimant_fails(self):
-        problems = self.check({
-            "examples/documents/indicators.json": '{"schema": "packetcraftr.indicators/v1"}',
-            "examples/documents/packet-new.yaml": "schema: packetcraftr.packet/v1\n",
-        })
-        self.assertTrue(any("no check validates YAML" in problem for problem in problems))
+    def test_invalid_yaml_reports_its_path(self):
+        with self.assertRaisesRegex(documents.CheckError, "broken.yaml"):
+            self.check({"examples/documents/broken.yaml": "schema: [\n"})
+
+    def test_missing_yaml_parser_reports_install_steps(self):
+        import sys
+        from unittest.mock import patch
+
+        with patch.dict(sys.modules, {"yaml": None}):
+            with self.assertRaisesRegex(documents.CheckError, "PyYAML"):
+                self.check({
+                    "examples/documents/indicators.yaml": "schema: packetcraftr.indicators/v1\n",
+                })
 
     def test_adr_hash_drift_fails(self):
         problems = self.check({

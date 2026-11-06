@@ -31,8 +31,6 @@ HISTORICAL = (
 
 HISTORICAL_ADR = "docs/adr/0003-never-reuse-output-contract-identifiers.md"
 
-YAML_COVERED_ELSEWHERE = {"examples/documents/packet-raw.yaml"}
-
 
 def schema_path(root: Path, identity: str) -> Path | None:
     match = IDENTITY.match(identity)
@@ -62,10 +60,21 @@ def check_documents(root: Path = ROOT) -> list[str]:
     validators = {}
     checked = 0
     for tree in DOCUMENT_TREES:
-        for path in sorted((root / tree).glob("*.json")):
-            if path.name.startswith("output-"):
+        for path in sorted((root / tree).glob("*")):
+            if path.suffix not in (".json", ".yaml", ".yml") or path.name.startswith("output-"):
                 continue
-            document = read_json(path)
+            if path.suffix == ".json":
+                document = read_json(path)
+            else:
+                try:
+                    import yaml
+                except ImportError as error:
+                    raise CheckError('YAML validation requires PyYAML. Install python3-yaml '
+                                     'or `pip install PyYAML`') from error
+                try:
+                    document = yaml.safe_load(path.read_text(encoding="utf-8"))
+                except yaml.YAMLError as error:
+                    raise CheckError(f"{path}: invalid YAML: {error}") from error
             identity = document.get("schema") if isinstance(document, dict) else None
             if not isinstance(identity, str):
                 continue
@@ -86,22 +95,6 @@ def check_documents(root: Path = ROOT) -> list[str]:
                 where = ".".join(str(part) for part in error.path) or "<root>"
                 problems.append(f"{shown}: {where}: {error.message}")
             checked += 1
-    cover_test = root / "crates/packetcraftr-core/src/protocol/builtin/tests.rs"
-    cover_text = cover_test.read_text() if cover_test.is_file() else ""
-    for covered in sorted(YAML_COVERED_ELSEWHERE):
-        if (root / covered).is_file() and Path(covered).name not in cover_text:
-            problems.append(
-                f"{covered}: listed as covered elsewhere but no core test names it"
-            )
-    for tree in DOCUMENT_TREES:
-        for path in sorted((root / tree).glob("*.yaml")) + sorted((root / tree).glob("*.yml")):
-            if not re.search(r"^schema:\s*packetcraftr\.", path.read_text(), re.M):
-                continue
-            shown = str(path.relative_to(root))
-            if shown not in YAML_COVERED_ELSEWHERE:
-                problems.append(
-                    f"{shown}: claims a schema but no check validates YAML documents"
-                )
     if checked == 0:
         problems.append("no input documents were checked against a schema")
     for schema in sorted((root / "schemas").glob("*.schema.json")):

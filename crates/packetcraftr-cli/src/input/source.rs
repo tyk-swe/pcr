@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 //! On Unix, reads from pipes, FIFOs, sockets, and character devices wait for readiness in short
-//! slices and fail with the invocation's interruption once it is cancelled or past its deadline.
+//! slices and fail with the control's interruption once it is cancelled or past its deadline.
 //! Regular files keep ordinary reads. Windows offers no safe readiness wait for anonymous or named
 //! pipes, so its reads still block.
 
@@ -11,7 +11,7 @@ use std::io::{self, Read};
 use std::path::Path;
 
 use crate::errors::CliError;
-use crate::invocation::Invocation;
+use crate::invocation::Control;
 
 pub(super) enum Source {
     File(File),
@@ -33,15 +33,15 @@ impl Read for Source {
     }
 }
 
-/// Prefers the invocation's pending interruption, which an interrupted read surfaces only as an
+/// Prefers the control's pending interruption, which an interrupted read surfaces only as an
 /// I/O error, so it reports like every other cancellation or deadline.
-pub(super) fn interrupted_or(invocation: &Invocation, error: CliError) -> CliError {
-    invocation.check().err().unwrap_or(error)
+pub(super) fn interrupted_or(control: &Control, error: CliError) -> CliError {
+    control.check().err().unwrap_or(error)
 }
 
 /// On Linux, opening never waits for a FIFO writer.
 #[cfg(unix)]
-pub(super) fn open(invocation: &Invocation, path: &Path) -> io::Result<Source> {
+pub(super) fn open(control: &Control, path: &Path) -> io::Result<Source> {
     use std::os::unix::fs::OpenOptionsExt;
     // FIFO readiness is only verified on Linux. On macOS, polling a FIFO
     // opened this way never delivered the written data or EOF, so FIFOs keep
@@ -55,44 +55,41 @@ pub(super) fn open(invocation: &Invocation, path: &Path) -> io::Result<Source> {
         .read(true)
         .custom_flags(rustix::fs::OFlags::NONBLOCK.bits().cast_signed())
         .open(path)?;
-    classify(invocation, file)
+    classify(control, file)
 }
 
 /// Reads a duplicate of standard input, leaving the shared descriptor's flags untouched.
 #[cfg(unix)]
-pub(super) fn stdin(invocation: &Invocation) -> io::Result<Source> {
+pub(super) fn stdin(control: &Control) -> io::Result<Source> {
     use std::os::fd::AsFd;
-    duplicate(invocation, io::stdin().as_fd())
+    duplicate(control, io::stdin().as_fd())
 }
 
 #[cfg(unix)]
-fn duplicate(
-    invocation: &Invocation,
-    descriptor: std::os::fd::BorrowedFd<'_>,
-) -> io::Result<Source> {
-    classify(invocation, File::from(descriptor.try_clone_to_owned()?))
+fn duplicate(control: &Control, descriptor: std::os::fd::BorrowedFd<'_>) -> io::Result<Source> {
+    classify(control, File::from(descriptor.try_clone_to_owned()?))
 }
 
 #[cfg(unix)]
-fn classify(invocation: &Invocation, file: File) -> io::Result<Source> {
+fn classify(control: &Control, file: File) -> io::Result<Source> {
     use std::os::unix::fs::FileTypeExt;
     let kind = file.metadata()?.file_type();
     if kind.is_fifo() || kind.is_socket() || kind.is_char_device() {
         return Ok(Source::Polled(Polled {
             file,
-            invocation: invocation.clone(),
+            control: control.clone(),
         }));
     }
     Ok(Source::File(file))
 }
 
 #[cfg(not(unix))]
-pub(super) fn open(_: &Invocation, path: &Path) -> io::Result<Source> {
+pub(super) fn open(_: &Control, path: &Path) -> io::Result<Source> {
     File::open(path).map(Source::File)
 }
 
 #[cfg(not(unix))]
-pub(super) fn stdin(_: &Invocation) -> io::Result<Source> {
+pub(super) fn stdin(_: &Control) -> io::Result<Source> {
     Ok(Source::Stdin(io::stdin().lock()))
 }
 
@@ -102,18 +99,16 @@ pub(super) fn stdin(_: &Invocation) -> io::Result<Source> {
 #[cfg(unix)]
 pub(super) struct Polled {
     file: File,
-    invocation: Invocation,
+    control: Control,
 }
 
 #[cfg(unix)]
 impl Polled {
     fn next_wait(&self) -> io::Result<std::time::Duration> {
         use packetcraftr_netio::deadline::POLL_INTERVAL;
-        self.invocation
-            .check_interrupted()
-            .map_err(io::Error::other)?;
+        self.control.check_interrupted().map_err(io::Error::other)?;
         Ok(self
-            .invocation
+            .control
             .deadline
             .as_ref()
             .map_or(POLL_INTERVAL, |deadline| {
@@ -166,17 +161,11 @@ impl Source {
 }
 
 #[cfg(test)]
-pub(super) fn test_invocation(
+pub(super) fn test_control(
     duration: Option<std::time::Duration>,
     cancellation: packetcraftr_core::budget::Cancellation,
-) -> Invocation {
-    Invocation::new(
-        crate::output::contract::Format::Json,
-        crate::invocation::StreamEncoder::new(crate::output::contract::Command::Build, io::sink()),
-        duration,
-        cancellation,
-        None,
-    )
+) -> Control {
+    Control::new(duration, cancellation)
 }
 
 #[cfg(all(test, unix))]

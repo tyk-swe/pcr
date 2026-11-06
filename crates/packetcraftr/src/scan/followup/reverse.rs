@@ -494,9 +494,9 @@ fn batched(
             retain_names(&mut lookup, &mut name_budget);
             names[index] = Some(lookup);
         }
-        // A failed batch reports no statistics; the bounded questions
-        // cannot overflow these counters.
-        let _ = statistics.checked_add_assign(&stats);
+        statistics
+            .checked_add_assign(&stats)
+            .map_err(|_| dns::Error::StatisticsOverflow { attempt: 1 })?;
     }
     Ok((names, statistics))
 }

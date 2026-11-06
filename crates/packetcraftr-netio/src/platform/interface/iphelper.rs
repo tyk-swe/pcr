@@ -16,7 +16,7 @@ use windows::Win32::NetworkManagement::IpHelper::{
 use windows::Win32::Networking::WinSock::AF_UNSPEC;
 
 use self::adapter::{BufferBounds, WindowsAdapter, parse_adapters};
-use crate::{interface, platform::common::on_worker, route};
+use crate::{interface, native, platform::common::on_worker};
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::error::Source;
 
@@ -63,7 +63,7 @@ pub(in crate::platform) fn interfaces_for_identity(
     .map_err(interface::Error::native)
 }
 
-pub(in crate::platform) fn adapter_snapshots() -> Result<Vec<WindowsAdapter>, route::Error> {
+pub(in crate::platform) fn adapter_snapshots() -> Result<Vec<WindowsAdapter>, native::Error> {
     const FLAGS: GET_ADAPTERS_ADDRESSES_FLAGS = GET_ADAPTERS_ADDRESSES_FLAGS(
         GAA_FLAG_INCLUDE_PREFIX.0
             | GAA_FLAG_SKIP_ANYCAST.0
@@ -86,7 +86,7 @@ pub(in crate::platform) fn adapter_snapshots() -> Result<Vec<WindowsAdapter>, ro
             .ok()
             .map(|bytes| bytes.div_ceil(align_of::<usize>()))
             .filter(|words| *words != 0)
-            .ok_or_else(|| route::Error::InvalidResponse {
+            .ok_or_else(|| native::Error::InvalidResponse {
                 message: "Windows reported an invalid adapter buffer size".to_owned(),
             })?;
         // A usize vector supplies alignment at least as strict as every IP Helper structure.
@@ -111,17 +111,18 @@ pub(in crate::platform) fn adapter_snapshots() -> Result<Vec<WindowsAdapter>, ro
         if result != NO_ERROR.0 {
             return Err(win32_error("GetAdaptersAddresses", WIN32_ERROR(result)));
         }
-        let initialized = usize::try_from(supplied).map_err(|_| route::Error::InvalidResponse {
-            message: "Windows returned an unrepresentable adapter buffer length".to_owned(),
-        })?;
+        let initialized =
+            usize::try_from(supplied).map_err(|_| native::Error::InvalidResponse {
+                message: "Windows returned an unrepresentable adapter buffer length".to_owned(),
+            })?;
         let allocated = storage
             .len()
             .checked_mul(size_of::<usize>())
-            .ok_or_else(|| route::Error::InvalidResponse {
+            .ok_or_else(|| native::Error::InvalidResponse {
                 message: "Windows adapter buffer size overflowed".to_owned(),
             })?;
         if initialized == 0 || initialized > allocated {
-            return Err(route::Error::InvalidResponse {
+            return Err(native::Error::InvalidResponse {
                 message: format!(
                     "Windows initialized {initialized} bytes of a {allocated}-byte adapter buffer"
                 ),
@@ -130,7 +131,7 @@ pub(in crate::platform) fn adapter_snapshots() -> Result<Vec<WindowsAdapter>, ro
         let bounds = BufferBounds::new(storage.as_ptr().cast(), initialized)?;
         return parse_adapters(head, bounds);
     }
-    Err(route::Error::OperatingSystem {
+    Err(native::Error::OperatingSystem {
         operation: "GetAdaptersAddresses",
         message: "adapter list changed during four consecutive reads".to_owned(),
         source: Some(Source::new(std::io::Error::from_raw_os_error(
@@ -142,8 +143,8 @@ pub(in crate::platform) fn adapter_snapshots() -> Result<Vec<WindowsAdapter>, ro
 pub(in crate::platform) fn win32_error(
     operation: &'static str,
     error: WIN32_ERROR,
-) -> route::Error {
-    route::Error::OperatingSystem {
+) -> native::Error {
+    native::Error::OperatingSystem {
         operation,
         message: format!("Win32 error {}", error.0),
         source: Some(Source::new(std::io::Error::from_raw_os_error(

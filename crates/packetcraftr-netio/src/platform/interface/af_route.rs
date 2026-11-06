@@ -12,11 +12,11 @@ use std::ptr;
 use crate::{
     interface::{self, Id as InterfaceId},
     link::Capability,
+    native,
     platform::common::{
         af_route::{netmask_prefix, sockaddr_ip},
         os_error,
     },
-    route,
 };
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::frame::LinkType;
@@ -26,7 +26,7 @@ pub(crate) fn interfaces(_deadline: &Deadline) -> Result<Vec<interface::Info>, i
     snapshot().map_err(interface::Error::native)
 }
 
-pub(in crate::platform) fn snapshot() -> Result<Vec<interface::Info>, route::Error> {
+pub(in crate::platform) fn snapshot() -> Result<Vec<interface::Info>, native::Error> {
     let mut head = ptr::null_mut();
     // SAFETY: `head` is a valid output pointer; the list stays valid until `freeifaddrs` below.
     if unsafe { libc::getifaddrs(&mut head) } != 0 {
@@ -175,6 +175,6 @@ fn link_address(address: *const libc::sockaddr, length: usize) -> Option<MacAddr
     Some(MacAddress(bytes))
 }
 
-fn last_os_error(operation: &'static str) -> route::Error {
+fn last_os_error(operation: &'static str) -> native::Error {
     os_error(operation, std::io::Error::last_os_error())
 }

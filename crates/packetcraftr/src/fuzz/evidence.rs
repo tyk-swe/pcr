@@ -16,9 +16,10 @@ use crate::engine::execution::validation::{
 };
 use crate::evidence::retention::{EvidenceDiagnosticDescriptor, EvidenceState};
 
-use super::error::{Error, case_error, duration_limit};
+use super::error::{Error, duration_limit};
 use super::executor::CaseEvidence;
 use super::{Evidence, Outcome};
+use crate::error::FromFailure as _;
 use crate::evidence::Limits as EvidenceLimits;
 
 /// Fuzz keeps undecodable frames as case evidence under the frame budget
@@ -127,7 +128,8 @@ pub(super) fn validate_execution(
     timeout: Duration,
     max_packet_bytes: usize,
 ) -> Result<(), Error> {
-    let invalid = |source| (case_error)(case.index, crate::error::Failure::InvalidEvidence(source));
+    let invalid =
+        |source| Error::from_failure(case.index, crate::error::Failure::InvalidEvidence(source));
     if execution.stats.packets_attempted != 1 || execution.stats.packets_completed != 1 {
         return Err(invalid(crate::evidence::Error::IncompleteStatistics));
     }

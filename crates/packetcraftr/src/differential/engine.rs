@@ -110,8 +110,7 @@ impl<P: PacketProviders, K: Clock> Runner for ClientRunner<'_, P, K> {
         attempt: &AttemptPlan,
         spent: &Stats,
     ) -> Result<AttemptOutcome, Error> {
-        let mut step = self.operation.clone();
-        step.spent = spent.clone();
+        let step = self.operation.clone().with_spent(spent.clone());
         let token = request.token;
         let target = request.target;
         let attempt_seq = attempt.attempt_seq;

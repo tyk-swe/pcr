@@ -22,7 +22,6 @@ use crate::{
     evidence::{RetentionBudget, SentPacket},
     exchange::WorkflowExecutor,
     providers::{CaptureProviders, PacketProviders},
-    scan::error::probe_error,
 };
 use correlation::{Best, CandidateIndex, SeenFrames};
 use packetcraftr_core::{
@@ -102,7 +101,8 @@ fn validate_options(
         (
             "probes_per_second",
             crate::scan::MAX_RATE as usize,
-            check_rate(probe_error, "probes_per_second", options.probes_per_second).is_ok(),
+            check_rate::<crate::scan::Error>("probes_per_second", options.probes_per_second)
+                .is_ok(),
         ),
         (
             "max_duration",
@@ -440,8 +440,7 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
         ));
         check(self.executor.client, self.deadline, &self.options.control)?;
         ready.map_err(BoundaryError::from_error)?;
-        self.spacing = rate_delay(
-            probe_error,
+        self.spacing = rate_delay::<crate::scan::Error>(
             "probes_per_second",
             1,
             self.options.probes_per_second,

@@ -38,7 +38,8 @@ pub(super) fn run(
             )
         })
         .transpose()?;
-    let mut reader = crate::input::open_capture(invocation, &args.path, limits)?;
+    let mut reader =
+        crate::input::open_capture(&invocation.control, &invocation.output, &args.path, limits)?;
     let mut frames = 0u64;
     let mut bytes = 0u64;
     if projector.projection.requirements().stream_index
@@ -51,7 +52,7 @@ pub(super) fn run(
             registry,
             &core::analysis::Options {
                 time_bounds: bounds,
-                cancellation: Some(invocation.cancellation.clone()),
+                cancellation: Some(invocation.control.cancellation.clone()),
                 limits: core::analysis::Limits {
                     max_frames: limits.max_frames(),
                     max_bytes: limits.max_bytes(),

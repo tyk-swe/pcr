@@ -32,7 +32,7 @@ use bytes::Bytes;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, VecDeque};
 
-pub(crate) const PREFACE_LEN: usize = 24;
+pub(crate) const PREFACE_LEN: usize = wire::CLIENT_PREFACE.len();
 const READ_CHUNK: usize = 4096;
 
 #[derive(Clone, Copy, PartialEq, Eq)]

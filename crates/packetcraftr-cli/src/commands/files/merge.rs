@@ -9,12 +9,27 @@ use crate::{errors::CliError, rendering::write_summary_line};
 use packetcraftr_core::{capture_file, error::Kind};
 use std::path::Path;
 
+use crate::output::contract::PublishedType;
+
 impl crate::commands::Spec for Args {
-    const FORMATS: &'static [crate::output::contract::Format] = &[
-        crate::output::contract::Format::Text,
-        crate::output::contract::Format::Json,
-        crate::output::contract::Format::Ndjson,
+    const PUBLISHED: &'static [PublishedType] = &[
+        PublishedType {
+            definition: "mergeSuccess",
+            command: "merge",
+            rust_types: &["crate::commands::files::merge::output::Report"],
+            events: &[],
+            example: "examples/documents/output-merge-complete.json",
+        },
+        PublishedType {
+            definition: "mergeStreamSuccess",
+            command: "merge",
+            rust_types: &["crate::commands::files::merge::output::Report"],
+            events: &["complete"],
+            example: "examples/documents/output-merge-complete.json",
+        },
     ];
+    const FORMATS: &'static [crate::output::contract::Format] =
+        crate::output::contract::TEXT_JSON_NDJSON;
     const CANCELLATION: bool = true;
     const OFFLINE: bool = true;
 
@@ -66,7 +81,12 @@ pub(crate) fn run(invocation: &crate::invocation::Invocation, args: Args) -> Res
         .map(|path| {
             Ok(capture_file::MergeSource {
                 name: path.display().to_string(),
-                reader: crate::input::open_capture(invocation, path, limits)?,
+                reader: crate::input::open_capture(
+                    &invocation.control,
+                    &invocation.output,
+                    path,
+                    limits,
+                )?,
             })
         })
         .collect::<Result<Vec<_>, CliError>>()?;

@@ -165,6 +165,7 @@ impl ParentInfo {
 }
 
 pub struct EncodeContext<'a> {
+    pub registry: &'a Registry,
     pub addresses: &'a Addresses,
     pub mode: Mode,
     pub child: Option<&'a ChildInfo>,

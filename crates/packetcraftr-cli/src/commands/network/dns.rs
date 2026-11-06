@@ -17,12 +17,34 @@ use crate::errors::CliError;
 use crate::invocation::StreamEncoder;
 use crate::system::{Runtime, prepare_workflow};
 
+use crate::output::contract::PublishedType;
+
 impl crate::commands::Spec for Args {
-    const FORMATS: &'static [crate::output::contract::Format] = &[
-        crate::output::contract::Format::Text,
-        crate::output::contract::Format::Json,
-        crate::output::contract::Format::Ndjson,
+    const PUBLISHED: &'static [PublishedType] = &[
+        PublishedType {
+            definition: "dnsSuccess",
+            command: "dns",
+            rust_types: &["crate::commands::network::dns::output::BatchResult"],
+            events: &[],
+            example: "examples/documents/output-dns-any-success.json",
+        },
+        PublishedType {
+            definition: "dnsStreamSuccess",
+            command: "dns",
+            rust_types: &["crate::commands::network::dns::output::report::Event"],
+            events: &[
+                "attempt",
+                "complete",
+                "diagnostic",
+                "record",
+                "rejected",
+                "undecoded",
+            ],
+            example: "examples/documents/output-dns-attempt-response-event.json",
+        },
     ];
+    const FORMATS: &'static [crate::output::contract::Format] =
+        crate::output::contract::TEXT_JSON_NDJSON;
     const CANCELLATION: bool = true;
 
     fn run_time(&self) -> Option<&dyn crate::command_options::Bounded> {

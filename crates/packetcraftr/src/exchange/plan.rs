@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::{Collection, Error, Request, Window};
+use super::{Collection, Error, Request, Step, Window};
 use crate::engine::preparation::{Admitted, PreparedPacket};
 use crate::route::CachedProvider;
 use crate::{Client, clock::Clock, providers::PacketProviders};
@@ -22,6 +22,50 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
             collection,
             stop: _,
         } = request;
+        self.prepare_template(
+            template,
+            send,
+            timeout,
+            max_template_packets,
+            collection,
+            operation,
+        )
+    }
+
+    pub(super) fn prepare_step(
+        &self,
+        step: Step,
+        operation: &crate::engine::operation::Operation,
+    ) -> Result<Prepared, Error> {
+        self.check_cancelled()?;
+        step.validate()?;
+        let Step {
+            template,
+            send,
+            timeout,
+            max_template_packets,
+            collection,
+        } = step;
+        self.prepare_template(
+            template,
+            send,
+            timeout,
+            max_template_packets,
+            collection,
+            operation,
+        )
+    }
+
+    fn prepare_template(
+        &self,
+        template: packetcraftr_core::template::Template,
+        send: crate::send::Options,
+        timeout: std::time::Duration,
+        max_template_packets: usize,
+        collection: Collection,
+        operation: &crate::engine::operation::Operation,
+    ) -> Result<Prepared, Error> {
+        self.check_cancelled()?;
         let count = template.expansion_len().map_err(crate::Error::from)?;
         self.prepare_packet_exchange(
             count,

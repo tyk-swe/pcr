@@ -68,6 +68,37 @@ impl Operation {
         remaining
     }
 
+    pub(crate) fn with_spent(mut self, spent: Stats) -> Self {
+        self.spent = spent;
+        self
+    }
+
+    pub(crate) fn with_neighbors(mut self, neighbors: neighbor::State) -> Self {
+        self.neighbors = neighbors;
+        self
+    }
+
+    pub(crate) fn with_neighbor_mode(mut self, neighbor_mode: NeighborMode) -> Self {
+        self.neighbor_mode = neighbor_mode;
+        self
+    }
+
+    pub(crate) fn with_neighbor_pause(mut self, neighbor_pause: Duration) -> Self {
+        self.neighbor_pause = neighbor_pause;
+        self
+    }
+
+    pub(crate) fn with_limits(mut self, packet_limit: u64, byte_limit: u64) -> Self {
+        self.packet_limit = packet_limit;
+        self.byte_limit = byte_limit;
+        self
+    }
+
+    pub(crate) fn with_runtime(mut self, runtime: Runtime) -> Self {
+        self.runtime = runtime;
+        self
+    }
+
     /// Trace stages use fresh preparation caches while retaining the containing
     /// operation's worker root, deadline, and spending.
     pub(crate) fn isolated(&self) -> Self {

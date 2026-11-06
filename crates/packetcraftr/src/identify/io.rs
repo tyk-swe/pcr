@@ -80,12 +80,7 @@ impl Reply {
         let outcome = match &source {
             tcp::Error::Cancelled(_) => IoOutcome::Cancelled,
             tcp::Error::DeadlineExceeded => IoOutcome::TimedOut,
-            tcp::Error::Socket(source)
-                if matches!(
-                    source.kind(),
-                    std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
-                ) =>
-            {
+            tcp::Error::Socket(source) if packetcraftr_netio::bounded::timed_out(source) => {
                 IoOutcome::TimedOut
             }
             _ => IoOutcome::Failed,
@@ -102,12 +97,7 @@ impl Reply {
                 IoOutcome::Cancelled
             }
             udp::Error::Interrupted(_) => IoOutcome::TimedOut,
-            udp::Error::Socket(source)
-                if matches!(
-                    source.kind(),
-                    std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
-                ) =>
-            {
+            udp::Error::Socket(source) if packetcraftr_netio::bounded::timed_out(source) => {
                 IoOutcome::TimedOut
             }
             _ => IoOutcome::Failed,
@@ -271,12 +261,7 @@ fn tcp_exchange<P: TcpProviders>(
                         _,
                     )) => IoOutcome::Cancelled,
                     tls::Error::Interrupted(_) => IoOutcome::TimedOut,
-                    tls::Error::Io(source)
-                        if matches!(
-                            source.kind(),
-                            std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
-                        ) =>
-                    {
+                    tls::Error::Io(source) if packetcraftr_netio::bounded::timed_out(source) => {
                         IoOutcome::TimedOut
                     }
                     tls::Error::WireLimit { .. } | tls::Error::StepLimit { .. } => {

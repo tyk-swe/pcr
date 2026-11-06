@@ -24,6 +24,8 @@ pub enum EncodeError {
     RecordLimit { sequence: u64, limit: usize },
     #[error("data records must declare a nonterminal event kind")]
     ReservedEvent,
+    #[error("NDJSON stream has no command identity for data records")]
+    Unattributed,
     #[error("NDJSON stream is already terminated")]
     Terminal,
     #[error("NDJSON stream output has already failed")]

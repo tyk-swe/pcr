@@ -19,8 +19,29 @@ pub(crate) struct ScanDiff {
     #[command(flatten)]
     bounds: Bounds,
 }
+use crate::output::contract::PublishedType;
+
 impl Spec for ScanDiff {
-    const FORMATS: &'static [Format] = &[Format::Text, Format::Json, Format::Ndjson];
+    const PUBLISHED: &'static [PublishedType] = &[
+        PublishedType {
+            definition: "securitySuccess",
+            command: "scan-diff",
+            rust_types: &["crate::commands::security::output::Report"],
+            events: &[],
+            example: "examples/documents/output-scan-diff-complete.json",
+        },
+        PublishedType {
+            definition: "securityStreamSuccess",
+            command: "scan-diff",
+            rust_types: &[
+                "crate::commands::security::output::FindingRecord",
+                "crate::commands::security::output::Report",
+            ],
+            events: &["complete", "finding"],
+            example: "examples/documents/output-scan-diff-complete.json",
+        },
+    ];
+    const FORMATS: &'static [Format] = crate::output::contract::TEXT_JSON_NDJSON;
     const CANCELLATION: bool = true;
     const OFFLINE: bool = true;
     fn resources(&self, s: &mut Settings<'_>) {

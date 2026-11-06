@@ -16,7 +16,10 @@ use crate::{
     codec::{DecodeContext, NetworkEnvelope},
     error::BoundaryError,
     packet::Packet,
-    protocol::{BuiltinProtocol, framing::Framer},
+    protocol::{
+        BuiltinProtocol,
+        framing::{Framer, Progress},
+    },
     registry::{Discriminator, Registry},
 };
 use bytes::Bytes;
@@ -142,10 +145,11 @@ impl Collector {
         let mut ports = Vec::new();
         for p in &selected {
             for (parent, d) in registry.parent_bindings(p.as_str()) {
-                if parent.as_str() == "tcp"
+                if parent == BuiltinProtocol::Tcp.id()
                     && d.0 > 0
                     && d.0 <= 65535
-                    && registry.child_for("tcp", d) == Some(crate::layer::Id::new(p.as_str()))
+                    && registry.child_for(BuiltinProtocol::Tcp.as_str(), d)
+                        == Some(crate::layer::Id::new(p.as_str()))
                 {
                     ports.push(d.0 as u16);
                 }
@@ -313,7 +317,10 @@ impl Collector {
     }
     fn protocol_for_port(&self, port: u16) -> Option<BuiltinProtocol> {
         self.registry
-            .child_for("tcp", Discriminator(u64::from(port)))
+            .child_for(
+                BuiltinProtocol::Tcp.as_str(),
+                Discriminator(u64::from(port)),
+            )
             .and_then(BuiltinProtocol::from_id)
             .filter(|p| self.selected.contains(p))
     }
@@ -349,28 +356,23 @@ impl Collector {
                 d.buffer.extend_from_slice(&data.bytes);
                 self.buffered += data.bytes.len();
                 while d.offset < d.buffer.len() && !d.disabled && !self.opaque(&d) {
-                    // Stream-level SIP keepalives are not messages. A lone CR waits for
-                    // the next delivery, so split CRLFs retain the same framing behavior.
-                    if d.protocol == BuiltinProtocol::Sip
-                        && d.buffer[d.offset..].starts_with(b"\r\n")
-                    {
-                        let next_offset = d.offset + 2;
-                        let sources = if next_offset < d.buffer.len() {
-                            Some(Accumulator::new(&data.sources)?)
-                        } else {
-                            None
-                        };
-                        d.offset = next_offset;
-                        self.buffered -= 2;
-                        d.framer = Framer::new(d.protocol.framing(), d.protocol.as_str());
-                        d.sources = sources;
-                        continue;
-                    }
                     match d
                         .framer
                         .progress(&d.buffer[d.offset..], self.limits.max_buffer_bytes)
                     {
-                        Ok(Some(len)) => {
+                        Ok(Progress::Skip(skipped)) => {
+                            let next_offset = d.offset + skipped;
+                            let sources = if next_offset < d.buffer.len() {
+                                Some(Accumulator::new(&data.sources)?)
+                            } else {
+                                None
+                            };
+                            d.offset = next_offset;
+                            self.buffered -= skipped;
+                            d.framer = Framer::new(d.protocol.framing(), d.protocol.as_str());
+                            d.sources = sources;
+                        }
+                        Ok(Progress::Message(len)) => {
                             if len == 0 {
                                 d.framer = Framer::new(d.protocol.framing(), d.protocol.as_str());
                                 return Err(Error::Limit {
@@ -420,7 +422,7 @@ impl Collector {
                             d.framer = Framer::new(d.protocol.framing(), d.protocol.as_str());
                             d.sources = remaining_sources;
                         }
-                        Ok(None) => break,
+                        Ok(Progress::Incomplete) => break,
                         Err(crate::protocol::framing::Error::BufferLimit { limit }) => {
                             d.framer = Framer::new(d.protocol.framing(), d.protocol.as_str());
                             return Err(Error::Limit {
@@ -502,8 +504,10 @@ impl Collector {
     }
     fn decode(&mut self, message: &mut Message) {
         if message.protocol == BuiltinProtocol::Amqp
-            && message.wire.starts_with(b"AMQP")
-            && message.wire.as_ref() != b"AMQP\0\0\x09\x01"
+            && message
+                .wire
+                .starts_with(&crate::protocol::application::amqp::PREFACE[..4])
+            && message.wire.as_ref() != crate::protocol::application::amqp::PREFACE
         {
             self.connections
                 .get_mut(&message.stream)
@@ -521,11 +525,15 @@ impl Collector {
                 .expect("selected connection exists");
             if let Some(level) =
                 crate::protocol::application::mqtt::connect_protocol_level(&message.wire)
-                && (connection.mqtt_level.is_none() || level != 4)
+                && (connection.mqtt_level.is_none()
+                    || level != crate::protocol::application::mqtt::SUPPORTED_LEVEL)
             {
                 connection.mqtt_level = Some(level);
             }
-            if let Some(level) = connection.mqtt_level.filter(|level| *level != 4) {
+            if let Some(level) = connection
+                .mqtt_level
+                .filter(|level| *level != crate::protocol::application::mqtt::SUPPORTED_LEVEL)
+            {
                 message.status = Status::Unsupported;
                 message.error = Some(format!(
                     "MQTT protocol level {level} is unsupported; connection messages remain opaque"

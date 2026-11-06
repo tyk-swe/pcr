@@ -82,8 +82,11 @@ pub(crate) fn load(
     campaign_path: &Path,
     log_path: &Path,
 ) -> Result<JoinInputs, CliError> {
-    let bytes =
-        crate::input::read_bounded_json_document(invocation, campaign_path, MAX_INPUT_BYTES)?;
+    let bytes = crate::input::read_bounded_json_document(
+        &invocation.control,
+        campaign_path,
+        MAX_INPUT_BYTES,
+    )?;
     invocation.check()?;
     let campaign = input::aggregate::<Campaign>(
         &bytes,
@@ -110,7 +113,8 @@ pub(crate) fn load(
         diagnostics: Vec::new(),
         stats: Default::default(),
     };
-    let bytes = crate::input::read_bounded_json_document(invocation, log_path, MAX_INPUT_BYTES)?;
+    let bytes =
+        crate::input::read_bounded_json_document(&invocation.control, log_path, MAX_INPUT_BYTES)?;
     invocation.check()?;
     let text = std::str::from_utf8(&bytes)
         .map_err(|_| CliError::new(Kind::Usage, "responder log is not UTF-8 JSON lines"))?;

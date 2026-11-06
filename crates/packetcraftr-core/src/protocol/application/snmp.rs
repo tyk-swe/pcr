@@ -70,7 +70,7 @@ crate::reflective_layer! {
 }
 message_codec!(SnmpCodec, Snmp, snmp_schema);
 
-const NAME: &str = "snmp";
+const NAME: &str = crate::protocol::BuiltinProtocol::Snmp.as_str();
 impl Snmp {
     fn encode_wire(&self, c: &EncodeContext<'_>) -> Result<Vec<u8>, Error> {
         if self.version > 1 {

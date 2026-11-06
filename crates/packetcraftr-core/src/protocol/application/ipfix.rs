@@ -46,7 +46,7 @@ crate::reflective_layer! {
 }
 message_codec!(IpfixCodec, Ipfix, ipfix_schema);
 
-const NAME: &str = "ipfix";
+const NAME: &str = crate::protocol::BuiltinProtocol::Ipfix.as_str();
 impl Ipfix {
     fn encode_wire(&self, c: &EncodeContext<'_>) -> Result<Vec<u8>, Error> {
         let max = c.remaining_packet_bytes;

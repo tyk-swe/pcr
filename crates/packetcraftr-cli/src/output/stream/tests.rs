@@ -47,6 +47,30 @@ impl StreamRecord for NamedData {
 }
 
 #[test]
+fn unattributed_encoder_refuses_records_but_reports_errors() {
+    let writer = RecordingWriter(Arc::default());
+    let stream = StreamEncoder::unattributed(writer.clone());
+    let refused = stream.emit_published(Published::new(NamedData("sample"), Vec::new()));
+    assert!(matches!(refused, Err(EncodeError::Unattributed)));
+    assert!(writer.0.lock().unwrap().is_empty());
+    assert!(stream.is_open());
+    stream
+        .emit_error(Error::new(
+            Classification::new(packetcraftr_core::error::Code::IoStdout, Kind::Io, None),
+            "startup failed",
+            Vec::new(),
+        ))
+        .unwrap();
+    let written = writer.0.lock().unwrap().clone();
+    let record: serde_json::Value = serde_json::from_slice(&written).unwrap();
+    assert_eq!(record["event"], "error");
+    assert!(
+        record.get("command").is_none_or(serde_json::Value::is_null),
+        "unattributed error must not borrow a command identity: {record}"
+    );
+}
+
+#[test]
 fn reserved_events_preserve_budget_and_sequence() {
     for counted in [false, true] {
         let writer = RecordingWriter(Arc::default());

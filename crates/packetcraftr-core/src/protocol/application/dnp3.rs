@@ -54,7 +54,7 @@ crate::reflective_layer! {
 }
 message_codec!(Dnp3Codec, Dnp3, dnp3_schema);
 
-const NAME: &str = "dnp3";
+const NAME: &str = crate::protocol::BuiltinProtocol::Dnp3.as_str();
 fn crc(b: &[u8]) -> u16 {
     let mut n = 0u16;
     for v in b {

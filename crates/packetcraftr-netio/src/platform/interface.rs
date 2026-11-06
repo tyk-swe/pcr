@@ -39,8 +39,6 @@ pub(crate) use identity::verify_interface_identity as verify_identity;
 pub(crate) fn enumerate(_deadline: &Deadline) -> Result<Vec<interface::Info>, interface::Error> {
     Err(Unsupported::unbuilt(
         NativeCapability::InterfaceEnumeration,
-        cfg!(feature = "native-route"),
-        "native-route",
         "interface enumeration",
     )
     .into())

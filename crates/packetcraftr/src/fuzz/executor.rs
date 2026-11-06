@@ -56,13 +56,12 @@ impl<P: PacketProviders, K: Clock> Executor<CaseStep> for WorkflowExecutor<'_, P
         let exchange = self
             .client
             .exchange_hooked(
-                crate::exchange::Request {
+                crate::exchange::Step {
                     template: packetcraftr_core::template::Template::new(case.packet.clone()),
                     send: self.send.clone(),
                     timeout: case.timeout,
                     max_template_packets: 1,
                     collection: self.collection.clone(),
-                    stop: crate::exchange::StopCondition::Window,
                 },
                 self.operation,
                 None,

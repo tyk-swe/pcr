@@ -15,7 +15,7 @@ use crate::providers::PacketProviders;
 use crate::{Client, Sink};
 
 use super::SYNTHESIZED_ETHERNET_BYTES;
-use super::error::{Error, case_error, duration_limit};
+use super::error::{Error, duration_limit};
 use super::evidence::{Recorder, validate_execution};
 use super::executor::{CaseEvidence, CaseStep};
 use super::plan::worst_case_duration;
@@ -74,10 +74,10 @@ where
         stats: campaign,
         ..
     } = prepared;
-    let delay = rate_delay(case_error, "cases_per_second", 1, request.cases_per_second)?;
+    let delay = rate_delay::<Error>("cases_per_second", 1, request.cases_per_second)?;
     let builder = Builder::new(Arc::clone(&registry));
     let mut recorder = Recorder::new(registry, request.campaign.limits, request.evidence());
-    let mut context = Context::new(deadline, clock, case_error);
+    let mut context = Context::new(deadline, clock);
     let mut executed_before = false;
     for mut case in cases {
         let case_index = case.index;

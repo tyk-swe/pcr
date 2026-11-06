@@ -67,8 +67,8 @@ impl DecodeArgs {
             };
             let (selector, target) = source.split_once('=').ok_or_else(invalid)?;
             let parent = match selector.trim().to_ascii_lowercase().as_str() {
-                "tcp.port" => "tcp",
-                "udp.port" => "udp",
+                "tcp.port" => BuiltinProtocol::Tcp,
+                "udp.port" => BuiltinProtocol::Udp,
                 _ => return Err(invalid()),
             };
             let (port, child) = target.split_once(':').ok_or_else(invalid)?;
@@ -80,18 +80,15 @@ impl DecodeArgs {
             let child = default
                 .protocol_named(child)
                 .ok_or_else(|| error(format!("unknown decode-as protocol {child:?}")))?;
-            if !packetcraftr_core::protocol::BuiltinProtocol::from_id(child).is_some_and(
-                |protocol| {
-                    let parent = packetcraftr_core::protocol::BuiltinProtocol::from_name(parent)
-                        .expect("transport");
-                    protocol.supports_transport(parent)
-                },
-            ) {
+            if !BuiltinProtocol::from_id(child)
+                .is_some_and(|protocol| protocol.supports_transport(parent))
+            {
                 return Err(error(format!(
-                    "{child} cannot be decoded directly under {parent}"
+                    "{child} cannot be decoded directly under {}",
+                    parent.as_str()
                 )));
             }
-            insert(&mut bindings, parent, port, child)?;
+            insert(&mut bindings, parent.as_str(), port, child)?;
         }
         builtin::registry_with(|builder| {
             for ((parent, port), child) in bindings {

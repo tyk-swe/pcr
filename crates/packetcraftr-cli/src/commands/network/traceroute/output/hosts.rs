@@ -13,10 +13,9 @@ use packetcraftr::probe::Transport;
 use packetcraftr::traceroute::hosts as library;
 
 use super::{Completion, Hop, Probe};
-use crate::commands::network::scan::output::host::reply_name;
-use crate::commands::network::scan::output::{Scope, Stage};
 use crate::output::contract::Error;
 use crate::output::frame::{Captured, Timestamp};
+use crate::output::scan_failure::{Scope, Stage, reply_name};
 use crate::output::stream::StreamRecord;
 
 published_enum! {

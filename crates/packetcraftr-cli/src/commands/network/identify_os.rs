@@ -68,8 +68,33 @@ impl Bounded for Args {
     }
 }
 
+use crate::output::contract::PublishedType;
+
 impl crate::commands::Spec for Args {
-    const FORMATS: &'static [Format] = &[Format::Text, Format::Json, Format::Ndjson];
+    const PUBLISHED: &'static [PublishedType] = &[
+        PublishedType {
+            definition: "osSuccess",
+            command: "identify-os",
+            rust_types: &["crate::commands::network::identify_os::output::Report"],
+            events: &[],
+            example: "examples/documents/output-os.json",
+        },
+        PublishedType {
+            definition: "osStreamSuccess",
+            command: "identify-os",
+            rust_types: &["crate::commands::network::identify_os::output::Event"],
+            events: &[
+                "complete",
+                "diagnostic",
+                "os_additional",
+                "os_preparation",
+                "os_probe",
+                "os_undecoded",
+            ],
+            example: "examples/documents/output-os-complete.json",
+        },
+    ];
+    const FORMATS: &'static [Format] = crate::output::contract::TEXT_JSON_NDJSON;
     const CANCELLATION: bool = true;
     fn run_time(&self) -> Option<&dyn Bounded> {
         Some(self)
@@ -93,7 +118,7 @@ impl crate::commands::Spec for Args {
         let corpus = match &self.corpus {
             Some(path) => Arc::new(
                 os_fingerprints::parse(&read_bounded_file(
-                    invocation,
+                    &invocation.control,
                     path,
                     os_fingerprints::MAX_DOCUMENT_BYTES,
                     InputKind::OsDocument,
@@ -137,7 +162,7 @@ impl crate::commands::Spec for Args {
             request.collection.capture,
         )?;
         let mut client = workflow.client(invocation, Runtime::Workflow);
-        if let Some(deadline) = invocation.deadline.clone() {
+        if let Some(deadline) = invocation.control.deadline.clone() {
             client = client.with_deadline((*deadline).clone());
         }
         request.route = workflow.route;

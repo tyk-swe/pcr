@@ -52,8 +52,8 @@ fn invocation(format: Format, writer: Writer) -> Invocation {
 #[test]
 fn generator_cancellation_reports_interrupt() {
     let invocation = invocation(Format::Text, Writer::default());
-    invocation.cancellation.cancel();
-    let error = invocation.cancellation.check().unwrap_err();
+    invocation.control.cancellation.cancel();
+    let error = invocation.control.cancellation.check().unwrap_err();
     let code = generation_exit(&invocation, Err(CliError::classified(error)), |error| {
         assert_eq!(error.classification.code.as_str(), "io.cancelled");
         Ok(())
@@ -64,7 +64,7 @@ fn generator_cancellation_reports_interrupt() {
 #[test]
 fn generator_write_failure_precedes_cancellation() {
     let invocation = invocation(Format::Text, Writer::default());
-    invocation.cancellation.cancel();
+    invocation.control.cancellation.cancel();
     let code = generation_exit(
         &invocation,
         Err(CliError::new(Kind::Io, "cancelled operation")),
@@ -119,7 +119,7 @@ fn published_json_errors_prioritize_output_failure() {
         let invocation = invocation(Format::Json, Writer::default());
         invocation.begin_json().unwrap();
         if cancelled {
-            invocation.cancellation.cancel();
+            invocation.control.cancellation.cancel();
         }
         let error = if output_failed {
             CliError::from_classification(
@@ -154,7 +154,7 @@ fn ndjson_cancellation_reports_terminal_or_failure() {
             ..Default::default()
         };
         let invocation = invocation(Format::Ndjson, writer.clone());
-        invocation.cancellation.cancel();
+        invocation.control.cancellation.cancel();
         let code = command_failure_with(
             &invocation,
             Command::Build,
@@ -204,7 +204,7 @@ fn ndjson_failure_preserves_context_and_cause() {
             .emit_error(CliError::new(Kind::Packet, "first failure").output_error())
             .is_err()
     );
-    invocation.cancellation.cancel();
+    invocation.control.cancellation.cancel();
     let error = CliError::from_classification(
         Classification::new(
             packetcraftr_core::error::Code::PacketTest,

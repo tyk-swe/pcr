@@ -6,7 +6,7 @@ use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
 };
 
-use crate::route;
+use crate::native;
 
 pub(in crate::platform) fn sockaddr_ip(bytes: &[u8]) -> Option<IpAddr> {
     // Darwin sockaddr stores `sa_family` after its leading length byte.
@@ -60,7 +60,7 @@ fn contiguous_prefix(bytes: &[u8]) -> Option<u8> {
 pub(in crate::platform) fn parse_route_addresses(
     bytes: &[u8],
     mask: libc::c_int,
-) -> Result<[Option<IpAddr>; libc::RTAX_MAX as usize], route::Error> {
+) -> Result<[Option<IpAddr>; libc::RTAX_MAX as usize], native::Error> {
     let mut output = [None; libc::RTAX_MAX as usize];
     let address_slots = output.len();
     let mut offset = 0;
@@ -69,14 +69,14 @@ pub(in crate::platform) fn parse_route_addresses(
             continue;
         }
         let Some(&length_byte) = bytes.get(offset) else {
-            return Err(route::Error::InvalidResponse {
+            return Err(native::Error::InvalidResponse {
                 message: "macOS route response truncated its sockaddr list".to_owned(),
             });
         };
         let length = usize::from(length_byte);
         let empty_netmask = index == libc::RTAX_NETMASK as usize && length == 0;
         if length < 2 && !empty_netmask {
-            return Err(route::Error::InvalidResponse {
+            return Err(native::Error::InvalidResponse {
                 message: format!(
                     "macOS route response sockaddr index {index} is too short for sa_family: length={length}"
                 ),
@@ -84,12 +84,12 @@ pub(in crate::platform) fn parse_route_addresses(
         }
         let stride = roundup(length);
         let Some(address_end) = offset.checked_add(length) else {
-            return Err(route::Error::InvalidResponse {
+            return Err(native::Error::InvalidResponse {
                 message: "macOS route response sockaddr length overflowed".to_owned(),
             });
         };
         if address_end > bytes.len() {
-            return Err(route::Error::InvalidResponse {
+            return Err(native::Error::InvalidResponse {
                 message: format!(
                     "macOS route response truncated sockaddr index {index}: offset={offset} length={length} bytes={}",
                     bytes.len()
@@ -104,7 +104,7 @@ pub(in crate::platform) fn parse_route_addresses(
             // Darwin may omit the unused alignment trailer after the final sockaddr.
             _ if !empty_netmask && !has_later_address && address_end == bytes.len() => address_end,
             _ => {
-                return Err(route::Error::InvalidResponse {
+                return Err(native::Error::InvalidResponse {
                     message: format!(
                         "macOS route response contained an invalid sockaddr at index {index}: offset={offset} length={length} stride={stride} bytes={}",
                         bytes.len()
@@ -114,7 +114,7 @@ pub(in crate::platform) fn parse_route_addresses(
         };
         if empty_netmask {
             if bytes[offset..next_offset].iter().any(|byte| *byte != 0) {
-                return Err(route::Error::InvalidResponse {
+                return Err(native::Error::InvalidResponse {
                     message: "macOS route response zero-length netmask slot contains nonzero bytes"
                         .to_owned(),
                 });

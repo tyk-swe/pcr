@@ -17,12 +17,43 @@ use crate::errors::CliError;
 use crate::invocation::StreamEncoder;
 use crate::system::{Runtime, prepare_workflow};
 
+use crate::output::contract::PublishedType;
+
 impl crate::commands::Spec for Args {
-    const FORMATS: &'static [crate::output::contract::Format] = &[
-        crate::output::contract::Format::Text,
-        crate::output::contract::Format::Json,
-        crate::output::contract::Format::Ndjson,
+    const PUBLISHED: &'static [PublishedType] = &[
+        PublishedType {
+            definition: "tracerouteSuccess",
+            command: "traceroute",
+            rust_types: &[
+                "crate::commands::network::traceroute::output::Report",
+                "crate::commands::network::traceroute::output::multipath::Report",
+            ],
+            events: &[],
+            example: "examples/documents/output-traceroute-multipath-success.json",
+        },
+        PublishedType {
+            definition: "tracerouteStreamSuccess",
+            command: "traceroute",
+            rust_types: &[
+                "crate::commands::network::traceroute::output::Event",
+                "crate::commands::network::traceroute::output::hosts::Event",
+                "crate::commands::network::traceroute::output::multipath::Event",
+            ],
+            events: &[
+                "complete",
+                "diagnostic",
+                "flow",
+                "flow_complete",
+                "probe",
+                "topology",
+                "undecoded",
+                "unmatched",
+            ],
+            example: "examples/documents/output-traceroute-complete.json",
+        },
     ];
+    const FORMATS: &'static [crate::output::contract::Format] =
+        crate::output::contract::TEXT_JSON_NDJSON;
     const CANCELLATION: bool = true;
 
     fn run_time(&self) -> Option<&dyn crate::command_options::Bounded> {

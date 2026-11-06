@@ -30,7 +30,7 @@ crate::reflective_layer! {
 }
 message_codec!(RtcpCodec, Rtcp, rtcp_schema);
 
-const NAME: &str = "rtcp";
+const NAME: &str = crate::protocol::BuiltinProtocol::Rtcp.as_str();
 impl Rtcp {
     fn encode_wire(&self, c: &EncodeContext<'_>) -> Result<Vec<u8>, Error> {
         if self.packets.0.is_empty() {

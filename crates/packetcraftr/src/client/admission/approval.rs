@@ -10,7 +10,7 @@ use packetcraftr_netio::interface::Id as InterfaceId;
 
 use packetcraftr_core::budget::Deadline;
 
-use crate::error::Failure;
+use crate::error::{Failure, FromFailure};
 use crate::policy::{Authorizer, Operation, WireLimits};
 use crate::target::{Family, ResolveTarget, SelectedAddress, Target};
 
@@ -33,16 +33,17 @@ pub(crate) fn resolve_selected<A, E>(
     target: &Target,
     family: Family,
     deadline: &Deadline,
-    gates: fn(u64, Failure) -> E,
 ) -> Result<SelectedTargets, E>
 where
     A: ResolveTarget,
+    E: FromFailure,
 {
-    let check = || check_deadline(deadline, gates);
+    let check = || check_deadline(deadline);
     check()?;
     let resolved = authorizer.resolve_and_authorize(target, deadline);
     check()?;
-    let resolved = resolved.map_err(|source| (gates)(0_u64, Failure::Authorization(source)))?;
+    let resolved =
+        resolved.map_err(|source| E::from_failure(0_u64, Failure::Authorization(source)))?;
 
     let declared = resolved.declared.to_string();
     let mut targets = Vec::with_capacity(resolved.selected.len());
@@ -65,21 +66,21 @@ pub(crate) fn approve_operation<A, E>(
     authorizer: &mut A,
     operation: Operation<'_>,
     deadline: &Deadline,
-    gates: fn(u64, Failure) -> E,
 ) -> Result<(), E>
 where
     A: Authorizer,
+    E: FromFailure,
 {
-    check_deadline(deadline, gates)?;
+    check_deadline(deadline)?;
     let approval = authorizer.authorize_operation(operation);
-    check_deadline(deadline, gates)?;
-    approval.map_err(|source| (gates)(0_u64, Failure::Authorization(source)))
+    check_deadline(deadline)?;
+    approval.map_err(|source| E::from_failure(0_u64, Failure::Authorization(source)))
 }
 
-fn check_deadline<E>(deadline: &Deadline, gates: fn(u64, Failure) -> E) -> Result<(), E> {
+fn check_deadline<E: FromFailure>(deadline: &Deadline) -> Result<(), E> {
     deadline
         .check()
-        .map_err(|source| (gates)(0_u64, Failure::DurationLimit(source)))
+        .map_err(|source| E::from_failure(0_u64, Failure::DurationLimit(source)))
 }
 
 pub(crate) const fn wire_limits(packets: u64, maximum_wire_bytes: u64) -> Operation<'static> {

@@ -60,7 +60,7 @@ FIXED_ASSETS = (
     'scripts/release-assets.json',
 )
 
-GENERATED_ASSETS = (
+BUILT_ASSETS = (
     'BUILD-METADATA.json',
     'completions/packetcraftr.bash',
     'completions/packetcraftr.elv',
@@ -100,7 +100,7 @@ def generated_manifest(root):
     return {
         'schema': 'packetcraftr.release-assets/v1',
         'source_assets': sorted(source_assets),
-        'generated_assets': sorted(GENERATED_ASSETS),
+        'generated_assets': sorted(BUILT_ASSETS),
     }
 
 

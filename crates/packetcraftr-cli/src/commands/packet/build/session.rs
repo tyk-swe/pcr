@@ -172,7 +172,7 @@ impl SessionArgs {
                     SessionProtocol::Udp => MAX_UDP_RESPONSE_IPV6.min(byte_budget),
                 };
                 let bytes = read_bounded_file_allow_empty(
-                    invocation,
+                    &invocation.control,
                     path,
                     limit,
                     InputKind::SessionResponse,

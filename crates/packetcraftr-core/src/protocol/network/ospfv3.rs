@@ -75,7 +75,7 @@ crate::reflective_layer! {
 }
 message_codec!(Ospfv3Codec, Ospfv3, ospfv3_schema);
 
-const NAME: &str = "ospfv3";
+const NAME: &str = crate::protocol::BuiltinProtocol::Ospfv3.as_str();
 const VERSION: u8 = 3;
 const DD_MINIMUM: usize = 12;
 impl Ospfv3 {

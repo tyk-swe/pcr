@@ -6,7 +6,7 @@
 
 use crate::{
     resources::NativeSnapshot,
-    workers::{self, Pool, Waited},
+    workers::{self, Blocked, Pool},
 };
 use packetcraftr_core::{
     budget::Deadline,
@@ -86,8 +86,8 @@ pub(crate) fn blocking_lookup_on(
         .admit()
         .map_err(|error| failure_with_source("native hostname lookup admission refused", error))?;
     let execution = wait.clone();
-    let task = permit
-        .spawn_with_control(&wait, move || {
+    let blocked = permit
+        .call(&wait, move || {
             let result = workers::unwind_after_cleanup(|| {
                 execution.enforce().map_err(BoundaryError::from_error)?;
                 lookup()
@@ -99,16 +99,14 @@ pub(crate) fn blocking_lookup_on(
             Err(interrupted) => BoundaryError::from_error(interrupted),
             Ok(()) => failure_with_source("start hostname lookup failed", error),
         })?;
-    match task.wait(&wait) {
-        Waited::Finished(Ok(result)) => {
+    match blocked {
+        Blocked::Finished(result) => {
             deadline.enforce().map_err(BoundaryError::from_error)?;
             result
         }
-        Waited::Finished(Err(_)) => Err(failure("hostname resolver panicked")),
-        Waited::Pending(task) => {
-            task.retention_marker().mark_retained();
+        Blocked::Panicked => Err(failure("hostname resolver panicked")),
+        Blocked::Pending => {
             retained_lookup.mark_retained();
-            drop(task);
             Err(wait
                 .enforce()
                 .err()

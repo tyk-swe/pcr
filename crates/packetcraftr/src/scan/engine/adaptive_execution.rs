@@ -16,7 +16,6 @@ use super::pipelined::{StagePlan, add_stats, pipeline_options, prepared_limit};
 use crate::probe::Stage;
 use crate::probe::{self, enforce_deadline};
 use crate::scan::Error;
-use crate::scan::error::probe_error;
 use crate::scan::evidence::ProbeClassifier;
 use crate::scan::executor::Pipelined;
 use crate::scan::plan::probe_count;
@@ -205,7 +204,7 @@ where
     if targets.is_empty() || endpoints.is_empty() {
         return Ok(stats);
     }
-    enforce_deadline(probe_error, prober.deadline)?;
+    enforce_deadline::<Error>(prober.deadline)?;
     prober.settle(&mut stats)?;
     let mut prefix = preceding.clone();
     add_stats(&mut prefix, &stats, first_sequence)?;

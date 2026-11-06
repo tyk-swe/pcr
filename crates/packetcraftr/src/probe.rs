@@ -71,13 +71,10 @@ impl Workflow {
     }
 }
 
-pub(crate) fn enforce_deadline<E>(
-    errors: fn(u64, crate::error::Failure) -> E,
-    deadline: &Deadline,
-) -> Result<(), E> {
-    deadline
-        .enforce()
-        .map_err(|interrupted| (errors)(0_u64, crate::error::Failure::Interrupted(interrupted)))
+pub(crate) fn enforce_deadline<E: crate::error::FromFailure>(deadline: &Deadline) -> Result<(), E> {
+    deadline.enforce().map_err(|interrupted| {
+        E::from_failure(0_u64, crate::error::Failure::Interrupted(interrupted))
+    })
 }
 
 pub(crate) fn index_or_push<'a, K, V>(

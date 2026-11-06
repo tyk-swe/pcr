@@ -9,6 +9,39 @@ use crate::protocol::headers::{IpHeader, LinkHeader};
 use crate::protocol::network::{Ipv4, Ipv6};
 
 #[test]
+fn catalog_capabilities_come_from_their_own_facts() {
+    use BuiltinProtocol::{Dns, Dtls, Http, Mpls, Mqtt, Tcp, Tls, Udp};
+    assert!(Dtls.is_message_protocol());
+    assert!(!Dns.is_message_protocol());
+    assert!(Mqtt.stream_decode());
+    assert!(!Dns.stream_decode());
+    assert!(!Http.stream_decode());
+    assert!(!Tls.stream_decode());
+    assert!(Dns.supports_transport(Tcp));
+    assert!(Dns.supports_transport(Udp));
+    assert!(Tls.supports_transport(Tcp));
+    assert!(!Mpls.supports_transport(Udp));
+    let registry = super::registry();
+    for protocol in BuiltinProtocol::ALL {
+        for (parent, ports) in [
+            (Tcp.as_str(), protocol.tcp_ports()),
+            (Udp.as_str(), protocol.udp_ports()),
+        ] {
+            for &port in ports {
+                assert_eq!(
+                    registry
+                        .child_for(parent, crate::registry::Discriminator(u64::from(port)))
+                        .map(crate::layer::Id::as_str),
+                    Some(protocol.as_str()),
+                    "{parent} port {port} should dissect as {}",
+                    protocol.as_str()
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn catalog_codec_and_schema_ids_agree() {
     let registry = super::registry();
     for protocol in BuiltinProtocol::ALL {
@@ -67,12 +100,13 @@ fn packet_documents_round_trip_through_build() {
     ))
     .unwrap();
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let entries = manifest["protocols"].as_array().unwrap();
     let mut checked = 0_usize;
-    for entry in manifest["protocols"].as_array().unwrap() {
+    for entry in entries {
         let name = entry["protocol"].as_str().unwrap();
-        let Some(document_path) = entry["packet_document"].as_str() else {
-            continue;
-        };
+        let document_path = entry["packet_document"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{name}: manifest entry has no packet document"));
         let registry = Arc::new(
             super::registry_with(|builder| {
                 if let Some(binding) = entry["decode_as"].as_str() {
@@ -118,7 +152,22 @@ fn packet_documents_round_trip_through_build() {
         assert_eq!(rebuilt.bytes, built.bytes, "{name}");
         checked += 1;
     }
-    assert!(checked >= 36, "only {checked} documents checked");
+    assert_eq!(checked, entries.len());
+}
+
+#[test]
+fn yaml_packet_document_builds() {
+    let text = include_str!("../../../../../examples/documents/packet-raw.yaml");
+    let document = crate::document::Packet::parse(text, crate::document::Format::Yaml, text.len())
+        .expect("yaml packet document parses");
+    let registry = super::registry();
+    let packet = document
+        .to_packet(&registry, 64)
+        .expect("yaml packet document converts");
+    let built = crate::build::Builder::new(registry)
+        .build(packet, Addresses::default(), Default::default())
+        .expect("yaml packet document builds");
+    assert_eq!(built.bytes.as_ref(), &[222, 173, 190, 239][..]);
 }
 
 #[test]

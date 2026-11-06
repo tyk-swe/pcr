@@ -54,7 +54,7 @@ fn built(packet: Packet) -> build::BuiltPacket {
 }
 
 fn request(probe: &Probe) -> Packet {
-    let mut packet = probe.packet();
+    let mut packet = probe.packet(&builtin::registry());
     if let Some(ip) = packet.get_mut::<Ipv4>() {
         ip.source = Ipv4Addr::new(192, 0, 2, 254);
     }

@@ -21,8 +21,29 @@ use crate::system::{Runtime, client};
 
 use self::arguments::Args;
 
+use crate::output::contract::PublishedType;
+
 impl crate::commands::Spec for Args {
-    const FORMATS: &'static [Format] = &[Format::Text, Format::Json, Format::Ndjson];
+    const PUBLISHED: &'static [PublishedType] = &[
+        PublishedType {
+            definition: "identifySuccess",
+            command: "identify",
+            rust_types: &["crate::commands::network::identify::output::Report"],
+            events: &[],
+            example: "examples/documents/output-identify-success.json",
+        },
+        PublishedType {
+            definition: "identifyStreamSuccess",
+            command: "identify",
+            rust_types: &[
+                "crate::commands::network::identify::output::Complete",
+                "crate::commands::network::identify::output::Record",
+            ],
+            events: &["complete", "identify_endpoint"],
+            example: "examples/documents/output-identify-complete.json",
+        },
+    ];
+    const FORMATS: &'static [Format] = crate::output::contract::TEXT_JSON_NDJSON;
     const CANCELLATION: bool = true;
 
     fn run_time(&self) -> Option<&dyn Bounded> {
@@ -63,7 +84,7 @@ impl crate::commands::Spec for Args {
         let corpus = match &self.corpus {
             Some(path) => Arc::new(
                 service_probes::parse(&read_bounded_file(
-                    invocation,
+                    &invocation.control,
                     path,
                     service_probes::MAX_DOCUMENT_BYTES,
                     InputKind::ServiceDocument,
@@ -82,7 +103,7 @@ impl crate::commands::Spec for Args {
         } else if let Some(path) = &self.exclusions {
             Arc::new(
                 service_exclusions::parse(&read_bounded_file(
-                    invocation,
+                    &invocation.control,
                     path,
                     service_exclusions::MAX_EXCLUSIONS_BYTES,
                     InputKind::ServiceDocument,
@@ -106,7 +127,7 @@ impl crate::commands::Spec for Args {
         );
         request.tls = self.tls.settings();
         request.intensity = self.intensity;
-        request.parent_deadline = invocation.deadline.clone();
+        request.parent_deadline = invocation.control.deadline.clone();
         request.limits = library::Limits {
             operation: library::Limit {
                 attempts: self.max_attempts,

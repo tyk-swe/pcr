@@ -36,8 +36,29 @@ pub(super) fn parse_token(value: &str) -> Result<[u8; 16], CliError> {
     Ok(token)
 }
 
+use crate::output::contract::PublishedType;
+
 impl crate::commands::Spec for Args {
-    const FORMATS: &'static [Format] = &[Format::Text, Format::Json, Format::Ndjson];
+    const PUBLISHED: &'static [PublishedType] = &[
+        PublishedType {
+            definition: "differentialSuccess",
+            command: "differential",
+            rust_types: &[
+                "crate::commands::network::differential::output::PlanReport",
+                "crate::commands::network::differential::output::Report",
+            ],
+            events: &[],
+            example: "examples/documents/output-differential-plan-success.json",
+        },
+        PublishedType {
+            definition: "differentialStreamSuccess",
+            command: "differential",
+            rust_types: &["crate::commands::network::differential::output::Event"],
+            events: &["attempt", "complete", "diagnostic"],
+            example: "examples/documents/output-differential-attempt-event.json",
+        },
+    ];
+    const FORMATS: &'static [Format] = crate::output::contract::TEXT_JSON_NDJSON;
     const CANCELLATION: bool = true;
 
     fn run_time(&self) -> Option<&dyn crate::command_options::Bounded> {

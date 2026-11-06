@@ -9,32 +9,10 @@ from pathlib import Path
 import re
 import sys
 
-from rust_source import is_test_path
+from rust_source import is_test_path, without_test_items
 
 ROOT = Path(__file__).resolve().parent.parent
 
-BASELINE = {
-    "make_layer_impls": 41,
-    "field_layout_literals": 123,
-    "hand_layout_fns": 31,
-    "glob_imports": 104,
-    "builtin_id_literals": 46,
-    "instant_now": 38,
-    "system_time_now": 19,
-    "getrandom_sites": 6,
-    "downcast_sites": 142,
-    "error_downcast_sites": 0,
-    "downcast_outside_allowlist": 142,
-    "dynamic_field_sites": 84,
-    "manual_cancellation_polls": 58,
-    "message_protocol_rows": 36,
-    "duplicate_constants": 27,
-    "public_items_core": 25,
-    "public_items_netio": 15,
-    "public_items_packetcraftr": 26,
-    "public_items_cli": 2,
-    "catalog_public_items": 27,
-}
 
 CEILINGS = {
     "make_layer_impls": 0,
@@ -45,7 +23,7 @@ CEILINGS = {
     "instant_now": 0,
     "system_time_now": 0,
     "getrandom_sites": 0,
-    "downcast_sites": 25,
+    "downcast_sites": 23,
     "error_downcast_sites": 12,
     "downcast_outside_allowlist": 0,
     "dynamic_field_sites": 0,
@@ -54,8 +32,7 @@ CEILINGS = {
     # encoder would report as an output code instead. The encoder already
     # enforces the same control deadline on every write, and every poll that
     # only duplicated an emit-internal check with an identical error is gone.
-    "manual_cancellation_polls": 59,
-    "message_protocol_rows": 0,
+    "manual_cancellation_polls": 73,
     "duplicate_constants": 0,
     "public_items_core": 25,
     "public_items_netio": 15,
@@ -102,6 +79,25 @@ CONST_PATTERN = re.compile(
 )
 
 
+POLL_PATTERN = re.compile(r"(?:invocation|control|cancellation|i)\.check(?:_interrupted)?\(")
+
+
+def cancellation_polls(sources: list[Path]) -> int:
+    """Manual Invocation/Control polls in CLI production sources.
+
+    Whitespace is stripped first so a poll split across lines counts, and
+    every local receiver spelling counts, not only `invocation`.
+    `invocation.rs` itself defines the wrappers and is excluded.
+    """
+    total = 0
+    for path in sources:
+        if "packetcraftr-cli" not in str(path) or path.name == "invocation.rs":
+            continue
+        text = without_test_items(path.read_text())
+        total += len(POLL_PATTERN.findall("".join(text.split())))
+    return total
+
+
 def duplicate_constants(sources: list[Path]) -> int:
     """Module-level constants defined with the same literal in two files.
 
@@ -144,12 +140,26 @@ def cast_counts(root: Path, sources: list[Path]) -> dict[str, int]:
     }
 
 
+DYNAMIC_FIELD_PATTERN = re.compile(
+    r"layer\.field\(|\.field\(\"[a-z0-9_.]+\"\)|\.set_field\(|\.field_path\(|\.set_field_path\("
+)
+
+
 def allowlist_problems(root: Path = ROOT) -> list[str]:
-    counts = cast_counts(root, production_sources(root))
+    sources = production_sources(root)
+    counts = cast_counts(root, sources)
     problems = []
     for relative in LAYER_CAST_FILES + ERROR_CAST_FILES:
         if counts.get(relative, 0) == 0:
             problems.append(f"stale cast allowlist entry: {relative}")
+    for module in BOUNDARY_MODULES:
+        shielded = sum(
+            len(DYNAMIC_FIELD_PATTERN.findall(path.read_text()))
+            for path in sources
+            if module in str(path.relative_to(root))
+        )
+        if shielded == 0:
+            problems.append(f"stale boundary exemption: {module}")
     return problems
 
 
@@ -157,7 +167,6 @@ BOUNDARY_MODULES = (
     "examples/",
     "fuzz/",
     "document/",
-    "expression",
     "filter/",
     "layer/model.rs",
     "layer/reflection.rs",
@@ -165,10 +174,6 @@ BOUNDARY_MODULES = (
     "codec.rs",
     "build.rs",
     "input/",
-    "rendering/",
-    "/rendering.rs",
-    "output/",
-    "/output.rs",
     "template.rs",
 )
 
@@ -207,9 +212,7 @@ def inventory(root: Path = ROOT) -> dict[str, int]:
             # Layer dynamic field access only: one-argument field reads by
             # name plus every path-based access. Two-argument DebugStruct
             # .field(name, value) calls are formatting, not layer access.
-            dynamic += len(re.findall(
-                r"layer\.field\(|\.field\(\"[a-z0-9_.]+\"\)|\.set_field\(|\.field_path\(|\.set_field_path\(",
-                text))
+            dynamic += len(DYNAMIC_FIELD_PATTERN.findall(text))
     non_clock = [
         s for s in sources if str(s.relative_to(root)) != CLOCK_SEAM
     ]
@@ -241,7 +244,7 @@ def inventory(root: Path = ROOT) -> dict[str, int]:
         "error_downcast_sites": error_casts,
         "downcast_outside_allowlist": outside,
         "dynamic_field_sites": dynamic,
-        "manual_cancellation_polls": count(r"invocation\.check", sources),
+        "manual_cancellation_polls": cancellation_polls(sources),
         "catalog_public_items": count(
             r"^\s*pub (?:const )?fn ",
             [root / "crates/packetcraftr-core/src/protocol/catalog.rs"],
@@ -249,12 +252,6 @@ def inventory(root: Path = ROOT) -> dict[str, int]:
         ),
         "duplicate_constants": duplicate_constants(sources),
         **public_items(root),
-        "message_protocol_rows": count(
-            r"MessageProtocol \{",
-            [root / "crates/packetcraftr-core/src/protocol/capabilities.rs"]
-            if (root / "crates/packetcraftr-core/src/protocol/capabilities.rs").exists()
-            else [],
-        ),
     }
 
 
@@ -264,10 +261,10 @@ def main() -> int:
     args = parser.parse_args()
     measured = inventory()
     failures = allowlist_problems()
-    print(f"{'metric':28} {'baseline':>8} {'measured':>8} {'ceiling':>8}")
+    print(f"{'metric':28} {'measured':>8} {'ceiling':>8}")
     for name, value in measured.items():
         ceiling = CEILINGS[name]
-        print(f"{name:28} {BASELINE[name]:>8} {value:>8} {ceiling:>8}")
+        print(f"{name:28} {value:>8} {ceiling:>8}")
         if value > ceiling:
             failures.append(f"{name}: {value} exceeds ceiling {ceiling}")
     if failures and not args.report:

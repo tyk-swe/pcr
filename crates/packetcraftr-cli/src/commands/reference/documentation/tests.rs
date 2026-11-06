@@ -199,7 +199,7 @@ fn publication_cancellation_reports_partial_progress() {
         files,
         |operation, path| {
             if operation == "publish" && path == second {
-                invocation.cancellation.cancel();
+                invocation.control.cancellation.cancel();
             }
             Ok(())
         },

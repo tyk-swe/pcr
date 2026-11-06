@@ -112,7 +112,7 @@ pub(crate) struct DnsCodec;
 
 impl Codec for DnsCodec {
     fn accepts_decoded_protocol(&self, protocol: &crate::layer::Id) -> bool {
-        matches!(protocol.as_str(), "dns" | "raw")
+        protocol == self.protocol_id() || protocol == &crate::layer::Raw::ID
     }
 
     fn protocol_id(&self) -> &'static crate::layer::Id {

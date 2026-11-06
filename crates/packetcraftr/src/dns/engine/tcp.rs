@@ -17,7 +17,7 @@ use crate::policy::Authorizer;
 use crate::target::ResolveTarget;
 use crate::target::{Family, Target};
 
-use super::super::error::{Error, EvidenceFault, attempt_error};
+use super::super::error::{Error, EvidenceFault};
 use super::super::evidence::{
     ClassifiedAttempt, classify_tcp_response, tcp_failure_evidence, tcp_timeout_evidence,
 };
@@ -141,12 +141,11 @@ where
             return Ok(false);
         }
         let target = Target::Address(probe.server_address);
-        let resolved = resolve_selected(
+        let resolved = resolve_selected::<_, Error>(
             self.authorizer,
             &target,
             Family::Any,
             self.execution.deadline(),
-            attempt_error,
         );
         self.execution.enforce(u64::from(probe.attempt))?;
         if attempt_deadline.check().is_err() {

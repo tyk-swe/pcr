@@ -9,7 +9,17 @@ pub const WORKER_CAPACITY: usize = 16;
 
 /// TCP jobs and established sockets share this data allocation. The remaining
 /// root slots admit eligible native control work while data is saturated.
-pub const TCP_DATA_CAPACITY: usize = WORKER_CAPACITY - WORKER_CAPACITY / 4;
+pub const TCP_DATA_CAPACITY: usize = data_capacity(WORKER_CAPACITY);
+
+pub(crate) const fn data_capacity(capacity: usize) -> usize {
+    let reserve = capacity / 4;
+    let reserve = if reserve == 0 && capacity > 1 {
+        1
+    } else {
+        reserve
+    };
+    capacity.saturating_sub(reserve)
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -69,4 +79,17 @@ pub fn execution_snapshot() -> NativeSnapshot {
 #[must_use]
 pub fn socket_snapshot() -> NativeSnapshot {
     crate::workers::shared().socket_snapshot()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn data_capacity_reserves_a_control_slot() {
+        assert_eq!(TCP_DATA_CAPACITY, 12);
+        assert_eq!(data_capacity(1), 1);
+        assert_eq!(data_capacity(2), 1);
+        assert_eq!(data_capacity(4), 3);
+    }
 }

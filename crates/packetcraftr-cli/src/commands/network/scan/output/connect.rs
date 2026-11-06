@@ -55,10 +55,10 @@ pub(crate) struct SocketError {
 #[derive(Clone, Debug, Serialize)]
 pub(crate) struct Probe {
     pub sequence: u64,
-    pub stage: super::Stage,
+    pub stage: crate::output::scan_failure::Stage,
     pub address: IpAddr,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub scope: Option<super::Scope>,
+    pub scope: Option<crate::output::scan_failure::Scope>,
     pub port: u16,
     pub attempt: u32,
     pub attempted: bool,
@@ -78,7 +78,10 @@ impl TryFrom<connect::ProbeEvidence> for Probe {
             sequence: probe.sequence,
             stage: probe.stage.into(),
             address: probe.endpoint.ip(),
-            scope: probe.scope.as_ref().map(super::Scope::from),
+            scope: probe
+                .scope
+                .as_ref()
+                .map(crate::output::scan_failure::Scope::from),
             port: probe.endpoint.port(),
             attempt: probe.attempt,
             attempted: probe.attempted,
@@ -101,7 +104,7 @@ impl TryFrom<connect::ProbeEvidence> for Probe {
 pub(crate) struct Endpoint {
     pub address: IpAddr,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub scope: Option<super::Scope>,
+    pub scope: Option<crate::output::scan_failure::Scope>,
     pub port: u16,
     /// The highest-ranked socket outcome.
     pub classification: Classification,
@@ -180,7 +183,10 @@ impl Report {
                 .map(|endpoint| {
                     Ok(Endpoint {
                         address: endpoint.address,
-                        scope: endpoint.scope.as_ref().map(super::Scope::from),
+                        scope: endpoint
+                            .scope
+                            .as_ref()
+                            .map(crate::output::scan_failure::Scope::from),
                         port: endpoint.port,
                         classification: endpoint.classification.into(),
                         port_hint: endpoint.port_hint,
@@ -224,7 +230,7 @@ pub(crate) struct EndpointEvent {
     method: &'static str,
     pub address: IpAddr,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub scope: Option<super::Scope>,
+    pub scope: Option<crate::output::scan_failure::Scope>,
     pub port: u16,
     pub classification: Classification,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -238,7 +244,10 @@ impl From<connect::Endpoint> for EndpointEvent {
         Self {
             method: "tcp_connect",
             address: endpoint.address,
-            scope: endpoint.scope.as_ref().map(super::Scope::from),
+            scope: endpoint
+                .scope
+                .as_ref()
+                .map(crate::output::scan_failure::Scope::from),
             port: endpoint.port,
             classification: endpoint.classification.into(),
             port_hint: endpoint.port_hint,

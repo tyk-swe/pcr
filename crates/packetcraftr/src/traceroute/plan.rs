@@ -8,7 +8,6 @@ use std::time::Duration;
 
 use super::Error;
 use super::Request;
-use super::error::probe_error;
 use crate::engine::execution::rate_delay;
 use crate::probe::{self, Batch, Transport};
 
@@ -122,8 +121,7 @@ pub(super) fn worst_case_duration(request: &Request) -> Result<Duration, Error> 
         limit: request.limits.max_duration,
     };
     let exchange = request.timeout.checked_mul(hops).ok_or_else(overflow)?;
-    let delay = rate_delay(
-        probe_error,
+    let delay = rate_delay::<Error>(
         "probes_per_second",
         usize::try_from(request.probes_per_hop).unwrap_or(usize::MAX),
         request.probes_per_second,

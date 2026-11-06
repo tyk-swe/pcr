@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use packetcraftr_core::protocol::{
+    BuiltinProtocol,
     application::dns::Dns,
     network::{Ipv4, Ipv6},
     transport::Udp,
@@ -16,10 +17,10 @@ use crate::engine::correlation::nonzero_ipv4_identification;
 use crate::engine::execution::rate_delay;
 use crate::policy::{DnsOperation, LimitOverflow, SocketLimits, WireLimits};
 
-use super::error::{Error, attempt_error};
+use super::error::Error;
 use super::request::QueryType;
 use super::tcp::LENGTH_PREFIX_BYTES;
-use super::{DEFAULT_SERVER_PORT, MAX_PROBE_OVERHEAD, Request, TransportMode};
+use super::{MAX_PROBE_OVERHEAD, Request, TransportMode};
 
 pub(super) struct OperationLimits {
     pub(super) packet_count: u64,
@@ -87,12 +88,7 @@ pub(super) fn operation_limits(
     } else {
         SocketLimits::new(0, 0, 0)
     };
-    let delay = rate_delay(
-        attempt_error,
-        "queries_per_second",
-        1,
-        request.queries_per_second,
-    )?;
+    let delay = rate_delay::<Error>("queries_per_second", 1, request.queries_per_second)?;
     let worst_case = worst_case_duration(request, delay)?;
     if worst_case > request.limits.max_duration {
         return Err(Error::DurationLimit {
@@ -203,12 +199,9 @@ impl Probe {
     }
 }
 
-/// Mirrors the UDP ports the default registry binds to `dns`, which strict
-/// build requires a `Dns` layer, not `Raw`, to carry.
-const UDP_DNS_PORTS: [u16; 3] = [DEFAULT_SERVER_PORT, 5353, 5355];
-
 pub(super) fn udp_dissects_as_dns(source_port: u16, destination_port: u16) -> bool {
-    UDP_DNS_PORTS.contains(&source_port) || UDP_DNS_PORTS.contains(&destination_port)
+    let ports = BuiltinProtocol::Dns.udp_ports();
+    ports.contains(&source_port) || ports.contains(&destination_port)
 }
 
 /// A retried query must not give an off-path spoofer a second chance at the same tuple.

@@ -33,6 +33,7 @@ jobs:
           python3 --version
           python3 -m compileall -q scripts examples/consumers
           python3 scripts/agent_skills.py --check
+          python3 scripts/check_documents.py
           python3 -m unittest discover -s scripts/tests -v
           python3 -O -m unittest discover -s scripts/tests -v
 

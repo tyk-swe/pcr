@@ -9,4 +9,3 @@ mod common;
 pub(crate) mod interface;
 pub(crate) mod route;
 pub(crate) mod transmit;
-pub(crate) mod udp;

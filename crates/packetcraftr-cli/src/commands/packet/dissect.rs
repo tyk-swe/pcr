@@ -26,7 +26,35 @@ use crate::rendering::{
     write_hex_line, write_raw, write_stdout_line, write_summary_line,
 };
 
+use crate::output::contract::PublishedType;
+
 impl crate::commands::Spec for Args {
+    const PUBLISHED: &'static [PublishedType] = &[
+        PublishedType {
+            definition: "dissectSuccess",
+            command: "dissect",
+            rust_types: &["crate::commands::packet::dissect::output::Report"],
+            events: &[],
+            example: "examples/documents/output-dissect-diagnostic-success.json",
+        },
+        PublishedType {
+            definition: "projectionAggregateSuccess",
+            command: "dissect",
+            rust_types: &["crate::output::projection::Report"],
+            events: &[],
+            example: "examples/documents/output-dissect-fields-success.json",
+        },
+        PublishedType {
+            definition: "projectionStreamSuccess",
+            command: "dissect",
+            rust_types: &[
+                "crate::output::projection::Complete",
+                "crate::output::projection::RowEvent",
+            ],
+            events: &["complete", "fields"],
+            example: "examples/documents/output-dissect-complete.json",
+        },
+    ];
     const FORMATS: &'static [crate::output::contract::Format] = &[
         crate::output::contract::Format::Text,
         crate::output::contract::Format::Json,
@@ -58,9 +86,7 @@ pub(super) fn run(
     format: Format,
     stream: &crate::invocation::StreamEncoder,
 ) -> Result<(), CliError> {
-    arguments
-        .tree
-        .validate_format(format == Format::Text, format)?;
+    arguments.tree.validate_format(format)?;
     let registry = arguments.decode.registry()?;
     if arguments.fields.is_empty() && matches!(format, Format::Ndjson) {
         return Err(crate::rendering::missing_fields_error());
@@ -91,18 +117,23 @@ pub(super) fn run(
     let hex_limit = hex_text_limit(max_packet_size);
     let bytes = match (arguments.hex, arguments.hex_file, arguments.file) {
         (Some(value), None, None) if value == "-" => hex_frame_bytes(
-            &read_stdin_bounded(invocation, hex_limit, InputKind::FrameHex)?,
+            &read_stdin_bounded(&invocation.control, hex_limit, InputKind::FrameHex)?,
             max_packet_size,
         )?,
         (Some(value), None, None) => hex_frame_bytes(value.as_bytes(), max_packet_size)?,
         (None, Some(path), None) => hex_frame_bytes(
-            &read_bounded_file(invocation, &path, hex_limit, InputKind::FrameHex)?,
+            &read_bounded_file(&invocation.control, &path, hex_limit, InputKind::FrameHex)?,
             max_packet_size,
         )?,
-        (None, None, Some(path)) => {
-            read_bounded_file(invocation, &path, max_packet_size, InputKind::Frame)?
+        (None, None, Some(path)) => read_bounded_file(
+            &invocation.control,
+            &path,
+            max_packet_size,
+            InputKind::Frame,
+        )?,
+        (None, None, None) => {
+            read_stdin_bounded(&invocation.control, max_packet_size, InputKind::Frame)?
         }
-        (None, None, None) => read_stdin_bounded(invocation, max_packet_size, InputKind::Frame)?,
         _ => unreachable!("clap enforces conflicts"),
     };
     let mut tree = arguments
@@ -119,7 +150,7 @@ pub(super) fn run(
     let context = core::filter::Context::frame(&decoded, 1);
     // The filter selects emission, not validity.
     let kept = match &filter {
-        Some(filter) => filtering::matches_decoded(filter, &context)?,
+        Some(filter) => filter.matches(&context).map_err(CliError::classified)?,
         None => true,
     };
     if let Some(mut projector) = projector {

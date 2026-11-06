@@ -60,7 +60,7 @@ crate::reflective_layer! {
 }
 message_codec!(Netflowv5Codec, Netflowv5, netflowv5_schema);
 
-const NAME: &str = "netflowv5";
+const NAME: &str = crate::protocol::BuiltinProtocol::Netflowv5.as_str();
 impl Netflowv5 {
     fn encode_wire(&self, c: &EncodeContext<'_>) -> Result<Vec<u8>, Error> {
         let mut w = Writer::new(NAME, c.remaining_packet_bytes);

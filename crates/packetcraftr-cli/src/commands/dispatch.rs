@@ -36,7 +36,7 @@ impl Launch<'_> {
     pub(super) fn generate(self, arguments: impl Generate) -> ExitCode {
         let invocation = crate::invocation::Invocation::new(
             self.format,
-            StreamEncoder::new(Command::Protocols, std::io::stdout()),
+            StreamEncoder::unattributed(std::io::stdout()),
             None,
             crate::cancellation::signal().clone(),
             None,
@@ -45,6 +45,7 @@ impl Launch<'_> {
             .and_then(|()| arguments.generate(&invocation, self.format))
             .and_then(|()| {
                 invocation
+                    .control
                     .cancellation
                     .check()
                     .map_err(CliError::classified)
@@ -146,6 +147,7 @@ impl Launch<'_> {
         match execute(&invocation, command, arguments) {
             Ok(exit) => {
                 if let Err(error) = invocation
+                    .control
                     .cancellation
                     .check()
                     .map_err(CliError::classified)
@@ -274,7 +276,7 @@ fn generation_exit(
 }
 
 fn failure_exit(invocation: &Invocation, error: &CliError) -> u8 {
-    if invocation.cancellation.is_cancelled() {
+    if invocation.control.cancellation.is_cancelled() {
         CANCELLED_EXIT_CODE
     } else {
         error.exit_code()

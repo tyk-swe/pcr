@@ -187,14 +187,18 @@ fn parse_range(text: &str) -> Result<NumericRange, CliError> {
     .map_err(CliError::classified)
 }
 
-fn parse_unsigned(text: &str) -> Option<u64> {
-    match text.strip_prefix("0x") {
-        Some(digits) if digits.bytes().all(|digit| digit.is_ascii_hexdigit()) => {
-            u64::from_str_radix(digits, 16).ok()
+/// A decimal or `0x`/`0X` hexadecimal unsigned value that fits `T`.
+pub(crate) fn parse_unsigned<T: TryFrom<u64>>(text: &str) -> Option<T> {
+    let value = match text.strip_prefix("0x").or_else(|| text.strip_prefix("0X")) {
+        Some(digits)
+            if !digits.is_empty() && digits.bytes().all(|digit| digit.is_ascii_hexdigit()) =>
+        {
+            u64::from_str_radix(digits, 16).ok()?
         }
-        Some(_) => None,
-        None => text.parse().ok(),
-    }
+        Some(_) => return None,
+        None => text.parse().ok()?,
+    };
+    T::try_from(value).ok()
 }
 
 impl ParsedTemplate {

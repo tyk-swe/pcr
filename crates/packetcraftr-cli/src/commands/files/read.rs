@@ -26,7 +26,38 @@ use crate::rendering::{FieldTree, finish_compressed_output};
 use capture_output::CaptureOutput;
 use selection::{Selection, prepare_decoding};
 
+use crate::output::contract::PublishedType;
+
 impl crate::commands::Spec for Args {
+    const PUBLISHED: &'static [PublishedType] = &[
+        PublishedType {
+            definition: "projectionAggregateSuccess",
+            command: "read",
+            rust_types: &["crate::output::projection::Report"],
+            events: &[],
+            example: "examples/documents/output-read-fields-success.json",
+        },
+        PublishedType {
+            definition: "readSuccess",
+            command: "read",
+            rust_types: &[
+                "crate::commands::files::read::output::Event",
+                "crate::commands::files::read::output::Frame",
+            ],
+            events: &["complete", "frame"],
+            example: "examples/documents/output-read-complete.json",
+        },
+        PublishedType {
+            definition: "projectionStreamSuccess",
+            command: "read",
+            rust_types: &[
+                "crate::output::projection::Complete",
+                "crate::output::projection::RowEvent",
+            ],
+            events: &["complete", "fields"],
+            example: "examples/documents/output-read-fields-complete.json",
+        },
+    ];
     const FORMATS: &'static [crate::output::contract::Format] = &[
         crate::output::contract::Format::Text,
         crate::output::contract::Format::Json,
@@ -96,7 +127,7 @@ pub(super) fn run(
             Vec::new(),
         ));
     }
-    tree.validate_format(format == Format::Text, format)?;
+    tree.validate_format(format)?;
     let capture_output = CaptureOutput::resolve(normalize, format)?;
     let registry = decode.registry()?;
     let decoding = prepare_decoding(
@@ -108,7 +139,7 @@ pub(super) fn run(
     let mut tree = tree
         .tree
         .then(|| FieldTree::new(Arc::clone(&registry), tree.max_tree_bytes));
-    let mut reader = open_capture(invocation, &path, limits)?;
+    let mut reader = open_capture(&invocation.control, &invocation.output, &path, limits)?;
     let selection = Selection {
         bounds,
         frames: &selection,

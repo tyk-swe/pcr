@@ -23,35 +23,7 @@ pub(crate) enum Failure {
     StatsOverflow(crate::StatsOverflow),
 }
 
-/// Maps a shared [`Failure`] onto a workflow whose `Error` has the common shape.
-/// Expands where `Error` and `WORKFLOW` are in scope.
-macro_rules! workflow_probe_error {
-    () => {
-        pub(crate) fn probe_error(sequence: u64, failure: crate::error::Failure) -> Error {
-            match failure {
-                crate::error::Failure::InvalidLimit {
-                    field,
-                    value,
-                    reason,
-                } => Error::InvalidLimit {
-                    field,
-                    value,
-                    reason,
-                },
-                crate::error::Failure::Authorization(source) => Error::Authorization(source),
-                crate::error::Failure::DurationLimit(source) => source.into(),
-                crate::error::Failure::Interrupted(source) => source.into(),
-                crate::error::Failure::Clock(source) => Error::Clock { sequence, source },
-                crate::error::Failure::Execution(source) => Error::Execution { sequence, source },
-                crate::error::Failure::InvalidEvidence(source) => Error::InvalidEvidence {
-                    sequence,
-                    message: WORKFLOW.describe_evidence(&source),
-                },
-                crate::error::Failure::StatsOverflow(_source) => {
-                    Error::StatisticsOverflow { sequence }
-                }
-            }
-        }
-    };
+/// A workflow error that can absorb a shared [`Failure`] at a probe coordinate.
+pub(crate) trait FromFailure: Sized {
+    fn from_failure(sequence: u64, failure: Failure) -> Self;
 }
-pub(crate) use workflow_probe_error;

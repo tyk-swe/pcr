@@ -60,7 +60,7 @@ crate::reflective_layer! {
 }
 message_codec!(RtpCodec, Rtp, rtp_schema);
 
-const NAME: &str = "rtp";
+const NAME: &str = crate::protocol::BuiltinProtocol::Rtp.as_str();
 impl Rtp {
     fn encode_wire(&self, c: &EncodeContext<'_>) -> Result<Vec<u8>, Error> {
         if self.payload_type > 127 || self.csrcs.0.len() > 15 {

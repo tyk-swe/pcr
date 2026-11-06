@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::{Pool, SocketPermit, Waited};
+use super::{Blocked, Pool, SocketPermit, Waited};
 use packetcraftr_core::budget::Deadline;
 use std::{
     sync::{Arc, mpsc},
@@ -94,6 +94,35 @@ fn cancelled_work_remains_charged_until_completion() {
     release.send(()).unwrap();
     wait(task);
     assert!(pool.admit().is_ok());
+    assert_eq!(pool.snapshot().cleanup_retaining_capacity, 0);
+}
+
+#[test]
+fn abandoned_blocking_call_stays_charged_until_the_work_returns() {
+    let pool = Arc::new(Pool::new(1));
+    let (release, held) = mpsc::sync_channel(1);
+    let blocked = pool
+        .admit()
+        .unwrap()
+        .call(&Deadline::new(Duration::from_millis(50)), move || {
+            held.recv().unwrap();
+        })
+        .unwrap();
+    assert!(matches!(blocked, Blocked::Pending));
+    assert_eq!(pool.snapshot().cleanup_retaining_capacity, 1);
+    assert!(pool.admit().is_err());
+
+    release.send(()).unwrap();
+    let permit = loop {
+        match pool.admit() {
+            Ok(permit) => break permit,
+            Err(_) => std::thread::sleep(Duration::from_millis(5)),
+        }
+    };
+    let finished = permit
+        .call(&Deadline::new(Duration::from_secs(5)), || 42)
+        .unwrap();
+    assert!(matches!(finished, Blocked::Finished(42)));
     assert_eq!(pool.snapshot().cleanup_retaining_capacity, 0);
 }
 

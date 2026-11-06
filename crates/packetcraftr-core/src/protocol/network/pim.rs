@@ -47,7 +47,7 @@ crate::reflective_layer! {
 }
 message_codec!(PimCodec, Pim, pim_schema);
 
-const NAME: &str = "pim";
+const NAME: &str = crate::protocol::BuiltinProtocol::Pim.as_str();
 impl Pim {
     fn encode_wire(&self, c: &EncodeContext<'_>) -> Result<Vec<u8>, Error> {
         if !matches!(self.message_type, 0 | 3) {

@@ -15,6 +15,14 @@ pub(crate) enum Error {
     BufferLimit { limit: usize },
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Progress {
+    Incomplete,
+    /// Stream bytes that are not a message, such as a SIP CRLF keepalive.
+    Skip(usize),
+    Message(usize),
+}
+
 #[derive(Default)]
 struct Resp {
     pos: usize,
@@ -42,7 +50,7 @@ impl Framer {
             resp: Resp::default(),
         }
     }
-    pub(crate) fn progress(&mut self, b: &[u8], maximum: usize) -> Result<Option<usize>, Error> {
+    pub(crate) fn progress(&mut self, b: &[u8], maximum: usize) -> Result<Progress, Error> {
         let n = self.name;
         if let Some(end) = self.expected {
             return Self::ready(b, end, maximum);
@@ -50,7 +58,7 @@ impl Framer {
         let len = match self.kind {
             Framing::Control => {
                 if b.len() < 4 {
-                    return Ok(None);
+                    return Ok(Progress::Incomplete);
                 }
                 let len = usize::from(u16::from_be_bytes([b[2], b[3]]));
                 if len < 4 {
@@ -60,7 +68,7 @@ impl Framer {
             }
             Framing::Lacp => {
                 let Some(&subtype) = b.first() else {
-                    return Ok(None);
+                    return Ok(Progress::Incomplete);
                 };
                 if subtype != 1 || b.get(1).is_some_and(|version| *version != 1) {
                     return Err(unsupported(
@@ -73,7 +81,7 @@ impl Framer {
             }
             Framing::Mqtt => {
                 if b.len() < 2 {
-                    return Ok(None);
+                    return Ok(Progress::Incomplete);
                 }
                 // Remaining Length is shared by MQTT versions. Packet-type
                 // validation belongs to the selected version's decoder.
@@ -81,7 +89,7 @@ impl Framer {
                 let mut end = None;
                 for i in 0..4 {
                     let Some(&v) = b.get(i + 1) else {
-                        return Ok(None);
+                        return Ok(Progress::Incomplete);
                     };
                     length += usize::from(v & 127) << (7 * i);
                     if v & 128 == 0 {
@@ -94,10 +102,12 @@ impl Framer {
                 }
                 end.ok_or_else(|| invalid(n, "remaining length exceeds four bytes"))?
             }
-            Framing::Amqp if b.starts_with(b"AMQP") => 8,
+            Framing::Amqp if b.starts_with(&crate::protocol::application::amqp::PREFACE[..4]) => {
+                crate::protocol::application::amqp::PREFACE.len()
+            }
             Framing::Amqp => {
                 if b.len() < 7 {
-                    return Ok(None);
+                    return Ok(Progress::Incomplete);
                 }
                 usize::try_from(u32::from_be_bytes(b[3..7].try_into().unwrap()))
                     .map_err(|_| invalid(n, "length overflow"))?
@@ -106,7 +116,7 @@ impl Framer {
             }
             Framing::Bgp => {
                 if b.len() < 19 {
-                    return Ok(None);
+                    return Ok(Progress::Incomplete);
                 }
                 let l = usize::from(u16::from_be_bytes([b[16], b[17]]));
                 if !(19..=4096).contains(&l) {
@@ -116,13 +126,22 @@ impl Framer {
             }
             Framing::Ber => match ber_length(b, n)? {
                 Some(v) => v,
-                None => return Ok(None),
+                None => return Ok(Progress::Incomplete),
             },
-            Framing::Resp => return self.resp.progress(b, maximum),
+            Framing::Resp => {
+                return Ok(match self.resp.progress(b, maximum, n)? {
+                    Some(len) => Progress::Message(len),
+                    None => Progress::Incomplete,
+                });
+            }
             Framing::Sip | Framing::Rtsp => {
+                // Stream-level SIP keepalives are not messages.
+                if self.kind == Framing::Sip && b.starts_with(b"\r\n") {
+                    return Ok(Progress::Skip(2));
+                }
                 if self.kind == Framing::Rtsp && b.first() == Some(&b'$') {
                     if b.len() < 4 {
-                        return Ok(None);
+                        return Ok(Progress::Incomplete);
                     }
                     4 + usize::from(u16::from_be_bytes([b[2], b[3]]))
                 } else {
@@ -132,7 +151,7 @@ impl Framer {
                         if b.len() > 65536 {
                             return Err(invalid(n, "header exceeds 65536 bytes").into());
                         }
-                        return Ok(None);
+                        return Ok(Progress::Incomplete);
                     };
                     let end = start + offset + 4;
                     let length = super::application::text_message::content_length(n, &b[..end])?;
@@ -149,7 +168,7 @@ impl Framer {
                     return Err(unsupported(n, "not Memcached binary framing").into());
                 }
                 if b.len() < 24 {
-                    return Ok(None);
+                    return Ok(Progress::Incomplete);
                 }
                 if !matches!(b[0], 0x80 | 0x81) {
                     return Err(unsupported(n, "not Memcached binary framing").into());
@@ -160,7 +179,7 @@ impl Framer {
             }
             Framing::Ipfix => {
                 if b.len() < 4 {
-                    return Ok(None);
+                    return Ok(Progress::Incomplete);
                 }
                 let l = usize::from(u16::from_be_bytes([b[2], b[3]]));
                 if l < 16 {
@@ -170,7 +189,7 @@ impl Framer {
             }
             Framing::Radius => {
                 if b.len() < 4 {
-                    return Ok(None);
+                    return Ok(Progress::Incomplete);
                 }
                 let len = usize::from(u16::from_be_bytes([b[2], b[3]]));
                 if !(20..=4096).contains(&len) {
@@ -180,13 +199,13 @@ impl Framer {
             }
             Framing::Stun => {
                 if b.len() < 20 {
-                    return Ok(None);
+                    return Ok(Progress::Incomplete);
                 }
                 20 + usize::from(u16::from_be_bytes([b[2], b[3]]))
             }
             Framing::ModbusTcp => {
                 if b.len() < 7 {
-                    return Ok(None);
+                    return Ok(Progress::Incomplete);
                 }
                 let l = usize::from(u16::from_be_bytes([b[4], b[5]]));
                 if !(2..=254).contains(&l) {
@@ -196,7 +215,7 @@ impl Framer {
             }
             Framing::Dnp3 => {
                 if b.len() < 3 {
-                    return Ok(None);
+                    return Ok(Progress::Incomplete);
                 }
                 if b[..2] != [5, 100] || b[2] < 5 {
                     return Err(invalid(n, "invalid DNP3 link prefix").into());
@@ -206,13 +225,13 @@ impl Framer {
             }
             Framing::EthernetIp => {
                 if b.len() < 24 {
-                    return Ok(None);
+                    return Ok(Progress::Incomplete);
                 }
                 24 + usize::from(u16::from_le_bytes([b[2], b[3]]))
             }
             Framing::Iec104 => {
                 if b.len() < 2 {
-                    return Ok(None);
+                    return Ok(Progress::Incomplete);
                 }
                 if b[0] != 0x68 || !(4..=253).contains(&b[1]) {
                     return Err(invalid(n, "invalid APDU length").into());
@@ -221,7 +240,7 @@ impl Framer {
             }
             Framing::OpcuaTcp => {
                 if b.len() < 8 {
-                    return Ok(None);
+                    return Ok(Progress::Incomplete);
                 }
                 let l = u32::from_le_bytes(b[4..8].try_into().unwrap()) as usize;
                 if l < 8 {
@@ -229,16 +248,20 @@ impl Framer {
                 }
                 l
             }
-            Framing::Datagram => return Ok(Some(b.len())),
+            Framing::Datagram => return Ok(Progress::Message(b.len())),
         };
         self.expected = Some(len);
         Self::ready(b, len, maximum)
     }
-    fn ready(b: &[u8], len: usize, max: usize) -> Result<Option<usize>, Error> {
+    fn ready(b: &[u8], len: usize, max: usize) -> Result<Progress, Error> {
         if len > max {
             return Err(Error::BufferLimit { limit: max });
         }
-        Ok((b.len() >= len).then_some(len))
+        Ok(if b.len() >= len {
+            Progress::Message(len)
+        } else {
+            Progress::Incomplete
+        })
     }
 }
 
@@ -251,13 +274,17 @@ pub(crate) fn packet_length(
     if kind == Framing::Sip && parent == Some(BuiltinProtocol::Udp.id()) {
         return super::application::text_message::datagram_length(name, b);
     }
-    Framer::new(kind, name)
+    match Framer::new(kind, name)
         .progress(b, usize::MAX)
         .map_err(|error| match error {
             Error::Codec(error) => error,
             Error::BufferLimit { .. } => invalid(name, "message exceeds framing byte budget"),
-        })?
-        .ok_or_else(|| truncated(name, b.len().saturating_add(1), b.len()))
+        })? {
+        Progress::Message(len) => Ok(len),
+        Progress::Incomplete | Progress::Skip(_) => {
+            Err(truncated(name, b.len().saturating_add(1), b.len()))
+        }
+    }
 }
 
 pub(crate) fn ber_length(b: &[u8], name: &'static str) -> Result<Option<usize>, CodecError> {
@@ -304,7 +331,12 @@ impl Resp {
         }
         true
     }
-    fn progress(&mut self, b: &[u8], max: usize) -> Result<Option<usize>, Error> {
+    fn progress(
+        &mut self,
+        b: &[u8],
+        max: usize,
+        name: &'static str,
+    ) -> Result<Option<usize>, Error> {
         loop {
             if let Some(end) = self.bulk_end {
                 if end > max {
@@ -314,7 +346,7 @@ impl Resp {
                     return Ok(None);
                 }
                 if b[end - 2..end] != *b"\r\n" {
-                    return Err(invalid("resp", "bulk string lacks CRLF").into());
+                    return Err(invalid(name, "bulk string lacks CRLF").into());
                 }
                 self.pos = end;
                 self.scan = end;
@@ -327,7 +359,7 @@ impl Resp {
                 return Ok(None);
             };
             if !matches!(kind, b'+' | b'-' | b':' | b'$' | b'*') {
-                return Err(unsupported("resp", "not RESP2 framing").into());
+                return Err(unsupported(name, "not RESP2 framing").into());
             }
             let start = self.scan.max(self.pos + 1);
             let Some(i) = b[start..].windows(2).position(|s| s == b"\r\n") else {
@@ -340,32 +372,32 @@ impl Resp {
             self.scan = self.pos;
             self.nodes += 1;
             if self.remaining.len() >= super::message::MAX_NESTING {
-                return Err(invalid("resp", "value exceeds nesting limit").into());
+                return Err(invalid(name, "value exceeds nesting limit").into());
             }
             if self.nodes > super::message::MAX_RECORDS {
-                return Err(invalid("resp", "too many values").into());
+                return Err(invalid(name, "too many values").into());
             }
             if matches!(kind, b'$' | b'*') {
                 let text =
-                    std::str::from_utf8(value).map_err(|_| invalid("resp", "invalid length"))?;
+                    std::str::from_utf8(value).map_err(|_| invalid(name, "invalid length"))?;
                 let count = text
                     .parse::<i64>()
-                    .map_err(|_| invalid("resp", "invalid length"))?;
+                    .map_err(|_| invalid(name, "invalid length"))?;
                 if count.to_string().as_bytes() != value {
-                    return Err(unsupported("resp", "noncanonical number").into());
+                    return Err(unsupported(name, "noncanonical number").into());
                 }
                 if count < -1 {
-                    return Err(invalid("resp", "invalid negative length").into());
+                    return Err(invalid(name, "invalid negative length").into());
                 }
                 if count >= 0 && kind == b'$' {
                     self.bulk_end = Some(
                         self.pos
                             .checked_add(
                                 usize::try_from(count)
-                                    .map_err(|_| invalid("resp", "length overflow"))?,
+                                    .map_err(|_| invalid(name, "length overflow"))?,
                             )
                             .and_then(|v| v.checked_add(2))
-                            .ok_or_else(|| invalid("resp", "length overflow"))?,
+                            .ok_or_else(|| invalid(name, "length overflow"))?,
                     );
                     continue;
                 }
@@ -373,7 +405,7 @@ impl Resp {
                     if self.remaining.len() >= super::message::MAX_NESTING
                         || count as u64 > super::message::MAX_RECORDS as u64
                     {
-                        return Err(invalid("resp", "array exceeds nesting/item limit").into());
+                        return Err(invalid(name, "array exceeds nesting/item limit").into());
                     }
                     self.remaining.push(count as usize);
                     continue;
@@ -382,9 +414,9 @@ impl Resp {
                 let number = std::str::from_utf8(value)
                     .ok()
                     .and_then(|v| v.parse::<i64>().ok())
-                    .ok_or_else(|| invalid("resp", "invalid integer"))?;
+                    .ok_or_else(|| invalid(name, "invalid integer"))?;
                 if number.to_string().as_bytes() != value {
-                    return Err(unsupported("resp", "noncanonical number").into());
+                    return Err(unsupported(name, "noncanonical number").into());
                 }
             }
             if self.done() {

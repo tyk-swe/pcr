@@ -44,7 +44,7 @@ crate::reflective_layer! {
 }
 message_codec!(CdpCodec, Cdp, cdp_schema);
 
-const NAME: &str = "cdp";
+const NAME: &str = crate::protocol::BuiltinProtocol::Cdp.as_str();
 impl Cdp {
     fn encode_wire(&self, c: &EncodeContext<'_>) -> Result<Vec<u8>, Error> {
         if !matches!(self.version, 1 | 2) {

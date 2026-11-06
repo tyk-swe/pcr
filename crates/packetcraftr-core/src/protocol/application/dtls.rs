@@ -38,7 +38,7 @@ crate::reflective_layer! {
 }
 message_codec!(DtlsCodec, Dtls, dtls_schema);
 
-const NAME: &str = "dtls";
+const NAME: &str = crate::protocol::BuiltinProtocol::Dtls.as_str();
 fn u24(r: &mut Reader<'_>) -> Result<u32, Error> {
     let b = r.take(3)?;
     Ok(u32::from_be_bytes([0, b[0], b[1], b[2]]))

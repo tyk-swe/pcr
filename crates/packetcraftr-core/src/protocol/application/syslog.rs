@@ -440,7 +440,7 @@ impl Codec for SyslogCodec {
     }
 
     fn accepts_decoded_protocol(&self, protocol: &crate::layer::Id) -> bool {
-        matches!(protocol.as_str(), "syslog" | "raw")
+        protocol == self.protocol_id() || protocol == &crate::layer::Raw::ID
     }
 
     fn encode(

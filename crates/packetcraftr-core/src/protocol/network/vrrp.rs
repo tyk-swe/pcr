@@ -252,7 +252,7 @@ impl Codec for VrrpCodec {
     }
 
     fn accepts_decoded_protocol(&self, protocol: &crate::layer::Id) -> bool {
-        matches!(protocol.as_str(), "vrrp" | "raw")
+        protocol == self.protocol_id() || protocol == &crate::layer::Raw::ID
     }
 
     fn encode(

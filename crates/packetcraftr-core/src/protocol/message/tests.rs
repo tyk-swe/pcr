@@ -56,6 +56,7 @@ fn round_trip_inner(name: &str, wire: &[u8], ipv6: bool) {
         })
         .unwrap_or_default();
     let context = EncodeContext {
+        registry: &registry,
         addresses: &addresses,
         mode: Mode::Strict,
         child: None,
@@ -653,6 +654,27 @@ fn udp_build_respects_registry_bindings() {
 }
 
 #[test]
+fn sip_framing_skips_stream_keepalives() {
+    let mut framer = crate::protocol::framing::Framer::new(crate::codec::Framing::Sip, "sip");
+    assert_eq!(
+        framer
+            .progress(b"\r\nOPTIONS sip:service SIP/2.0\r\n", 65536)
+            .unwrap(),
+        crate::protocol::framing::Progress::Skip(2)
+    );
+    let mut framer = crate::protocol::framing::Framer::new(crate::codec::Framing::Sip, "sip");
+    assert_eq!(
+        framer.progress(b"\r", 65536).unwrap(),
+        crate::protocol::framing::Progress::Incomplete
+    );
+    let mut framer = crate::protocol::framing::Framer::new(crate::codec::Framing::Rtsp, "rtsp");
+    assert_ne!(
+        framer.progress(b"\r\n", 65536).unwrap(),
+        crate::protocol::framing::Progress::Skip(2)
+    );
+}
+
+#[test]
 fn sip_tcp_still_requires_content_length() {
     let mut framer = crate::protocol::framing::Framer::new(crate::codec::Framing::Sip, "sip");
     assert!(
@@ -711,6 +733,7 @@ fn ospfv2_preserves_authentication_digest() {
             packet.layer(0).unwrap(),
             &[],
             &EncodeContext {
+                registry: &registry,
                 addresses: &addresses,
                 mode: Mode::Strict,
                 child: None,
@@ -1151,11 +1174,11 @@ fn folded_sip_rtsp_headers_preserve_framing() {
             );
             assert_eq!(
                 framer.progress(&wire.as_bytes()[..split], 65536).unwrap(),
-                None
+                crate::protocol::framing::Progress::Incomplete
             );
             assert_eq!(
                 framer.progress(wire.as_bytes(), 65536).unwrap(),
-                Some(wire.len())
+                crate::protocol::framing::Progress::Message(wire.len())
             );
         }
         let registry = builtin::registry();
@@ -1776,7 +1799,7 @@ fn resp_framing_matches_decoder_depth() {
             Framer::new(crate::codec::Framing::Resp, "resp")
                 .progress(wire, 4096)
                 .unwrap(),
-            Some(wire.len())
+            crate::protocol::framing::Progress::Message(wire.len())
         );
     }
 }

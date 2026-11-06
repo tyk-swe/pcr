@@ -12,7 +12,7 @@ use super::Prober;
 use crate::probe::Stage;
 use crate::probe::{self, enforce_deadline};
 use crate::scan::Error;
-use crate::scan::error::{duration_limit, probe_error};
+use crate::scan::error::duration_limit;
 use crate::scan::evidence::ProbeClassifier;
 use crate::scan::executor::{PipelineEvent, PipelineOptions, Pipelined};
 use crate::scan::plan::packet::sent_probe_matches;
@@ -74,7 +74,7 @@ where
     if plan.targets.is_empty() || plan.endpoints.is_empty() {
         return Ok(crate::Stats::default());
     }
-    enforce_deadline(probe_error, prober.deadline)?;
+    enforce_deadline::<Error>(prober.deadline)?;
     if !plan.uses_pipeline(request) {
         let probes = run_batches(
             plan.batches(request),
@@ -211,6 +211,7 @@ where
     let mut peak_pending = 0usize;
     let mut sent_bytes = 0u64;
     let settings = pipeline_options(request, deadline, preceding, 0)?;
+    let registry = evidence.classifier_mut().registry;
     let result = executor.execute_pipeline(batches, settings, &mut |event| {
         let invalid = |index| {
             packetcraftr_core::error::BoundaryError::from_error(Error::InvalidEvidence {
@@ -222,7 +223,7 @@ where
             PipelineEvent::Sent { index, sent } => {
                 let batch = batches.get(index).ok_or_else(|| invalid(index))?;
                 let probe = batch.probe()?;
-                if confirmed[index] || !sent_probe_matches(probe, &sent.built().packet) {
+                if confirmed[index] || !sent_probe_matches(registry, probe, &sent.built().packet) {
                     return Err(invalid(index));
                 }
                 confirmed[index] = true;
@@ -342,6 +343,6 @@ where
                 .to_owned(),
         });
     }
-    enforce_deadline(probe_error, deadline)?;
+    enforce_deadline::<Error>(deadline)?;
     Ok((outcome.stats, outcome.peak_pending))
 }

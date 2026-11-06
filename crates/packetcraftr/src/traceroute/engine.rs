@@ -21,10 +21,10 @@ use crate::{Client, Sink};
 use super::Error;
 use super::MAX_PROBE_BYTES;
 use super::WORKFLOW;
-use super::error::probe_error;
 use super::evidence::ProbeClassifier;
 use super::plan::{build_batches, probe_target, worst_case_duration};
 use super::{Event, Probe, Report, Request, Termination};
+use crate::error::FromFailure as _;
 use crate::probe::enforce_deadline;
 
 impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
@@ -54,7 +54,7 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
         let publish = publisher(
             &operation.runtime,
             sink,
-            |error| (probe_error)(0_u64, crate::error::Failure::DurationLimit(error)),
+            |error| Error::from_failure(0_u64, crate::error::Failure::DurationLimit(error)),
             |source| Error::Output { source },
         )?;
         let send = crate::traceroute::request::send_options(&request.route);
@@ -85,13 +85,12 @@ where
     C: Clock,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
-    enforce_deadline(probe_error, deadline)?;
+    enforce_deadline::<Error>(deadline)?;
     let approved = approve_traceroute(request, authorizer, deadline)?;
     let mut batches = build_batches(request, approved.destination)?;
-    enforce_deadline(probe_error, deadline)?;
+    enforce_deadline::<Error>(deadline)?;
     let mut evidence = BatchEvidence::new_with_retention_limits(
         WORKFLOW,
-        probe_error,
         request.limits.evidence,
         request.limits.evidence,
         ProbeClassifier {
@@ -140,7 +139,6 @@ fn approve_traceroute<A: Authorizer + ResolveTarget>(
     let (selected, _) = admit_operation(
         authorizer,
         deadline,
-        probe_error,
         &request.target,
         FamilyGate::new(request.address_family, Error::family),
         |selected| {
@@ -187,14 +185,10 @@ fn approve_traceroute<A: Authorizer + ResolveTarget>(
 }
 
 fn validate_probe_plan(request: &Request, total_probes: usize) -> Result<(), Error> {
-    check_probe_count(probe_error, total_probes, request.limits.max_probes)?;
+    check_probe_count::<Error>(total_probes, request.limits.max_probes)?;
     probe_target(
         request,
         u64::try_from(total_probes.saturating_sub(1)).unwrap_or(u64::MAX),
     )?;
-    check_probe_duration(
-        probe_error,
-        worst_case_duration(request)?,
-        request.limits.max_duration,
-    )
+    check_probe_duration(worst_case_duration(request)?, request.limits.max_duration)
 }

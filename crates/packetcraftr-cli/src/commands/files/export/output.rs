@@ -1,9 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-use crate::commands::analyze::dns::output::provenance::Source;
 use crate::commands::offline_analysis::output::reassembly::DatagramKey;
 use crate::commands::offline_analysis::output::{Scope, StreamRef};
 use crate::output::contract::Error;
+use crate::output::frame::Source;
 use packetcraftr_core::analysis::export::Plan;
 use packetcraftr_core::capture_file;
 use serde::Serialize;

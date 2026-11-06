@@ -68,8 +68,7 @@ impl<P: PacketProviders, K: Clock> Runner for ClientRunner<'_, P, K> {
         grant: Grant,
         spent: &Stats,
     ) -> Result<Evidence, BoundaryError> {
-        let mut operation = self.operation.clone();
-        operation.spent = spent.clone();
+        let operation = self.operation.clone().with_spent(spent.clone());
         let mut matcher = |_: usize, sent: &Packet, received: &DecodedPacket| {
             packet::classify(&operation.registry, self.strategy, sent, received).is_some()
         };
@@ -96,8 +95,7 @@ impl<P: PacketProviders, K: Clock> Runner for ClientRunner<'_, P, K> {
             return Ok(Stats::default());
         }
         let started = self.client.clock.now();
-        let mut operation = self.operation.clone();
-        operation.spent = spent.clone();
+        let operation = self.operation.clone().with_spent(spent.clone());
         let mut stream = self
             .client
             .streaming_in(&self.send, resets.len() as u64, &operation)

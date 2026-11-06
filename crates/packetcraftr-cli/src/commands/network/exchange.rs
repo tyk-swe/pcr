@@ -15,7 +15,33 @@ use crate::errors::CliError;
 use crate::invocation::StreamEncoder;
 use crate::system::{Prepared, placeholder, prepare_live};
 
+use crate::output::contract::PublishedType;
+
 impl crate::commands::Spec for Args {
+    const PUBLISHED: &'static [PublishedType] = &[
+        PublishedType {
+            definition: "exchangeSuccess",
+            command: "exchange",
+            rust_types: &["crate::commands::network::exchange::output::Report"],
+            events: &[],
+            example: "examples/documents/output-exchange-success.json",
+        },
+        PublishedType {
+            definition: "exchangeStreamSuccess",
+            command: "exchange",
+            rust_types: &["crate::commands::network::exchange::output::Event"],
+            events: &[
+                "complete",
+                "diagnostic",
+                "response",
+                "sent",
+                "unanswered",
+                "undecoded",
+                "unsolicited",
+            ],
+            example: "examples/documents/output-exchange-complete.json",
+        },
+    ];
     const FORMATS: &'static [crate::output::contract::Format] = &[
         crate::output::contract::Format::Text,
         crate::output::contract::Format::Json,

@@ -19,11 +19,10 @@
 //! | 6. Commands | `commands`: implementations by `--help` group, each with its own published `output` types, plus the registry and dispatch |
 //! | 7. Application shell | `app`: process entry, argument parsing, and help |
 //!
-//! Three upward edges are deliberate. `output::contract::Command` is generated
+//! Two upward edges are deliberate. `output::contract::Command` is generated
 //! by the command registry, so published identifiers and the parser come from
-//! one declaration. `output::DifferentialReport` lets integration tests build a
-//! campaign fixture from the published type. `commands::reference` reads
-//! `app::cli` because it documents the application itself.
+//! one declaration. `commands::reference` reads `app::cli` because it
+//! documents the application itself.
 //!
 //! Unit tests stay beside the implementations they exercise.
 #![forbid(unsafe_code)]

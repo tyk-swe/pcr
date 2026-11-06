@@ -1,12 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::fmt::Display;
-
 use clap::Args;
 use packetcraftr_core::error::{Classification, Kind};
 
 use crate::errors::CliError;
+use crate::output::contract::Format;
 
 /// Text field-tree view of dissected layers.
 #[derive(Clone, Copy, Debug, Args)]
@@ -25,8 +24,8 @@ impl TreeArgs {
     }
 
     /// The tree is human text, so machine and byte formats refuse it.
-    pub(crate) fn validate_format(&self, text: bool, format: impl Display) -> Result<(), CliError> {
-        if self.tree && !text {
+    pub(crate) fn validate_format(&self, format: Format) -> Result<(), CliError> {
+        if self.tree && format != Format::Text {
             return Err(CliError::from_classification(
                 Classification::new(
                     packetcraftr_core::error::Code::CliTreeUnsupportedFormat,

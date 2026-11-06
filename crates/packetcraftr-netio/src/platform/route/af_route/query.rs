@@ -131,13 +131,6 @@ fn route_timeout(operation: &'static str) -> route::Error {
     route::Error::DeadlineExceeded { operation }
 }
 
-fn timed_out(error: &std::io::Error) -> bool {
-    matches!(
-        error.kind(),
-        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
-    )
-}
-
 fn build_route_request(
     destination: IpAddr,
     interface_index: Option<u32>,
@@ -229,7 +222,7 @@ fn route_write_error(destination: IpAddr, error: std::io::Error) -> route::Error
     if matches!(error.raw_os_error(), Some(libc::ESRCH | libc::ENETUNREACH)) {
         return route::Error::RouteNotFound { destination };
     }
-    if timed_out(&error) {
+    if crate::bounded::timed_out(&error) {
         return route_timeout("writing the RTM_GET request");
     }
     os_error("write RTM_GET", error)
@@ -252,7 +245,7 @@ fn read_route_response(
         let mut response = [MaybeUninit::<u8>::uninit(); 4096];
         let length = match socket.recv(&mut response) {
             Ok(length) => length,
-            Err(error) if timed_out(&error) => {
+            Err(error) if crate::bounded::timed_out(&error) => {
                 caller.check_cancelled()?;
                 continue;
             }

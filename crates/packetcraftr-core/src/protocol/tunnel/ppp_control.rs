@@ -40,13 +40,13 @@ impl sealed::Sealed for Ipcp {}
 impl sealed::Sealed for Ipv6cp {}
 
 impl ControlProtocol for Lcp {
-    const NAME: &'static str = "ppp_lcp";
+    const NAME: &'static str = crate::protocol::BuiltinProtocol::PppLcp.as_str();
 }
 impl ControlProtocol for Ipcp {
-    const NAME: &'static str = "ppp_ipcp";
+    const NAME: &'static str = crate::protocol::BuiltinProtocol::PppIpcp.as_str();
 }
 impl ControlProtocol for Ipv6cp {
-    const NAME: &'static str = "ppp_ipv6cp";
+    const NAME: &'static str = crate::protocol::BuiltinProtocol::PppIpv6cp.as_str();
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

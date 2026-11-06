@@ -11,7 +11,7 @@ use packetcraftr_core::budget::Deadline;
 use packetcraftr_netio::interface::Id as InterfaceId;
 
 use super::approval::{SelectedTargets, approve_operation, resolve_selected};
-use crate::error::Failure;
+use crate::error::{Failure, FromFailure};
 use crate::policy::{Authorizer, Operation};
 use crate::target::{
     Family, MAX_CANDIDATES, ResolveTarget, SelectedAddress, Selection, SelectionError,
@@ -67,10 +67,9 @@ pub(crate) struct DeclaredTargets<'a, E> {
 /// Admits one declared target for a live operation: authorized resolution,
 /// the empty/family gate, the workflow's budget plan over the admitted
 /// addresses, then [`approve_operation`].
-pub(crate) fn admit_operation<A, E, P, Plan, Build>(
+pub(crate) fn admit_operation<A, E: FromFailure, P, Plan, Build>(
     authorizer: &mut A,
     deadline: &Deadline,
-    gates: fn(u64, Failure) -> E,
     target: &Target,
     family: FamilyGate<E>,
     plan: Plan,
@@ -81,18 +80,15 @@ where
     Plan: FnOnce(&SelectedTargets) -> Result<P, E>,
     Build: for<'a> FnOnce(&'a P) -> Result<Operation<'a>, E>,
 {
-    let selected = resolve_selected(authorizer, target, family.family(), deadline, gates)?;
-    admit_selected(
-        authorizer, deadline, gates, family, selected, plan, operation,
-    )
+    let selected = resolve_selected(authorizer, target, family.family(), deadline)?;
+    admit_selected(authorizer, deadline, family, selected, plan, operation)
 }
 
 /// [`admit_operation`] over a declared [`Selection`], or over the exact
 /// targets already resolved for it.
-pub(crate) fn admit_selection<A, E, P, Plan, Build>(
+pub(crate) fn admit_selection<A, E: FromFailure, P, Plan, Build>(
     authorizer: &mut A,
     deadline: &Deadline,
-    gates: fn(u64, Failure) -> E,
     targets: DeclaredTargets<'_, E>,
     invalid: impl Fn(SelectionError) -> E,
     plan: Plan,
@@ -105,18 +101,15 @@ where
 {
     let family = targets.family;
     let selected = match targets.resolved {
-        Some(resolved) => resolve_exact(authorizer, targets, resolved, deadline, gates, invalid)?,
-        None => resolve_selection(authorizer, targets, deadline, gates, invalid)?,
+        Some(resolved) => resolve_exact(authorizer, targets, resolved, deadline, invalid)?,
+        None => resolve_selection(authorizer, targets, deadline, invalid)?,
     };
-    admit_selected(
-        authorizer, deadline, gates, family, selected, plan, operation,
-    )
+    admit_selected(authorizer, deadline, family, selected, plan, operation)
 }
 
-fn admit_selected<A, E, P, Plan, Build>(
+fn admit_selected<A, E: FromFailure, P, Plan, Build>(
     authorizer: &mut A,
     deadline: &Deadline,
-    gates: fn(u64, Failure) -> E,
     family: FamilyGate<E>,
     selected: SelectedTargets,
     plan: Plan,
@@ -130,18 +123,17 @@ where
     family.require(&selected.targets)?;
     let plan = plan(&selected)?;
     let operation = operation(&plan)?;
-    approve_operation(authorizer, operation, deadline, gates)?;
+    approve_operation(authorizer, operation, deadline)?;
     Ok((selected, plan))
 }
 
 /// The selection for [`DeclaredTargets::resolved`]: every exact entry
 /// re-authorized in order, deduplicated, and gated by the declaration.
-fn resolve_exact<A, E>(
+fn resolve_exact<A, E: FromFailure>(
     authorizer: &mut A,
     targets: DeclaredTargets<'_, E>,
     resolved: &[Target],
     deadline: &Deadline,
-    gates: fn(u64, Failure) -> E,
     invalid: impl Fn(SelectionError) -> E,
 ) -> Result<SelectedTargets, E>
 where
@@ -164,7 +156,7 @@ where
     let enforce = || {
         deadline
             .enforce()
-            .map_err(|source| (gates)(0_u64, Failure::Interrupted(source)))
+            .map_err(|source| E::from_failure(0_u64, Failure::Interrupted(source)))
     };
     let mut selected = Vec::new();
     let mut seen = HashSet::<(IpAddr, Option<InterfaceId>)>::new();
@@ -182,7 +174,7 @@ where
         if selection.excludes(address) || !family_kind.accepts(address) {
             continue;
         }
-        let authorized = resolve_selected(authorizer, target, family_kind, deadline, gates)?;
+        let authorized = resolve_selected(authorizer, target, family_kind, deadline)?;
         for record in authorized.targets {
             enforce()?;
             if selection.excludes(record.address) {
@@ -207,11 +199,10 @@ where
     })
 }
 
-fn resolve_selection<A, E>(
+fn resolve_selection<A, E: FromFailure>(
     authorizer: &mut A,
     targets: DeclaredTargets<'_, E>,
     deadline: &Deadline,
-    gates: fn(u64, Failure) -> E,
     invalid: impl Fn(SelectionError) -> E,
 ) -> Result<SelectedTargets, E>
 where
@@ -229,7 +220,7 @@ where
     let enforce = || {
         deadline
             .enforce()
-            .map_err(|source| (gates)(0_u64, Failure::Interrupted(source)))
+            .map_err(|source| E::from_failure(0_u64, Failure::Interrupted(source)))
     };
     let mut selected = Vec::new();
     let mut origins = Origins::default();
@@ -291,7 +282,7 @@ where
                     continue;
                 }
             }
-            let resolved = resolve_selected(authorizer, &target, family, deadline, gates)?;
+            let resolved = resolve_selected(authorizer, &target, family, deadline)?;
             for record in resolved.targets {
                 enforce()?;
                 if selection.excludes(record.address) {

@@ -16,7 +16,6 @@ use crate::target::Family;
 use crate::target::Selection;
 
 use super::Error;
-use super::error::probe_error;
 use crate::probe::{self, Transport};
 use crate::scan::{
     DEFAULT_MAX_PORTS, DEFAULT_MAX_UNDECODED_FRAMES, MAX_IN_FLIGHT, MAX_PROBE_ATTEMPTS, MAX_PROBES,
@@ -265,7 +264,7 @@ impl Request {
         if let Some(adaptive) = &self.adaptive {
             adaptive.validate(self)?;
         }
-        check_rate(probe_error, "probes_per_second", self.probes_per_second)?;
+        check_rate::<Error>("probes_per_second", self.probes_per_second)?;
         self.discovery
             .validate(&self.route, &self.limits, self.address_family)?;
         self.validate_endpoints()?;

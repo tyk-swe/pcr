@@ -65,7 +65,7 @@ crate::reflective_layer! {
 }
 message_codec!(EthernetIpCodec, EthernetIp, ethernetip_schema);
 
-const NAME: &str = "ethernet_ip";
+const NAME: &str = crate::protocol::BuiltinProtocol::EthernetIp.as_str();
 impl EthernetIp {
     fn encode_wire(&self, c: &EncodeContext<'_>) -> Result<Vec<u8>, Error> {
         if self.sender_context.len() != 8 {

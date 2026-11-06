@@ -328,6 +328,7 @@
     "schemas/packetcraftr.os-fingerprints.v1.schema.json",
     "schemas/packetcraftr.output.v19.schema.json",
     "schemas/packetcraftr.packet.v1.schema.json",
+    "schemas/packetcraftr.port-catalog.v1.schema.json",
     "schemas/packetcraftr.rewrite.v1.schema.json",
     "schemas/packetcraftr.service-exclusions.v1.schema.json",
     "schemas/packetcraftr.service-probes.v1.schema.json",

@@ -68,8 +68,23 @@ class CheckCouplingTests(unittest.TestCase):
                 "fn f(layer: &dyn Layer) { layer.downcast_ref::<Tcp>(); }",
         })
         problems = coupling.allowlist_problems(root)
-        self.assertTrue(any("identity" not in problem for problem in problems))
+        self.assertTrue(
+            any("stale cast allowlist entry: crates/packetcraftr-core/src/packet.rs"
+                in problem for problem in problems)
+        )
         self.assertFalse(any("identity.rs" in problem for problem in problems))
+
+    def test_stale_boundary_exemption_is_reported(self):
+        root = self.workspace({
+            "crates/mini/src/codec.rs": 'fn f() { layer.field("x"); }',
+        })
+        problems = coupling.allowlist_problems(root)
+        self.assertFalse(
+            any("stale boundary exemption: codec.rs" in problem for problem in problems)
+        )
+        self.assertTrue(
+            any("stale boundary exemption: template.rs" in problem for problem in problems)
+        )
 
     def test_duplicate_constant_literals_are_counted(self):
         root = self.workspace({
@@ -82,6 +97,23 @@ class CheckCouplingTests(unittest.TestCase):
         })
         measured = coupling.inventory(root)
         self.assertEqual(measured["duplicate_constants"], 1)
+
+    def test_cancellation_polls_count_every_receiver_spelling(self):
+        root = self.workspace({
+            "crates/packetcraftr-core/src/protocol/catalog.rs":
+                'Foo { canonical: "foo", aliases: [] }',
+            "crates/packetcraftr-cli/src/a.rs":
+                "fn f() { invocation.check()?; control.check()?; i.check()?; }\n"
+                "fn g() { invocation\n    .check_interrupted()?; }\n"
+                "fn h() { invocation.control.cancellation.check()?; }\n"
+                "#[cfg(test)]\nmod tests { fn t() { invocation.check()?; } }\n",
+            "crates/packetcraftr-cli/src/invocation.rs":
+                "fn f() { invocation.check()?; }",
+            "crates/packetcraftr/src/b.rs":
+                "fn f() { invocation.check()?; }",
+        })
+        measured = coupling.inventory(root)
+        self.assertEqual(measured["manual_cancellation_polls"], 5)
 
     def test_repository_stays_under_ceilings(self):
         measured = coupling.inventory()

@@ -45,8 +45,38 @@ pub(crate) struct Args {
     #[command(flatten)]
     pub(crate) limits: OfflineLimitsArgs,
 }
+use crate::output::contract::PublishedType;
+
 impl crate::commands::Spec for Args {
-    const FORMATS: &'static [Format] = &[Format::Text, Format::Json, Format::Ndjson];
+    const PUBLISHED: &'static [PublishedType] = &[
+        PublishedType {
+            definition: "messagesSuccess",
+            command: "messages",
+            rust_types: &["crate::commands::analyze::messages::output::Report"],
+            events: &[],
+            example: "examples/documents/output-messages-success.json",
+        },
+        PublishedType {
+            definition: "messagesStreamSuccess",
+            command: "messages",
+            rust_types: &[
+                "crate::commands::analyze::messages::output::Issue",
+                "crate::commands::analyze::messages::output::Message",
+                "crate::commands::analyze::messages::output::Report",
+                "crate::commands::offline_analysis::output::reassembly::Event",
+            ],
+            events: &[
+                "complete",
+                "ip_datagram_completed",
+                "ip_datagram_incomplete",
+                "ip_overlap_resolved",
+                "protocol_issue",
+                "protocol_message",
+            ],
+            example: "examples/documents/output-messages-complete.json",
+        },
+    ];
+    const FORMATS: &'static [Format] = crate::output::contract::TEXT_JSON_NDJSON;
     const CANCELLATION: bool = true;
     const OFFLINE: bool = true;
     fn run_time(&self) -> Option<&dyn crate::command_options::Bounded> {

@@ -56,14 +56,14 @@ pub(super) fn read_udp_payload(
     if let Some(path) = path {
         if manifest::is_stdin(path) {
             return crate::input::read_stdin_bounded_allow_empty(
-                invocation,
+                &invocation.control,
                 MAX_UDP_PAYLOAD_BYTES,
                 InputKind::Payload,
             )
             .map(Bytes::from);
         }
         return read_bounded_file_allow_empty(
-            invocation,
+            &invocation.control,
             path,
             MAX_UDP_PAYLOAD_BYTES,
             InputKind::Payload,
@@ -88,9 +88,13 @@ pub(super) fn load_udp_profiles(
         ));
     }
     let document = if manifest::is_stdin(path) {
-        crate::input::read_stdin_bounded(invocation, MAX_PROFILE_BYTES, InputKind::UdpProfiles)?
+        crate::input::read_stdin_bounded(
+            &invocation.control,
+            MAX_PROFILE_BYTES,
+            InputKind::UdpProfiles,
+        )?
     } else {
-        crate::input::read_bounded_json_document(invocation, path, MAX_PROFILE_BYTES)?
+        crate::input::read_bounded_json_document(&invocation.control, path, MAX_PROFILE_BYTES)?
     };
     let assignments = udp_profiles::parse(&document).map_err(CliError::classified)?;
     profile::compile(assignments).map_err(CliError::classified)
@@ -127,7 +131,7 @@ pub(super) fn ingest_targets(
         })
         .collect::<Vec<_>>();
     origins.extend(manifest::read_with_budget(
-        invocation,
+        &invocation.control,
         &manifest_sources(targets_file),
         &mut budget,
     )?);
@@ -140,7 +144,11 @@ pub(super) fn ingest_targets(
     }
     let mut exclude = exclusions.to_vec();
     exclude.extend(parse_declarations::<packetcraftr::target::Network>(
-        &manifest::read_with_budget(invocation, &manifest_sources(exclude_file), &mut budget)?,
+        &manifest::read_with_budget(
+            &invocation.control,
+            &manifest_sources(exclude_file),
+            &mut budget,
+        )?,
     )?);
     Ok(Ingested {
         targets: packetcraftr::target::Selection { include, exclude },

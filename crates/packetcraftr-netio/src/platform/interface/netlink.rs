@@ -19,7 +19,7 @@ use crate::platform::common::{netlink::with_netlink, os_error};
 use crate::{
     interface::{self, Id as InterfaceId},
     link::Capability,
-    route,
+    native,
 };
 
 pub(crate) fn interfaces(deadline: &Deadline) -> Result<Vec<interface::Info>, interface::Error> {
@@ -28,14 +28,14 @@ pub(crate) fn interfaces(deadline: &Deadline) -> Result<Vec<interface::Info>, in
 
 pub(in crate::platform) fn snapshot(
     deadline: &Deadline,
-) -> Result<Vec<interface::Info>, route::Error> {
+) -> Result<Vec<interface::Info>, native::Error> {
     with_netlink(
         deadline,
         |handle| async move { query_interfaces(&handle).await },
     )
 }
 
-async fn query_interfaces(handle: &Handle) -> Result<Vec<interface::Info>, route::Error> {
+async fn query_interfaces(handle: &Handle) -> Result<Vec<interface::Info>, native::Error> {
     let mut interfaces = query_links(handle, None).await?;
     query_addresses(handle, None, &mut interfaces).await?;
     Ok(interfaces.into_values().collect())
@@ -45,15 +45,15 @@ pub(in crate::platform) async fn query_interface(
     handle: &Handle,
     index: u32,
     interface_hint: Option<&InterfaceId>,
-) -> Result<interface::Info, route::Error> {
-    let not_found = || route::Error::InterfaceNotFound {
+) -> Result<interface::Info, native::Error> {
+    let not_found = || native::Error::InterfaceNotFound {
         name: interface_hint.map_or_else(|| format!("index-{index}"), |hint| hint.name.clone()),
         index,
     };
     let mut interfaces = query_links(handle, Some(index))
         .await
         .map_err(|error| match error {
-            route::Error::InterfaceNotFound { .. } => not_found(),
+            native::Error::InterfaceNotFound { .. } => not_found(),
             error => error,
         })?;
     query_addresses(handle, Some(index), &mut interfaces).await?;
@@ -62,7 +62,7 @@ pub(in crate::platform) async fn query_interface(
 
 pub(in crate::platform) async fn query_local_addresses(
     handle: &Handle,
-) -> Result<Vec<IpAddr>, route::Error> {
+) -> Result<Vec<IpAddr>, native::Error> {
     Ok(query_interfaces(handle)
         .await?
         .into_iter()
@@ -78,7 +78,7 @@ pub(in crate::platform) async fn query_local_addresses(
 async fn query_links(
     handle: &Handle,
     index_filter: Option<u32>,
-) -> Result<BTreeMap<u32, interface::Info>, route::Error> {
+) -> Result<BTreeMap<u32, interface::Info>, native::Error> {
     let request = handle.link().get();
     let mut links = match index_filter {
         Some(index) => request.match_index(index).execute(),
@@ -107,7 +107,7 @@ async fn query_links(
                 _ => {}
             }
         }
-        let name = name.ok_or_else(|| route::Error::InvalidResponse {
+        let name = name.ok_or_else(|| native::Error::InvalidResponse {
             message: format!("Linux link {} has no interface name", message.header.index),
         })?;
         let loopback = message.header.flags.contains(LinkFlags::Loopback)
@@ -147,12 +147,12 @@ async fn query_links(
     Ok(interfaces)
 }
 
-fn link_lookup_error(index_filter: Option<u32>, error: rtnetlink::Error) -> route::Error {
+fn link_lookup_error(index_filter: Option<u32>, error: rtnetlink::Error) -> native::Error {
     if let Some(index) = index_filter
         && let rtnetlink::Error::NetlinkError(reply) = &error
         && reply.raw_code().checked_abs() == Some(libc::ENODEV)
     {
-        return route::Error::InterfaceNotFound {
+        return native::Error::InterfaceNotFound {
             name: format!("index-{index}"),
             index,
         };
@@ -164,7 +164,7 @@ async fn query_addresses(
     handle: &Handle,
     index_filter: Option<u32>,
     interfaces: &mut BTreeMap<u32, interface::Info>,
-) -> Result<(), route::Error> {
+) -> Result<(), native::Error> {
     let request = handle.address().get();
     let mut addresses = match index_filter {
         Some(index) => request.set_link_index_filter(index).execute(),

@@ -21,12 +21,36 @@ use analysis::StreamTransport;
 use analysis::tls::{Collector, Limits as TlsLimits, Selector, SniPattern, Status};
 use rendering::State;
 
+use crate::output::contract::PublishedType;
+
 impl crate::commands::Spec for Args {
-    const FORMATS: &'static [crate::output::contract::Format] = &[
-        crate::output::contract::Format::Text,
-        crate::output::contract::Format::Json,
-        crate::output::contract::Format::Ndjson,
+    const PUBLISHED: &'static [PublishedType] = &[
+        PublishedType {
+            definition: "tlsSuccess",
+            command: "tls",
+            rust_types: &["crate::commands::analyze::tls::output::Report"],
+            events: &[],
+            example: "examples/documents/output-tls-success.json",
+        },
+        PublishedType {
+            definition: "tlsStreamSuccess",
+            command: "tls",
+            rust_types: &[
+                "crate::commands::offline_analysis::output::reassembly::Event",
+                "crate::commands::analyze::tls::output::Event",
+            ],
+            events: &[
+                "complete",
+                "ip_datagram_completed",
+                "ip_datagram_incomplete",
+                "ip_overlap_resolved",
+                "session",
+            ],
+            example: "examples/documents/output-tls-alert-event.json",
+        },
     ];
+    const FORMATS: &'static [crate::output::contract::Format] =
+        crate::output::contract::TEXT_JSON_NDJSON;
     const CANCELLATION: bool = true;
     const OFFLINE: bool = true;
 
@@ -90,16 +114,21 @@ pub(super) fn run(
     let prepared = prepare(capture_limits, arguments.limits, None, &arguments.decode)?;
     let session = analysis::Session::new(
         prepared.registry.clone(),
-        analysis::Options {
+        analysis::SessionOptions {
             stream: selected_stream.map(|index| analysis::StreamRef {
                 transport: StreamTransport::Tcp,
                 index,
             }),
-            ..prepared.options(invocation)
+            ..prepared.session_options(invocation)
         },
         collector,
     );
-    let mut reader = open_capture(invocation, &arguments.path, capture_limits)?;
+    let mut reader = open_capture(
+        &invocation.control,
+        &invocation.output,
+        &arguments.path,
+        capture_limits,
+    )?;
 
     let mut state = State::new(arguments.max_output_sessions);
     let outcome = session

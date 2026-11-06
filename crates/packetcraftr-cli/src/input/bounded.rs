@@ -9,7 +9,7 @@ use packetcraftr_core::error::{Classification, Classified, Kind};
 
 use super::source::{self, Source, interrupted_or};
 use crate::errors::CliError;
-use crate::invocation::Invocation;
+use crate::invocation::Control;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum InputKind {
@@ -139,38 +139,35 @@ fn require_redirected_stdin(kind: InputKind, stdin_is_terminal: bool) -> Result<
 }
 
 pub(crate) fn read_bounded_file(
-    invocation: &Invocation,
+    control: &Control,
     path: &Path,
     max_bytes: usize,
     kind: InputKind,
 ) -> Result<Vec<u8>, CliError> {
     require_non_empty(
-        read_bounded_file_allow_empty(invocation, path, max_bytes, kind)?,
+        read_bounded_file_allow_empty(control, path, max_bytes, kind)?,
         kind,
     )
     .map_err(|error| error.with_input(path.display()))
 }
 
 pub(crate) fn read_bounded_file_allow_empty(
-    invocation: &Invocation,
+    control: &Control,
     path: &Path,
     max_bytes: usize,
     kind: InputKind,
 ) -> Result<Vec<u8>, CliError> {
-    let bytes = read_file_capped(invocation, path, max_bytes)?;
+    let bytes = read_file_capped(control, path, max_bytes)?;
     require_bounded(bytes, max_bytes, kind).map_err(|error| error.with_input(path.display()))
 }
 
-pub(super) fn open_file(invocation: &Invocation, path: &Path) -> Result<Source, CliError> {
-    source::open(invocation, path).map_err(|source| file_io_error("open", path, source))
+pub(super) fn open_file(control: &Control, path: &Path) -> Result<Source, CliError> {
+    source::open(control, path).map_err(|source| file_io_error("open", path, source))
 }
 
-pub(super) fn redirected_stdin(
-    invocation: &Invocation,
-    kind: InputKind,
-) -> Result<Source, CliError> {
+pub(super) fn redirected_stdin(control: &Control, kind: InputKind) -> Result<Source, CliError> {
     require_redirected_stdin(kind, io::stdin().is_terminal())?;
-    source::stdin(invocation).map_err(|source| input_read_error(kind, source))
+    source::stdin(control).map_err(|source| input_read_error(kind, source))
 }
 
 fn file_io_error(operation: &'static str, path: &Path, source: io::Error) -> CliError {
@@ -208,11 +205,11 @@ pub(crate) fn hex_text_limit(max_packet_size: usize) -> usize {
 }
 
 pub(crate) fn read_bounded_json_document(
-    invocation: &Invocation,
+    control: &Control,
     path: &Path,
     max_bytes: usize,
 ) -> Result<Vec<u8>, CliError> {
-    let bytes = read_file_capped(invocation, path, max_bytes)?;
+    let bytes = read_file_capped(control, path, max_bytes)?;
     if bytes.len() > max_bytes {
         return Err(CliError::new(
             Kind::Usage,
@@ -223,23 +220,23 @@ pub(crate) fn read_bounded_json_document(
 }
 
 pub(crate) fn read_stdin_bounded(
-    invocation: &Invocation,
+    control: &Control,
     max_bytes: usize,
     kind: InputKind,
 ) -> Result<Vec<u8>, CliError> {
     require_non_empty(
-        read_stdin_bounded_allow_empty(invocation, max_bytes, kind)?,
+        read_stdin_bounded_allow_empty(control, max_bytes, kind)?,
         kind,
     )
 }
 
 pub(crate) fn read_stdin_bounded_allow_empty(
-    invocation: &Invocation,
+    control: &Control,
     max_bytes: usize,
     kind: InputKind,
 ) -> Result<Vec<u8>, CliError> {
     require_bounded(
-        read_stdin_capped(invocation, max_bytes, kind)?,
+        read_stdin_capped(control, max_bytes, kind)?,
         max_bytes,
         kind,
     )
@@ -261,12 +258,12 @@ fn require_bounded(bytes: Vec<u8>, max_bytes: usize, kind: InputKind) -> Result<
 
 /// Reads at most `max_bytes + 1` bytes of `path`, leaving the oversize decision to the caller.
 pub(crate) fn read_file_capped(
-    invocation: &Invocation,
+    control: &Control,
     path: &Path,
     max_bytes: usize,
 ) -> Result<Vec<u8>, CliError> {
-    read_file_reader_capped(open_file(invocation, path)?, path, max_bytes)
-        .map_err(|error| interrupted_or(invocation, error))
+    read_file_reader_capped(open_file(control, path)?, path, max_bytes)
+        .map_err(|error| interrupted_or(control, error))
 }
 
 fn read_file_reader_capped(
@@ -280,12 +277,12 @@ fn read_file_reader_capped(
 /// Reads at most `max_bytes + 1` bytes of redirected stdin, leaving the oversize decision to the
 /// caller.
 pub(crate) fn read_stdin_capped(
-    invocation: &Invocation,
+    control: &Control,
     max_bytes: usize,
     kind: InputKind,
 ) -> Result<Vec<u8>, CliError> {
-    read_stdin_reader_capped(redirected_stdin(invocation, kind)?, max_bytes, kind)
-        .map_err(|error| interrupted_or(invocation, error))
+    read_stdin_reader_capped(redirected_stdin(control, kind)?, max_bytes, kind)
+        .map_err(|error| interrupted_or(control, error))
 }
 
 fn read_stdin_reader_capped(
@@ -343,16 +340,16 @@ mod tests {
 
     #[test]
     fn file_errors_preserve_paths_and_codes() {
-        let invocation = &source::test_invocation(None, Default::default());
+        let control = &source::test_control(None, Default::default());
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("frame.bin");
-        let error = read_bounded_file(invocation, &path, 1, InputKind::Frame).unwrap_err();
+        let error = read_bounded_file(control, &path, 1, InputKind::Frame).unwrap_err();
         assert_eq!(error.classification.kind, Kind::Io);
         assert!(error.message.contains(&path.display().to_string()));
         assert!(!error.causes.is_empty());
 
         std::fs::write(&path, b"ab").unwrap();
-        let error = read_bounded_file(invocation, &path, 1, InputKind::Frame).unwrap_err();
+        let error = read_bounded_file(control, &path, 1, InputKind::Frame).unwrap_err();
         assert_eq!(
             error.classification,
             core::decode::Error::PacketSizeLimit {
@@ -364,7 +361,7 @@ mod tests {
         assert!(error.message.contains(&path.display().to_string()));
 
         std::fs::write(&path, b"").unwrap();
-        let error = read_bounded_file(invocation, &path, 1, InputKind::Frame).unwrap_err();
+        let error = read_bounded_file(control, &path, 1, InputKind::Frame).unwrap_err();
         assert_eq!(error.classification.code.as_str(), "cli.input_source");
         assert!(error.message.contains(&path.display().to_string()));
     }
@@ -379,14 +376,14 @@ mod tests {
             .status()
             .unwrap();
         assert!(status.success(), "mkfifo failed: {status:?}");
-        let invocation = source::test_invocation(
+        let control = source::test_control(
             Some(std::time::Duration::from_millis(200)),
             Default::default(),
         );
 
-        let error = read_bounded_json_document(&invocation, &fifo, 16).unwrap_err();
+        let error = read_bounded_json_document(&control, &fifo, 16).unwrap_err();
 
-        let expected = invocation.check().unwrap_err();
+        let expected = control.check().unwrap_err();
         assert_eq!(error.classification, expected.classification);
         assert_eq!(error.exit_code(), expected.exit_code());
         assert!(

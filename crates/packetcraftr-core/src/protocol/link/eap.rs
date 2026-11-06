@@ -36,7 +36,7 @@ crate::reflective_layer! {
 }
 message_codec!(EapCodec, Eap, eap_schema);
 
-const NAME: &str = "eap";
+const NAME: &str = crate::protocol::BuiltinProtocol::Eap.as_str();
 impl Eap {
     fn encode_wire(&self, c: &EncodeContext<'_>) -> Result<Vec<u8>, Error> {
         if !(1..=4).contains(&self.code) {

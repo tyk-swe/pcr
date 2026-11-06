@@ -4,7 +4,7 @@
 use super::MAX_FLOWS;
 use crate::engine::execution::rate_delay;
 use crate::probe::{check_probe_count, check_probe_duration};
-use crate::traceroute::{Error, MAX_PROBES_PER_HOP, error::probe_error, request::check_collection};
+use crate::traceroute::{Error, MAX_PROBES_PER_HOP, request::check_collection};
 
 #[derive(Clone, Debug)]
 pub struct Request {
@@ -49,14 +49,9 @@ impl Request {
             &self.trace.limits,
             u32::from(self.flows),
         )?;
-        check_probe_count(
-            probe_error,
-            self.probe_count(),
-            self.trace.limits.max_probes,
-        )?;
+        check_probe_count::<Error>(self.probe_count(), self.trace.limits.max_probes)?;
         let windows = self.trace.hop_count() as u32 * self.trace.probes_per_hop;
-        let delay = rate_delay(
-            probe_error,
+        let delay = rate_delay::<Error>(
             "probes_per_second",
             usize::from(self.flows),
             self.trace.probes_per_second,
@@ -74,7 +69,7 @@ impl Request {
                 actual: std::time::Duration::MAX,
                 limit: self.trace.limits.max_duration,
             })?;
-        check_probe_duration(probe_error, duration, self.trace.limits.max_duration)
+        check_probe_duration(duration, self.trace.limits.max_duration)
     }
 
     pub fn probe_count(&self) -> usize {

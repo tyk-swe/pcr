@@ -343,7 +343,7 @@ impl Codec for HttpCodec {
         &http_schema().protocol
     }
     fn accepts_decoded_protocol(&self, protocol: &crate::layer::Id) -> bool {
-        matches!(protocol.as_str(), NAME | "raw")
+        protocol == self.protocol_id() || protocol == &crate::layer::Raw::ID
     }
     fn schema(&self) -> Option<&'static crate::layer::Schema> {
         Some(http_schema())

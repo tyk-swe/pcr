@@ -97,7 +97,7 @@ impl EncoderOutput {
 #[derive(Clone)]
 pub struct StreamEncoder {
     deadline: Option<Arc<Deadline>>,
-    command: Command,
+    command: Option<Command>,
     output: Arc<Mutex<EncoderOutput>>,
     resources: Option<Arc<dyn Fn() -> super::resources::Report + Send + Sync>>,
     terminal_error_timeout: Option<Duration>,
@@ -141,6 +141,17 @@ impl StreamEncoder {
     }
 
     pub fn new(command: Command, writer: impl Write + Send + 'static) -> Self {
+        Self::with_identity(Some(command), EncoderWriter::Direct(Box::new(writer)))
+    }
+
+    /// An encoder for paths that run before any command is selected. It can
+    /// report errors, which carry no command identity, but refuses data
+    /// records instead of borrowing a published command name.
+    pub fn unattributed(writer: impl Write + Send + 'static) -> Self {
+        Self::with_identity(None, EncoderWriter::Direct(Box::new(writer)))
+    }
+
+    fn with_identity(command: Option<Command>, writer: EncoderWriter) -> Self {
         Self {
             deadline: None,
             resources: None,
@@ -149,7 +160,7 @@ impl StreamEncoder {
             output: Arc::new(Mutex::new(EncoderOutput {
                 state: EncoderState::Open,
                 sequence: 0,
-                writer: EncoderWriter::Direct(Box::new(writer)),
+                writer,
                 batching: Batching::Off,
                 pending: Vec::new(),
             })),
@@ -183,7 +194,7 @@ impl StreamEncoder {
             deadline: None,
             resources: None,
             terminal_error_timeout: None,
-            command,
+            command: Some(command),
             output: Arc::new(Mutex::new(EncoderOutput {
                 state: EncoderState::Open,
                 sequence: 0,
@@ -270,7 +281,7 @@ impl StreamEncoder {
         let mut output = self.lock_output()?;
         output.require_open()?;
         let sequence = output.sequence;
-        let mut record = Envelope::error_record(Some(self.command), sequence, error);
+        let mut record = Envelope::error_record(self.command, sequence, error);
         if let Some(observe) = &self.resources {
             record = record.with_resources(observe());
         }
@@ -315,6 +326,9 @@ impl StreamEncoder {
         terminal: bool,
         budget: Option<(&ResultMeter, &mut usize)>,
     ) -> Result<(), EncodeError> {
+        let Some(command) = self.command else {
+            return Err(EncodeError::Unattributed);
+        };
         let Published {
             result,
             diagnostics,
@@ -337,7 +351,7 @@ impl StreamEncoder {
             value: result,
             meter,
         };
-        let mut record = Envelope::record(self.command, sequence, event, result, diagnostics);
+        let mut record = Envelope::record(command, sequence, event, result, diagnostics);
         if (sequence == 0 || terminal)
             && let Some(observe) = &self.resources
         {

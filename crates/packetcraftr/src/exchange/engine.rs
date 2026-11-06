@@ -7,7 +7,7 @@ use packetcraftr_core::error::{BoundaryError, Classification, Kind};
 use packetcraftr_core::packet::Packet;
 
 use super::{
-    Error, Event, Observed, Report, Request, StopCondition, WorkflowResponseMatcher,
+    Error, Event, Observed, Report, Request, Step, StopCondition, WorkflowResponseMatcher,
     WorkflowStopPredicate,
 };
 use crate::clock::Clock;
@@ -105,14 +105,13 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
 
     pub(crate) fn exchange_hooked(
         &self,
-        request: Request,
+        step: Step,
         operation: &crate::engine::operation::Operation,
         workflow_matcher: Option<&mut WorkflowResponseMatcher<'_>>,
         stop_predicate: Option<&mut WorkflowStopPredicate<'_>>,
     ) -> Result<super::WorkflowEvidence, Error> {
         let mut observed = Observed::default();
-        let transaction =
-            self.arm_capture(self.prepare_exchange(request, operation)?, operation)?;
+        let transaction = self.arm_capture(self.prepare_step(step, operation)?, operation)?;
         let response_deadline = transaction.window.ends_at();
         let (report, unsolicited_ingress, observation_quality) = transaction.execute(
             self.providers.transmit(),

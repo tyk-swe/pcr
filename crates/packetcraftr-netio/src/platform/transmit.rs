@@ -66,8 +66,6 @@ pub(crate) fn session() -> Box<dyn Provider> {
 fn send_layer2(_frame: Layer2Frame<'_>) -> Result<Report, Error> {
     Err(Unsupported::unbuilt(
         NativeCapability::Transmission(crate::link::Mode::Layer2),
-        cfg!(feature = "native-layer2"),
-        "native-layer2",
         "Layer 2 injection",
     )
     .into())
@@ -77,8 +75,6 @@ fn send_layer2(_frame: Layer2Frame<'_>) -> Result<Report, Error> {
 fn send_layer3(_frame: Layer3Frame<'_>) -> Result<Report, Error> {
     Err(Unsupported::unbuilt(
         NativeCapability::Transmission(crate::link::Mode::Layer3),
-        cfg!(feature = "native-layer3"),
-        "native-layer3",
         "raw IP transmission",
     )
     .into())

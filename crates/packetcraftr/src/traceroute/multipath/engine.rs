@@ -5,7 +5,8 @@ use super::{
     Event, Flow, FlowCompletion, FlowSummary, ProbeEvidence, Reply, Report, Request, Rtt, Summary,
     Unmatched, packet, packet::Probe, topology::Topology,
 };
-use crate::traceroute::{Error, MAX_PROBE_BYTES, ResponseKind, Termination, error::probe_error};
+use crate::error::FromFailure as _;
+use crate::traceroute::{Error, MAX_PROBE_BYTES, ResponseKind, Termination};
 use crate::{
     Client, Sink, Stats,
     client::admission::{Admission, FamilyGate, admit_operation, wire_limits},
@@ -62,7 +63,7 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
         let emit = publisher(
             &operation.runtime,
             sink,
-            |error| probe_error(0, Failure::DurationLimit(error)),
+            |error| Error::from_failure(0, Failure::DurationLimit(error)),
             |source| Error::Output { source },
         )?;
         let nonce = nonce()?;
@@ -96,7 +97,7 @@ pub(super) fn run<A: Authorizer + ResolveTarget, R: Runner, C: Clock>(
     let destination = approved.destination;
     let mut flows = packet::flows(request, destination, nonce);
     let mut state = RunState::new(request, &flows);
-    let mut context = Context::new(deadline, clock, probe_error);
+    let mut context = Context::<_, Error>::new(deadline, clock);
     let mut spent = Stats::default();
     let mut previous_count = None;
     for sweep in 1..=trace.probes_per_hop {
@@ -115,12 +116,7 @@ pub(super) fn run<A: Authorizer + ResolveTarget, R: Runner, C: Clock>(
             if let Some(previous) = previous_count {
                 context.pace(
                     sequence,
-                    rate_delay(
-                        probe_error,
-                        "probes_per_second",
-                        previous,
-                        trace.probes_per_second,
-                    )?,
+                    rate_delay::<Error>("probes_per_second", previous, trace.probes_per_second)?,
                 )?;
             }
             previous_count = Some(probes.len());
@@ -131,7 +127,6 @@ pub(super) fn run<A: Authorizer + ResolveTarget, R: Runner, C: Clock>(
                 |runner, grant| runner.exchange(&probes, grant, &spent),
                 |_, evidence, grant, _| {
                     validate_batch_evidence(
-                        probe_error,
                         &probes,
                         grant.timeout,
                         evidence,
@@ -251,7 +246,6 @@ fn approve<A: Authorizer + ResolveTarget>(
     let (selected, _) = admit_operation(
         authorizer,
         deadline,
-        probe_error,
         &trace.target,
         FamilyGate::new(trace.address_family, Error::family),
         |selected| {

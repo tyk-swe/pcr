@@ -13,12 +13,41 @@ use crate::commands::offline_analysis::{Inspection, complete_application, inspec
 use crate::errors::CliError;
 use crate::output::contract::Command;
 
+use crate::output::contract::PublishedType;
+
 impl crate::commands::Spec for Args {
-    const FORMATS: &'static [crate::output::contract::Format] = &[
-        crate::output::contract::Format::Text,
-        crate::output::contract::Format::Json,
-        crate::output::contract::Format::Ndjson,
+    const PUBLISHED: &'static [PublishedType] = &[
+        PublishedType {
+            definition: "dnsAnalysisSuccess",
+            command: "dns-read",
+            rust_types: &["crate::commands::analyze::dns::output::Report"],
+            events: &[],
+            example: "examples/documents/output-dns-read-success.json",
+        },
+        PublishedType {
+            definition: "dnsAnalysisStreamSuccess",
+            command: "dns-read",
+            rust_types: &[
+                "crate::commands::analyze::dns::output::Issue",
+                "crate::commands::analyze::dns::output::Message",
+                "crate::commands::analyze::dns::output::Report",
+                "crate::commands::analyze::dns::output::Transaction",
+                "crate::commands::offline_analysis::output::reassembly::Event",
+            ],
+            events: &[
+                "complete",
+                "dns_message",
+                "dns_stream_issue",
+                "dns_transaction",
+                "ip_datagram_completed",
+                "ip_datagram_incomplete",
+                "ip_overlap_resolved",
+            ],
+            example: "examples/documents/output-dns-read-complete.json",
+        },
     ];
+    const FORMATS: &'static [crate::output::contract::Format] =
+        crate::output::contract::TEXT_JSON_NDJSON;
     const CANCELLATION: bool = true;
     const OFFLINE: bool = true;
 

@@ -22,8 +22,17 @@ pub(crate) struct Assessment {
     #[command(flatten)]
     bounds: Bounds,
 }
+use crate::output::contract::PublishedType;
+
 impl Spec for Assessment {
-    const FORMATS: &'static [Format] = &[Format::Text, Format::Json];
+    const PUBLISHED: &'static [PublishedType] = &[PublishedType {
+        definition: "securitySuccess",
+        command: "report",
+        rust_types: &["crate::commands::security::output::Report"],
+        events: &[],
+        example: "examples/documents/output-report-success.json",
+    }];
+    const FORMATS: &'static [Format] = crate::output::contract::TEXT_JSON;
     const CANCELLATION: bool = true;
     const OFFLINE: bool = true;
     fn resources(&self, s: &mut Settings<'_>) {

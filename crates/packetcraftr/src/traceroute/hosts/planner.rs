@@ -19,7 +19,6 @@ use crate::evidence::SentPacket;
 use crate::probe::runner::{BatchEvidence, Classifier, Outcome as ProbeOutcome};
 use crate::probe::{self, Batch, Transport, enforce_deadline};
 use crate::target::ResolvedZone;
-use crate::traceroute::error::probe_error;
 use crate::traceroute::evidence::{correlated_probe_methods, fold_termination, probe_evidence};
 use crate::traceroute::{CorrelatedResponse, Error, Probe, ResponseKind, Termination};
 
@@ -177,7 +176,7 @@ impl<'r> Planner<'r> {
             }
         }
         loop {
-            enforce_deadline(probe_error, deadline)?;
+            enforce_deadline::<Error>(deadline)?;
             let now = now();
             if self.current.is_none() {
                 let Some(slot) = self.slots.get(self.next_slot) else {

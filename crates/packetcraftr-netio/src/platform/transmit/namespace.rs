@@ -3,34 +3,32 @@
 
 use std::{
     fs::File,
-    os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
 };
 
 use packetcraftr_core::error::Source;
 
 use crate::Error;
+use crate::workers::ExecutionContext as NamespaceIdentity;
 
 struct Namespace {
     _file: File,
-    device: u64,
-    inode: u64,
+    identity: NamespaceIdentity,
 }
 
 impl Namespace {
     fn capture(path: &Path) -> Result<Self, Error> {
         let file = File::open(path).map_err(namespace_error)?;
-        let metadata = file.metadata().map_err(namespace_error)?;
+        let identity = NamespaceIdentity::of_metadata(&file.metadata().map_err(namespace_error)?);
         Ok(Self {
             _file: file,
-            device: metadata.dev(),
-            inode: metadata.ino(),
+            identity,
         })
     }
 
     fn verify(&self, path: &Path) -> Result<(), Error> {
         let current = std::fs::metadata(path).map_err(namespace_error)?;
-        if current.dev() != self.device || current.ino() != self.inode {
+        if NamespaceIdentity::of_metadata(&current) != self.identity {
             return Err(Error::Send {
                 message: "transmission session namespace changed".to_owned(),
                 source: None,

@@ -24,12 +24,27 @@ use packetcraftr_core::{
     },
 };
 
+use crate::output::contract::PublishedType;
+
 impl crate::commands::Spec for Args {
-    const FORMATS: &'static [crate::output::contract::Format] = &[
-        crate::output::contract::Format::Text,
-        crate::output::contract::Format::Json,
-        crate::output::contract::Format::Ndjson,
+    const PUBLISHED: &'static [PublishedType] = &[
+        PublishedType {
+            definition: "rewriteSuccess",
+            command: "rewrite",
+            rust_types: &["crate::commands::files::rewrite::output::Report"],
+            events: &[],
+            example: "examples/documents/output-rewrite-complete.json",
+        },
+        PublishedType {
+            definition: "rewriteStreamSuccess",
+            command: "rewrite",
+            rust_types: &["crate::commands::files::rewrite::output::Report"],
+            events: &["complete"],
+            example: "examples/documents/output-rewrite-complete.json",
+        },
     ];
+    const FORMATS: &'static [crate::output::contract::Format] =
+        crate::output::contract::TEXT_JSON_NDJSON;
     const CANCELLATION: bool = true;
     const OFFLINE: bool = true;
 
@@ -88,7 +103,7 @@ pub(crate) fn run(invocation: &crate::invocation::Invocation, args: Args) -> Res
             ));
         }
         let document = crate::input::read_bounded_json_document(
-            invocation,
+            &invocation.control,
             path,
             rules::MAX_REWRITE_DOCUMENT_BYTES,
         )?;
@@ -142,8 +157,13 @@ pub(crate) fn run(invocation: &crate::invocation::Invocation, args: Args) -> Res
         )?)
     };
     let deadline = Deadline::new(args.duration.max_duration())
-        .with_cancellation(Some(invocation.cancellation.clone()));
-    let mut reader = crate::input::open_capture(invocation, &args.path, capture_limits)?;
+        .with_cancellation(Some(invocation.control.cancellation.clone()));
+    let mut reader = crate::input::open_capture(
+        &invocation.control,
+        &invocation.output,
+        &args.path,
+        capture_limits,
+    )?;
     let limits = capture_file::Limits {
         max_frames: capture_limits.max_frames(),
         max_bytes: capture_limits.max_bytes(),

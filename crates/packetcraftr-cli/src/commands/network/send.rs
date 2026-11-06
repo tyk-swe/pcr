@@ -55,7 +55,16 @@ fn collect(
     collector.finish(report).map_err(CliError::classified)
 }
 
+use crate::output::contract::PublishedType;
+
 impl crate::commands::Spec for Args {
+    const PUBLISHED: &'static [PublishedType] = &[PublishedType {
+        definition: "sendSuccess",
+        command: "send",
+        rust_types: &["crate::commands::network::send::output::Report"],
+        events: &[],
+        example: "examples/documents/output-send-success.json",
+    }];
     const FORMATS: &'static [crate::output::contract::Format] = &[
         crate::output::contract::Format::Text,
         crate::output::contract::Format::Json,

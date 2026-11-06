@@ -87,11 +87,19 @@ pub(crate) fn prepare_transfer(
     deadline.enforce().map_err(Outcome::interrupted)
 }
 
-pub(crate) fn retryable(source: &io::Error) -> bool {
+/// A socket wait that ended without progress counts as a timeout on every
+/// platform; some report it as `WouldBlock` instead of `TimedOut`.
+pub fn timed_out(source: &io::Error) -> bool {
     matches!(
         source.kind(),
-        io::ErrorKind::Interrupted | io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+        io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
     )
+}
+
+/// Transient socket failures a bounded wait loop may retry after
+/// re-checking its deadline.
+pub fn retryable(source: &io::Error) -> bool {
+    source.kind() == io::ErrorKind::Interrupted || timed_out(source)
 }
 
 #[cfg(test)]

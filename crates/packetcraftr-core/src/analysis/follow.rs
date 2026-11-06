@@ -247,11 +247,7 @@ impl session::Collector for Collector {
         Ok(Self::observe(self, record))
     }
 
-    fn finish(self, run: &RunSummary) -> Result<(Vec<Chunk>, Summary), BoundaryError> {
-        Ok((Vec::new(), Self::finish(self, run)))
-    }
-
-    fn finish_controlled(
+    fn finish(
         self,
         run: &RunSummary,
         deadline: &crate::budget::Deadline,

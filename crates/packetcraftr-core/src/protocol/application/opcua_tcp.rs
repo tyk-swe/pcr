@@ -72,7 +72,7 @@ crate::reflective_layer! {
 }
 message_codec!(OpcuaTcpCodec, OpcuaTcp, opcuatcp_schema);
 
-const NAME: &str = "opcua_tcp";
+const NAME: &str = crate::protocol::BuiltinProtocol::OpcuaTcp.as_str();
 impl OpcuaTcp {
     fn encode_wire(&self, c: &EncodeContext<'_>) -> Result<Vec<u8>, Error> {
         if self.message_type.len() != 3 || !matches!(self.chunk_type, b'F' | b'C' | b'A') {

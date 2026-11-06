@@ -1,9 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::{interface, route};
+use crate::{interface, native};
 
-pub(crate) fn validate_native_interface(interface: &interface::Info) -> Result<(), route::Error> {
+pub(crate) fn validate_native_interface(interface: &interface::Info) -> Result<(), native::Error> {
     if !interface.id.is_complete() {
         return Err(invalid_response(
             "operating system returned an incomplete interface identity".to_owned(),
@@ -23,7 +23,7 @@ pub(crate) fn validate_native_interface(interface: &interface::Info) -> Result<(
 
 pub(super) fn validate_native_interfaces(
     interfaces: Vec<interface::Info>,
-) -> Result<Vec<interface::Info>, route::Error> {
+) -> Result<Vec<interface::Info>, native::Error> {
     let mut identities = std::collections::HashSet::with_capacity(interfaces.len());
     for interface in &interfaces {
         validate_native_interface(interface)?;
@@ -37,6 +37,6 @@ pub(super) fn validate_native_interfaces(
     Ok(interfaces)
 }
 
-fn invalid_response(message: String) -> route::Error {
-    route::Error::InvalidResponse { message }
+fn invalid_response(message: String) -> native::Error {
+    native::Error::InvalidResponse { message }
 }

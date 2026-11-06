@@ -100,8 +100,24 @@ mod tests {
     #[test]
     fn bundled_payloads_compile_with_published_version() {
         assert!(!bundled().is_empty());
-        assert_eq!(data_set().version, CURATED_UDP_PAYLOADS_VERSION);
-        assert_eq!(data_set().name, "udp-payloads");
+        let provenance = include_str!("../../../data/udp-payloads.provenance.yaml");
+        let dataset: Vec<&str> = provenance
+            .lines()
+            .skip_while(|line| line.trim() != "dataset:")
+            .skip(1)
+            .take_while(|line| line.starts_with(char::is_whitespace))
+            .collect();
+        assert!(!dataset.is_empty(), "provenance has no dataset block");
+        let field = |name: &str| {
+            dataset
+                .iter()
+                .map(|line| line.trim())
+                .find_map(|line| line.strip_prefix(name))
+                .map(|value| value.trim().trim_matches('"'))
+                .unwrap_or_else(|| panic!("provenance dataset declares no {name}"))
+        };
+        assert_eq!(data_set().name, field("name:"));
+        assert_eq!(data_set().version, field("version:"));
     }
 
     #[test]

@@ -6,12 +6,16 @@ from pathlib import Path
 
 from support import ROOT
 
-CRATES = {
-    'packetcraftr': 'crates/packetcraftr/Cargo.toml',
-    'packetcraftr-core': 'crates/packetcraftr-core/Cargo.toml',
-    'packetcraftr-netio': 'crates/packetcraftr-netio/Cargo.toml',
-    'packetcraftr-cli': 'crates/packetcraftr-cli/Cargo.toml',
-}
+def discover_crates():
+    crates = {}
+    for manifest in sorted((ROOT / 'crates').glob('*/Cargo.toml')):
+        with manifest.open('rb') as stream:
+            name = tomllib.load(stream)['package']['name']
+        crates[name] = str(manifest.relative_to(ROOT))
+    return crates
+
+
+CRATES = discover_crates()
 
 NATIVE_FEATURES = ('native-route', 'native-layer2', 'native-layer3')
 

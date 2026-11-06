@@ -21,12 +21,79 @@ use crate::errors::CliError;
 use self::arguments::Args;
 use self::preparation::Planned;
 
+use crate::output::contract::PublishedType;
+
 impl crate::commands::Spec for Args {
-    const FORMATS: &'static [crate::output::contract::Format] = &[
-        crate::output::contract::Format::Text,
-        crate::output::contract::Format::Json,
-        crate::output::contract::Format::Ndjson,
+    const PUBLISHED: &'static [PublishedType] = &[
+        PublishedType {
+            definition: "scanSuccess",
+            command: "scan",
+            rust_types: &["crate::commands::network::scan::output::Report"],
+            events: &[],
+            example: "examples/documents/output-scan-ip-protocol.json",
+        },
+        PublishedType {
+            definition: "scanConnectSuccess",
+            command: "scan",
+            rust_types: &["crate::commands::network::scan::output::connect::Report"],
+            events: &[],
+            example: "examples/documents/output-scan-connect-success.json",
+        },
+        PublishedType {
+            definition: "targetListSuccess",
+            command: "scan",
+            rust_types: &["crate::commands::network::scan::output::list::Report"],
+            events: &[],
+            example: "examples/documents/output-scan-list-aggregate.json",
+        },
+        PublishedType {
+            definition: "scanStreamSuccess",
+            command: "scan",
+            rust_types: &[
+                "crate::commands::network::scan::output::event::Event",
+                "crate::commands::network::scan::output::host::Host",
+                "crate::commands::network::traceroute::output::hosts::Event",
+            ],
+            events: &[
+                "complete",
+                "diagnostic",
+                "endpoint",
+                "host",
+                "observation_quality",
+                "probe",
+                "probe_sent",
+                "traceroute_host",
+                "traceroute_probe",
+                "traceroute_undecoded",
+                "unattributed",
+                "undecoded",
+            ],
+            example: "examples/documents/output-scan-complete.json",
+        },
+        PublishedType {
+            definition: "scanConnectStreamSuccess",
+            command: "scan",
+            rust_types: &[
+                "crate::commands::network::scan::output::connect::EndpointEvent",
+                "crate::commands::network::scan::output::connect::ProbeEvent",
+                "crate::commands::network::scan::output::connect::Report",
+            ],
+            events: &["complete", "connect_endpoint", "connect_probe"],
+            example: "examples/documents/output-scan-connect-complete.json",
+        },
+        PublishedType {
+            definition: "targetListStreamSuccess",
+            command: "scan",
+            rust_types: &[
+                "crate::commands::network::scan::output::list::Complete",
+                "crate::commands::network::scan::output::list::TargetEvent",
+            ],
+            events: &["complete", "target"],
+            example: "examples/documents/output-scan-list-complete.json",
+        },
     ];
+    const FORMATS: &'static [crate::output::contract::Format] =
+        crate::output::contract::TEXT_JSON_NDJSON;
     const CANCELLATION: bool = true;
 
     fn run_time(&self) -> Option<&dyn crate::command_options::Bounded> {

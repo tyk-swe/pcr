@@ -116,13 +116,7 @@ pub(crate) fn lookup(
     _preferred_source: Option<IpAddr>,
     _deadline: &Deadline,
 ) -> Result<Decision, route::Error> {
-    Err(Unsupported::unbuilt(
-        NativeCapability::Route,
-        cfg!(feature = "native-route"),
-        "native-route",
-        "route selection",
-    )
-    .into())
+    Err(Unsupported::unbuilt(NativeCapability::Route, "route selection").into())
 }
 
 #[cfg(not(native_route))]
@@ -130,11 +124,5 @@ pub(crate) fn lookup_interface(
     _interface: &InterfaceId,
     _deadline: &Deadline,
 ) -> Result<Decision, route::Error> {
-    Err(Unsupported::unbuilt(
-        NativeCapability::Route,
-        cfg!(feature = "native-route"),
-        "native-route",
-        "interface selection",
-    )
-    .into())
+    Err(Unsupported::unbuilt(NativeCapability::Route, "interface selection").into())
 }

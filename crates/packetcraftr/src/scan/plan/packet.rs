@@ -13,6 +13,7 @@ use packetcraftr_core::field::WireValue;
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::{Layer, Raw};
 use packetcraftr_core::protocol::application::dns::Dns;
+#[cfg(test)]
 use packetcraftr_core::protocol::builtin;
 use packetcraftr_core::protocol::{
     network::{Icmpv4, Icmpv6, Ipv4, Ipv6},
@@ -40,7 +41,7 @@ fn scan_udp_source_port(attempt: u32) -> u16 {
 // matches
 impl Probe {
     #[must_use]
-    pub fn packet(&self) -> Packet {
+    pub fn packet(&self, registry: &Arc<Registry>) -> Packet {
         let mut packet = Packet::default();
         let explicit_ip_protocol = self.endpoint.ip_protocol();
         match self.address {
@@ -88,7 +89,7 @@ impl Probe {
                         packet.push(Raw::new(self.udp_payload.clone()));
                     }
                 } else {
-                    push_udp_payload(&mut packet, port, &self.udp_payload);
+                    push_udp_payload(&mut packet, registry, port, &self.udp_payload);
                 }
             }
             probe::Endpoint::Sctp { port } => {
@@ -148,7 +149,6 @@ fn icmp_probe_fields(endpoint: probe::Endpoint, address: IpAddr, sequence: u64) 
 /// Second byte of every scan ICMP echo payload; see [`icmp_identity`].
 const ICMP_IDENTITY_TAG: u8 = 0x43;
 
-const NTP_PORT: u16 = 123;
 const VXLAN_PORT: u16 = 4789;
 const GENEVE_PORT: u16 = 6081;
 const GENEVE_ETHERNET: u16 = ether_type::TRANSPARENT_ETHERNET_BRIDGING;
@@ -157,33 +157,32 @@ const GENEVE_IPV6: u16 = ether_type::IPV6;
 
 // Materialize recognized payloads under their registered UDP ports so strict
 // construction retains the same application bytes and protocol identity.
-fn push_udp_payload(packet: &mut Packet, port: u16, payload: &Bytes) {
+fn push_udp_payload(packet: &mut Packet, registry: &Arc<Registry>, port: u16, payload: &Bytes) {
     if payload.is_empty() {
         return;
     }
-    let registry = builtin::registry();
     if port == crate::dns::DEFAULT_SERVER_PORT
         && let Ok(dns) = Dns::try_from(payload.clone())
     {
         packet.push(dns);
         return;
     }
-    if matches!(port, 67 | 68)
+    if BuiltinProtocol::Dhcpv4.udp_ports().contains(&port)
         && let Ok(dhcp) =
             packetcraftr_core::protocol::application::dhcp::Dhcpv4::try_from(payload.clone())
     {
         packet.push(dhcp);
         return;
     }
-    if matches!(port, 546 | 547)
+    if BuiltinProtocol::Dhcpv6.udp_ports().contains(&port)
         && let Ok(dhcp) =
             packetcraftr_core::protocol::application::dhcp::Dhcpv6::try_from(payload.clone())
     {
         packet.push(dhcp);
         return;
     }
-    if port == NTP_PORT
-        && let Some(ntp) = decode_layer(&registry, BuiltinProtocol::Ntp.as_str(), payload)
+    if BuiltinProtocol::Ntp.udp_ports().contains(&port)
+        && let Some(ntp) = decode_layer(registry, BuiltinProtocol::Ntp.as_str(), payload)
         && BuiltinProtocol::Ntp.identifies(&*ntp.layer)
         && ntp.consumed == payload.len()
     {
@@ -193,16 +192,16 @@ fn push_udp_payload(packet: &mut Packet, port: u16, payload: &Bytes) {
     if port == VXLAN_PORT
         && push_typed_tunnel(
             packet,
-            &registry,
-            "vxlan",
+            registry,
+            BuiltinProtocol::Vxlan.as_str(),
             LinkType::ETHERNET,
-            "ethernet",
+            BuiltinProtocol::Ethernet.as_str(),
             payload,
         )
     {
         return;
     }
-    if port == GENEVE_PORT && push_geneve_payload(packet, &registry, payload) {
+    if port == GENEVE_PORT && push_geneve_payload(packet, registry, payload) {
         return;
     }
     packet.push(Raw::new(payload.clone()));
@@ -274,7 +273,7 @@ fn push_typed_tunnel(
 }
 
 fn push_geneve_payload(packet: &mut Packet, registry: &Arc<Registry>, payload: &[u8]) -> bool {
-    let Some(header) = decode_layer(registry, "geneve", payload) else {
+    let Some(header) = decode_layer(registry, BuiltinProtocol::Geneve.as_str(), payload) else {
         return false;
     };
     let Some(protocol_type) = identity::geneve_protocol_type(&*header.layer) else {
@@ -282,9 +281,21 @@ fn push_geneve_payload(packet: &mut Packet, registry: &Arc<Registry>, payload: &
     };
     let inner_bytes = &payload[header.consumed..];
     let (link_type, expected_root, opaque) = match protocol_type {
-        WireValue::Exact(GENEVE_ETHERNET) => (Some(LinkType::ETHERNET), Some("ethernet"), false),
-        WireValue::Exact(GENEVE_IPV4) => (Some(LinkType::IPV4), Some("ipv4"), false),
-        WireValue::Exact(GENEVE_IPV6) => (Some(LinkType::IPV6), Some("ipv6"), false),
+        WireValue::Exact(GENEVE_ETHERNET) => (
+            Some(LinkType::ETHERNET),
+            Some(BuiltinProtocol::Ethernet.as_str()),
+            false,
+        ),
+        WireValue::Exact(GENEVE_IPV4) => (
+            Some(LinkType::IPV4),
+            Some(BuiltinProtocol::Ipv4.as_str()),
+            false,
+        ),
+        WireValue::Exact(GENEVE_IPV6) => (
+            Some(LinkType::IPV6),
+            Some(BuiltinProtocol::Ipv6.as_str()),
+            false,
+        ),
         _ => (None, None, true),
     };
     let inner = link_type.map_or_else(Vec::new, |link| decode_inner(registry, link, inner_bytes));
@@ -307,6 +318,7 @@ fn push_geneve_payload(packet: &mut Packet, registry: &Arc<Registry>, payload: &
 }
 
 fn sent_payload_matches(
+    registry: &Arc<Registry>,
     probe: &Probe,
     sent: &Packet,
     network_protocol: BuiltinProtocol,
@@ -336,14 +348,14 @@ fn sent_payload_matches(
         probe::Endpoint::Sctp { .. } => probe.sctp_scan.chunk_bytes(probe.sequence),
         _ => probe.udp_payload.clone(),
     };
-    payload_bytes(&suffix).is_some_and(|bytes| bytes == expected)
+    payload_bytes(registry, &suffix).is_some_and(|bytes| bytes == expected)
 }
 
-fn payload_bytes(payload: &Packet) -> Option<Bytes> {
+fn payload_bytes(registry: &Arc<Registry>, payload: &Packet) -> Option<Bytes> {
     if payload.is_empty() {
         return Some(Bytes::new());
     }
-    build::Builder::new(builtin::registry())
+    build::Builder::new(Arc::clone(registry))
         .build(
             payload.clone(),
             codec::Addresses::default(),
@@ -353,7 +365,11 @@ fn payload_bytes(payload: &Packet) -> Option<Bytes> {
         .map(|built| built.bytes)
 }
 
-pub(in crate::scan) fn sent_probe_matches(probe: &Probe, sent: &Packet) -> bool {
+pub(in crate::scan) fn sent_probe_matches(
+    registry: &Arc<Registry>,
+    probe: &Probe,
+    sent: &Packet,
+) -> bool {
     if probe.udp_profile.as_ref().is_some_and(|profile| {
         probe.endpoint.transport() != crate::probe::Transport::Udp
             || profile.payload(probe.sequence) != probe.udp_payload
@@ -386,7 +402,7 @@ pub(in crate::scan) fn sent_probe_matches(probe: &Probe, sent: &Packet) -> bool 
         }
         probe::Endpoint::Ip { .. } => None,
     };
-    if !sent_payload_matches(probe, sent, network_protocol, transport_protocol) {
+    if !sent_payload_matches(registry, probe, sent, network_protocol, transport_protocol) {
         return false;
     }
     let network_matches = match probe.address {
@@ -482,8 +498,35 @@ mod tests {
     }
 
     fn payload_protocol(probe: &Probe) -> Option<BuiltinProtocol> {
-        let packet = probe.packet();
+        let packet = probe.packet(&builtin::registry());
         packet.layer(packet.len() - 1).and_then(BuiltinProtocol::of)
+    }
+
+    #[test]
+    fn payload_typing_uses_the_supplied_registry() {
+        let mut payload = vec![0x23_u8];
+        payload.resize(48, 0);
+        let probe = Probe {
+            udp_payload: Bytes::from(payload),
+            ..udp_probe(BuiltinProtocol::Ntp.udp_ports()[0])
+        };
+        let empty = std::sync::Arc::new(
+            packetcraftr_core::registry::Builder::default()
+                .build()
+                .unwrap(),
+        );
+        let packet = probe.packet(&empty);
+        assert_eq!(
+            packet.layer(packet.len() - 1).and_then(BuiltinProtocol::of),
+            Some(BuiltinProtocol::Raw),
+            "a registry without the NTP codec keeps the payload raw"
+        );
+        let packet = probe.packet(&builtin::registry());
+        assert_eq!(
+            packet.layer(packet.len() - 1).and_then(BuiltinProtocol::of),
+            Some(BuiltinProtocol::Ntp),
+            "the builtin registry types the payload as NTP"
+        );
     }
 
     #[test]

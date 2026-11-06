@@ -37,11 +37,12 @@ impl crate::probe::runner::Sequenced for Probe {
 }
 
 pub(super) fn flows(request: &Request, destination: IpAddr, nonce: u64) -> Vec<Flow> {
-    let width = u32::from(u16::MAX) - 49_152 + 1 - u32::from(request.flows) + 1;
+    let ephemeral_base = u32::from(crate::engine::correlation::EPHEMERAL_SOURCE_PORT_BASE);
+    let width = u32::from(u16::MAX) - ephemeral_base + 1 - u32::from(request.flows) + 1;
     let base = request
         .trace
         .source_port
-        .unwrap_or((49_152 + (nonce as u32 % width)) as u16);
+        .unwrap_or((ephemeral_base + (nonce as u32 % width)) as u16);
     (0..request.flows)
         .map(|index| Flow {
             id: index + 1,

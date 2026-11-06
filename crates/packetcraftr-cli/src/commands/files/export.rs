@@ -9,12 +9,27 @@ use crate::output::contract::Command;
 use crate::{errors::CliError, rendering::write_summary_line};
 use packetcraftr_core::{analysis, capture_file};
 
+use crate::output::contract::PublishedType;
+
 impl crate::commands::Spec for Args {
-    const FORMATS: &'static [crate::output::contract::Format] = &[
-        crate::output::contract::Format::Text,
-        crate::output::contract::Format::Json,
-        crate::output::contract::Format::Ndjson,
+    const PUBLISHED: &'static [PublishedType] = &[
+        PublishedType {
+            definition: "exportSuccess",
+            command: "export",
+            rust_types: &["crate::commands::files::export::output::Report"],
+            events: &[],
+            example: "examples/documents/output-export-complete.json",
+        },
+        PublishedType {
+            definition: "exportStreamSuccess",
+            command: "export",
+            rust_types: &["crate::commands::files::export::output::Report"],
+            events: &["complete"],
+            example: "examples/documents/output-export-complete.json",
+        },
     ];
+    const FORMATS: &'static [crate::output::contract::Format] =
+        crate::output::contract::TEXT_JSON_NDJSON;
     const CANCELLATION: bool = true;
     const OFFLINE: bool = true;
 
@@ -60,9 +75,14 @@ pub(crate) fn run(invocation: &crate::invocation::Invocation, args: Args) -> Res
     selection.validate().map_err(CliError::classified)?;
     let mut staged = crate::staged_output::StagedFile::stage(invocation, &args.write)?;
     let limits = capture_limits.stream_limits();
-    let mut source = crate::input::open_capture(invocation, &args.path, capture_limits)?;
+    let mut source = crate::input::open_capture(
+        &invocation.control,
+        &invocation.output,
+        &args.path,
+        capture_limits,
+    )?;
     let mut reader =
-        crate::input::snapshot_capture(invocation, &mut source, capture_limits, limits)?;
+        crate::input::snapshot_capture(&invocation.control, &mut source, capture_limits, limits)?;
     let plan = analysis::export::plan(
         &mut reader,
         setup.registry.clone(),

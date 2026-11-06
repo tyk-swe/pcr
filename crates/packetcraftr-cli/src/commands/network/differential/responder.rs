@@ -47,8 +47,26 @@ pub(crate) struct Args {
     pub(crate) duration: MaxDurationArgs,
 }
 
+use crate::output::contract::PublishedType;
+
 impl crate::commands::Spec for Args {
-    const FORMATS: &'static [Format] = &[Format::Text, Format::Json, Format::Ndjson];
+    const PUBLISHED: &'static [PublishedType] = &[
+        PublishedType {
+            definition: "differentialResponderSuccess",
+            command: "differential-responder",
+            rust_types: &["crate::commands::network::differential::output::ResponderReport"],
+            events: &[],
+            example: "examples/documents/output-differential-responder-success.json",
+        },
+        PublishedType {
+            definition: "differentialResponderStreamSuccess",
+            command: "differential-responder",
+            rust_types: &["crate::commands::network::differential::output::ResponderEvent"],
+            events: &["complete", "received"],
+            example: "examples/documents/output-differential-responder-complete.json",
+        },
+    ];
+    const FORMATS: &'static [Format] = crate::output::contract::TEXT_JSON_NDJSON;
     const CANCELLATION: bool = true;
 
     fn run_time(&self) -> Option<&dyn crate::command_options::Bounded> {
@@ -104,7 +122,7 @@ fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<()
     request.idle_after_first =
         (arguments.idle_ms > 0).then(|| Duration::from_millis(arguments.idle_ms));
     request.max_datagrams = arguments.max_datagrams as usize;
-    request.cancellation = Some(invocation.cancellation.clone());
+    request.cancellation = Some(invocation.control.cancellation.clone());
 
     let format = invocation.format;
     let stream = &invocation.output;
@@ -420,7 +438,7 @@ mod tests {
             Default::default(),
             None,
         );
-        let cancellation = invocation.cancellation.clone();
+        let cancellation = invocation.control.cancellation.clone();
         let handle = thread::spawn(move || run(&invocation, arguments));
 
         if !probe_until_answered(port, || handle.is_finished()) {

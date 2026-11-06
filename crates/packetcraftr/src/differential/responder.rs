@@ -40,9 +40,7 @@ where
     let mut buffer = vec![0_u8; MAX_DATAGRAM];
 
     loop {
-        if let Some(cancellation) = &request.cancellation {
-            cancellation.check().map_err(Error::from)?;
-        }
+        deadline.check_cancelled().map_err(Error::from)?;
         if deadline.check().is_err() {
             return Ok(report);
         }
@@ -61,6 +59,7 @@ where
             }
             Err(error) => return Err(io_error(error)),
         };
+        deadline.check_cancelled().map_err(Error::from)?;
         if deadline.check().is_err() {
             return Ok(report);
         }
@@ -82,6 +81,7 @@ where
         };
         sink.publish_controlled(ResponderEvent::Received(record), &deadline)
             .map_err(|source: BoundaryError| Error::Output { source })?;
+        deadline.check_cancelled().map_err(Error::from)?;
         if deadline.check().is_err() {
             return Ok(report);
         }
@@ -198,6 +198,24 @@ mod tests {
 
     #[test]
     fn responder_does_not_reply_after_a_blocked_sink_outlives_its_duration() {
+        let report = respond_with_blocked_sink(None).expect("responder stops normally");
+        assert_eq!(report.received, 1);
+        assert_eq!(report.replies_sent, 0);
+    }
+
+    #[test]
+    fn responder_reports_cancellation_after_a_blocked_sink_outlives_its_duration() {
+        let cancellation = packetcraftr_core::budget::Cancellation::default();
+        let outcome = respond_with_blocked_sink(Some(cancellation));
+        assert!(
+            matches!(&outcome, Err(Error::Cancelled(_))),
+            "expected cancellation, got {outcome:?}"
+        );
+    }
+
+    fn respond_with_blocked_sink(
+        cancellation: Option<packetcraftr_core::budget::Cancellation>,
+    ) -> Result<ResponderReport, Error> {
         let port = {
             let socket = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
             socket.local_addr().unwrap().port()
@@ -208,10 +226,12 @@ mod tests {
             .unwrap();
         let (entered_tx, entered_rx) = std::sync::mpsc::channel();
         let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let responder_cancellation = cancellation.clone();
         let token = [0x42; 16];
         let handle = thread::spawn(move || {
             let mut request = ResponderRequest::new(Ipv4Addr::LOCALHOST, port, token);
             request.max_duration = Duration::from_millis(400);
+            request.cancellation = responder_cancellation;
             respond(request, move |_| {
                 entered_tx.send(()).unwrap();
                 release_rx.recv().unwrap();
@@ -231,12 +251,13 @@ mod tests {
             }
         }
         assert!(entered, "sink received the probe");
+        if let Some(cancellation) = cancellation {
+            cancellation.cancel();
+        }
         thread::sleep(Duration::from_millis(550));
         release_tx.send(()).unwrap();
         let mut reply = [0_u8; 128];
         assert!(socket.recv_from(&mut reply).is_err(), "no late UDP reply");
-        let report = handle.join().unwrap().expect("responder stops normally");
-        assert_eq!(report.received, 1);
-        assert_eq!(report.replies_sent, 0);
+        handle.join().unwrap()
     }
 }

@@ -411,6 +411,85 @@ mod tests {
     }
 
     #[test]
+    fn blocked_live_output_does_not_send_a_reply_after_duration() {
+        struct BlockedWriter {
+            entered: std::sync::mpsc::Sender<()>,
+            release: Option<std::sync::mpsc::Receiver<()>>,
+        }
+
+        impl Write for BlockedWriter {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                if let Some(release) = self.release.take() {
+                    self.entered.send(()).unwrap();
+                    release.recv().unwrap();
+                }
+                Ok(bytes.len())
+            }
+
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let directory = tempfile::tempdir().expect("test directory");
+        let log = directory.path().join("responder-log.jsonl");
+        let port = free_port();
+        let arguments = parsed_args(port, 0, 500, &log);
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let runtime = packetcraftr::runtime::Runtime::new(1).unwrap();
+        let stream = crate::output::stream::StreamEncoder::new_bounded(
+            Command::DifferentialResponder,
+            BlockedWriter {
+                entered: entered_tx,
+                release: Some(release_rx),
+            },
+            &runtime,
+            Duration::from_secs(1),
+        )
+        .unwrap();
+        let invocation = Invocation::new(
+            Format::Ndjson,
+            stream.into(),
+            arguments.publication_duration(),
+            Default::default(),
+            None,
+        );
+        let handle = thread::spawn(move || run(&invocation, arguments));
+        let socket = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_millis(250)))
+            .unwrap();
+        let entered_deadline = SystemClock.now() + Duration::from_secs(2);
+        let mut entered = false;
+        while SystemClock.now() < entered_deadline && !handle.is_finished() {
+            socket
+                .send_to(&probe(), (Ipv4Addr::LOCALHOST, port))
+                .unwrap();
+            if entered_rx.recv_timeout(Duration::from_millis(20)).is_ok() {
+                entered = true;
+                break;
+            }
+        }
+        assert!(entered, "live event reached the blocked output");
+        thread::sleep(Duration::from_millis(650));
+        let stop_deadline = SystemClock.now() + Duration::from_millis(250);
+        while !handle.is_finished() && SystemClock.now() < stop_deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        let stopped_before_release = handle.is_finished();
+        release_tx.send(()).unwrap();
+        let mut reply = [0_u8; 128];
+        assert!(socket.recv_from(&mut reply).is_err(), "no late UDP reply");
+        assert!(
+            handle.join().unwrap().is_err(),
+            "blocked output is reported"
+        );
+        assert!(stopped_before_release, "live output exceeded the duration");
+        assert!(holds_probe_record(&std::fs::read_to_string(log).unwrap()));
+    }
+
+    #[test]
     fn expired_publication_budget_keeps_published_log_without_completion() {
         let directory = tempfile::tempdir().expect("test directory");
         let log = directory.path().join("responder-log.jsonl");

@@ -3,7 +3,7 @@
 
 use std::ffi::OsString;
 
-use clap::{CommandFactory, parser::ValueSource};
+use clap::{CommandFactory, ValueEnum};
 
 use crate::output;
 
@@ -22,31 +22,59 @@ pub(crate) struct Context {
     pub(crate) command: Option<output::contract::Command>,
 }
 
-/// Best-effort context for reporting a parse failure, read from the real
-/// command definition with errors ignored so it can never disagree with the
-/// parser about option spellings, clusters, or where globals may appear.
+/// Best-effort parse-failure context, scanning globals past argument errors
+/// with option spellings and values from the real command definition.
 pub(crate) fn parse(arguments: &[OsString]) -> Context {
-    let matches = Cli::command()
+    let definition = Cli::command();
+    let mut format = None;
+    let mut color = ColorChoice::default();
+    let raw = clap_lex::RawArgs::new(arguments.iter().skip(1));
+    let mut cursor = raw.cursor();
+    while let Some(argument) = raw.next(&mut cursor) {
+        if argument.is_escape() {
+            break;
+        }
+        let Some((Ok(name), inline)) = argument.to_long() else {
+            continue;
+        };
+        let Some(option) = definition.get_arguments().find(|option| {
+            matches!(option.get_id().as_str(), "format" | "color")
+                && option.get_long() == Some(name)
+        }) else {
+            continue;
+        };
+        let value = inline.or_else(|| {
+            let next = raw.peek(&cursor)?;
+            if next.is_escape() || next.is_long() || next.is_short() {
+                return None;
+            }
+            raw.next_os(&mut cursor)
+        });
+        let Some(value) = value.and_then(|value| value.to_str()) else {
+            continue;
+        };
+        match option.get_id().as_str() {
+            "format" => {
+                if let Ok(value) = Format::from_str(value, false) {
+                    format = match value {
+                        Format::Json => Some(MachineFormat::Json),
+                        Format::Ndjson => Some(MachineFormat::Ndjson),
+                        _ => None,
+                    };
+                }
+            }
+            "color" => {
+                if let Ok(value) = ColorChoice::from_str(value, false) {
+                    color = value;
+                }
+            }
+            _ => {}
+        }
+    }
+    let matches = definition
         .ignore_errors(true)
         .args_override_self(true)
         .get_matches_from(arguments);
-    let supplied = |id| matches.value_source(id) == Some(ValueSource::CommandLine);
-    let format = supplied("format")
-        .then(|| {
-            matches
-                .get_many::<Format>("format")
-                .and_then(|mut all| all.next_back().copied())
-        })
-        .flatten()
-        .and_then(|format| match format {
-            Format::Json => Some(MachineFormat::Json),
-            Format::Ndjson => Some(MachineFormat::Ndjson),
-            _ => None,
-        });
-    let color = supplied("color")
-        .then(|| matches.get_one::<ColorChoice>("color").copied())
-        .flatten()
-        .unwrap_or_default();
     let command = matches.subcommand().and_then(|(group, values)| {
         let leaf = values.subcommand_name()?;
         crate::commands::registry::INVENTORY
@@ -95,6 +123,52 @@ mod tests {
     }
 
     #[test]
+    fn reads_globals_after_argument_errors() {
+        for (options, format) in [
+            (
+                vec!["--bogus", "--output", "json", "--color", "never"],
+                MachineFormat::Json,
+            ),
+            (
+                vec!["--bogus", "--output=ndjson", "--color=never"],
+                MachineFormat::Ndjson,
+            ),
+            (
+                vec![
+                    "--link-type",
+                    "bogus",
+                    "--output",
+                    "json",
+                    "--color",
+                    "never",
+                ],
+                MachineFormat::Json,
+            ),
+            (
+                vec!["--output", "bogus", "--output", "json", "--color", "never"],
+                MachineFormat::Json,
+            ),
+            (
+                vec!["--output", "--color", "never", "--output", "ndjson"],
+                MachineFormat::Ndjson,
+            ),
+        ] {
+            let arguments = ["packetcraftr", "packet", "build"]
+                .into_iter()
+                .chain(options)
+                .collect::<Vec<_>>();
+            let found = context(&arguments);
+            assert_eq!(found.format, Some(format), "{arguments:?}");
+            assert_eq!(found.color, ColorChoice::Never, "{arguments:?}");
+            assert_eq!(
+                found.command,
+                Some(output::contract::Command::Build),
+                "{arguments:?}"
+            );
+        }
+    }
+
+    #[test]
     fn clustered_short_flags_and_inline_values_parse() {
         let found = context(&[
             "packetcraftr",
@@ -114,8 +188,11 @@ mod tests {
                 "packetcraftr",
                 "--output",
                 "json",
+                "--bogus",
                 "--output",
                 "ndjson",
+                "--output",
+                "invalid",
                 "badcmd"
             ])
             .format,
@@ -125,14 +202,21 @@ mod tests {
 
     #[test]
     fn unknown_spellings_and_values_stay_text() {
-        assert_eq!(
-            context(&["packetcraftr", "--outp", "ndjson", "badcmd"]).format,
-            None
-        );
-        assert_eq!(
-            context(&["packetcraftr", "--output", "bogus", "badcmd"]).format,
-            None
-        );
+        for arguments in [
+            vec!["packetcraftr", "--outp", "ndjson", "badcmd"],
+            vec!["packetcraftr", "--output", "bogus", "badcmd"],
+            vec!["packetcraftr", "packet", "build", "--", "--output", "json"],
+            vec!["packetcraftr", "packet", "build", "--packet=--output=json"],
+            vec![
+                "packetcraftr",
+                "--output",
+                "json",
+                "--bogus",
+                "--output=text",
+            ],
+        ] {
+            assert_eq!(context(&arguments).format, None, "{arguments:?}");
+        }
         assert_eq!(
             context(&["packetcraftr", "packet", "badleaf"]).command,
             None

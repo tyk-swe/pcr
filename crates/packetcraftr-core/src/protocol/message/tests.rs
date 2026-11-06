@@ -402,6 +402,72 @@ fn protocol_expansion_reference_vectors() {
 }
 
 #[test]
+fn dnp3_header_fields_follow_present_headers() {
+    use crate::protocol::application::dnp3::Dnp3;
+
+    let registry = builtin::registry();
+    for (has_transport, transport, has_application, function) in [
+        (false, 0xc0, false, 1),
+        (true, 0, false, 1),
+        (true, 0x80, false, 1),
+        (true, 0x40, true, 1),
+        (true, 0xc0, true, 1),
+        (true, 0x40, true, 0x81),
+        (true, 0xc0, true, 0x81),
+    ] {
+        let base = Dnp3 {
+            has_transport,
+            transport,
+            has_application,
+            function,
+            data: if has_transport {
+                Bytes::from(vec![0xa5; 33])
+            } else {
+                Bytes::new()
+            },
+            ..Default::default()
+        };
+        let cases = [
+            ("transport", transport | 1, has_transport),
+            ("application_control", 0xc1, has_application),
+            ("function", function + 1, has_application),
+            ("indications", 42, has_application && function & 128 != 0),
+        ];
+        for mode in [Mode::Strict, Mode::Permissive] {
+            for (field, value, carried) in cases {
+                for changed in [false, true] {
+                    let mut layer = base.clone();
+                    if changed {
+                        layer.set_field(field, value.into()).unwrap();
+                    }
+                    let mut packet = Packet::default();
+                    packet.push(layer.clone());
+                    let json =
+                        serde_json::to_string(&document::Packet::from_packet(&packet)).unwrap();
+                    let document =
+                        document::Packet::parse(&json, document::Format::Json, json.len()).unwrap();
+                    let result = build_in(document.to_packet(&registry, 16).unwrap(), mode);
+                    if changed && !carried {
+                        let error = result.unwrap_err();
+                        assert!(error.contains(field), "{mode:?} {field}: {error}");
+                        continue;
+                    }
+                    let built = result.unwrap();
+                    assert!(built.diagnostics.is_empty(), "{mode:?} {layer:?}");
+                    assert_eq!(built.packet.get::<Dnp3>(), Some(&layer));
+                    let decoded = decode("dnp3", &built.bytes).unwrap();
+                    let mut packet = Packet::default();
+                    packet.push_boxed(decoded.layer);
+                    assert_eq!(packet.get::<Dnp3>(), Some(&layer));
+                    let rebuilt = build_in(packet, mode).unwrap();
+                    assert_eq!(rebuilt.bytes, built.bytes);
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn ipv6_ospf_survives_authentication_header() {
     let registry = builtin::registry();
     let mut packet = Packet::default();

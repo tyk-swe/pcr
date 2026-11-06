@@ -70,7 +70,39 @@ fn crc(b: &[u8]) -> u16 {
     !n
 }
 impl Dnp3 {
+    fn reject_uncarried_fields(&self) -> Result<(), Error> {
+        let default = Self::default();
+        let application = self.has_transport && self.has_application;
+        for (field, carried, unchanged) in [
+            (
+                "transport",
+                self.has_transport,
+                self.transport == default.transport,
+            ),
+            (
+                "application_control",
+                application,
+                self.application_control == default.application_control,
+            ),
+            ("function", application, self.function == default.function),
+            (
+                "indications",
+                application && self.function & 128 != 0,
+                self.indications == default.indications,
+            ),
+        ] {
+            if !carried && !unchanged {
+                return Err(invalid(
+                    NAME,
+                    format!("{field} is not part of the selected headers"),
+                ));
+            }
+        }
+        Ok(())
+    }
+
     fn encode_wire(&self, c: &EncodeContext<'_>) -> Result<Vec<u8>, Error> {
+        self.reject_uncarried_fields()?;
         let mut p = Writer::new(NAME, 250);
         if self.has_transport {
             p.u8(self.transport)?;

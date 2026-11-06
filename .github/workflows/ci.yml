@@ -173,7 +173,7 @@ jobs:
       fail-fast: false
       matrix:
         # The release workflow builds on these images; keep CI on the same baselines.
-        os: [macos-14, macos-15-intel, windows-2022]
+        os: [macos-15, macos-15-intel, windows-2022]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 35
     steps:
@@ -211,7 +211,7 @@ jobs:
       fail-fast: false
       matrix:
         # The release workflow builds on these images; keep CI on the same baselines.
-        os: [macos-14, macos-15-intel, windows-2022]
+        os: [macos-15, macos-15-intel, windows-2022]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 35
     steps:

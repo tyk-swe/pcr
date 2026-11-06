@@ -103,17 +103,20 @@ class CheckCouplingTests(unittest.TestCase):
             "crates/packetcraftr-core/src/protocol/catalog.rs":
                 'Foo { canonical: "foo", aliases: [] }',
             "crates/packetcraftr-cli/src/a.rs":
+                "// #[cfg(test)] appears only in this example\n"
+                'const DOC: &str = "#[cfg(test)]";\n'
                 "fn f() { invocation.check()?; control.check()?; i.check()?; }\n"
                 "fn g() { invocation\n    .check_interrupted()?; }\n"
                 "fn h() { invocation.control.cancellation.check()?; }\n"
-                "#[cfg(test)]\nmod tests { fn t() { invocation.check()?; } }\n",
+                "#[cfg(test)]\nmod tests { fn t() { assert!(1 < 2); invocation.check()?; } }\n"
+                "fn after_tests() { control.check()?; }\n",
             "crates/packetcraftr-cli/src/invocation.rs":
                 "fn f() { invocation.check()?; }",
             "crates/packetcraftr/src/b.rs":
                 "fn f() { invocation.check()?; }",
         })
         measured = coupling.inventory(root)
-        self.assertEqual(measured["manual_cancellation_polls"], 5)
+        self.assertEqual(measured["manual_cancellation_polls"], 6)
 
     def test_repository_stays_under_ceilings(self):
         measured = coupling.inventory()

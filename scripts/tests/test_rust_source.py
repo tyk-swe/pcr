@@ -40,6 +40,31 @@ class WithoutTestItemsTests(unittest.TestCase):
         source = "#[cfg(all(test, unix))]\nmod tests;\nfn live() {}\n"
         self.assertEqual(rust_source.without_test_items(source), "\nfn live() {}\n")
 
+    def test_comparisons_in_test_helpers_preserve_following_production(self):
+        for body in ("assert!(1 < 2);", "let _ = 1 << 2;", "let _ = [1 < 2];"):
+            with self.subTest(body=body):
+                source = (
+                    "#[cfg(test)]\nfn helper<T: Into<Result<u8, u16>>>() { "
+                    + body + " }\nfn live() {}\n"
+                )
+                self.assertEqual(rust_source.without_test_items(source), "\nfn live() {}\n")
+
+    def test_attribute_text_in_comments_and_literals_is_preserved(self):
+        for prefix in (
+            "// #[cfg(test)]\n",
+            "/* #[cfg(test)] */\n",
+            "/* nested /* #[cfg(test)] */ comment */\n",
+            'const DOC: &str = "#[cfg(test)]";\n',
+            'const DOC: &str = r##"example: "#[cfg(test)]""##;\n',
+        ):
+            with self.subTest(prefix=prefix):
+                production = "pub struct Live;\n"
+                source = prefix + production + "#[cfg(test)]\nfn helper() {}\nfn live() {}\n"
+                self.assertEqual(
+                    rust_source.without_test_items(source),
+                    prefix + production + "\nfn live() {}\n",
+                )
+
 
 class BlankCommentsTests(unittest.TestCase):
     def test_comments_blank_but_literals_survive(self):

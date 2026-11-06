@@ -146,9 +146,9 @@ def _item_end(text: str, i: int) -> int:
             brace -= 1
             if brace == 0 and paren == bracket == angle == 0:
                 return i + 1
-        elif char == "<":
+        elif char == "<" and paren == bracket == brace == 0:
             angle += 1
-        elif char == ">" and angle and text[i - 1] not in "-=":
+        elif char == ">" and paren == bracket == brace == 0 and angle and text[i - 1] not in "-=":
             angle -= 1
         elif char in ",;" and paren == bracket == brace == angle == 0:
             return i + 1
@@ -160,10 +160,17 @@ def without_test_items(text: str) -> str:
     """`text` with every `#[cfg(test)]`-gated item removed."""
     out = []
     pos = 0
-    while True:
-        match = TEST_ATTRIBUTE.search(text, pos)
-        if match is None:
-            out.append(text[pos:])
-            return "".join(out)
-        out.append(text[pos:match.start()])
-        pos = _item_end(text, match.end())
+    i = 0
+    while i < len(text):
+        skipped = _skip_literal(text, i)
+        if skipped > i:
+            i = skipped
+            continue
+        match = TEST_ATTRIBUTE.match(text, i)
+        if match is not None:
+            out.append(text[pos:i])
+            pos = i = _item_end(text, match.end())
+            continue
+        i += 1
+    out.append(text[pos:])
+    return "".join(out)

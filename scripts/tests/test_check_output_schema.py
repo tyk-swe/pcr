@@ -129,13 +129,17 @@ class DocumentValidationTests(unittest.TestCase):
             live = root / 'crates/mini/src/live.rs'
             live.parent.mkdir(parents=True)
             live.write_text(
+                '// #[cfg(test)] appears only in this example\n'
+                'const DOC: &str = r#"#[cfg(test)]"#;\n'
                 'fn f() { let _ = "cli.live"; }\n'
-                '#[cfg(test)]\nmod tests {\n    fn g() { let _ = "cli.inline_test"; }\n}\n'
+                '#[cfg(test)]\nmod tests {\n'
+                '    fn g() { assert!(1 < 2); let _ = "cli.inline_test"; }\n}\n'
+                'fn after_tests() { let _ = "cli.after"; }\n'
             )
             tests = root / 'crates/mini/tests/check.rs'
             tests.parent.mkdir(parents=True)
             tests.write_text('fn g() { let _ = "cli.test_file"; }\n')
-            self.assertEqual(checker.published_codes(root), {'cli.live'})
+            self.assertEqual(checker.published_codes(root), {'cli.live', 'cli.after'})
 
     def test_invalid_schema_is_rejected(self):
         with self.assertRaises(checker.CheckError):

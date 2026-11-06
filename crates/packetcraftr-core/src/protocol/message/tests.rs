@@ -1801,6 +1801,48 @@ fn optional_padding_rejects_wrong_types_and_preserves_bytes() {
 }
 
 #[test]
+fn rtp_extensions_require_flag() {
+    use crate::protocol::application::rtp::Rtp;
+
+    let registry = builtin::registry();
+    for mode in [Mode::Strict, Mode::Permissive] {
+        for has_extension in [false, true] {
+            for extension_profile in [0, 1, 0xbede, u16::MAX] {
+                for extension_data in [Bytes::new(), Bytes::from_static(b"\x10\x20\x30\x40")] {
+                    let rtp = Rtp {
+                        has_extension,
+                        extension_profile,
+                        extension_data,
+                        payload: Bytes::from_static(b"media"),
+                        ..Default::default()
+                    };
+                    let mut packet = Packet::default();
+                    packet.push(rtp.clone());
+                    let json =
+                        serde_json::to_string(&document::Packet::from_packet(&packet)).unwrap();
+                    let document =
+                        document::Packet::parse(&json, document::Format::Json, json.len()).unwrap();
+                    let result = build_in(document.to_packet(&registry, 16).unwrap(), mode);
+                    if !has_extension && (extension_profile != 0 || !rtp.extension_data.is_empty())
+                    {
+                        assert!(result.is_err(), "{mode:?}: {rtp:?}");
+                        continue;
+                    }
+                    let built = result.unwrap();
+                    assert!(built.diagnostics.is_empty());
+                    assert_eq!(built.packet.get::<Rtp>(), Some(&rtp));
+                    builder_round_trip("rtp", &built.bytes);
+                    let mut decoded = Packet::default();
+                    decoded.push_boxed(decode("rtp", &built.bytes).unwrap().layer);
+                    assert_eq!(decoded.get::<Rtp>(), Some(&rtp));
+                    assert_eq!(build_in(decoded, mode).unwrap().bytes, built.bytes);
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn rtcp_padding_preserves_report_boundaries() {
     use crate::protocol::application::rtcp::Rtcp;
 

@@ -69,6 +69,9 @@ impl Rtp {
         if !self.has_extension && !self.extension_data.is_empty() {
             return Err(invalid(NAME, "extension data without flag"));
         }
+        if !self.has_extension && self.extension_profile != 0 {
+            return Err(invalid(NAME, "extension_profile requires has_extension"));
+        }
         let mut w = Writer::new(NAME, c.remaining_packet_bytes);
         w.u8(0x80
             | if self.padding.is_empty() { 0 } else { 32 }

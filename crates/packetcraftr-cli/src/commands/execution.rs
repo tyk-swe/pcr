@@ -48,11 +48,19 @@ pub(crate) fn emitter<E: 'static>(
                 .clone()
                 .with_control(Arc::new(control.clone()));
             let result = (self.publish)(event, &output).map_err(CliError::into_boundary_error);
+            control
+                .check_cancelled()
+                .map_err(BoundaryError::from_error)?;
+            self.invocation
+                .control
+                .check_cancelled()
+                .map_err(BoundaryError::from_error)?;
+            result?;
             control.enforce().map_err(BoundaryError::from_error)?;
             self.invocation
                 .check()
                 .map_err(CliError::into_boundary_error)?;
-            result
+            Ok(())
         }
     }
     let delivery = if invocation.format == crate::output::contract::Format::Ndjson

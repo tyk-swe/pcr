@@ -7,7 +7,7 @@ use crate::codec::{DecodeContext, EncodeContext, Error};
 use crate::field;
 use crate::protocol::common::{invalid, unsupported};
 use crate::protocol::message::{
-    MAX_RECORDS, Reader, Records, Writer, data, message_codec, number, record,
+    MAX_RECORDS, Reader, Records, Writer, data, message_codec, number, optional_bytes, record,
 };
 use bytes::Bytes;
 
@@ -225,7 +225,7 @@ fn opaque(
     w.u32(u32::try_from(b.len()).map_err(|_| invalid(NAME, "opaque too long"))?)?;
     w.put(b)?;
     let pad = (4 - b.len() % 4) % 4;
-    if let Some(field::Value::Bytes(p)) = r.get("padding") {
+    if let Some(p) = optional_bytes(r, "padding", NAME)? {
         if p.len() != pad {
             return Err(invalid(NAME, "invalid XDR padding"));
         }

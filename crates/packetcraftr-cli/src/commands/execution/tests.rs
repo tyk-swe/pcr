@@ -360,7 +360,13 @@ fn cooperative_writer_wait_retains_parent_control() {
         let still_charged = writer_runtime.snapshot();
         release.send(()).unwrap();
         caller.join().unwrap();
-        assert!(returned_under_control.unwrap().is_err());
+        let error = returned_under_control
+            .unwrap()
+            .expect_err("blocked writer must not finish successfully");
+        if !frozen {
+            use packetcraftr_core::error::{Classified, Code};
+            assert_eq!(error.classification().code, Code::IoCancelled);
+        }
         assert_eq!(still_charged.active, 1);
         assert_eq!(still_charged.timed_out_retaining_capacity, 1);
         assert!(!invocation.output.is_complete());
@@ -373,6 +379,34 @@ fn cooperative_writer_wait_retains_parent_control() {
             std::thread::yield_now();
         }
     }
+}
+
+#[test]
+fn successful_event_after_deadline_reports_duration_limit() {
+    use packetcraftr_core::error::{Classified, Code};
+
+    let invocation = Invocation::new(
+        Format::Ndjson,
+        StreamEncoder::new(Command::Scan, Writer::default()),
+        None,
+        Cancellation::default(),
+        None,
+    );
+    let elapsed = Arc::new(AtomicUsize::new(0));
+    let clock = Arc::clone(&elapsed);
+    let start = Instant::now();
+    let deadline = Deadline::with_time_source(Duration::from_secs(1), move || {
+        start + Duration::from_secs(clock.load(Ordering::Relaxed) as u64)
+    });
+    let mut sink = emitter(&invocation, move |(), _| {
+        elapsed.store(2, Ordering::Relaxed);
+        Ok(())
+    });
+
+    let error = sink
+        .publish_controlled((), &deadline)
+        .expect_err("late event must exceed the deadline");
+    assert_eq!(error.classification().code, Code::PolicyDurationLimit);
 }
 
 #[test]

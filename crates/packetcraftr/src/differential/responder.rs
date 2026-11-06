@@ -6,6 +6,7 @@ use std::io;
 use std::net::{SocketAddr, UdpSocket};
 use std::time::{Duration, Instant};
 
+use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::error::BoundaryError;
 
 use super::ResponderRequest;
@@ -32,16 +33,15 @@ where
         UdpSocket::bind(SocketAddr::from((request.bind, request.port))).map_err(io_error)?;
     socket.set_read_timeout(Some(POLL)).map_err(io_error)?;
 
-    let started = SystemClock.now();
+    let deadline =
+        Deadline::new(request.max_duration).with_cancellation(request.cancellation.clone());
     let mut last_received: Option<Instant> = None;
     let mut report = ResponderReport::default();
     let mut buffer = vec![0_u8; MAX_DATAGRAM];
 
     loop {
-        if let Some(cancellation) = &request.cancellation {
-            cancellation.check().map_err(Error::from)?;
-        }
-        if started.elapsed() >= request.max_duration {
+        deadline.check_cancelled().map_err(Error::from)?;
+        if deadline.check().is_err() {
             return Ok(report);
         }
         if let (Some(idle), Some(last)) = (request.idle_after_first, last_received)
@@ -59,6 +59,10 @@ where
             }
             Err(error) => return Err(io_error(error)),
         };
+        deadline.check_cancelled().map_err(Error::from)?;
+        if deadline.check().is_err() {
+            return Ok(report);
+        }
         let Some(probe) = canary::parse_probe(&buffer[..len]) else {
             report.ignored += 1;
             continue;
@@ -75,8 +79,12 @@ where
             source,
             payload_sha256: hex(&probe.payload_sha256),
         };
-        sink.publish(ResponderEvent::Received(record))
+        sink.publish_controlled(ResponderEvent::Received(record), &deadline)
             .map_err(|source: BoundaryError| Error::Output { source })?;
+        deadline.check_cancelled().map_err(Error::from)?;
+        if deadline.check().is_err() {
+            return Ok(report);
+        }
         let reply = canary::build_reply(&probe);
         if reply.len() < len {
             socket.send_to(&reply, source).map_err(io_error)?;
@@ -186,5 +194,70 @@ mod tests {
                 .iter()
                 .any(|record| record.attempt_seq == 9)
         );
+    }
+
+    #[test]
+    fn responder_does_not_reply_after_a_blocked_sink_outlives_its_duration() {
+        let report = respond_with_blocked_sink(None).expect("responder stops normally");
+        assert_eq!(report.received, 1);
+        assert_eq!(report.replies_sent, 0);
+    }
+
+    #[test]
+    fn responder_reports_cancellation_after_a_blocked_sink_outlives_its_duration() {
+        let cancellation = packetcraftr_core::budget::Cancellation::default();
+        let outcome = respond_with_blocked_sink(Some(cancellation));
+        assert!(
+            matches!(&outcome, Err(Error::Cancelled(_))),
+            "expected cancellation, got {outcome:?}"
+        );
+    }
+
+    fn respond_with_blocked_sink(
+        cancellation: Option<packetcraftr_core::budget::Cancellation>,
+    ) -> Result<ResponderReport, Error> {
+        let port = {
+            let socket = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+            socket.local_addr().unwrap().port()
+        };
+        let socket = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_millis(250)))
+            .unwrap();
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let responder_cancellation = cancellation.clone();
+        let token = [0x42; 16];
+        let handle = thread::spawn(move || {
+            let mut request = ResponderRequest::new(Ipv4Addr::LOCALHOST, port, token);
+            request.max_duration = Duration::from_millis(400);
+            request.cancellation = responder_cancellation;
+            respond(request, move |_| {
+                entered_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+                Ok(())
+            })
+        });
+        let payload = canary::build_probe(&token, 1, 7, 256);
+        let start_deadline = SystemClock.now() + Duration::from_secs(2);
+        let mut entered = false;
+        while SystemClock.now() < start_deadline && !handle.is_finished() {
+            socket
+                .send_to(&payload, (Ipv4Addr::LOCALHOST, port))
+                .unwrap();
+            if entered_rx.recv_timeout(Duration::from_millis(20)).is_ok() {
+                entered = true;
+                break;
+            }
+        }
+        assert!(entered, "sink received the probe");
+        if let Some(cancellation) = cancellation {
+            cancellation.cancel();
+        }
+        thread::sleep(Duration::from_millis(550));
+        release_tx.send(()).unwrap();
+        let mut reply = [0_u8; 128];
+        assert!(socket.recv_from(&mut reply).is_err(), "no late UDP reply");
+        handle.join().unwrap()
     }
 }

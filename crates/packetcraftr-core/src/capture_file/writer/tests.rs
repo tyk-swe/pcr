@@ -165,3 +165,169 @@ fn stream_limits_reject_excess_before_writing() {
     assert_eq!(writer.frames_written(), 2);
     assert_eq!(writer.captured_bytes_written(), exact_bytes);
 }
+
+#[test]
+fn mapped_interface_speeds_keep_their_values_across_byte_orders() {
+    use crate::capture_file::{
+        Endianness, Interface, MetadataBlockKind, PcapNgOption, PcapNgOptions, RecordKind,
+        TimestampResolution, map_frames,
+    };
+
+    let speed = 1_000_000_000_u64;
+    for target_order in [Endianness::Little, Endianness::Big] {
+        for code in [8, 16, 17] {
+            let source = [Endianness::Little, Endianness::Big]
+                .into_iter()
+                .flat_map(|source_order| {
+                    let mut writer = Writer::pcapng_with_options(
+                        Vec::new(),
+                        PcapNgOptions {
+                            endianness: source_order,
+                            ..Default::default()
+                        },
+                    )
+                    .unwrap();
+                    let speed_bytes = match source_order {
+                        Endianness::Little => speed.to_le_bytes(),
+                        Endianness::Big => speed.to_be_bytes(),
+                    };
+                    writer
+                        .add_interface_description_with_options(
+                            Interface {
+                                link_type: LinkType::ETHERNET,
+                                snap_len: 65_535,
+                                timestamp_resolution: TimestampResolution::Decimal(9),
+                                timestamp_offset: 0,
+                            },
+                            &[
+                                PcapNgOption {
+                                    code,
+                                    value: speed_bytes.to_vec().into(),
+                                },
+                                PcapNgOption {
+                                    code: 7,
+                                    value: vec![2, 3, 4, 5, 6, 7, 8, 9].into(),
+                                },
+                            ],
+                        )
+                        .unwrap();
+                    writer.write_frame(&frame(1, 0, 0x11, 60)).unwrap();
+                    writer.into_inner()
+                })
+                .collect::<Vec<_>>();
+            let mut reader = Reader::with_limits(Cursor::new(source), Default::default()).unwrap();
+            let mut writer = Writer::pcapng_with_options(
+                Vec::new(),
+                PcapNgOptions {
+                    endianness: target_order,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            let report = map_frames(
+                &mut reader,
+                &mut writer,
+                Limits::default(),
+                0,
+                |_, frame| Ok(frame.clone()),
+            )
+            .unwrap();
+            assert_eq!(report.frames_read, 2);
+            let output = writer.into_inner();
+            let mut reader = Reader::with_limits(Cursor::new(output), Default::default()).unwrap();
+            let mut interfaces = 0;
+            while let Some(record) = reader.next_record().unwrap() {
+                if let RecordKind::Metadata(MetadataBlockKind::InterfaceDescription {
+                    options,
+                    ..
+                }) = record.kind
+                {
+                    let value: [u8; 8] = options
+                        .iter()
+                        .find(|option| option.code == code)
+                        .unwrap()
+                        .value
+                        .as_ref()
+                        .try_into()
+                        .unwrap();
+                    let actual = match reader.endianness() {
+                        Endianness::Little => u64::from_le_bytes(value),
+                        Endianness::Big => u64::from_be_bytes(value),
+                    };
+                    assert_eq!(actual, speed, "interface {interfaces}, option {code}");
+                    assert_eq!(
+                        options
+                            .iter()
+                            .find(|option| option.code == 7)
+                            .unwrap()
+                            .value
+                            .as_ref(),
+                        [2, 3, 4, 5, 6, 7, 8, 9]
+                    );
+                    interfaces += 1;
+                }
+            }
+            assert_eq!(interfaces, 2);
+        }
+    }
+}
+
+#[test]
+fn mapped_interface_speeds_reject_malformed_widths_when_converting_byte_order() {
+    use crate::capture_file::{
+        Endianness, Interface, PcapNgOption, PcapNgOptions, TimestampResolution, map_frames,
+    };
+
+    for (source_order, target_order) in [
+        (Endianness::Little, Endianness::Big),
+        (Endianness::Big, Endianness::Little),
+    ] {
+        for code in [8, 16, 17] {
+            for length in [0, 7, 9] {
+                let mut source = Writer::pcapng_with_options(
+                    Vec::new(),
+                    PcapNgOptions {
+                        endianness: source_order,
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+                source
+                    .add_interface_description_with_options(
+                        Interface {
+                            link_type: LinkType::ETHERNET,
+                            snap_len: 65_535,
+                            timestamp_resolution: TimestampResolution::Decimal(9),
+                            timestamp_offset: 0,
+                        },
+                        &[PcapNgOption {
+                            code,
+                            value: vec![1; length].into(),
+                        }],
+                    )
+                    .unwrap();
+                let mut reader =
+                    Reader::with_limits(Cursor::new(source.into_inner()), Default::default())
+                        .unwrap();
+                let mut output = Writer::pcapng_with_options(
+                    Vec::new(),
+                    PcapNgOptions {
+                        endianness: target_order,
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+                assert!(matches!(
+                    map_frames(
+                        &mut reader,
+                        &mut output,
+                        Limits::default(),
+                        0,
+                        |_, frame| { Ok(frame.clone()) }
+                    ),
+                    Err(Error::TransformMetadata("malformed interface speed"))
+                ));
+            }
+        }
+    }
+}

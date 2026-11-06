@@ -172,6 +172,64 @@ fn mqtt_fields_are_editable() {
 }
 
 #[test]
+fn eap_rejects_uncarried_methods() {
+    use crate::protocol::link::eap::Eap;
+
+    for mode in [Mode::Strict, Mode::Permissive] {
+        for code in [3, 4] {
+            for method in [2, 25, 255] {
+                let mut packet = Packet::default();
+                packet.push(Eap {
+                    code,
+                    method,
+                    ..Default::default()
+                });
+                let error = build_in(packet, mode).unwrap_err();
+                assert!(
+                    error.ends_with("success/failure cannot contain method"),
+                    "{mode:?}, code {code}, method {method}: {error}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn eap_methods_and_terminal_defaults_round_trip() {
+    use crate::protocol::link::eap::Eap;
+
+    for mode in [Mode::Strict, Mode::Permissive] {
+        for code in [1, 2, 3, 4] {
+            let methods: &[u8] = if code <= 2 { &[1, 25, 255] } else { &[0, 1] };
+            for &method in methods {
+                let mut packet = Packet::default();
+                packet.push(Eap {
+                    code,
+                    identifier: 7,
+                    method,
+                    data: if code <= 2 {
+                        Bytes::from_static(b"data")
+                    } else {
+                        Bytes::new()
+                    },
+                });
+                let built = build_in(packet, mode).unwrap();
+                let expected = if code <= 2 {
+                    vec![code, 7, 0, 9, method, b'd', b'a', b't', b'a']
+                } else {
+                    vec![code, 7, 0, 4]
+                };
+                assert_eq!(built.bytes.as_ref(), expected);
+                assert!(built.diagnostics.is_empty());
+                round_trip("eap", &built.bytes);
+                let rebuilt = build_in(built.packet, mode).unwrap();
+                assert_eq!(rebuilt.bytes, built.bytes);
+            }
+        }
+    }
+}
+
+#[test]
 fn protocol_expansion_reference_vectors() {
     round_trip("mqtt", &[48, 4, 0, 1, 97, 120]);
     round_trip("coap", &[64, 1, 18, 52, 180, 116, 101, 115, 116]);
@@ -1436,42 +1494,83 @@ fn sip_preserves_trailing_datagram_bytes() {
 fn ethernet_padding_preserves_datagram_framing() {
     let registry = builtin::registry();
     let builder = crate::build::Builder::new(registry.clone());
-    let mut packet = Packet::default();
-    packet.push(Ethernet::default());
-    packet.push(Ipv4::default());
-    packet.push(Udp {
-        destination_port: 5683,
-        ..Default::default()
-    });
-    packet.push(crate::protocol::application::coap::Coap::default());
-    let mut padded = builder
-        .build(packet, Addresses::default(), Default::default())
-        .unwrap()
-        .bytes
-        .to_vec();
-    padded.resize(60, 0);
-    let decoded = crate::decode::Dissector::new(registry)
-        .decode(
-            Frame::new(None, LinkType::ETHERNET, Bytes::copy_from_slice(&padded)).unwrap(),
-            Default::default(),
-        )
-        .unwrap();
-    assert_eq!(
-        decoded
-            .packet
-            .get::<crate::layer::Padding>()
-            .unwrap()
-            .outside_layer,
-        Some(1)
-    );
-    assert_eq!(
-        builder
-            .build(decoded.packet, Addresses::default(), Default::default())
+    for (network, port, application) in [
+        ("ipv4", 5683, "coap()"),
+        ("ipv4", 53, "dns()"),
+        ("ipv6", 53, "dns()"),
+        ("ipv4", 69, "tftp(opcode=4,block=1)"),
+        ("ipv6", 69, "tftp(opcode=4,block=1)"),
+        ("ipv4", 123, "ntp()"),
+        ("ipv6", 123, "ntp()"),
+        ("ipv4", 514, "syslog()"),
+        ("ipv6", 514, "syslog()"),
+        ("ipv4", 67, "dhcpv4()"),
+        ("ipv6", 547, "dhcpv6()"),
+    ] {
+        let expression = format!("ethernet()/{network}()/udp(dport={port})/{application}");
+        let packet = crate::expression::parse(&expression, &registry, Default::default()).unwrap();
+        let protocol = application.split_once('(').unwrap().0;
+        if protocol != "coap" {
+            let mut with_child = packet.clone();
+            with_child.push(crate::layer::Raw::new(Bytes::from_static(b"x")));
+            with_child.push(crate::layer::Padding::after_layer(
+                Bytes::from_static(b"pad"),
+                1,
+            ));
+            let error = builder
+                .build(
+                    with_child,
+                    Addresses::default(),
+                    crate::build::Options {
+                        mode: Mode::Permissive,
+                        ..Default::default()
+                    },
+                )
+                .unwrap_err();
+            assert!(
+                matches!(&error, crate::build::Error::Codec { protocol: refused, .. } if refused.as_str() == protocol),
+                "{expression}: {error}"
+            );
+        }
+        let mut padded = builder
+            .build(packet, Addresses::default(), Default::default())
             .unwrap()
             .bytes
-            .as_ref(),
-        padded
-    );
+            .to_vec();
+        padded.resize(padded.len().max(46) + 14, 0xa5);
+        let decoded = crate::decode::Dissector::new(registry.clone())
+            .decode(
+                Frame::new(None, LinkType::ETHERNET, Bytes::copy_from_slice(&padded)).unwrap(),
+                Default::default(),
+            )
+            .unwrap();
+        assert_eq!(
+            decoded.packet.layer(3).unwrap().protocol_id().as_str(),
+            protocol,
+            "{expression}"
+        );
+        assert_eq!(
+            decoded
+                .packet
+                .get::<crate::layer::Padding>()
+                .unwrap()
+                .outside_layer,
+            Some(1)
+        );
+        for mode in [Mode::Strict, Mode::Permissive] {
+            let rebuilt = builder
+                .build(
+                    decoded.packet.clone(),
+                    Addresses::default(),
+                    crate::build::Options {
+                        mode,
+                        ..Default::default()
+                    },
+                )
+                .unwrap_or_else(|error| panic!("{expression} ({mode:?}): {error}"));
+            assert_eq!(rebuilt.bytes.as_ref(), padded, "{expression} ({mode:?})");
+        }
+    }
 }
 
 #[test]
@@ -1563,6 +1662,182 @@ fn rtsp_sip_methods_accept_tokens() {
         for method in ["GET_PARAMETER", "SET_PARAMETER", "custom_method2"] {
             let wire = format!("{method} * {version}\r\nContent-Length: 0\r\n\r\n");
             builder_round_trip(name, wire.as_bytes());
+        }
+    }
+}
+
+#[test]
+fn optional_padding_rejects_wrong_types_and_preserves_bytes() {
+    use crate::protocol::application::{ipfix::Ipfix, stun::Stun};
+
+    let registry = builtin::registry();
+    let builder = crate::build::Builder::new(registry.clone());
+    for padding in [
+        None,
+        Some(field::Value::Bool(true)),
+        Some(field::Value::Unsigned(3)),
+        Some(field::Value::Signed(-1)),
+        Some(field::Value::Text("ABC".into())),
+        Some(field::Value::List(vec![])),
+        Some(field::Value::Object(Default::default())),
+        Some(field::Value::Ipv4("192.0.2.1".parse().unwrap())),
+        Some(field::Value::Ipv6("2001:db8::1".parse().unwrap())),
+        Some(field::Value::Mac([0; 6])),
+        Some(Bytes::new().into()),
+        Some(Bytes::from_static(b"A").into()),
+        Some(Bytes::from_static(b"AB").into()),
+        Some(Bytes::from_static(b"ABC").into()),
+        Some(Bytes::from_static(b"ABCD").into()),
+    ] {
+        let padded = |fields| {
+            record(fields)
+                .into_iter()
+                .chain(padding.clone().map(|value| ("padding".to_owned(), value)))
+                .collect()
+        };
+        let template = |id: u16| Ipfix {
+            sets: Records(vec![padded([
+                ("id", id.into()),
+                (
+                    "records",
+                    field::Value::List(vec![field::Value::Object(record([
+                        ("template_id", 256_u16.into()),
+                        ("fields", field::Value::List(vec![])),
+                    ]))]),
+                ),
+            ])]),
+            ..Default::default()
+        };
+        let cases: [(Box<dyn Layer>, &str); 5] = [
+            (
+                Box::new(Stun {
+                    attributes: Records(vec![padded([
+                        ("kind", 0x8022_u16.into()),
+                        ("value", Bytes::from_static(b"a").into()),
+                    ])]),
+                    ..Default::default()
+                }),
+                "attributes[0].padding",
+            ),
+            (
+                Box::new(Sflow {
+                    samples: Records(vec![padded([
+                        ("format", 4096_u32.into()),
+                        ("data", Bytes::from_static(b"a").into()),
+                    ])]),
+                    ..Default::default()
+                }),
+                "samples[0].padding",
+            ),
+            (
+                Box::new(Sflow {
+                    samples: Records(vec![record([
+                        ("format", 2_u32.into()),
+                        ("sequence", 1_u32.into()),
+                        ("source_id", 1_u32.into()),
+                        (
+                            "records",
+                            field::Value::List(vec![field::Value::Object(padded([
+                                ("format", 4096_u32.into()),
+                                ("data", Bytes::from_static(b"a").into()),
+                            ]))]),
+                        ),
+                    ])]),
+                    ..Default::default()
+                }),
+                "samples[0].records[0].padding",
+            ),
+            (Box::new(template(2)), "sets[0].padding"),
+            (Box::new(template(3)), "sets[0].padding"),
+        ];
+        for (layer, path) in cases {
+            let name = layer.protocol_id().as_str().to_owned();
+            let expected = match &padding {
+                None => Some(if name == "ipfix" {
+                    Bytes::new()
+                } else {
+                    Bytes::from_static(&[0; 3])
+                }),
+                Some(field::Value::Bytes(bytes))
+                    if bytes.len() == 3 || name == "ipfix" && bytes.len() <= 3 =>
+                {
+                    Some(bytes.clone())
+                }
+                _ => None,
+            };
+            let mut packet = Packet::default();
+            packet.push_boxed(layer);
+            let json = serde_json::to_string(&document::Packet::from_packet(&packet)).unwrap();
+            let document =
+                document::Packet::parse(&json, document::Format::Json, json.len()).unwrap();
+            for mode in [Mode::Strict, Mode::Permissive] {
+                let result = builder.build(
+                    document.to_packet(&registry, 16).unwrap(),
+                    Addresses::default(),
+                    crate::build::Options {
+                        mode,
+                        ..Default::default()
+                    },
+                );
+                let Some(expected) = &expected else {
+                    assert!(result.is_err(), "{name} {path} {mode:?} {padding:?}");
+                    continue;
+                };
+                let built = result.unwrap();
+                assert!(built.diagnostics.is_empty());
+                assert_eq!(
+                    built
+                        .packet
+                        .layer(0)
+                        .unwrap()
+                        .field_path(&path.parse().unwrap()),
+                    Some(expected.clone().into()),
+                    "{name} {path} {mode:?} {padding:?}",
+                );
+                builder_round_trip(&name, &built.bytes);
+            }
+        }
+    }
+}
+
+#[test]
+fn rtp_extensions_require_flag() {
+    use crate::protocol::application::rtp::Rtp;
+
+    let registry = builtin::registry();
+    for mode in [Mode::Strict, Mode::Permissive] {
+        for has_extension in [false, true] {
+            for extension_profile in [0, 1, 0xbede, u16::MAX] {
+                for extension_data in [Bytes::new(), Bytes::from_static(b"\x10\x20\x30\x40")] {
+                    let rtp = Rtp {
+                        has_extension,
+                        extension_profile,
+                        extension_data,
+                        payload: Bytes::from_static(b"media"),
+                        ..Default::default()
+                    };
+                    let mut packet = Packet::default();
+                    packet.push(rtp.clone());
+                    let json =
+                        serde_json::to_string(&document::Packet::from_packet(&packet)).unwrap();
+                    let document =
+                        document::Packet::parse(&json, document::Format::Json, json.len()).unwrap();
+                    let result = build_in(document.to_packet(&registry, 16).unwrap(), mode);
+                    if !has_extension && (extension_profile != 0 || !rtp.extension_data.is_empty())
+                    {
+                        assert!(result.is_err(), "{mode:?}: {rtp:?}");
+                        continue;
+                    }
+                    let built = result.unwrap();
+                    assert!(built.diagnostics.is_empty());
+                    assert_eq!(built.packet.get::<Rtp>(), Some(&rtp));
+                    builder_round_trip("rtp", &built.bytes);
+                    let mut decoded = Packet::default();
+                    decoded.push_boxed(decode("rtp", &built.bytes).unwrap().layer);
+                    assert_eq!(decoded.get::<Rtp>(), Some(&rtp));
+                    assert_eq!(build_in(decoded, mode).unwrap().bytes, built.bytes);
+                }
+            }
         }
     }
 }
@@ -1754,6 +2029,81 @@ fn text_targets_and_content_lengths() {
                 .is_err(),
                 "{length:?}"
             );
+        }
+    }
+}
+
+#[test]
+fn text_start_lines_reject_embedded_line_endings() {
+    let registry = builtin::registry();
+    for (name, port, start) in [
+        ("ssdp", 1900, "M-SEARCH * HTTP/1.1"),
+        ("sip", 5060, "SIP/2.0 200 OK"),
+        ("rtsp", 554, "RTSP/1.0 200 OK"),
+    ] {
+        for separator in ["\r\n", "\r", "\n"] {
+            let message = format!("{start}{separator}X-Test: first\r\nContent-Length: 0\r\n\r\n");
+            let mut packet = Packet::default();
+            packet.push(Ethernet::default());
+            packet.push(Ipv4::default());
+            if name == "rtsp" {
+                packet.push(Tcp {
+                    destination_port: port,
+                    ..Default::default()
+                });
+            } else {
+                packet.push(Udp {
+                    destination_port: port,
+                    ..Default::default()
+                });
+            }
+            packet.push(crate::layer::Raw::new(Bytes::from(message)));
+            let original = build_in(packet, Mode::Permissive).unwrap().bytes;
+            let decoded = crate::decode::Dissector::new(registry.clone())
+                .decode(
+                    Frame::new(None, LinkType::ETHERNET, original.clone()).unwrap(),
+                    Default::default(),
+                )
+                .unwrap();
+            let valid = separator == "\r\n";
+            if valid {
+                round_trip(
+                    name,
+                    format!("{start}\r\nX-Test: first\r\n second\r\nContent-Length: 0\r\n\r\n")
+                        .as_bytes(),
+                );
+            }
+            assert_eq!(
+                decoded
+                    .packet
+                    .iter()
+                    .any(|layer| layer.protocol_id().as_str() == name),
+                valid,
+                "{name} {separator:?}"
+            );
+            if valid {
+                assert!(
+                    decoded.diagnostics.is_empty(),
+                    "{name}: {:?}",
+                    decoded.diagnostics
+                );
+            } else {
+                assert!(
+                    decoded
+                        .diagnostics
+                        .iter()
+                        .any(|d| d.message.contains("invalid start line")),
+                    "{name}: {:?}",
+                    decoded.diagnostics
+                );
+            }
+            let mode = if valid {
+                Mode::Strict
+            } else {
+                Mode::Permissive
+            };
+            let rebuilt = build_in(decoded.packet, mode).unwrap();
+            assert_eq!(rebuilt.bytes, original, "{name} {separator:?}");
         }
     }
 }
@@ -2546,5 +2896,207 @@ fn rtsp_text_and_binary_round_trip() {
         let document = document::Packet::parse(&json, document::Format::Json, json.len()).unwrap();
         let rebuilt = build_in(document.to_packet(&registry, 16).unwrap(), Mode::Strict).unwrap();
         assert_eq!(rebuilt.bytes, built.bytes, "{expected:?}");
+    }
+}
+
+#[test]
+fn bgp_fields_follow_message_type() {
+    use crate::protocol::application::bgp::Bgp;
+    let prefix = field::Value::List(vec![field::Value::Object(record([
+        ("length", 24_u8.into()),
+        ("prefix", Bytes::from_static(&[192, 0, 2]).into()),
+    ]))]);
+    let fields = [
+        (1, "version", 3_u8.into()),
+        (1, "my_as", 64512_u16.into()),
+        (1, "hold_time", 30_u16.into()),
+        (
+            1,
+            "identifier",
+            field::Value::Ipv4("192.0.2.1".parse().unwrap()),
+        ),
+        (
+            1,
+            "parameters",
+            field::Value::List(vec![field::Value::Object(record([
+                ("kind", 2_u8.into()),
+                ("value", Bytes::from_static(&[2, 0]).into()),
+            ]))]),
+        ),
+        (2, "withdrawn", prefix.clone()),
+        (
+            2,
+            "attributes",
+            field::Value::List(vec![field::Value::Object(record([
+                ("flags", 64_u8.into()),
+                ("kind", 1_u8.into()),
+                ("value", Bytes::from_static(&[0]).into()),
+            ]))]),
+        ),
+        (2, "nlri", prefix),
+        (3, "error_code", 3_u8.into()),
+        (3, "error_subcode", 1_u8.into()),
+        (3, "data", Bytes::from_static(b"data").into()),
+    ];
+    let registry = builtin::registry();
+    let build = |bgp: Bgp, mode| {
+        let mut packet = Packet::default();
+        packet.push(Ethernet::default());
+        packet.push(Ipv4::default());
+        packet.push(Tcp {
+            destination_port: 179,
+            ..Default::default()
+        });
+        packet.push(bgp);
+        build_in(packet, mode)
+    };
+    for mode in [Mode::Strict, Mode::Permissive] {
+        for message_type in 1..=4 {
+            let baseline = Bgp {
+                message_type,
+                ..Default::default()
+            };
+            let built = build(baseline.clone(), mode).unwrap();
+            let decoded = crate::decode::Dissector::new(registry.clone())
+                .decode(
+                    Frame::new(None, LinkType::ETHERNET, built.bytes.clone()).unwrap(),
+                    Default::default(),
+                )
+                .unwrap();
+            assert_eq!(decoded.packet.get::<Bgp>(), Some(&baseline));
+            assert_eq!(build_in(decoded.packet, mode).unwrap().bytes, built.bytes);
+            for (carried_by, field, value) in &fields {
+                let mut bgp = baseline.clone();
+                bgp.set_field(field, value.clone()).unwrap();
+                let result = build(bgp.clone(), mode);
+                if message_type != *carried_by {
+                    let error = result.unwrap_err();
+                    assert!(
+                        error.ends_with(&format!("does not carry field {field}")),
+                        "{mode:?} {message_type}: {error}"
+                    );
+                } else if *field == "version" {
+                    assert!(result.unwrap_err().contains("only BGP version 4"));
+                } else {
+                    let built = result.unwrap();
+                    let decoded = crate::decode::Dissector::new(registry.clone())
+                        .decode(
+                            Frame::new(None, LinkType::ETHERNET, built.bytes.clone()).unwrap(),
+                            Default::default(),
+                        )
+                        .unwrap();
+                    assert_eq!(decoded.packet.get::<Bgp>(), Some(&bgp));
+                    assert_eq!(build_in(decoded.packet, mode).unwrap().bytes, built.bytes);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn snmp_rejects_fields_from_other_pdus() {
+    use crate::protocol::application::snmp::Snmp;
+    let registry = builtin::registry();
+    let trap_fields = [
+        (
+            "enterprise",
+            Bytes::from_static(&[43, 6, 1, 4, 1, 1]).into(),
+        ),
+        (
+            "agent_address",
+            field::Value::Ipv4("192.0.2.1".parse().unwrap()),
+        ),
+        ("generic_trap", field::Value::Unsigned(6)),
+        ("specific_trap", field::Value::Unsigned(42)),
+        ("timestamp", field::Value::Unsigned(123456)),
+    ];
+    let request_fields = [
+        ("request_id", field::Value::Signed(42)),
+        ("request_id", field::Value::Signed(0)),
+        ("request_id", field::Value::Signed(-1)),
+        ("error_status", field::Value::Unsigned(2)),
+        ("error_index", field::Value::Unsigned(3)),
+    ];
+    for pdu_type in 0xa0..=0xa7 {
+        let trap = pdu_type == 0xa4;
+        for (name, value) in if trap { &request_fields } else { &trap_fields } {
+            let mut layer = Snmp {
+                version: if trap { 0 } else { 1 },
+                pdu_type,
+                ..Default::default()
+            };
+            layer.set_field(name, value.clone()).unwrap();
+            let mut packet = Packet::default();
+            packet.push(layer);
+            let json = serde_json::to_string(&document::Packet::from_packet(&packet)).unwrap();
+            let document =
+                document::Packet::parse(&json, document::Format::Json, json.len()).unwrap();
+            for mode in [Mode::Strict, Mode::Permissive] {
+                let error = build_in(document.to_packet(&registry, 16).unwrap(), mode).unwrap_err();
+                assert!(
+                    error.contains(&format!("{name} is not part of PDU type {pdu_type:#x}")),
+                    "{mode:?}: {error}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn snmp_pdu_fields_survive_document_and_wire_round_trips() {
+    use crate::protocol::application::snmp::Snmp;
+    let registry = builtin::registry();
+    for pdu_type in 0xa0..=0xa7 {
+        let base = Snmp {
+            version: u8::from(pdu_type != 0xa4),
+            pdu_type,
+            ..Default::default()
+        };
+        let populated = if pdu_type == 0xa4 {
+            Snmp {
+                enterprise: Bytes::from_static(&[43, 6, 1, 4, 1, 1]),
+                agent_address: "192.0.2.1".parse().unwrap(),
+                generic_trap: 6,
+                specific_trap: 42,
+                timestamp: 123456,
+                ..base.clone()
+            }
+        } else {
+            Snmp {
+                request_id: -42,
+                error_status: 2,
+                error_index: 3,
+                ..base.clone()
+            }
+        };
+        for layer in [base, populated] {
+            for mode in [Mode::Strict, Mode::Permissive] {
+                let mut packet = Packet::default();
+                packet.push(Ipv4::default());
+                packet.push(Udp {
+                    destination_port: 161,
+                    ..Default::default()
+                });
+                packet.push(layer.clone());
+                let document = document::Packet::from_packet(&packet);
+                let built = build_in(document.to_packet(&registry, 16).unwrap(), mode).unwrap();
+                assert_eq!(built.packet.get::<Snmp>(), Some(&layer));
+                assert!(built.diagnostics.is_empty(), "{:?}", built.diagnostics);
+                let decoded = crate::decode::Dissector::new(registry.clone())
+                    .decode(
+                        Frame::new(None, LinkType::RAW, built.bytes.clone()).unwrap(),
+                        Default::default(),
+                    )
+                    .unwrap();
+                assert!(decoded.diagnostics.is_empty(), "{:?}", decoded.diagnostics);
+                assert_eq!(decoded.packet.get::<Snmp>(), Some(&layer));
+                let json =
+                    serde_json::to_string(&document::Packet::from_packet(&decoded.packet)).unwrap();
+                let document =
+                    document::Packet::parse(&json, document::Format::Json, json.len()).unwrap();
+                let rebuilt = build_in(document.to_packet(&registry, 16).unwrap(), mode).unwrap();
+                assert_eq!(rebuilt.bytes, built.bytes, "{mode:?}: {layer:?}");
+            }
+        }
     }
 }

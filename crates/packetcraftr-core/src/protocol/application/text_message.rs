@@ -25,9 +25,7 @@ pub(super) fn encode(
     max: usize,
 ) -> Result<Vec<u8>, Error> {
     let mut w = Writer::new(name, max);
-    if start.iter().any(|b| matches!(*b, b'\r' | b'\n')) || start.is_empty() {
-        return Err(invalid(name, "invalid start line"));
-    }
+    validate_start_line(name, start)?;
     w.put(start)?;
     w.put(b"\r\n")?;
     if headers.0.len() > 256 {
@@ -138,6 +136,7 @@ fn parse_head(name: &'static str, b: &[u8]) -> Result<Head, Error> {
         .windows(2)
         .position(|v| v == b"\r\n")
         .ok_or_else(|| invalid(name, "missing start line"))?;
+    validate_start_line(name, &b[..first])?;
     let start = Bytes::copy_from_slice(&b[..first]);
     let mut pos = first + 2;
     let mut headers = Records::default();
@@ -204,6 +203,13 @@ fn parse_head(name: &'static str, b: &[u8]) -> Result<Head, Error> {
         length,
         end,
     })
+}
+
+fn validate_start_line(name: &'static str, start: &[u8]) -> Result<(), Error> {
+    if start.is_empty() || start.iter().any(|b| matches!(*b, b'\r' | b'\n')) {
+        return Err(invalid(name, "invalid start line"));
+    }
+    Ok(())
 }
 
 fn valid_name(protocol: &'static str, key: &[u8]) -> bool {

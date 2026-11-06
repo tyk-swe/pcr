@@ -20,6 +20,8 @@ use super::rendering;
 
 pub(crate) const AFTER_LONG_HELP: &str = r"Run the cooperating Responder on the target side of a differential Campaign. It binds an ordinary UDP socket, records every token-bearing Canary it receives, and replies with a smaller deterministic echo naming the received payload digest. Datagrams without the campaign token are counted and ignored. The reception log is written no-clobber at clean stop (duration reached, idle after the first Canary, datagram bound, or cancellation) for a later differential-join.
 
+When the duration is reached, the Responder publishes its report and exits successfully. Output failures still return an error.
+
 Example:
   packetcraftr network differential-responder --port 40101 --token <32 hex chars> --log-file responder-log.jsonl";
 
@@ -71,6 +73,13 @@ impl crate::commands::Spec for Args {
 
     fn run_time(&self) -> Option<&dyn crate::command_options::Bounded> {
         Some(&self.duration)
+    }
+
+    fn publication_duration(&self) -> Option<Duration> {
+        Some(
+            self.duration.max_duration()
+                + Duration::from_millis(crate::resources::OUTPUT_TIMEOUT_MS),
+        )
     }
 
     fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
@@ -194,6 +203,7 @@ fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<()
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::Spec as _;
     use crate::invocation::{Invocation, StreamEncoder};
     use crate::output::contract::Command;
     use clap::Parser as _;
@@ -344,7 +354,10 @@ mod tests {
         for _ in 0..3 {
             let port = free_port();
             let arguments = parsed_args(port, idle_ms, duration_ms, log);
-            let invocation = ndjson(stdout.clone(), deadline_ms.map(Duration::from_millis));
+            let deadline = deadline_ms
+                .map(Duration::from_millis)
+                .or_else(|| arguments.publication_duration());
+            let invocation = ndjson(stdout.clone(), deadline);
             let handle = thread::spawn(move || run(&invocation, arguments));
             let answered = probe_until_answered(port, || handle.is_finished());
             if answered {
@@ -361,29 +374,155 @@ mod tests {
     }
 
     #[test]
-    fn ndjson_duration_expiry_publishes_empty_log() {
+    fn duration_expiry_publishes_empty_log_and_report() {
         let directory = tempfile::tempdir().expect("test directory");
-        let log = directory.path().join("responder-log.jsonl");
+        for format in [Format::Text, Format::Json, Format::Ndjson] {
+            let log = directory.path().join(format!("{format:?}.jsonl"));
+            let arguments = parsed_args(free_port(), 0, 100, &log);
+            let stdout = Stdout::default();
+            let invocation = Invocation::new(
+                format,
+                StreamEncoder::new(Command::DifferentialResponder, stdout.clone()),
+                arguments.publication_duration(),
+                Default::default(),
+                None,
+            );
 
-        let outcome = run(
-            &ndjson(Stdout::default(), Some(Duration::from_millis(100))),
-            parsed_args(free_port(), 0, 100, &log),
-        );
-
-        assert!(outcome.is_err(), "the expired invocation stays reported");
-        assert_eq!(std::fs::read_to_string(&log).expect("log published"), "");
+            run(&invocation, arguments).expect("duration stop succeeds");
+            assert_eq!(std::fs::read_to_string(&log).expect("log published"), "");
+            if format == Format::Ndjson {
+                assert_eq!(stdout.events(), ["complete"]);
+            }
+        }
     }
 
     #[test]
-    fn ndjson_duration_expiry_preserves_receptions() {
+    fn duration_expiry_preserves_receptions() {
         let directory = tempfile::tempdir().expect("test directory");
         let log = directory.path().join("responder-log.jsonl");
+        let stdout = Stdout::default();
 
-        let outcome = run_with_traffic(&log, 0, 1000, Stdout::default(), Some(1000), || {});
+        run_with_traffic(&log, 0, 1000, stdout.clone(), None, || {})
+            .expect("duration stop succeeds");
 
-        assert!(outcome.is_err(), "the expired invocation stays reported");
         let contents = std::fs::read_to_string(&log).expect("log published");
         assert!(holds_probe_record(&contents), "log contents: {contents}");
+        assert_eq!(stdout.events().last().map(String::as_str), Some("complete"));
+    }
+
+    #[test]
+    fn blocked_live_output_does_not_send_a_reply_after_duration() {
+        assert_eq!(
+            blocked_live_output(false),
+            packetcraftr_core::error::Code::IoStdout
+        );
+    }
+
+    #[test]
+    fn cancelled_blocked_live_output_reports_cancellation() {
+        assert_eq!(
+            blocked_live_output(true),
+            packetcraftr_core::error::Code::IoCancelled
+        );
+    }
+
+    fn blocked_live_output(cancel: bool) -> packetcraftr_core::error::Code {
+        struct BlockedWriter {
+            entered: std::sync::mpsc::Sender<()>,
+            release: Option<std::sync::mpsc::Receiver<()>>,
+        }
+
+        impl Write for BlockedWriter {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                if let Some(release) = self.release.take() {
+                    self.entered.send(()).unwrap();
+                    release.recv().unwrap();
+                }
+                Ok(bytes.len())
+            }
+
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let directory = tempfile::tempdir().expect("test directory");
+        let log = directory.path().join("responder-log.jsonl");
+        let port = free_port();
+        let arguments = parsed_args(port, 0, 500, &log);
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let runtime = packetcraftr::runtime::Runtime::new(1).unwrap();
+        let stream = crate::output::stream::StreamEncoder::new_bounded(
+            Command::DifferentialResponder,
+            BlockedWriter {
+                entered: entered_tx,
+                release: Some(release_rx),
+            },
+            &runtime,
+            Duration::from_secs(1),
+        )
+        .unwrap();
+        let cancellation = packetcraftr_core::budget::Cancellation::default();
+        let invocation = Invocation::new(
+            Format::Ndjson,
+            stream.into(),
+            arguments.publication_duration(),
+            cancellation.clone(),
+            None,
+        );
+        let handle = thread::spawn(move || run(&invocation, arguments));
+        let socket = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_millis(250)))
+            .unwrap();
+        let entered_deadline = SystemClock.now() + Duration::from_secs(2);
+        let mut entered = false;
+        while SystemClock.now() < entered_deadline && !handle.is_finished() {
+            socket
+                .send_to(&probe(), (Ipv4Addr::LOCALHOST, port))
+                .unwrap();
+            if entered_rx.recv_timeout(Duration::from_millis(20)).is_ok() {
+                entered = true;
+                break;
+            }
+        }
+        assert!(entered, "live event reached the blocked output");
+        if cancel {
+            cancellation.cancel();
+        }
+        thread::sleep(Duration::from_millis(650));
+        let stop_deadline = SystemClock.now() + Duration::from_millis(250);
+        while !handle.is_finished() && SystemClock.now() < stop_deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        let stopped_before_release = handle.is_finished();
+        release_tx.send(()).unwrap();
+        let mut reply = [0_u8; 128];
+        assert!(socket.recv_from(&mut reply).is_err(), "no late UDP reply");
+        let error = handle
+            .join()
+            .unwrap()
+            .expect_err("blocked output is reported");
+        assert!(stopped_before_release, "live output exceeded the duration");
+        assert!(holds_probe_record(&std::fs::read_to_string(log).unwrap()));
+        error.classification.code
+    }
+
+    #[test]
+    fn expired_publication_budget_keeps_published_log_without_completion() {
+        let directory = tempfile::tempdir().expect("test directory");
+        let log = directory.path().join("responder-log.jsonl");
+        let stdout = Stdout::default();
+
+        let outcome = run(
+            &ndjson(stdout.clone(), Some(Duration::from_millis(1))),
+            parsed_args(free_port(), 0, 100, &log),
+        );
+
+        assert!(outcome.is_err(), "the expired publication stays reported");
+        assert_eq!(std::fs::read_to_string(&log).expect("log published"), "");
+        assert!(!stdout.events().iter().any(|event| event == "complete"));
     }
 
     #[test]

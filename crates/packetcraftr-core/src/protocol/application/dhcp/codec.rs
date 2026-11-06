@@ -9,7 +9,7 @@ use crate::{
     field,
     layer::Layer,
     layout::FieldLayout,
-    protocol::common::{invalid, rejected, typed_layer},
+    protocol::common::{invalid, payload_without_padding, rejected, typed_layer},
 };
 
 pub(super) trait Message: Layer + Default + Sized + 'static {
@@ -27,7 +27,7 @@ pub(super) fn encode<M: Message>(
     payload: &[u8],
     context: &EncodeContext<'_>,
 ) -> Result<Encoded, crate::codec::Error> {
-    if !payload.is_empty() {
+    if !payload_without_padding(M::NAME, payload, context)?.is_empty() {
         return Err(invalid(M::NAME, "DHCP is a complete UDP payload"));
     }
     let layer = typed_layer::<M>(M::NAME, layer)?;

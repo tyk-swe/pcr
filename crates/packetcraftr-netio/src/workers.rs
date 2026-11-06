@@ -35,7 +35,7 @@ pub(crate) use admission::{
 #[cfg(all(native_route, target_os = "linux"))]
 pub(crate) use context::NAMESPACE_PATH;
 pub(crate) use context::{ExecutionContext, current as execution_context};
-#[cfg(any(native_route, native_layer2, test))]
+#[cfg(any(all(native_route, target_os = "linux"), native_layer2, test))]
 pub(crate) use task::Waited;
 pub(crate) use task::{Blocked, Task, discard_panic_payload, unwind_after_cleanup};
 

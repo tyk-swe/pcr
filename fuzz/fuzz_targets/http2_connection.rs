@@ -14,7 +14,7 @@ use std::hint::black_box;
 use std::time::{Duration, SystemTime};
 
 use libfuzzer_sys::fuzz_target;
-use packetcraftr_core::analysis::{Options, Session, application, http2};
+use packetcraftr_core::analysis::{Session, SessionOptions, application, http2};
 use packetcraftr_fuzz::{
     Conversation, Direction, Family, MAX_SEGMENT_PAYLOAD, Segment, capture, ip, registry, tcp,
 };
@@ -135,7 +135,7 @@ fuzz_target!(|data: &[u8]| {
         http2::Limits::default(),
     )
     .expect("default HTTP/2 limits are valid");
-    let _ = Session::new(registry(), Options::default(), collector).run(
+    let _ = Session::new(registry(), SessionOptions::default(), collector).run(
         &mut reader,
         |event| {
             black_box(event);

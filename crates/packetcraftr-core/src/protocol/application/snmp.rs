@@ -76,6 +76,7 @@ impl Snmp {
         if self.version > 1 {
             return Err(unsupported(NAME, "only SNMPv1/v2c"));
         }
+        self.validate_field_ownership()?;
         let max = c.remaining_packet_bytes;
         let mut body = Writer::new(NAME, max);
         ber::int(&mut body, 2, self.version.into())?;
@@ -115,6 +116,29 @@ impl Snmp {
         let mut w = Writer::new(NAME, max);
         ber::put(&mut w, 0x30, &body.bytes)?;
         Ok(w.bytes)
+    }
+    fn validate_field_ownership(&self) -> Result<(), Error> {
+        let trap = self.pdu_type == 0xa4;
+        let stray = [
+            ("request_id", trap && self.request_id != 1),
+            ("error_status", trap && self.error_status != 0),
+            ("error_index", trap && self.error_index != 0),
+            ("enterprise", !trap && !self.enterprise.is_empty()),
+            (
+                "agent_address",
+                !trap && !self.agent_address.is_unspecified(),
+            ),
+            ("generic_trap", !trap && self.generic_trap != 0),
+            ("specific_trap", !trap && self.specific_trap != 0),
+            ("timestamp", !trap && self.timestamp != 0),
+        ];
+        if let Some((name, _)) = stray.into_iter().find(|(_, present)| *present) {
+            return Err(invalid(
+                NAME,
+                format!("{name} is not part of PDU type {:#x}", self.pdu_type),
+            ));
+        }
+        Ok(())
     }
     fn parse_wire(
         b: Bytes,

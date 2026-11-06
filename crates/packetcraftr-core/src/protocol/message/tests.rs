@@ -2992,3 +2992,111 @@ fn bgp_fields_follow_message_type() {
         }
     }
 }
+
+#[test]
+fn snmp_rejects_fields_from_other_pdus() {
+    use crate::protocol::application::snmp::Snmp;
+    let registry = builtin::registry();
+    let trap_fields = [
+        (
+            "enterprise",
+            Bytes::from_static(&[43, 6, 1, 4, 1, 1]).into(),
+        ),
+        (
+            "agent_address",
+            field::Value::Ipv4("192.0.2.1".parse().unwrap()),
+        ),
+        ("generic_trap", field::Value::Unsigned(6)),
+        ("specific_trap", field::Value::Unsigned(42)),
+        ("timestamp", field::Value::Unsigned(123456)),
+    ];
+    let request_fields = [
+        ("request_id", field::Value::Signed(42)),
+        ("request_id", field::Value::Signed(0)),
+        ("request_id", field::Value::Signed(-1)),
+        ("error_status", field::Value::Unsigned(2)),
+        ("error_index", field::Value::Unsigned(3)),
+    ];
+    for pdu_type in 0xa0..=0xa7 {
+        let trap = pdu_type == 0xa4;
+        for (name, value) in if trap { &request_fields } else { &trap_fields } {
+            let mut layer = Snmp {
+                version: if trap { 0 } else { 1 },
+                pdu_type,
+                ..Default::default()
+            };
+            layer.set_field(name, value.clone()).unwrap();
+            let mut packet = Packet::default();
+            packet.push(layer);
+            let json = serde_json::to_string(&document::Packet::from_packet(&packet)).unwrap();
+            let document =
+                document::Packet::parse(&json, document::Format::Json, json.len()).unwrap();
+            for mode in [Mode::Strict, Mode::Permissive] {
+                let error = build_in(document.to_packet(&registry, 16).unwrap(), mode).unwrap_err();
+                assert!(
+                    error.contains(&format!("{name} is not part of PDU type {pdu_type:#x}")),
+                    "{mode:?}: {error}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn snmp_pdu_fields_survive_document_and_wire_round_trips() {
+    use crate::protocol::application::snmp::Snmp;
+    let registry = builtin::registry();
+    for pdu_type in 0xa0..=0xa7 {
+        let base = Snmp {
+            version: u8::from(pdu_type != 0xa4),
+            pdu_type,
+            ..Default::default()
+        };
+        let populated = if pdu_type == 0xa4 {
+            Snmp {
+                enterprise: Bytes::from_static(&[43, 6, 1, 4, 1, 1]),
+                agent_address: "192.0.2.1".parse().unwrap(),
+                generic_trap: 6,
+                specific_trap: 42,
+                timestamp: 123456,
+                ..base.clone()
+            }
+        } else {
+            Snmp {
+                request_id: -42,
+                error_status: 2,
+                error_index: 3,
+                ..base.clone()
+            }
+        };
+        for layer in [base, populated] {
+            for mode in [Mode::Strict, Mode::Permissive] {
+                let mut packet = Packet::default();
+                packet.push(Ipv4::default());
+                packet.push(Udp {
+                    destination_port: 161,
+                    ..Default::default()
+                });
+                packet.push(layer.clone());
+                let document = document::Packet::from_packet(&packet);
+                let built = build_in(document.to_packet(&registry, 16).unwrap(), mode).unwrap();
+                assert_eq!(built.packet.get::<Snmp>(), Some(&layer));
+                assert!(built.diagnostics.is_empty(), "{:?}", built.diagnostics);
+                let decoded = crate::decode::Dissector::new(registry.clone())
+                    .decode(
+                        Frame::new(None, LinkType::RAW, built.bytes.clone()).unwrap(),
+                        Default::default(),
+                    )
+                    .unwrap();
+                assert!(decoded.diagnostics.is_empty(), "{:?}", decoded.diagnostics);
+                assert_eq!(decoded.packet.get::<Snmp>(), Some(&layer));
+                let json =
+                    serde_json::to_string(&document::Packet::from_packet(&decoded.packet)).unwrap();
+                let document =
+                    document::Packet::parse(&json, document::Format::Json, json.len()).unwrap();
+                let rebuilt = build_in(document.to_packet(&registry, 16).unwrap(), mode).unwrap();
+                assert_eq!(rebuilt.bytes, built.bytes, "{mode:?}: {layer:?}");
+            }
+        }
+    }
+}

@@ -376,6 +376,34 @@ fn cooperative_writer_wait_retains_parent_control() {
 }
 
 #[test]
+fn successful_event_after_deadline_reports_duration_limit() {
+    use packetcraftr_core::error::{Classified, Code};
+
+    let invocation = Invocation::new(
+        Format::Ndjson,
+        StreamEncoder::new(Command::Scan, Writer::default()),
+        None,
+        Cancellation::default(),
+        None,
+    );
+    let elapsed = Arc::new(AtomicUsize::new(0));
+    let clock = Arc::clone(&elapsed);
+    let start = Instant::now();
+    let deadline = Deadline::with_time_source(Duration::from_secs(1), move || {
+        start + Duration::from_secs(clock.load(Ordering::Relaxed) as u64)
+    });
+    let mut sink = emitter(&invocation, move |(), _| {
+        elapsed.store(2, Ordering::Relaxed);
+        Ok(())
+    });
+
+    let error = sink
+        .publish_controlled((), &deadline)
+        .expect_err("late event must exceed the deadline");
+    assert_eq!(error.classification().code, Code::PolicyDurationLimit);
+}
+
+#[test]
 fn cancellation_reaches_replacement_outputs() {
     for replace in [false, true] {
         let runtime = Runtime::new(1).unwrap();

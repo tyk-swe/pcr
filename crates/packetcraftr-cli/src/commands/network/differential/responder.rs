@@ -481,9 +481,14 @@ mod tests {
         release_tx.send(()).unwrap();
         let mut reply = [0_u8; 128];
         assert!(socket.recv_from(&mut reply).is_err(), "no late UDP reply");
-        assert!(
-            handle.join().unwrap().is_err(),
-            "blocked output is reported"
+        let error = handle
+            .join()
+            .unwrap()
+            .expect_err("blocked output is reported");
+        assert_eq!(
+            error.classification.code,
+            packetcraftr_core::error::Code::IoStdout,
+            "{error:?}"
         );
         assert!(stopped_before_release, "live output exceeded the duration");
         assert!(holds_probe_record(&std::fs::read_to_string(log).unwrap()));

@@ -41,6 +41,7 @@ pub struct Datagram<'a> {
 pub struct Collector {
     limits: Limits,
     keylog: KeyLog,
+    refreshed_revision: u64,
     states: BTreeMap<u64, State>,
     cids: CidIndex,
     resets: ResetIndex,
@@ -63,6 +64,7 @@ impl Collector {
         Ok(Self {
             limits,
             keylog: KeyLog::with_limit(keylog_limit),
+            refreshed_revision: 0,
             states: BTreeMap::new(),
             cids: BTreeMap::new(),
             resets: BTreeMap::new(),
@@ -407,6 +409,11 @@ impl Collector {
     where
         F: FnMut(Event) -> Result<(), BoundaryError>,
     {
+        session::check(deadline)?;
+        let revision = self.keylog.revision();
+        if self.refreshed_revision == revision {
+            return Ok(());
+        }
         let indexes: Vec<_> = self.states.keys().copied().collect();
         for index in indexes {
             crate::analysis::session::check(deadline)?;
@@ -424,6 +431,7 @@ impl Collector {
                 sink(event)?;
             }
         }
+        self.refreshed_revision = revision;
         Ok(())
     }
     pub fn finish<F>(
@@ -508,7 +516,9 @@ impl Collector {
         let Some(mut state) = self.take(index) else {
             return;
         };
+        let before = state.report.metrics.decrypted_packets;
         self.retry(&mut state);
+        self.summary.decrypted_packets += state.report.metrics.decrypted_packets - before;
         if reason != "idle_expiry" {
             self.summary.connections_evicted += 1;
             state.diagnostic(

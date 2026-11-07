@@ -1004,6 +1004,156 @@ fn quic_retired_reset_tokens_do_not_close_active_connections() {
 }
 
 #[test]
+fn quic_reordered_cid_issuance_preserves_retirement_and_active_tokens() {
+    for retire_prior in [true, false] {
+        for known_cid in [true, false] {
+            for retired_token in [true, false] {
+                let mut h = Harness::new(Limits::default());
+                h.hellos(Version::V1, 0x1301);
+                h.collector.append_keylog(keylog(0x1301).as_bytes(), true);
+                let server =
+                    Keys::new(Suite::Aes128, Version::V1, &traffic_secret(0x1301, 0x44)).unwrap();
+                let old_token = [0xab; 16];
+                let active_token = [0xcd; 16];
+                if retire_prior {
+                    h.feed(
+                        false,
+                        &short_packet(
+                            false,
+                            1,
+                            false,
+                            &[&[24, 2, 2, 8][..], &[0x79; 8], &active_token].concat(),
+                            &server,
+                        ),
+                    );
+                } else {
+                    let client =
+                        Keys::new(Suite::Aes128, Version::V1, &traffic_secret(0x1301, 0x33))
+                            .unwrap();
+                    h.feed(true, &short_packet(true, 0, false, &[25, 1], &client));
+                }
+                h.feed(
+                    false,
+                    &short_packet(
+                        false,
+                        0,
+                        false,
+                        &[&[24, 1, 0, 8][..], &[0x78; 8], &old_token].concat(),
+                        &server,
+                    ),
+                );
+                if !retire_prior {
+                    h.feed(
+                        false,
+                        &short_packet(
+                            false,
+                            1,
+                            false,
+                            &[&[24, 2, 0, 8][..], &[0x79; 8], &active_token].concat(),
+                            &server,
+                        ),
+                    );
+                }
+                let cid = if known_cid { CLIENT_CID } else { [0x99; 8] };
+                let token = if retired_token {
+                    old_token
+                } else {
+                    active_token
+                };
+                h.feed(false, &[&[0x40][..], &cid, &[0x98; 12], &token].concat());
+                let (connections, _) = h.finish();
+                assert_eq!(connections[0].stateless_reset, !retired_token);
+                assert_eq!(connections[0].closed, !retired_token);
+            }
+        }
+    }
+}
+
+#[test]
+fn quic_accepted_early_data_retains_conflicting_overlap_evidence() {
+    let mut h = Harness::new(Limits::default());
+    h.hellos(Version::V1, 0x1301);
+    h.collector.append_keylog(keylog(0x1301).as_bytes(), true);
+    let early = Keys::new(Suite::Aes128, Version::V1, &traffic_secret(0x1301, 0x77)).unwrap();
+    for (number, data) in [b"early", b"other"].into_iter().enumerate() {
+        h.feed(
+            true,
+            &long_packet(
+                Version::V1,
+                PacketKind::ZeroRtt,
+                true,
+                number as u64,
+                &stream_frame(0, data, true),
+                &early,
+            ),
+        );
+    }
+    let extensions = extension(42, &[]);
+    let body = [&(extensions.len() as u16).to_be_bytes()[..], &extensions].concat();
+    let server = Keys::new(Suite::Aes128, Version::V1, &traffic_secret(0x1301, 0x55)).unwrap();
+    h.feed(
+        false,
+        &long_packet(
+            Version::V1,
+            PacketKind::Handshake,
+            false,
+            0,
+            &crypto_frame(&handshake(8, &body), 0),
+            &server,
+        ),
+    );
+    let (connections, _) = h.finish();
+    let c = &connections[0];
+    assert_eq!(c.early_data, super::EarlyData::Accepted);
+    let stream = &c.streams[0];
+    assert!(!stream.early_data && !stream.complete);
+    assert!(stream.conflicting_overlap);
+    assert!(stream.omitted_bytes > 0);
+    assert_eq!(&stream.ranges[0].data[..], b"early");
+}
+
+#[test]
+fn quic_eviction_time_decryption_agrees_with_connection_reports() {
+    let mut h = Harness::new(Limits {
+        idle_expiry: Duration::from_millis(100),
+        ..Limits::default()
+    });
+    h.hellos(Version::V1, 0x1301);
+    let client = Keys::new(Suite::Aes128, Version::V1, &traffic_secret(0x1301, 0x33)).unwrap();
+    h.feed(
+        true,
+        &short_packet(true, 0, false, &stream_frame(0, b"late", true), &client),
+    );
+    h.collector.append_keylog(keylog(0x1301).as_bytes(), true);
+    h.frame = 200;
+    h.feed(
+        true,
+        &long_packet(
+            Version::V1,
+            PacketKind::Initial,
+            true,
+            0,
+            &crypto_frame(&hello(true, 0x1301), 0),
+            &Keys::initial(Version::V1, &ORIGINAL, true).unwrap(),
+        ),
+    );
+    let (connections, summary) = h.finish();
+    let retired = connections
+        .iter()
+        .find(|c| c.end_reason == "idle_expiry")
+        .unwrap();
+    assert_eq!(&retired.streams[0].ranges[0].data[..], b"late");
+    assert!(retired.streams[0].complete);
+    assert_eq!(
+        summary.decrypted_packets,
+        connections
+            .iter()
+            .map(|c| c.metrics.decrypted_packets)
+            .sum::<u64>()
+    );
+}
+
+#[test]
 fn quic_known_cid_parse_failures_preserve_connection_evidence() {
     let mut h = Harness::new(Limits::default());
     h.hellos(Version::V1, 0x1301);

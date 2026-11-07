@@ -171,6 +171,7 @@ impl State {
                 .streams
                 .entry((id, direction, false))
                 .or_insert_with(StreamState::new);
+            destination.ranges.conflicting |= state.ranges.conflicting;
             for range in state.ranges.finish() {
                 match destination.insert(range.offset, &range.data, false, limits) {
                     Ok(repeated) => self.report.metrics.repeated_stream_bytes += repeated,
@@ -289,11 +290,7 @@ impl State {
                 )?;
             }
             Frame::RetireConnectionId(sequence) => {
-                for cid in &mut self.cids {
-                    if cid.owner == direction.reverse() && cid.sequence == Some(sequence) {
-                        cid.retired = true;
-                    }
-                }
+                self.retire_cid(direction.reverse(), sequence, limits)?;
             }
             Frame::PathChallenge(data) => {
                 self.report.metrics.path_challenges += 1;

@@ -65,6 +65,8 @@ pub(super) struct State {
     pub(super) report: Connection,
     pub(super) version: Version,
     pub(super) cids: Vec<Cid>,
+    retire_before: [u64; 2],
+    retired_sequences: BTreeSet<(Direction, u64)>,
     pub(super) original_dcid: Vec<u8>,
     pub(super) initial_dcid: Vec<u8>,
     pub(super) random: Option<[u8; 32]>,
@@ -161,6 +163,8 @@ impl State {
                 },
             ],
             original_dcid: dcid.to_vec(),
+            retire_before: [0; 2],
+            retired_sequences: BTreeSet::new(),
             initial_dcid: dcid.to_vec(),
             random: None,
             protections: std::array::from_fn(|_| Protection::default()),
@@ -216,24 +220,8 @@ impl State {
         }) {
             return Err(super::Error::Invalid);
         }
-        if let Some(cid) = self
-            .cids
-            .iter_mut()
-            .find(|cid| cid.owner == issued.owner && cid.sequence == Some(issued.sequence))
-        {
-            cid.token = Some(issued.token);
-        } else {
-            if self.cids.len() >= limits.max_connection_ids {
-                return Err(super::Error::Limit);
-            }
-            self.cids.push(Cid {
-                id: issued.id.to_vec(),
-                owner: issued.owner,
-                sequence: Some(issued.sequence),
-                token: Some(issued.token),
-                retired: false,
-            });
-        }
+        let retire_before = retire_before.max(self.retire_before[issued.owner.index()]);
+        self.retire_before[issued.owner.index()] = retire_before;
         for cid in &mut self.cids {
             if cid.owner == issued.owner
                 && cid
@@ -243,6 +231,58 @@ impl State {
                 cid.retired = true;
             }
         }
+        self.retired_sequences
+            .retain(|&(owner, sequence)| owner != issued.owner || sequence >= retire_before);
+        let retired = issued.sequence < retire_before
+            || self
+                .retired_sequences
+                .contains(&(issued.owner, issued.sequence));
+        if let Some(cid) = self
+            .cids
+            .iter_mut()
+            .find(|cid| cid.owner == issued.owner && cid.sequence == Some(issued.sequence))
+        {
+            cid.token = Some(issued.token);
+            cid.retired |= retired;
+        } else {
+            if self.cids.len() >= limits.max_connection_ids {
+                return Err(super::Error::Limit);
+            }
+            self.cids.push(Cid {
+                id: issued.id.to_vec(),
+                owner: issued.owner,
+                sequence: Some(issued.sequence),
+                token: Some(issued.token),
+                retired,
+            });
+        }
+        self.retired_sequences
+            .remove(&(issued.owner, issued.sequence));
+        Ok(())
+    }
+    pub(super) fn retire_cid(
+        &mut self,
+        owner: Direction,
+        sequence: u64,
+        limits: &Limits,
+    ) -> Result<(), super::Error> {
+        if let Some(cid) = self
+            .cids
+            .iter_mut()
+            .find(|cid| cid.owner == owner && cid.sequence == Some(sequence))
+        {
+            cid.retired = true;
+            return Ok(());
+        }
+        if sequence < self.retire_before[owner.index()]
+            || self.retired_sequences.contains(&(owner, sequence))
+        {
+            return Ok(());
+        }
+        if self.retired_sequences.len() >= limits.max_connection_ids {
+            return Err(super::Error::Limit);
+        }
+        self.retired_sequences.insert((owner, sequence));
         Ok(())
     }
     pub(super) fn diagnostic(
@@ -304,6 +344,7 @@ impl State {
             + self.report.paths.len() * 256
             + self.challenges.len() * 256
             + self.source_frames.len() * 64
+            + self.retired_sequences.len() * 64
             + self
                 .report
                 .diagnostics

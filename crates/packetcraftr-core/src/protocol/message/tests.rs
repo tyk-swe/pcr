@@ -587,6 +587,102 @@ fn reference_packet_prefixes_are_bounded() {
 }
 
 #[test]
+fn modbus_fields_follow_the_pdu_form_and_function() {
+    use crate::protocol::application::modbus_tcp::{ModbusTcp, PduForm};
+
+    let registry = builtin::registry();
+    for (form, function, carried) in [
+        (PduForm::Request, 1, "address quantity"),
+        (PduForm::Request, 2, "address quantity"),
+        (PduForm::Request, 3, "address quantity"),
+        (PduForm::Request, 4, "address quantity"),
+        (PduForm::Request, 5, "address value"),
+        (PduForm::Request, 6, "address value"),
+        (PduForm::Request, 15, "address quantity data"),
+        (PduForm::Request, 16, "address quantity data"),
+        (PduForm::Response, 1, "data"),
+        (PduForm::Response, 2, "data"),
+        (PduForm::Response, 3, "data"),
+        (PduForm::Response, 4, "data"),
+        (PduForm::Response, 5, "address value"),
+        (PduForm::Response, 6, "address value"),
+        (PduForm::Response, 15, "address quantity"),
+        (PduForm::Response, 16, "address quantity"),
+        (PduForm::Exception, 131, "exception_code"),
+        (PduForm::Raw, 3, "data"),
+        (PduForm::Raw, 23, "data"),
+    ] {
+        let data = match (form, function) {
+            (PduForm::Request, 15) => Bytes::from_static(&[0xa5]),
+            (PduForm::Request, 16) | (PduForm::Response, 1..=4) | (PduForm::Raw, _) => {
+                Bytes::from_static(&[0xa5, 0x5a])
+            }
+            _ => Bytes::new(),
+        };
+        let base = ModbusTcp {
+            form,
+            function,
+            data,
+            ..Default::default()
+        };
+        for mode in [Mode::Strict, Mode::Permissive] {
+            for (field, value) in [
+                ("address", field::Value::Unsigned(42)),
+                ("quantity", 2_u64.into()),
+                ("value", 0xff00_u64.into()),
+                ("exception_code", 2_u64.into()),
+                ("data", Bytes::from_static(&[0x12, 0x34]).into()),
+            ] {
+                for changed in [false, true] {
+                    let mut layer = base.clone();
+                    if changed {
+                        layer.set_field(field, value.clone()).unwrap();
+                        if form == PduForm::Request && matches!(function, 15 | 16) {
+                            let count = if function == 15 {
+                                usize::from(layer.quantity).div_ceil(8)
+                            } else {
+                                usize::from(layer.quantity) * 2
+                            };
+                            layer.data = Bytes::from(vec![0x12; count]);
+                        }
+                    }
+                    let mut packet = Packet::default();
+                    packet.push(layer.clone());
+                    let json =
+                        serde_json::to_string(&document::Packet::from_packet(&packet)).unwrap();
+                    let document =
+                        document::Packet::parse(&json, document::Format::Json, json.len()).unwrap();
+                    let result = build_in(document.to_packet(&registry, 16).unwrap(), mode);
+                    if changed && !carried.split_whitespace().any(|name| name == field) {
+                        let error = result.unwrap_err();
+                        assert!(
+                            error.contains(field),
+                            "{form:?} {function} {mode:?} {field}: {error}"
+                        );
+                        continue;
+                    }
+                    let built = result.unwrap();
+                    assert!(built.diagnostics.is_empty(), "{layer:?}");
+                    let decoded = decode("modbus_tcp", &built.bytes).unwrap();
+                    let mut packet = Packet::default();
+                    packet.push_boxed(decoded.layer.clone_box());
+                    assert_eq!(build_in(packet, mode).unwrap().bytes, built.bytes);
+                    let mut interpreted =
+                        decoded.layer.downcast_ref::<ModbusTcp>().unwrap().clone();
+                    if matches!(form, PduForm::Request | PduForm::Response) {
+                        interpreted.interpret(form == PduForm::Response).unwrap();
+                    }
+                    assert_eq!(interpreted, layer, "{mode:?} {field}");
+                    let mut packet = Packet::default();
+                    packet.push(interpreted);
+                    assert_eq!(build_in(packet, mode).unwrap().bytes, built.bytes);
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn malformed_resp_and_modbus_are_rejected() {
     let registry = builtin::registry();
     let context = DecodeContext {

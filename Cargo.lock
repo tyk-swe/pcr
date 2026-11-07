@@ -684,6 +684,7 @@ dependencies = [
  "md-5",
  "memchr",
  "noyalib",
+ "ring",
  "serde",
  "serde_json",
  "sha2",

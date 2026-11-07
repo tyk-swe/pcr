@@ -1,0 +1,63 @@
+{
+  "schema": "packetcraftr.quic-streams/v1",
+  "connections": [
+    {
+      "connection": 0,
+      "early_data": "not_observed",
+      "incomplete": false,
+      "streams": [
+        {
+          "id": 0,
+          "direction": "client",
+          "ranges": [
+            {
+              "offset": 0,
+              "length": 11,
+              "file": "quic-0-0-client-accepted-0.bin"
+            }
+          ],
+          "final_size": 11,
+          "complete": true,
+          "conflicting_overlap": false,
+          "final_size_error": false,
+          "omitted_bytes": 0,
+          "early_data": false
+        },
+        {
+          "id": 0,
+          "direction": "server",
+          "ranges": [
+            {
+              "offset": 0,
+              "length": 21,
+              "file": "quic-0-0-server-accepted-0.bin"
+            }
+          ],
+          "final_size": 21,
+          "complete": true,
+          "conflicting_overlap": false,
+          "final_size_error": false,
+          "omitted_bytes": 0,
+          "early_data": false
+        },
+        {
+          "id": 4,
+          "direction": "client",
+          "ranges": [
+            {
+              "offset": 0,
+              "length": 13,
+              "file": "quic-0-4-client-accepted-0.bin"
+            }
+          ],
+          "final_size": 13,
+          "complete": true,
+          "conflicting_overlap": false,
+          "final_size_error": false,
+          "omitted_bytes": 0,
+          "early_data": false
+        }
+      ]
+    }
+  ]
+}

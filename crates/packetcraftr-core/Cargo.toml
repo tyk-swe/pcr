@@ -17,6 +17,7 @@ workspace = true
 # below those crates makes native I/O unavailable by construction.
 [dependencies]
 bytes.workspace = true
+ring.workspace = true
 flate2.workspace = true
 zstd.workspace = true
 md5.workspace = true

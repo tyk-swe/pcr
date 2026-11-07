@@ -73,3 +73,10 @@ doc = false
 bench = false
 
 [workspace]
+
+[[bin]]
+name = "quic"
+path = "fuzz_targets/quic.rs"
+test = false
+doc = false
+bench = false

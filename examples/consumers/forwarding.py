@@ -16,7 +16,7 @@ import math
 import sys
 from typing import BinaryIO, Any
 
-SCHEMA = "packetcraftr.output/v19"
+SCHEMA = "packetcraftr.output/v20"
 # Releases 0.3.0 to 0.5.0-beta.2 and later unreleased builds each emitted this
 # identifier with a different schema, so no single schema can validate it.
 AMBIGUOUS_SCHEMA = "packetcraftr.output/v1"

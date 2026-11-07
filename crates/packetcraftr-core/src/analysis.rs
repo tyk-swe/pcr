@@ -18,6 +18,7 @@ pub mod http2;
 pub mod messages;
 mod pipeline;
 pub mod provenance;
+pub mod quic;
 pub mod reassembly;
 pub mod scope;
 mod serial;
@@ -28,9 +29,9 @@ pub mod tls;
 
 pub use error::{Constraint, Error};
 pub use pipeline::{
-    ClockReport, Conversation, DerivedDatagram, FrameRecord, IpCounters, IpDatagramOutcome,
-    IpEvent, IpEventRecord, IpFamilyCounters, IpReassemblyReport, Limits, Options, Plan, Summary,
-    TcpView, UdpView, run, run_with_ip_events,
+    ClockReport, Conversation, DerivedDatagram, FramePipeline, FrameRecord, IpCounters,
+    IpDatagramOutcome, IpEvent, IpEventRecord, IpFamilyCounters, IpReassemblyReport, Limits,
+    Options, Plan, Summary, TcpView, UdpView, run, run_with_ip_events,
 };
 pub use session::{Collector, CollectorNeeds, Outcome, Pass, Session, SessionOptions};
 pub use stream::{Endpoint, FlowKey, ScopedFlowKey, StreamRef, StreamTransport};

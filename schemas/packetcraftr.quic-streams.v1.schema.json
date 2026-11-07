@@ -1,0 +1,144 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:packetcraftr:quic-streams:v1",
+  "title": "PacketcraftR QUIC stream export manifest v1",
+  "description": "Offsets remain absolute. Separate range files preserve gaps. Early data acceptance is recorded independently of byte completeness.",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "const": "packetcraftr.quic-streams/v1"
+    },
+    "connections": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/exportedConnection"
+      }
+    }
+  },
+  "required": [
+    "schema",
+    "connections"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "uint64": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 18446744073709551615
+    },
+    "hexBytes": {
+      "type": "string",
+      "pattern": "^(?:[0-9a-f]{2})*$"
+    },
+    "quicDirection": {
+      "enum": [
+        "client",
+        "server"
+      ]
+    },
+    "quicEarlyData": {
+      "enum": [
+        "not_observed",
+        "unknown",
+        "accepted",
+        "rejected"
+      ]
+    },
+    "quicRange": {
+      "type": "object",
+      "properties": {
+        "offset": {
+          "$ref": "#/$defs/uint64"
+        },
+        "length": {
+          "$ref": "#/$defs/uint64"
+        },
+        "file": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "offset",
+        "length",
+        "file"
+      ],
+      "additionalProperties": false
+    },
+    "quicStream": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uint64"
+        },
+        "direction": {
+          "$ref": "#/$defs/quicDirection"
+        },
+        "ranges": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/quicRange"
+          }
+        },
+        "final_size": {
+          "$ref": "#/$defs/uint64"
+        },
+        "reset_error": {
+          "$ref": "#/$defs/uint64"
+        },
+        "complete": {
+          "type": "boolean"
+        },
+        "conflicting_overlap": {
+          "type": "boolean"
+        },
+        "final_size_error": {
+          "type": "boolean"
+        },
+        "omitted_bytes": {
+          "$ref": "#/$defs/uint64"
+        },
+        "early_data": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "direction",
+        "ranges",
+        "complete",
+        "conflicting_overlap",
+        "final_size_error",
+        "omitted_bytes",
+        "early_data"
+      ],
+      "additionalProperties": false
+    },
+    "exportedConnection": {
+      "type": "object",
+      "properties": {
+        "connection": {
+          "$ref": "#/$defs/uint64"
+        },
+        "early_data": {
+          "$ref": "#/$defs/quicEarlyData"
+        },
+        "incomplete": {
+          "type": "boolean"
+        },
+        "streams": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/quicStream"
+          }
+        }
+      },
+      "required": [
+        "connection",
+        "early_data",
+        "incomplete",
+        "streams"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

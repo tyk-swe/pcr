@@ -103,10 +103,11 @@ mod tests {
 
     #[test]
     fn unrelated_output_identity_is_rejected() {
+        let unknown = format!("{}/unsupported", packetcraftr_core::security::OUTPUT_SCHEMA);
         for schema in [
             "packetcraftr.output/v2",
             "packetcraftr.output/v18",
-            "packetcraftr.output/v20",
+            &unknown,
         ] {
             let message = rejection(&hunt_with_schema(schema));
             assert!(!message.contains("ambiguous"), "{schema}: {message}");

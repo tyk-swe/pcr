@@ -138,9 +138,7 @@ fn run(args: Args, invocation: &Invocation) -> Result<(), CliError> {
         owned_deadline = Deadline::new(args.limits.max_duration());
         &owned_deadline
     };
-    let input_incomplete = run.truncated_frames > 0
-        || !run.incomplete_sources.is_empty()
-        || run.source_outcomes_omitted > 0
+    let input_incomplete = run.input_incomplete()
         || capture.as_ref().is_some_and(|capture| {
             !capture.summary.capture_statistics_complete
                 || capture.summary.sources.iter().any(|source| {

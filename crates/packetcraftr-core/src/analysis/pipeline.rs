@@ -58,6 +58,14 @@ pub struct Summary {
     pub scopes: Vec<crate::analysis::scope::Definition>,
 }
 
+impl Summary {
+    pub fn input_incomplete(&self) -> bool {
+        self.truncated_frames > 0
+            || !self.incomplete_sources.is_empty()
+            || self.source_outcomes_omitted > 0
+    }
+}
+
 /// Reassembly idle expiry follows capture timestamps, independent of wall-clock
 /// time.
 pub fn run<R, F>(

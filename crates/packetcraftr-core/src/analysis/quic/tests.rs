@@ -1009,17 +1009,67 @@ fn quic_known_cid_parse_failures_preserve_connection_evidence() {
     h.hellos(Version::V1, 0x1301);
     h.collector.append_keylog(keylog(0x1301).as_bytes(), true);
     h.feed(false, &[&[0x40][..], &CLIENT_CID].concat());
+    let long_prefix = [&[0xe0, 0, 0, 0, 1, 8][..], &CLIENT_CID].concat();
+    h.feed(false, &long_prefix);
+    h.feed(false, &[long_prefix.as_slice(), &[0, 64, 64, 0]].concat());
     let server = Keys::new(Suite::Aes128, Version::V1, &traffic_secret(0x1301, 0x44)).unwrap();
     h.feed(false, &short_packet(false, 0, false, &[29, 0, 0], &server));
     let (connections, summary) = h.finish();
     let c = &connections[0];
     assert!(c.closed && c.incomplete);
-    assert!(
-        c.diagnostics
-            .iter()
-            .any(|d| d.frame == 3 && d.code == "malformed_packet")
+    for frame in 3..=5 {
+        assert!(
+            c.diagnostics
+                .iter()
+                .any(|d| d.frame == frame && d.code == "malformed_packet")
+        );
+    }
+    assert_eq!(c.source_frames, vec![1, 2, 3, 4, 5, 6]);
+    assert_eq!(summary.malformed_datagrams, 3);
+    assert_eq!(c.metrics.packets, 6);
+}
+
+#[test]
+fn quic_session_retains_capture_loss_hidden_by_display_filter() {
+    use crate::{analysis, capture_file, filter::Filter, protocol::builtin};
+    use std::io::Cursor;
+
+    let registry = builtin::registry();
+    let filter = Filter::compile("udp", &registry, Default::default()).unwrap();
+    let mut collector = Collector::new(Limits::default()).unwrap();
+    collector.append_keylog(
+        include_bytes!("../../../../../examples/captures/quic-demo.keys"),
+        true,
     );
-    assert_eq!(c.source_frames, vec![1, 2, 3, 4]);
-    assert_eq!(summary.malformed_datagrams, 1);
-    assert_eq!(c.metrics.packets, 4);
+    let mut reader = capture_file::Reader::with_limits(
+        Cursor::new(include_bytes!(
+            "../../../../../examples/captures/quic-demo-truncated.pcap"
+        )),
+        capture_file::ReaderLimits::default(),
+    )
+    .unwrap();
+    let mut connections = Vec::new();
+    let outcome = analysis::Session::new(
+        registry,
+        analysis::SessionOptions {
+            filter: Some(&filter),
+            ..analysis::SessionOptions::default()
+        },
+        collector,
+    )
+    .run(
+        &mut reader,
+        |_| Ok(()),
+        |Event::Connection { connection }| {
+            connections.push(connection);
+            Ok(())
+        },
+    )
+    .unwrap();
+    assert!(outcome.run.frames_matched < outcome.run.frames_read);
+    assert!(outcome.run.input_incomplete());
+    assert_eq!(connections.len(), 1);
+    assert!(connections[0].closed && connections[0].incomplete);
+    assert!(!connections[0].streams.is_empty());
+    assert!(connections[0].streams.iter().all(|stream| stream.complete));
 }

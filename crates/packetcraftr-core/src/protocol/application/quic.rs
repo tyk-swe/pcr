@@ -4,6 +4,7 @@ use bytes::Bytes;
 mod frames;
 mod packet;
 pub use frames::{AckRange, Frame, parse_frames};
+pub(crate) use packet::long_destination_connection_id;
 pub use packet::{Packet, PacketKind, Version, parse_packet};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]

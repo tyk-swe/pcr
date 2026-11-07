@@ -144,8 +144,9 @@ impl Collector {
             let matched = if short {
                 self.match_short(input.flow, remaining)
             } else {
-                match parse_packet(remaining, None) {
-                    Ok(packet) => self.match_id(input.flow, packet.dcid),
+                match crate::protocol::application::quic::long_destination_connection_id(remaining)
+                {
+                    Ok(dcid) => self.match_id(input.flow, dcid),
                     Err(_) => {
                         if input.flow.flow.source_port == 443
                             || input.flow.flow.destination_port == 443
@@ -174,20 +175,25 @@ impl Collector {
                     if short && self.stateless_reset(&input, remaining) {
                         break;
                     }
-                    if let Some((index, _, _)) = association {
+                    if association.is_some()
+                        || input.flow.flow.source_port == 443
+                        || input.flow.flow.destination_port == 443
+                    {
                         self.summary.malformed_datagrams += 1;
-                        if let Some(mut state) = self.take(index) {
-                            state.record_datagram(&input, &self.limits);
-                            state.report.metrics.packets += 1;
-                            self.summary.packets += 1;
-                            state.diagnostic(
-                                input.number,
-                                "malformed_packet",
-                                error.to_string(),
-                                &self.limits,
-                            );
-                            self.store(index, state);
-                        }
+                    }
+                    if let Some((index, _, _)) = association
+                        && let Some(mut state) = self.take(index)
+                    {
+                        state.record_datagram(&input, &self.limits);
+                        state.report.metrics.packets += 1;
+                        self.summary.packets += 1;
+                        state.diagnostic(
+                            input.number,
+                            "malformed_packet",
+                            error.to_string(),
+                            &self.limits,
+                        );
+                        self.store(index, state);
                     }
                     break;
                 }
@@ -663,11 +669,14 @@ impl session::Collector for Collector {
         Self::observe(self, record).map_err(BoundaryError::from_error)
     }
     fn finish(
-        self,
-        _: &crate::analysis::Summary,
+        mut self,
+        run: &crate::analysis::Summary,
         deadline: &crate::budget::Deadline,
         sink: &mut dyn FnMut(Event) -> Result<(), BoundaryError>,
     ) -> Result<Summary, BoundaryError> {
+        if run.input_incomplete() {
+            self.mark_capture_incomplete();
+        }
         Self::finish(self, deadline, sink)
     }
 }

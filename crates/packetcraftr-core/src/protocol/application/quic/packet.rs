@@ -55,6 +55,23 @@ pub struct Packet<'a> {
     pub bytes: &'a [u8],
 }
 
+fn connection_id<'a>(reader: &mut Reader<'a>) -> Result<&'a [u8], Error> {
+    let length = usize::from(reader.byte()?);
+    if length > 20 {
+        return Err(Error::Invalid);
+    }
+    reader.take(length)
+}
+
+pub(crate) fn long_destination_connection_id(input: &[u8]) -> Result<&[u8], Error> {
+    let mut reader = Reader::new(input);
+    if reader.byte()? & 0x80 == 0 {
+        return Err(Error::Invalid);
+    }
+    reader.take(4)?;
+    connection_id(&mut reader)
+}
+
 pub fn parse_packet(input: &[u8], short_dcid_length: Option<usize>) -> Result<Packet<'_>, Error> {
     let mut r = Reader::new(input);
     let first = r.byte()?;
@@ -81,16 +98,8 @@ pub fn parse_packet(input: &[u8], short_dcid_length: Option<usize>) -> Result<Pa
         });
     }
     let version = u32::from_be_bytes(r.take(4)?.try_into().map_err(|_| Error::Truncated)?);
-    let dlen = usize::from(r.byte()?);
-    if dlen > 20 {
-        return Err(Error::Invalid);
-    }
-    let dcid = r.take(dlen)?;
-    let slen = usize::from(r.byte()?);
-    if slen > 20 {
-        return Err(Error::Invalid);
-    }
-    let scid = r.take(slen)?;
+    let dcid = connection_id(&mut r)?;
+    let scid = connection_id(&mut r)?;
     let mut packet = Packet {
         kind: PacketKind::Unsupported,
         version,

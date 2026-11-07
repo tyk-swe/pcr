@@ -20,7 +20,7 @@ pub(super) struct State {
     exporter: Option<Exporter>,
 }
 impl State {
-    pub(super) fn new(args: &Args) -> Result<Self, CliError> {
+    pub(super) fn new(args: &Args, invocation: &Invocation) -> Result<Self, CliError> {
         Ok(Self {
             retained: Vec::new(),
             selected: 0,
@@ -30,7 +30,7 @@ impl State {
             exporter: args
                 .write
                 .as_deref()
-                .map(|path| Exporter::new(path, args.max_output_connections))
+                .map(|path| Exporter::new(invocation, path, args.max_output_connections))
                 .transpose()?,
         })
     }
@@ -106,7 +106,7 @@ impl State {
                     self.charge(range.data.len())?;
                 }
                 if let (Some(exporter), Some(name)) = (&mut self.exporter, &file) {
-                    exporter.range(invocation, name, &range.data)?;
+                    exporter.range(name, &range.data)?;
                 }
                 if args.include_data && invocation.format != Format::Json {
                     for (index, chunk) in range.data.chunks(64 * 1024).enumerate() {
@@ -236,9 +236,9 @@ impl State {
         }
         Ok(())
     }
-    pub(super) fn publish(&mut self, invocation: &Invocation) -> Result<(), CliError> {
+    pub(super) fn publish(&mut self) -> Result<(), CliError> {
         if let Some(exporter) = self.exporter.take() {
-            exporter.finish(invocation)?;
+            exporter.finish()?;
         }
         Ok(())
     }

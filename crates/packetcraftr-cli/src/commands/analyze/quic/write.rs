@@ -19,12 +19,17 @@ struct Manifest {
 }
 pub(super) struct Exporter {
     directory: PathBuf,
+    manifest: StagedFile,
     max_connections: usize,
     files: Vec<(PathBuf, StagedFile)>,
     connections: Vec<ExportedConnection>,
 }
 impl Exporter {
-    pub(super) fn new(directory: &Path, max_connections: usize) -> Result<Self, CliError> {
+    pub(super) fn new(
+        invocation: &Invocation,
+        directory: &Path,
+        max_connections: usize,
+    ) -> Result<Self, CliError> {
         if !directory.is_dir() {
             return Err(CliError::new(
                 Kind::Usage,
@@ -33,17 +38,13 @@ impl Exporter {
         }
         Ok(Self {
             directory: directory.to_owned(),
+            manifest: StagedFile::stage(invocation, &directory.join("quic-manifest.json"))?,
             max_connections,
             files: Vec::new(),
             connections: Vec::new(),
         })
     }
-    pub(super) fn range(
-        &mut self,
-        invocation: &Invocation,
-        name: &str,
-        data: &[u8],
-    ) -> Result<(), CliError> {
+    pub(super) fn range(&mut self, name: &str, data: &[u8]) -> Result<(), CliError> {
         if self.files.len() >= 4096 {
             return Err(CliError::new(
                 Kind::Policy,
@@ -51,7 +52,7 @@ impl Exporter {
             ));
         }
         let path = self.directory.join(name);
-        let mut file = StagedFile::stage(invocation, &path)?;
+        let mut file = self.manifest.stage_sibling(std::ffi::OsStr::new(name))?;
         file.as_file_mut()
             .write_all(data)
             .map_err(|e| CliError::caused(Kind::Io, &e))?;
@@ -106,9 +107,9 @@ impl Exporter {
             connection.incomplete = true;
         }
     }
-    pub(super) fn finish(mut self, invocation: &Invocation) -> Result<(), CliError> {
+    pub(super) fn finish(mut self) -> Result<(), CliError> {
         let path = self.directory.join("quic-manifest.json");
-        let mut manifest = StagedFile::stage(invocation, &path)?;
+        let mut manifest = self.manifest;
         serde_json::to_writer_pretty(
             manifest.as_file_mut(),
             &Manifest {

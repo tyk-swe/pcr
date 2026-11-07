@@ -50,3 +50,7 @@ packetcraftr analyze quic examples/captures/quic-demo-v2.pcapng --keylog example
 The client stream 0 contains `hello world`, the server stream 0 contains `received hello world` followed by a newline, and client stream 4 contains `updated keys` followed by a newline. The capture includes coalescing, reordered STREAM data, a migrated path, a validated challenge response, and a key update. Its synthetic handshake demonstrates passive decoding and does not establish a valid TLS session with a real endpoint.
 
 Packet protection follows [RFC 9001](https://www.rfc-editor.org/rfc/rfc9001), [QUIC v2](https://www.rfc-editor.org/rfc/rfc9369), and the [NSS key-log format](https://nss-crypto.org/reference/security/nss/legacy/key_log_format/index.html). Transport interpretation follows [RFC 9000](https://www.rfc-editor.org/rfc/rfc9000), [RFC 9002](https://www.rfc-editor.org/rfc/rfc9002), and [RFC 9221](https://www.rfc-editor.org/rfc/rfc9221).
+
+Unassociated short-header packets are retained as possible stateless resets until their tokens become available. This queue shares the QUIC byte allowance and uses the pending-packet ceiling across the capture, expires after the idle interval, and drops older candidates when full. Resource-limit counters record discarded candidates.
+
+QUIC export binds the manifest directory before reading capture input. All stream ranges and the manifest use that same directory handle, including when its path is renamed or replaced on Unix. The shared staged-output platform limits still apply on Windows.

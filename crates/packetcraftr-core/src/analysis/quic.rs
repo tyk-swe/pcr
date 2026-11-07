@@ -4,6 +4,7 @@ mod keylog;
 mod model;
 mod protection;
 mod ranges;
+mod reset;
 mod state;
 mod transport;
 
@@ -22,7 +23,7 @@ pub use model::{
     TransportParameter,
 };
 use state::{Observation, Pending, PendingReason, State};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::time::SystemTime;
 
 type CidIndex = BTreeMap<(u32, Vec<u8>), BTreeSet<(u64, Direction)>>;
@@ -48,6 +49,8 @@ pub struct Collector {
     lru: BTreeSet<(SystemTime, u64)>,
     summary: Summary,
     memory: usize,
+    reset_candidates: VecDeque<reset::Candidate>,
+    reset_memory: usize,
     next_connection: u64,
     capture_incomplete: bool,
 }
@@ -71,6 +74,8 @@ impl Collector {
             lru: BTreeSet::new(),
             summary: Summary::default(),
             memory: 0,
+            reset_candidates: VecDeque::new(),
+            reset_memory: 0,
             next_connection: 0,
             capture_incomplete: false,
         })
@@ -159,7 +164,7 @@ impl Collector {
                     }
                 }
             };
-            let association = match matched {
+            let mut association = match matched {
                 Association::One {
                     connection,
                     direction,
@@ -212,6 +217,22 @@ impl Collector {
                     continue;
                 }
             }
+            if association.is_none() && packet.kind == PacketKind::Initial {
+                match self.match_initial_source(input.flow, &packet) {
+                    Association::One {
+                        connection,
+                        direction,
+                        length,
+                    } => {
+                        association = Some((connection, direction, length));
+                    }
+                    Association::Ambiguous => {
+                        self.summary.ambiguous_packets += 1;
+                        continue;
+                    }
+                    Association::None => {}
+                }
+            }
             let (index, direction, length) = if let Some(association) = association {
                 association
             } else {
@@ -219,9 +240,13 @@ impl Collector {
                     continue;
                 }
                 if packet.kind != PacketKind::Initial {
-                    if input.flow.flow.source_port == 443 || input.flow.flow.destination_port == 443
-                    {
+                    let counted = input.flow.flow.source_port == 443
+                        || input.flow.flow.destination_port == 443;
+                    if counted {
                         self.summary.unassociated_packets += 1;
+                    }
+                    if short {
+                        self.queue_reset(&input, packet.bytes, counted);
                     }
                     continue;
                 }
@@ -276,6 +301,7 @@ impl Collector {
                 },
             );
             self.retry(&mut state);
+            self.replay_resets(&mut state);
             self.summary.decrypted_packets += state.report.metrics.decrypted_packets - before;
             self.store(index, state);
             self.enforce_memory(&mut events);
@@ -284,9 +310,18 @@ impl Collector {
         Ok(events)
     }
     fn enforce_memory(&mut self, events: &mut Vec<Event>) {
-        while self.memory.saturating_add(self.keylog.memory()) > self.limits.max_buffered_bytes
-            && !self.states.is_empty()
+        while self
+            .memory
+            .saturating_add(self.keylog.memory())
+            .saturating_add(self.reset_memory)
+            > self.limits.max_buffered_bytes
         {
+            if self.drop_reset() {
+                continue;
+            }
+            if self.states.is_empty() {
+                break;
+            }
             self.summary.buffer_limit_hits += 1;
             self.evict("buffer_limit", events);
         }
@@ -421,6 +456,7 @@ impl Collector {
             };
             let before = state.report.metrics.decrypted_packets;
             self.retry(&mut state);
+            self.replay_resets(&mut state);
             crate::analysis::session::check(deadline)?;
             self.summary.decrypted_packets += state.report.metrics.decrypted_packets - before;
             self.store(index, state);
@@ -447,7 +483,8 @@ impl Collector {
         })?;
         while let Some(index) = self.states.keys().next().copied() {
             session::check(deadline)?;
-            if let Some(state) = self.take(index) {
+            if let Some(mut state) = self.take(index) {
+                self.replay_resets(&mut state);
                 sink(Event::Connection {
                     connection: Box::new(state.finish("capture_end", &self.limits)),
                 })?;
@@ -498,6 +535,7 @@ impl Collector {
         Some(state)
     }
     fn expire(&mut self, now: SystemTime, events: &mut Vec<Event>) {
+        self.expire_resets(now);
         while let Some(&(time, _)) = self.lru.first() {
             if !now
                 .duration_since(time)
@@ -517,6 +555,7 @@ impl Collector {
         };
         let before = state.report.metrics.decrypted_packets;
         self.retry(&mut state);
+        self.replay_resets(&mut state);
         self.summary.decrypted_packets += state.report.metrics.decrypted_packets - before;
         if reason != "idle_expiry" {
             self.summary.connections_evicted += 1;
@@ -597,6 +636,23 @@ impl Collector {
             }
         }
     }
+    fn match_initial_source(&self, flow: &ScopedFlowKey, packet: &Packet<'_>) -> Association {
+        let Some(candidates) = self.cids.get(&(flow.scope.get(), packet.scid.to_vec())) else {
+            return Association::None;
+        };
+        let matches: Vec<_> = candidates
+            .iter()
+            .filter_map(|(index, direction)| {
+                let state = self.states.get(index)?;
+                (*direction == Direction::Server
+                    && !state.report.closed
+                    && state.version.wire() == packet.version
+                    && (!packet.scid.is_empty() || state.report.paths.contains(&flow.flow)))
+                .then_some((*index, Direction::Client))
+            })
+            .collect();
+        self.choose(flow, &matches, packet.dcid.len())
+    }
     fn match_short(&self, flow: &ScopedFlowKey, bytes: &[u8]) -> Association {
         let mut found = Vec::new();
         for length in 0..=20 {
@@ -612,6 +668,14 @@ impl Collector {
                 Association::Ambiguous => return Association::Ambiguous,
                 Association::None => {}
             }
+        }
+        if found
+            .iter()
+            .any(|(index, _, _)| self.states.get(index).is_some_and(|s| !s.report.closed))
+        {
+            found.retain(|(index, _, length)| {
+                *length != 0 || self.states.get(index).is_some_and(|s| !s.report.closed)
+            });
         }
         found.sort_unstable();
         found.dedup();

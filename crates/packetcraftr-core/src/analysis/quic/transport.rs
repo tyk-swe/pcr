@@ -72,7 +72,7 @@ impl State {
         let opened = self.open(packet, direction, log);
         if packet.kind == PacketKind::OneRtt
             && packet.bytes.len() >= 21
-            && matches!(opened, Ok(None) | Err(Error::Authentication))
+            && matches!(opened, Ok(None) | Err(_))
             && self.cids.iter().any(|cid| {
                 !cid.retired
                     && cid.owner == direction

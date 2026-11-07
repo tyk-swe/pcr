@@ -179,7 +179,7 @@ fn capture(
         pipeline: analysis::FramePipeline::new(builtin::registry(), options).unwrap(),
         collector: quic::Collector::new(quic::Limits::default()).unwrap(),
         secrets: keylog::Input::open(Some(&keys)).unwrap(),
-        state: State::new(&args).unwrap(),
+        state: State::new(&args, &invocation).unwrap(),
         interfaces: Vec::new(),
     };
     let shutdowns = Arc::new(AtomicUsize::new(0));
@@ -287,4 +287,34 @@ fn live_quic_finalization_failure_retains_capture_statistics() {
         .expect("capture evidence after finalization failure");
     assert_eq!(snapshot.summary.sources[0].statistics.dropped_frames, 7);
     assert_eq!(snapshot.summary.frames_delivered, 9);
+}
+
+#[cfg(unix)]
+#[test]
+fn quic_exports_remain_in_the_directory_selected_before_input() {
+    let root = tempfile::tempdir().unwrap();
+    let requested = root.path().join("selected");
+    let original = root.path().join("original");
+    std::fs::create_dir(&requested).unwrap();
+    let invocation = Invocation::new(
+        crate::output::contract::Format::Text,
+        crate::invocation::StreamEncoder::new(crate::commands::Command::Quic, std::io::sink()),
+        None,
+        Cancellation::default(),
+        None,
+    );
+    let mut exporter = super::super::write::Exporter::new(&invocation, &requested, 1).unwrap();
+    std::fs::rename(&requested, &original).unwrap();
+    std::fs::create_dir(&requested).unwrap();
+    exporter.range("range.bin", b"selected directory").unwrap();
+    exporter.finish().unwrap();
+    assert_eq!(
+        std::fs::read(original.join("range.bin")).unwrap(),
+        b"selected directory"
+    );
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(original.join("quic-manifest.json")).unwrap())
+            .unwrap();
+    assert_eq!(manifest["connections"], serde_json::json!([]));
+    assert_eq!(std::fs::read_dir(&requested).unwrap().count(), 0);
 }

@@ -813,117 +813,140 @@ fn quic_retry_key_changes_recover_buffered_server_initials() {
 
 #[test]
 fn quic_zero_length_cid_tuple_reuse_keeps_connections_distinct() {
-    let mut h = Harness::new(Limits::default());
-    h.collector.append_keylog(keylog(0x1301).as_bytes(), true);
-    let next_dcid = [0x91; 8];
-    let keys = Keys::new(Suite::Aes128, Version::V1, &traffic_secret(0x1301, 0x44)).unwrap();
-    for (dcid, data) in [
-        (&ORIGINAL, b"first".as_slice()),
-        (&next_dcid, b"second".as_slice()),
-    ] {
-        h.feed(
-            true,
-            &long_packet_with_cids(
-                Version::V1,
-                PacketKind::Initial,
-                dcid,
-                &[],
-                0,
-                &crypto_frame(&hello(true, 0x1301), 0),
-                &Keys::initial(Version::V1, dcid, true).unwrap(),
+    for nonempty in [false, true] {
+        let mut h = Harness::new(Limits::default());
+        h.collector.append_keylog(keylog(0x1301).as_bytes(), true);
+        let next_dcid = [0x91; 8];
+        let keys = Keys::new(Suite::Aes128, Version::V1, &traffic_secret(0x1301, 0x44)).unwrap();
+        for (dcid, data, client, server) in [
+            (&ORIGINAL, b"first".as_slice(), &[][..], &[][..]),
+            (
+                &next_dcid,
+                b"second".as_slice(),
+                if nonempty { &CLIENT_CID[..] } else { &[][..] },
+                if nonempty { &SERVER_CID[..] } else { &[][..] },
             ),
-        );
-        h.feed(
-            false,
-            &long_packet_with_cids(
-                Version::V1,
-                PacketKind::Initial,
-                &[],
-                &[],
-                0,
-                &crypto_frame(&hello(false, 0x1301), 0),
-                &Keys::initial(Version::V1, dcid, false).unwrap(),
-            ),
-        );
-        h.feed(
-            false,
-            &short_packet_to(
-                &[],
-                0,
+        ] {
+            h.feed(
+                true,
+                &long_packet_with_cids(
+                    Version::V1,
+                    PacketKind::Initial,
+                    dcid,
+                    client,
+                    0,
+                    &crypto_frame(&hello(true, 0x1301), 0),
+                    &Keys::initial(Version::V1, dcid, true).unwrap(),
+                ),
+            );
+            h.feed(
                 false,
-                &[stream_frame(0, data, true), vec![29, 0, 0]].concat(),
-                &keys,
-            ),
-        );
-    }
-    let (connections, summary) = h.finish();
-    assert_eq!(connections.len(), 2);
-    assert_eq!(summary.decrypted_packets, 6);
-    assert_eq!(summary.ambiguous_packets, 0);
-    for (connection, data, sources) in [
-        (&connections[0], b"first".as_slice(), vec![1, 2, 3]),
-        (&connections[1], b"second".as_slice(), vec![4, 5, 6]),
-    ] {
-        assert!(connection.closed && !connection.incomplete);
-        assert_eq!(connection.source_frames, sources);
-        assert!(connection.streams[0].complete);
-        assert_eq!(connection.streams[0].ranges[0].data.as_ref(), data);
+                &long_packet_with_cids(
+                    Version::V1,
+                    PacketKind::Initial,
+                    client,
+                    server,
+                    0,
+                    &crypto_frame(&hello(false, 0x1301), 0),
+                    &Keys::initial(Version::V1, dcid, false).unwrap(),
+                ),
+            );
+            h.feed(
+                false,
+                &short_packet_to(
+                    client,
+                    0,
+                    false,
+                    &[stream_frame(0, data, true), vec![29, 0, 0]].concat(),
+                    &keys,
+                ),
+            );
+        }
+        let (connections, summary) = h.finish();
+        assert_eq!(connections.len(), 2);
+        assert_eq!(summary.decrypted_packets, 6);
+        assert_eq!(summary.ambiguous_packets, 0);
+        for (connection, data, sources) in [
+            (&connections[0], b"first".as_slice(), vec![1, 2, 3]),
+            (&connections[1], b"second".as_slice(), vec![4, 5, 6]),
+        ] {
+            assert!(connection.closed && !connection.incomplete);
+            assert_eq!(connection.source_frames, sources);
+            assert!(connection.streams[0].complete);
+            assert_eq!(connection.streams[0].ranges[0].data.as_ref(), data);
+        }
     }
 }
 
 #[test]
 fn quic_buffered_stateless_resets_use_tokens_learned_later() {
-    for version in [Version::V1, Version::V2] {
-        for transport_parameter in [true, false] {
-            for delayed_secrets in [true, false] {
-                let mut h = Harness::new(Limits::default());
-                h.hellos(version, 0x1301);
-                if !delayed_secrets {
-                    h.collector.append_keylog(keylog(0x1301).as_bytes(), true);
-                }
-                let token = [0xab; 16];
-                let keys = Keys::new(
-                    Suite::Aes128,
-                    version,
-                    &traffic_secret(0x1301, if transport_parameter { 0x55 } else { 0x44 }),
-                )
-                .unwrap();
-                let encrypted = |number: u64, data: &[u8]| {
-                    if transport_parameter {
-                        long_packet(version, PacketKind::Handshake, false, number, data, &keys)
-                    } else {
-                        short_packet(false, number, false, data, &keys)
+    for associated in [false, true] {
+        for version in [Version::V1, Version::V2] {
+            for transport_parameter in [true, false] {
+                for delayed_secrets in [true, false] {
+                    let mut h = Harness::new(Limits::default());
+                    h.hellos(version, 0x1301);
+                    if !delayed_secrets {
+                        h.collector.append_keylog(keylog(0x1301).as_bytes(), true);
                     }
-                };
-                h.feed(false, &encrypted(2, &[1]));
-                h.feed(
-                    false,
-                    &[&[0x40][..], &CLIENT_CID, &[0x98; 12], &token].concat(),
-                );
-                let issue = if transport_parameter {
-                    let extensions = extension(57, &[&varint(2), &varint(16), &token[..]].concat());
-                    crypto_frame(
-                        &handshake(
-                            8,
-                            &[&(extensions.len() as u16).to_be_bytes()[..], &extensions].concat(),
-                        ),
-                        0,
+                    let token = [0xab; 16];
+                    let keys = Keys::new(
+                        Suite::Aes128,
+                        version,
+                        &traffic_secret(0x1301, if transport_parameter { 0x55 } else { 0x44 }),
                     )
-                } else {
-                    [&[24, 1, 0, 8][..], &[0x78; 8], &token].concat()
-                };
-                h.feed(false, &encrypted(1, &issue));
-                if delayed_secrets {
-                    h.collector.append_keylog(keylog(0x1301).as_bytes(), true);
+                    .unwrap();
+                    let encrypted = |number: u64, data: &[u8]| {
+                        if transport_parameter {
+                            long_packet(version, PacketKind::Handshake, false, number, data, &keys)
+                        } else {
+                            short_packet(false, number, false, data, &keys)
+                        }
+                    };
+                    h.feed(false, &encrypted(2, &[1]));
+                    h.feed(
+                        false,
+                        &[
+                            &[0x40][..],
+                            if associated {
+                                &CLIENT_CID[..]
+                            } else {
+                                &[0x99; 8][..]
+                            },
+                            &[0x98; 12],
+                            &token,
+                        ]
+                        .concat(),
+                    );
+                    let issue = if transport_parameter {
+                        let extensions =
+                            extension(57, &[&varint(2), &varint(16), &token[..]].concat());
+                        crypto_frame(
+                            &handshake(
+                                8,
+                                &[&(extensions.len() as u16).to_be_bytes()[..], &extensions]
+                                    .concat(),
+                            ),
+                            0,
+                        )
+                    } else {
+                        [&[24, 1, 0, 8][..], &[0x78; 8], &token].concat()
+                    };
+                    h.feed(false, &encrypted(1, &issue));
+                    if delayed_secrets {
+                        h.collector.append_keylog(keylog(0x1301).as_bytes(), true);
+                    }
+                    let (connections, summary) = h.finish();
+                    let connection = &connections[0];
+                    assert!(
+                        connection.stateless_reset && connection.closed && !connection.incomplete
+                    );
+                    assert_eq!(connection.pending_packets, 0);
+                    assert_eq!(connection.source_frames, vec![1, 2, 3, 4, 5]);
+                    assert_eq!(connection.last_frame, 5);
+                    assert_eq!(summary.packets, 5);
+                    assert_eq!(summary.decrypted_packets, 4);
                 }
-                let (connections, summary) = h.finish();
-                let connection = &connections[0];
-                assert!(connection.stateless_reset && connection.closed && !connection.incomplete);
-                assert_eq!(connection.pending_packets, 0);
-                assert_eq!(connection.source_frames, vec![1, 2, 3, 4, 5]);
-                assert_eq!(connection.last_frame, 5);
-                assert_eq!(summary.packets, 5);
-                assert_eq!(summary.decrypted_packets, 4);
             }
         }
     }
@@ -1769,4 +1792,196 @@ fn quic_accepted_early_data_preserves_observed_offsets_without_payloads() {
         assert!(stream.final_size_error);
         assert!(!stream.complete);
     }
+}
+
+#[test]
+fn quic_post_retry_client_initials_rejoin_the_existing_connection() {
+    for version in [Version::V1, Version::V2] {
+        for client in [&[][..], &CLIENT_CID[..]] {
+            let mut h = Harness::new(Limits::default());
+            h.collector.append_keylog(keylog(0x1301).as_bytes(), true);
+            let retry_cid = [0x91; 8];
+            let retry_kind = if version == Version::V1 { 0xff } else { 0xcf };
+            let mut retry = [
+                &[retry_kind][..],
+                &version.wire().to_be_bytes(),
+                &[client.len() as u8],
+                client,
+                &[8],
+                &retry_cid,
+                b"token",
+            ]
+            .concat();
+            // RFC 9001/9369 section 5.8, May 2021/2023.
+            let (key, nonce) = match version {
+                Version::V1 => (
+                    "be0c690b9f66575a1d766b54e368c84e",
+                    "461599d35d632bf2239825bb",
+                ),
+                Version::V2 => (
+                    "8fb4b01b56ac48e260fbcbcead7ccc92",
+                    "d86969bc2d7c6d9990efb04a",
+                ),
+            };
+            let integrity = ring::aead::LessSafeKey::new(
+                ring::aead::UnboundKey::new(&ring::aead::AES_128_GCM, &unhex(key).unwrap())
+                    .unwrap(),
+            );
+            let tag = integrity
+                .seal_in_place_separate_tag(
+                    ring::aead::Nonce::assume_unique_for_key(
+                        unhex(nonce).unwrap().try_into().unwrap(),
+                    ),
+                    ring::aead::Aad::from(
+                        [&[ORIGINAL.len() as u8][..], &ORIGINAL, &retry].concat(),
+                    ),
+                    &mut [],
+                )
+                .unwrap();
+            retry.extend_from_slice(tag.as_ref());
+            h.feed(
+                true,
+                &long_packet_with_cids(
+                    version,
+                    PacketKind::Initial,
+                    &ORIGINAL,
+                    client,
+                    0,
+                    &crypto_frame(&hello(true, 0x1301), 0),
+                    &Keys::initial(version, &ORIGINAL, true).unwrap(),
+                ),
+            );
+            h.feed(
+                true,
+                &long_packet_with_cids(
+                    version,
+                    PacketKind::Initial,
+                    &retry_cid,
+                    client,
+                    1,
+                    &crypto_frame(&hello(true, 0x1301), 0),
+                    &Keys::initial(version, &retry_cid, true).unwrap(),
+                ),
+            );
+            h.feed(false, &retry);
+            h.feed(
+                false,
+                &long_packet_with_cids(
+                    version,
+                    PacketKind::Initial,
+                    client,
+                    &retry_cid,
+                    0,
+                    &crypto_frame(&hello(false, 0x1301), 0),
+                    &Keys::initial(version, &retry_cid, false).unwrap(),
+                ),
+            );
+            let keys = Keys::new(Suite::Aes128, version, &traffic_secret(0x1301, 0x44)).unwrap();
+            h.feed(
+                false,
+                &short_packet_to(
+                    client,
+                    0,
+                    false,
+                    &[stream_frame(0, b"joined", true), vec![29, 0, 0]].concat(),
+                    &keys,
+                ),
+            );
+            let (connections, summary) = h.finish();
+            assert_eq!(connections.len(), 1);
+            assert_eq!(summary.decrypted_packets, 4);
+            assert_eq!(summary.ambiguous_packets, 0);
+            assert!(connections[0].closed && !connections[0].incomplete);
+            assert_eq!(connections[0].pending_packets, 0);
+            assert_eq!(connections[0].metrics.retry_packets, 1);
+            assert_eq!(connections[0].source_frames, vec![1, 2, 3, 4, 5]);
+            assert_eq!(connections[0].streams[0].ranges[0].data.as_ref(), b"joined");
+        }
+    }
+}
+
+#[test]
+fn quic_minimum_stateless_resets_survive_short_header_samples() {
+    for version in [Version::V1, Version::V2] {
+        let mut h = Harness::new(Limits::default());
+        h.collector.append_keylog(keylog(0x1301).as_bytes(), true);
+        let client = [0x12];
+        h.feed(
+            true,
+            &long_packet_with_cids(
+                version,
+                PacketKind::Initial,
+                &ORIGINAL,
+                &client,
+                0,
+                &crypto_frame(&hello(true, 0x1301), 0),
+                &Keys::initial(version, &ORIGINAL, true).unwrap(),
+            ),
+        );
+        h.feed(
+            false,
+            &long_packet_with_cids(
+                version,
+                PacketKind::Initial,
+                &client,
+                &SERVER_CID,
+                0,
+                &crypto_frame(&hello(false, 0x1301), 0),
+                &Keys::initial(version, &ORIGINAL, false).unwrap(),
+            ),
+        );
+        let token = [0xab; 16];
+        let keys = Keys::new(Suite::Aes128, version, &traffic_secret(0x1301, 0x44)).unwrap();
+        h.feed(
+            false,
+            &short_packet_to(
+                &client,
+                0,
+                false,
+                &[&[24, 1, 0, 8][..], &[0x78; 8], &token].concat(),
+                &keys,
+            ),
+        );
+        h.feed(false, &[&[0x40][..], &client, &[0; 3], &token].concat());
+        let (connections, summary) = h.finish();
+        assert!(
+            connections[0].stateless_reset && connections[0].closed && !connections[0].incomplete
+        );
+        assert_eq!(connections[0].pending_packets, 0);
+        assert_eq!(connections[0].source_frames, vec![1, 2, 3, 4]);
+        assert_eq!(summary.decrypted_packets, 3);
+        assert_eq!(summary.packets, 4);
+    }
+}
+
+#[test]
+fn quic_unassociated_reset_candidates_respect_the_pending_limit() {
+    let mut h = Harness::new(Limits {
+        max_pending_packets: 1,
+        ..Limits::default()
+    });
+    h.collector.append_keylog(keylog(0x1301).as_bytes(), true);
+    h.hellos(Version::V1, 0x1301);
+    for token in [[0xaa; 16], [0xbb; 16]] {
+        h.feed(
+            false,
+            &[&[0x40][..], &[0x99; 8], &[0x98; 12], &token].concat(),
+        );
+    }
+    let keys = Keys::new(Suite::Aes128, Version::V1, &traffic_secret(0x1301, 0x44)).unwrap();
+    for (number, token) in [(0, [0xaa; 16]), (1, [0xbb; 16])] {
+        let issue = [
+            &[24, number as u8 + 1, 0, 8][..],
+            &[number as u8 + 0x78; 8],
+            &token,
+        ]
+        .concat();
+        h.feed(false, &short_packet(false, number, false, &issue, &keys));
+    }
+    let (connections, summary) = h.finish();
+    assert!(connections[0].stateless_reset && connections[0].closed);
+    assert_eq!(connections[0].source_frames, vec![1, 2, 4, 5, 6]);
+    assert_eq!(summary.buffer_limit_hits, 1);
+    assert_eq!(summary.unassociated_packets, 1);
+    assert_eq!(summary.decrypted_packets, 4);
 }

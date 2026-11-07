@@ -94,9 +94,9 @@ fn run(args: Args, invocation: &Invocation) -> Result<(), CliError> {
     let setup =
         commands::offline_analysis::prepare(args.limits, args.filter.as_deref(), &args.decode)?;
     let mut collector = quic::Collector::new(limits).map_err(CliError::classified)?;
+    let mut state = rendering::State::new(&args, invocation)?;
     let mut secrets = keylog::Input::open(args.keylog.as_deref())?;
     secrets.poll(&mut collector, invocation, args.path.is_some())?;
-    let mut state = rendering::State::new(&args)?;
     let encoder = &invocation.output;
     let (run, capture, collector, secrets, state) = if let Some(path) = &args.path {
         let mut reader = crate::input::open_capture(
@@ -179,7 +179,7 @@ fn finish(
                 "no QUIC connection or stream matched the selectors",
             ));
         }
-        state.publish(invocation)?;
+        state.publish()?;
         let summary = output::Summary {
             engine: engine.into(),
             frames_read: run.frames_read,

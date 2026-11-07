@@ -251,6 +251,7 @@ impl<'a> Selected<'a> {
     fn matches(&mut self, sources: &SourceSet) -> bool {
         let mut found = false;
         for frame in sources.frames() {
+            found |= self.frames.contains(&frame.number);
             if self.requested_datagrams.contains(&frame.number) {
                 self.matched_datagrams.insert(frame.number);
                 found = true;

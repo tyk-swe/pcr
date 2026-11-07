@@ -123,8 +123,55 @@ impl ModbusTcp {
         }
         Ok(())
     }
+    fn reject_uncarried_fields(&self) -> Result<(), Error> {
+        let default = Self::default();
+        let typed = matches!(self.form, PduForm::Request | PduForm::Response);
+        let write_single = typed && matches!(self.function, 5 | 6);
+        let write_multiple = typed && matches!(self.function, 15 | 16);
+        let read_request = self.form == PduForm::Request && matches!(self.function, 1..=4);
+        let fields = [
+            (
+                "address",
+                read_request || write_single || write_multiple,
+                self.address == default.address,
+            ),
+            (
+                "quantity",
+                read_request || write_multiple,
+                self.quantity == default.quantity,
+            ),
+            ("value", write_single, self.value == default.value),
+            (
+                "exception_code",
+                self.form == PduForm::Exception,
+                self.exception_code == default.exception_code,
+            ),
+            (
+                "data",
+                self.form == PduForm::Raw
+                    || self.form == PduForm::Request && write_multiple
+                    || self.form == PduForm::Response && matches!(self.function, 1..=4),
+                self.data == default.data,
+            ),
+        ];
+        if let Some((field, ..)) = fields
+            .iter()
+            .find(|(_, carried, unchanged)| !carried && !unchanged)
+        {
+            return Err(invalid(
+                NAME,
+                format!(
+                    "{field} is not part of {} function {}",
+                    self.form.as_str(),
+                    self.function
+                ),
+            ));
+        }
+        Ok(())
+    }
     fn encode_wire(&self, c: &EncodeContext<'_>) -> Result<Vec<u8>, Error> {
         self.validate_fields()?;
+        self.reject_uncarried_fields()?;
         let mut p = Writer::new(NAME, 252);
         let mut function = self.function;
         match self.form {

@@ -33,4 +33,4 @@ pub use pipeline::{
     TcpView, UdpView, run, run_with_ip_events,
 };
 pub use session::{Collector, CollectorNeeds, Outcome, Pass, Session, SessionOptions};
-pub use stream::{Endpoint, StreamRef, StreamTransport};
+pub use stream::{Endpoint, FlowKey, ScopedFlowKey, StreamRef, StreamTransport};

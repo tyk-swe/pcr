@@ -46,13 +46,13 @@ impl Connection {
     ) -> Result<packetcraftr::audit::TlsRequest, CliError> {
         self.bounds.core()?;
         let mut request = packetcraftr::audit::TlsRequest::new(self.endpoint);
-        request.server_name = self.server_name.clone();
-        request.timeout = self.max_duration();
-        request.limits.max_wire_bytes_sent = self.max_tls_write_bytes;
-        request.limits.max_wire_bytes_read = self.max_tls_read_bytes;
-        request.limits.handshake_timeout = self.max_duration();
+        request.tls.server_name = self.server_name.clone();
+        request.connection.timeout = self.max_duration();
+        request.tls.limits.max_wire_bytes_sent = self.max_tls_write_bytes;
+        request.tls.limits.max_wire_bytes_read = self.max_tls_read_bytes;
+        request.tls.limits.handshake_timeout = self.max_duration();
         if let Some(path) = &self.ca_file {
-            request.trust = packetcraftr_netio::tls::TrustStore::from_pem(&read(
+            request.tls.trust = packetcraftr_netio::tls::TrustStore::from_pem(&read(
                 invocation,
                 path,
                 1024 * 1024,
@@ -170,8 +170,17 @@ impl Spec for AuditHttp {
             ));
         }
         let mut request = packetcraftr::audit::HttpRequest::new(self.connection.endpoint);
-        request.connection = self.connection.request(i)?;
-        request.tls = self.tls;
+        let connection = self.connection.request(i)?;
+        request.transport = if self.tls {
+            packetcraftr::audit::HttpTransport::Tls(connection.tls)
+        } else {
+            connection
+                .tls
+                .validate(connection.connection.endpoint)
+                .map_err(CliError::classified)?;
+            packetcraftr::audit::HttpTransport::Plain
+        };
+        request.connection = connection.connection;
         request.host = self.host.unwrap_or_else(|| {
             self.connection
                 .server_name

@@ -177,9 +177,9 @@ jobs:
               "packetcraftr.exe" if windows else "packetcraftr"
           )
           sys.path.insert(0, str(pathlib.Path("scripts").resolve()))
-          from release_assets import SOURCE_ASSETS
+          from release_assets import load_inventory
 
-          for source in map(pathlib.Path, SOURCE_ASSETS):
+          for source in map(pathlib.Path, load_inventory(pathlib.Path.cwd()).source_assets):
               destination = staging / source
               destination.parent.mkdir(parents=True, exist_ok=True)
               shutil.copy2(source, destination)

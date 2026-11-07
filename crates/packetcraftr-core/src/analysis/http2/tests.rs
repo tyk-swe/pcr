@@ -3,8 +3,8 @@
 use super::settings::{ENABLE_PUSH, INITIAL_WINDOW_SIZE, MAX_CONCURRENT_STREAMS, MAX_FRAME_SIZE};
 use super::*;
 use crate::analysis::{
+    FlowKey,
     provenance::{SourceFrame, Tracker},
-    reassembly::tcp::FlowKey,
     scope::Interner,
 };
 use crate::protocol::application::http2::CLIENT_PREFACE;

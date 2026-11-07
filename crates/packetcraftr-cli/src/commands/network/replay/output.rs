@@ -10,9 +10,9 @@ use packetcraftr::replay as library;
 use packetcraftr_netio::link::Mode as NetworkLinkMode;
 
 use crate::output::contract::Error;
-use crate::output::envelope::Stats;
 use crate::output::frame::Captured;
 use crate::output::network::{InterfaceId, LinkMode};
+use packetcraftr::Stats;
 
 published_enum! {
     pub(crate) enum SourceFormat from packetcraftr_core::capture_file::Format {

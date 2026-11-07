@@ -3,10 +3,9 @@
 
 use super::Message;
 use crate::analysis::{
-    StreamTransport,
+    ScopedFlowKey, StreamTransport,
     application::{Error, Limits},
     provenance::{Accumulator, SourceSet},
-    reassembly::tcp::ScopedFlowKey,
 };
 use serde::Serialize;
 use std::{collections::BTreeMap, time::SystemTime};

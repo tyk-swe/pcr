@@ -11,8 +11,9 @@ use bytes::Bytes;
 use crate::analysis::adapter::transport_payload;
 use crate::analysis::dedup::Deduplicator;
 use crate::analysis::pipeline::{FrameRecord, Summary as RunSummary};
-use crate::analysis::reassembly::tcp::{Event as TcpEvent, FlowKey, ScopedFlowKey};
+use crate::analysis::reassembly::tcp::Event as TcpEvent;
 use crate::analysis::session::{self, CollectorNeeds};
+use crate::analysis::{FlowKey, ScopedFlowKey};
 use crate::analysis::{StreamRef, StreamTransport};
 use crate::error::BoundaryError;
 

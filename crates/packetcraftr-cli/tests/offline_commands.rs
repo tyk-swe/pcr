@@ -185,10 +185,11 @@ fn dns_capture_analysis_succeeds() {
 }
 
 #[test]
-fn mqtt_capture_outputs_json_envelope() {
-    let capture = capture_path("protocol-mqtt.pcap");
-    let capture = capture.to_string_lossy().into_owned();
-    let args = [
+fn capture_field_projection_preserves_rows_across_output_formats() {
+    let path = capture_path("protocol-mqtt.pcap");
+    let frames = capture_frames(&path);
+    let capture = path.to_string_lossy().into_owned();
+    let mut args = [
         "--output",
         "json",
         "files",
@@ -196,22 +197,118 @@ fn mqtt_capture_outputs_json_envelope() {
         capture.as_str(),
         "--field",
         "frame.number",
+        "--field",
+        "frame.len",
     ];
     let output = run(&args);
     let text = assert_success(&output, &args);
-    let trimmed = text.trim();
-    assert!(
-        trimmed.starts_with('{') && trimmed.ends_with('}'),
-        "JSON stdout should be a single object, got:\n{text}"
+    let aggregate: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let expected_rows: Vec<_> = frames.iter().enumerate().map(|(index, bytes)| {
+        serde_json::json!({"source_frame": index + 1, "values": [index + 1, bytes.len()]})
+    }).collect();
+    assert_eq!(
+        aggregate["schema"],
+        packetcraftr_core::security::OUTPUT_SCHEMA
     );
-    assert!(
-        trimmed.contains(packetcraftr_core::security::OUTPUT_SCHEMA),
-        "JSON stdout should carry the owned output schema value, got:\n{text}"
+    assert_eq!(aggregate["status"], "success");
+    assert_eq!(
+        aggregate["result"]["rows"],
+        serde_json::json!(expected_rows)
     );
-    assert!(
-        trimmed.contains("\"status\"") && trimmed.contains("\"success\""),
-        "JSON stdout should report a success envelope, got:\n{text}"
+    assert_eq!(
+        aggregate["result"]["columns"],
+        serde_json::json!(["frame.number", "frame.len"])
     );
+    assert_eq!(aggregate["result"]["rows_written"], frames.len());
+    assert_eq!(aggregate["result"]["frames_read"], frames.len());
+    assert_eq!(
+        aggregate["result"]["captured_bytes_read"],
+        frames.iter().map(Vec::len).sum::<usize>()
+    );
+
+    args[1] = "ndjson";
+    let output = run(&args);
+    let text = assert_success(&output, &args);
+    let records: Vec<serde_json::Value> = text
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(records.len(), expected_rows.len() + 1);
+    for (record, row) in records.iter().zip(&expected_rows) {
+        assert_eq!(record["event"], "fields");
+        assert_eq!(record["result"]["columns"], aggregate["result"]["columns"]);
+        assert_eq!(record["result"]["source_frame"], row["source_frame"]);
+        assert_eq!(record["result"]["values"], row["values"]);
+    }
+    let terminal = records.last().unwrap();
+    assert_eq!(terminal["event"], "complete");
+    for key in [
+        "columns",
+        "rows_written",
+        "frames_read",
+        "captured_bytes_read",
+    ] {
+        assert_eq!(terminal["result"][key], aggregate["result"][key]);
+    }
+
+    args[1] = "text";
+    let output = run(&args);
+    let text = assert_success(&output, &args);
+    let expected = std::iter::once("frame.number\tframe.len\n".to_owned())
+        .chain(
+            frames
+                .iter()
+                .enumerate()
+                .map(|(index, bytes)| format!("{}\t{}\n", index + 1, bytes.len())),
+        )
+        .collect::<String>();
+    assert_eq!(text, expected);
+}
+
+#[test]
+fn projection_ndjson_budget_counts_row_payload_and_rejects_unpublished_rows() {
+    let path = capture_path("protocol-mqtt.pcap");
+    let capture = path.to_string_lossy().into_owned();
+    let base = [
+        "--output",
+        "ndjson",
+        "files",
+        "read",
+        capture.as_str(),
+        "--field",
+        "frame.number",
+        "--filter",
+        "frame.number == 1",
+    ];
+    let output = run(&base);
+    let text = assert_success(&output, &base);
+    let first: serde_json::Value = serde_json::from_str(text.lines().next().unwrap()).unwrap();
+    assert_eq!(first["event"], "fields");
+    let row_bytes = serde_json::to_vec(&first["result"]).unwrap().len();
+    for (maximum, succeeds) in [(row_bytes, true), (row_bytes - 1, false)] {
+        let maximum = maximum.to_string();
+        let args = base
+            .iter()
+            .copied()
+            .chain(["--max-projection-bytes", maximum.as_str()])
+            .collect::<Vec<_>>();
+        let output = run(&args);
+        let text = stdout(&output);
+        let records: Vec<serde_json::Value> = text
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(output.status.success(), succeeds, "{text}");
+        if succeeds {
+            assert_eq!(records.len(), 2);
+            assert_eq!(records[0]["result"], first["result"]);
+            assert_eq!(records[1]["event"], "complete");
+            continue;
+        }
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0]["event"], "error");
+        assert_eq!(records[0]["error"]["code"], "policy.projection_limit");
+    }
 }
 
 #[test]

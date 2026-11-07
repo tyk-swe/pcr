@@ -15,7 +15,6 @@ use self::arguments::Args;
 use crate::commands::offline_analysis::prepare;
 use crate::errors::CliError;
 use crate::input::open_capture;
-use crate::invocation::StreamEncoder;
 
 use analysis::StreamTransport;
 use analysis::tls::{Collector, Limits as TlsLimits, Selector, SniPattern, Status};
@@ -74,18 +73,16 @@ impl crate::commands::Spec for Args {
         self,
         invocation: &crate::invocation::Invocation,
     ) -> Result<crate::commands::CommandExit, CliError> {
-        let format = invocation.format;
-        let stream = &invocation.output;
-        run(invocation, self, format, stream).map(|()| crate::commands::CommandExit::SUCCESS)
+        run(invocation, self).map(|()| crate::commands::CommandExit::SUCCESS)
     }
 }
 
 pub(super) fn run(
     invocation: &crate::invocation::Invocation,
     arguments: Args,
-    format: Format,
-    stream: &StreamEncoder,
 ) -> Result<(), CliError> {
+    let format = invocation.format;
+    let stream = &invocation.output;
     let selected_stream = arguments
         .stream
         .as_ref()
@@ -110,8 +107,7 @@ pub(super) fn run(
     }
     let collector = Collector::new(tls_limits).map_err(CliError::classified)?;
 
-    let capture_limits = arguments.limits.capture.limits()?;
-    let prepared = prepare(capture_limits, arguments.limits, None, &arguments.decode)?;
+    let prepared = prepare(arguments.limits, None, &arguments.decode)?;
     let session = analysis::Session::new(
         prepared.registry.clone(),
         analysis::SessionOptions {
@@ -127,7 +123,7 @@ pub(super) fn run(
         &invocation.control,
         &invocation.output,
         &arguments.path,
-        capture_limits,
+        prepared.capture_limits,
     )?;
 
     let mut state = State::new(arguments.max_output_sessions);

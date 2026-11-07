@@ -6,11 +6,12 @@ use std::time::Instant;
 use bytes::Bytes;
 
 use super::{PendingMergePlan, PushPlan};
+use crate::analysis::ScopedFlowKey;
 use crate::analysis::reassembly::tcp::pages;
 use crate::analysis::reassembly::tcp::state::{
     TcpFlowState, append_emitted_history, trim_emitted_history,
 };
-use crate::analysis::reassembly::tcp::{Event, Reassembler, ScopedFlowKey, Segment};
+use crate::analysis::reassembly::tcp::{Event, Reassembler, Segment};
 
 pub(in crate::analysis::reassembly::tcp) fn commit_push(
     reassembler: &mut Reassembler,

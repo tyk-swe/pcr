@@ -11,52 +11,10 @@ import sys
 
 from rust_source import blank_comments_and_strings, is_test_path, without_test_items
 
-LAYERS = {
-    "packetcraftr-core": {
-        ("error",): 1, ("diagnostic",): 1, ("budget",): 1, ("field",): 1,
-        ("layer",): 1, ("layout",): 1, ("codec",): 1,
-                ("clock",): 1, ("packet",): 1,
-        ("registry",): 1, ("matcher",): 1, ("frame",): 1, ("template",): 1,
-        ("protocol",): 2, ("build",): 2, ("decode",): 2, ("expression",): 2,
-        ("transform",): 2, ("conversation",): 2, ("document",): 2,
-        ("capture_file",): 3, ("filter",): 3,
-        ("analysis",): 4, ("security",): 4, ("fuzz",): 4,
-    },
-    "packetcraftr": {
-        ("clock",): 1, ("deadline",): 1, ("data",): 1,
-        ("engine", "stats"): 1, ("engine", "correlation"): 1,
-        ("probe", "model"): 1,
-        ("error",): 2, ("policy",): 2, ("target",): 2, ("route",): 2,
-        ("neighbor",): 2, ("providers",): 2, ("runtime",): 2, ("client",): 2,
-        ("evidence", "error"): 2,
-        ("engine",): 3, ("evidence",): 3, ("send", "options"): 3,
-        ("send",): 4, ("exchange",): 4, ("capture",): 4, ("probe",): 4,
-        ("dns",): 5, ("traceroute",): 5, ("os",): 5, ("identify",): 5,
-        ("replay",): 5, ("fuzz",): 5, ("audit",): 5, ("differential",): 5,
-        ("target", "plan"): 5,
-        ("scan",): 6,
-    },
-    "packetcraftr-netio": {
-        ("deadline",): 1,
-                ("entropy",): 1, ("link",): 1, ("bounded",): 1,
-        ("unsupported",): 2, ("resources",): 2, ("workers",): 2,
-        ("error",): 3, ("native",): 3, ("interface",): 3, ("route",): 3, ("capture",): 3,
-        ("transmit",): 3, ("tcp",): 3, ("udp",): 3, ("tls",): 3,
-        ("resolution",): 3,
-        ("platform",): 4,
-    },
-    "packetcraftr-cli": {
-        ("output",): 1,
-        ("errors",): 2, ("filtering",): 2, ("cancellation",): 2, ("resources",): 2,
-        ("command_options",): 3,
-        ("invocation",): 4,
-        ("input",): 5, ("system",): 5, ("rendering",): 5, ("staged_output",): 5,
-        ("commands",): 6,
-        ("app",): 7,
-    },
-}
+LayerTable = dict[tuple[str, ...], int]
+Allowlist = tuple[tuple[str, tuple[str, ...], tuple[str, ...], str], ...]
 
-ALLOWLIST = (
+ALLOWLIST: Allowlist = (
     ("packetcraftr-netio", ("capture", "system"), ("platform",),
      "system provider dispatch documented in packetcraftr-netio lib.rs"),
     ("packetcraftr-netio", ("route",), ("platform",),
@@ -249,7 +207,8 @@ def allowlisted(
 
 
 def check_crate(
-    crate: str, src: Path, table, allowlist, used: set[int], include_tests: bool = False
+    crate: str, src: Path, table: LayerTable, allowlist: Allowlist,
+    used: set[int], include_tests: bool = False,
 ) -> list[str]:
     problems = []
     for path in sorted(src.rglob("*.rs")):
@@ -317,79 +276,44 @@ def documented_layers(
     return layers, duplicates
 
 
-def check_documented(
-    crate: str, src: Path, table: dict[tuple[str, ...], int], required: bool = True
-) -> list[str]:
+def crate_layers(crate: str, src: Path) -> tuple[LayerTable, list[str]]:
     root = src / "lib.rs"
     if not root.is_file():
-        return [f"{crate}: lib.rs documents no layer table"] if required else []
+        return {}, [f"{crate}: lib.rs documents no layer table"]
     documented, duplicates = documented_layers(root.read_text(errors="replace"))
     if not documented:
-        return [f"{crate}: lib.rs documents no layer table"] if required else []
+        return {}, [f"{crate}: lib.rs documents no layer table"]
     problems = [
         f"{crate}: lib.rs documents {'::'.join(path)} at layers "
         f"{' and '.join(str(number) for number in numbers)}"
         for path, numbers in duplicates
     ]
-    for path, layer in sorted(documented.items()):
-        if layer_of(table, path) != layer:
-            problems.append(
-                f"{crate}: lib.rs documents {'::'.join(path)} at layer {layer} "
-                f"but the layer table does not"
-            )
-    for path, layer in sorted(table.items()):
-        if len(path) > 1:
-            if documented.get(path) != layer:
-                problems.append(
-                    f"{crate}: the layer table puts {'::'.join(path)} at layer {layer} "
-                    f"but lib.rs does not document {'::'.join(path)} at layer {layer}"
-                )
-            continue
-        if layer_of(documented, path) == layer:
-            continue
-        if any(
-            doc[:len(path)] == path and doc_layer == layer
-            for doc, doc_layer in documented.items()
-        ):
-            continue
-        problems.append(
-            f"{crate}: the layer table puts {'::'.join(path)} at layer {layer} "
-            f"but lib.rs does not document {'::'.join(path)} at layer {layer}"
-        )
-    return problems
+    return documented, problems
 
 
 def check_workspace(
     root: Path,
-    layers=LAYERS,
-    allowlist=ALLOWLIST,
+    allowlist: Allowlist = ALLOWLIST,
     include_tests: bool = False,
-    require_documented: bool = True,
 ) -> list[str]:
     problems = []
-    if layers is LAYERS:
-        discovered = {
-            path.parent.name
-            for path in (root / "crates").glob("*/Cargo.toml")
-        }
-        for crate in sorted(discovered - set(layers)):
-            problems.append(
-                f"{crate}: workspace crate has no layer table entry; "
-                "script tables keyed by crate name would skip it"
-            )
+    crates = tuple(path.parent for path in sorted((root / "crates").glob("*/Cargo.toml")))
     used: set[int] = set()
-    for crate, table in layers.items():
-        src = root / "crates" / crate / "src"
+    for directory in crates:
+        crate = directory.name
+        src = directory / "src"
         if not src.is_dir():
             problems.append(f"{crate}: missing source directory {src}")
             continue
-        if not include_tests:
-            problems.extend(check_documented(crate, src, table, require_documented))
+        table, invalid = crate_layers(crate, src)
+        problems.extend(invalid)
+        if not table:
+            continue
         problems.extend(check_crate(crate, src, table, allowlist, used, include_tests))
     if include_tests:
         return problems
     for index, (crate, owner_prefix, target_prefix, _reason) in enumerate(allowlist):
-        if index not in used and crate in layers:
+        if index not in used and any(directory.name == crate for directory in crates):
             problems.append(
                 f"{crate}: stale allowlist entry {'::'.join(owner_prefix)} -> "
                 f"{'::'.join(target_prefix)}"
@@ -397,7 +321,7 @@ def check_workspace(
     return problems
 
 
-def main(argv=None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--root", type=Path, default=Path(__file__).resolve().parents[1]
@@ -411,13 +335,13 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     if args.report_tests:
         couplings = check_workspace(
-            args.root.resolve(), layers=LAYERS, allowlist=ALLOWLIST, include_tests=True
+            args.root.resolve(), include_tests=True
         )
         for coupling in couplings:
             print(coupling)
         print(f"{len(couplings)} test layer coupling(s) (report only)")
         return 0
-    problems = check_workspace(args.root.resolve(), layers=LAYERS, allowlist=ALLOWLIST)
+    problems = check_workspace(args.root.resolve())
     for problem in problems:
         print(problem, file=sys.stderr)
     if problems:

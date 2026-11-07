@@ -33,9 +33,10 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use serde::Serialize;
 
+use crate::analysis::ScopedFlowKey;
 use crate::analysis::conversation_index::CanonicalFlow;
 use crate::analysis::pipeline::{FrameRecord, Summary as RunSummary};
-use crate::analysis::reassembly::tcp::{Event as TcpEvent, ScopedFlowKey};
+use crate::analysis::reassembly::tcp::Event as TcpEvent;
 use crate::analysis::session::{Collector as SessionCollector, CollectorNeeds};
 use crate::error::BoundaryError;
 use crate::protocol::transport::Tcp;

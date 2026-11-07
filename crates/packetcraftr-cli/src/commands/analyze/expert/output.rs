@@ -6,7 +6,7 @@ use serde::Serialize;
 use packetcraftr_core::analysis::{self as library, expert};
 
 use crate::commands::offline_analysis::output::{Clock, StreamTransport};
-use packetcraftr_core::diagnostic::Severity;
+use crate::output::envelope::Severity;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub(crate) struct Finding {
@@ -23,7 +23,7 @@ pub(crate) struct Finding {
 impl From<expert::Finding> for Finding {
     fn from(value: expert::Finding) -> Self {
         Self {
-            severity: value.severity,
+            severity: value.severity.into(),
             code: value.code,
             frame: value.number,
             transport: value.stream.map(|stream| stream.transport.into()),

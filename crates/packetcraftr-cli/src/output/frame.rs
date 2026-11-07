@@ -11,8 +11,8 @@ use packetcraftr_core::frame::Frame;
 use packetcraftr_core::{decode::DecodedPacket, layout};
 
 use super::contract::Error;
+use super::envelope::Diagnostic;
 use super::hex::CompactHex;
-use packetcraftr_core::diagnostic::Diagnostic;
 
 const NANOS_PER_SECOND: u32 = 1_000_000_000;
 
@@ -148,7 +148,13 @@ impl TryFrom<&packetcraftr_core::analysis::provenance::SourceFrame> for Source {
     }
 }
 
-pub use packetcraftr_core::frame::Direction;
+published_enum! {
+    pub enum Direction from packetcraftr_core::frame::Direction {
+        Inbound => "inbound",
+        Outbound => "outbound",
+        Unknown => "unknown",
+    }
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct ByteRange {
@@ -267,7 +273,7 @@ impl TryFrom<Frame> for Captured {
             original_length: frame.original_length(),
             link_type: frame.link_type.0,
             interface: frame.interface,
-            direction: frame.direction,
+            direction: frame.direction.map(Into::into),
             bytes: frame.bytes().clone(),
         })
     }
@@ -299,7 +305,12 @@ impl From<&DecodedPacket> for Stack {
         Self {
             packet: packetcraftr_core::document::Packet::from_packet(&decoded.packet),
             layout: (&decoded.layout).into(),
-            diagnostics: decoded.diagnostics.clone(),
+            diagnostics: decoded
+                .diagnostics
+                .iter()
+                .cloned()
+                .map(Into::into)
+                .collect(),
         }
     }
 }
@@ -326,7 +337,7 @@ impl TryFrom<DecodedPacket> for Decoded {
             frame: frame.try_into()?,
             packet: packetcraftr_core::document::Packet::from_packet(&packet),
             layout: layout.into(),
-            diagnostics,
+            diagnostics: diagnostics.into_iter().map(Into::into).collect(),
         })
     }
 }

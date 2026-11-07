@@ -7,7 +7,8 @@ use std::net::IpAddr;
 
 use serde::Serialize;
 
-use packetcraftr::probe::{self, Transport};
+use packetcraftr::probe;
+use packetcraftr::probe::Transport;
 use packetcraftr::scan as library;
 
 use super::capture::Stats as CaptureStats;
@@ -97,15 +98,14 @@ pub(crate) fn coverage(value: library::Coverage) -> &'static str {
 /// The effective TCP segment a raw scan sends to TCP scan endpoints.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub struct TcpScan {
-    #[serde(serialize_with = "serialize_tcp_mode")]
-    pub mode: library::TcpScan,
+    pub mode: TcpMode,
     pub flags: u16,
 }
 
 impl From<library::TcpScan> for TcpScan {
     fn from(mode: library::TcpScan) -> Self {
         Self {
-            mode,
+            mode: mode.into(),
             flags: mode.flags(),
         }
     }
@@ -114,32 +114,17 @@ impl From<library::TcpScan> for TcpScan {
 /// The effective SCTP chunk a raw scan sends to SCTP scan endpoints.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub struct SctpScan {
-    #[serde(serialize_with = "serialize_sctp_mode")]
-    pub mode: library::SctpScan,
+    pub mode: SctpMode,
     pub chunk_type: u8,
 }
 
 impl From<library::SctpScan> for SctpScan {
     fn from(mode: library::SctpScan) -> Self {
         Self {
-            mode,
+            mode: mode.into(),
             chunk_type: mode.chunk_type(),
         }
     }
-}
-
-fn serialize_tcp_mode<S: serde::Serializer>(
-    mode: &library::TcpScan,
-    serializer: S,
-) -> Result<S::Ok, S::Error> {
-    serializer.serialize_str(mode.as_str())
-}
-
-fn serialize_sctp_mode<S: serde::Serializer>(
-    mode: &library::SctpScan,
-    serializer: S,
-) -> Result<S::Ok, S::Error> {
-    serializer.serialize_str(mode.as_str())
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -222,7 +207,7 @@ pub struct FailedProbe {
     pub destination_port: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ip_protocol: Option<u8>,
-    pub transport: Transport,
+    pub transport: crate::output::network::Transport,
     pub attempt: u32,
 }
 
@@ -249,7 +234,7 @@ impl TryFrom<&library::PipelineFailure> for Failure {
 
     fn try_from(error: &library::PipelineFailure) -> Result<Self, Error> {
         Ok(Self {
-            stats: error.stats.clone(),
+            stats: error.stats.clone().into(),
             pending: error
                 .pending
                 .iter()
@@ -267,7 +252,7 @@ impl TryFrom<&library::PipelineFailure> for Failure {
                 scope: probe.scope.as_ref().map(Scope::from),
                 destination_port: probe.endpoint.port(),
                 ip_protocol: probe.endpoint.ip_protocol(),
-                transport: probe.endpoint.transport(),
+                transport: probe.endpoint.transport().into(),
                 attempt: probe.attempt,
             }),
             capture_sources: error
@@ -279,9 +264,58 @@ impl TryFrom<&library::PipelineFailure> for Failure {
                     ready: source.ready,
                     shutdown_confirmed: source.shutdown_confirmed,
                     statistics_valid: source.statistics_valid,
-                    statistics: source.statistics,
+                    statistics: source.statistics.into(),
                 })
                 .collect(),
         })
+    }
+}
+
+published_enum! {
+    pub enum SctpMode from library::SctpScan {
+        Init => "init",
+        CookieEcho => "cookie_echo",
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TcpMode {
+    Syn,
+    Ack,
+    Window,
+    Fin,
+    Null,
+    Xmas,
+    Maimon,
+    Custom,
+}
+impl From<library::TcpScan> for TcpMode {
+    fn from(value: library::TcpScan) -> Self {
+        match value {
+            library::TcpScan::Syn => Self::Syn,
+            library::TcpScan::Ack => Self::Ack,
+            library::TcpScan::Window => Self::Window,
+            library::TcpScan::Fin => Self::Fin,
+            library::TcpScan::Null => Self::Null,
+            library::TcpScan::Xmas => Self::Xmas,
+            library::TcpScan::Maimon => Self::Maimon,
+            library::TcpScan::Custom { .. } => Self::Custom,
+        }
+    }
+}
+
+impl TcpMode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Syn => "syn",
+            Self::Ack => "ack",
+            Self::Window => "window",
+            Self::Fin => "fin",
+            Self::Null => "null",
+            Self::Xmas => "xmas",
+            Self::Maimon => "maimon",
+            Self::Custom => "custom",
+        }
     }
 }

@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use serde::Serialize;
 
-use packetcraftr_core::analysis::{self as library, reassembly::tcp, scope};
+use packetcraftr_core::analysis::{self as library, scope};
 
 use crate::output::contract::Error;
 
@@ -257,8 +257,8 @@ pub(crate) struct FlowKey {
     pub destination_port: u16,
 }
 
-impl From<tcp::FlowKey> for FlowKey {
-    fn from(value: tcp::FlowKey) -> Self {
+impl From<library::FlowKey> for FlowKey {
+    fn from(value: library::FlowKey) -> Self {
         Self {
             source: value.source,
             source_port: value.source_port,
@@ -274,8 +274,8 @@ pub(crate) struct ScopedFlowKey {
     pub flow: FlowKey,
 }
 
-impl From<tcp::ScopedFlowKey> for ScopedFlowKey {
-    fn from(value: tcp::ScopedFlowKey) -> Self {
+impl From<library::ScopedFlowKey> for ScopedFlowKey {
+    fn from(value: library::ScopedFlowKey) -> Self {
         Self {
             scope: value.scope.get(),
             flow: value.flow.into(),

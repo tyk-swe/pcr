@@ -10,8 +10,8 @@
 //! | Layer | Modules |
 //! | --- | --- |
 //! | 1. Foundation | `clock`, `deadline`, `data`, `engine::stats`, `engine::correlation`, `probe::model` |
-//! | 2. Environment | `error`, `policy`, `target` (model, resolver, and selection), `route`, `neighbor`, `providers`, `runtime`, `client::{admission, planning}`, `evidence::error` |
-//! | 3. Engine | `engine::{mtu, operation, preparation, execution}`, `evidence`, `send::options` |
+//! | 2. Environment | `error`, `policy`, `target` (model, resolver, and selection), `route`, `neighbor`, `providers`, `runtime`, `client`, `evidence::error` |
+//! | 3. Engine | `engine`, `evidence`, `send::options` |
 //! | 4. Primitives | `send`, `exchange`, `capture`, `probe` |
 //! | 5. Workflows | `dns`, `traceroute`, `os`, `identify`, `replay`, `fuzz`, `audit`, `differential`, `target::plan` |
 //! | 6. Composite | `scan`, which follows up with traces and reverse DNS |

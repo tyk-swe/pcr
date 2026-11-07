@@ -12,7 +12,6 @@ pub(crate) mod multipath;
 use crate::output::contract::Error;
 use crate::output::envelope::Published;
 use crate::output::frame::{Captured, Timestamp};
-use packetcraftr::probe::{self, Transport};
 
 use packetcraftr::traceroute as library;
 
@@ -38,11 +37,11 @@ pub struct Probe {
     pub sequence: u64,
     pub hop_limit: u8,
     pub attempt: u32,
-    pub strategy: Transport,
+    pub strategy: crate::output::network::Transport,
     pub destination: IpAddr,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub destination_port: Option<u16>,
-    pub status: probe::Status,
+    pub status: crate::output::network::ProbeStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response_kind: Option<ResponseKind>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -74,7 +73,7 @@ pub struct Report {
     pub target: String,
     pub resolved_addresses: Vec<IpAddr>,
     pub destination: IpAddr,
-    pub strategy: Transport,
+    pub strategy: crate::output::network::Transport,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub destination_port: Option<u16>,
     pub hops: Vec<Hop>,
@@ -127,7 +126,7 @@ impl TryFrom<library::Aggregate> for Published<Report> {
                 target,
                 resolved_addresses,
                 destination,
-                strategy,
+                strategy: strategy.into(),
                 destination_port,
                 hops: hop_outputs,
                 undecoded: undecoded_outputs,
@@ -156,7 +155,7 @@ pub enum Event {
         target: String,
         resolved_addresses: Vec<IpAddr>,
         destination: IpAddr,
-        strategy: Transport,
+        strategy: crate::output::network::Transport,
         #[serde(skip_serializing_if = "Option::is_none")]
         destination_port: Option<u16>,
         completion: Completion,
@@ -196,7 +195,7 @@ impl From<library::Report> for Published<Event> {
                 target: summary.target,
                 resolved_addresses: summary.resolved_addresses,
                 destination: summary.destination,
-                strategy: summary.strategy,
+                strategy: summary.strategy.into(),
                 destination_port: summary.destination_port,
                 completion: summary.termination.into(),
             },
@@ -214,10 +213,10 @@ impl TryFrom<library::ProbeEvidence> for Probe {
             sequence: probe.sequence,
             hop_limit: probe.hop_limit,
             attempt: probe.attempt,
-            strategy: probe.strategy,
+            strategy: probe.strategy.into(),
             destination: probe.destination,
             destination_port: probe.destination_port,
-            status: probe.status,
+            status: probe.status.into(),
             response_kind: probe.response_kind.map(Into::into),
             responder: probe.responder,
             sent_at: probe.sent_at.try_into()?,

@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::io::{Read, Seek};
+use std::sync::Arc;
 
-use crate::budget::Cancellation;
+use crate::budget::{Cancellation, Deadline};
 use crate::frame::Frame;
 
 use super::classic::{PcapState, pcap_layout, read_next_pcap_record, read_pcap_header};
@@ -33,11 +34,34 @@ pub struct Reader<R> {
     scratch: Vec<u8>,
     finished: bool,
     cancellation: Option<Cancellation>,
-    deadline: Option<std::sync::Arc<crate::budget::Deadline>>,
+    deadline: Option<Arc<Deadline>>,
 }
 
 impl<R: Read> Reader<R> {
-    pub fn with_limits(mut inner: R, limits: ReaderLimits) -> Result<Self, Error> {
+    pub fn with_limits(inner: R, limits: ReaderLimits) -> Result<Self, Error> {
+        Self::with_control(inner, limits, None)
+    }
+
+    pub fn with_control(
+        inner: R,
+        limits: ReaderLimits,
+        control: Option<Arc<Deadline>>,
+    ) -> Result<Self, Error> {
+        if let Some(control) = &control {
+            control.enforce()?;
+        }
+        let result = Self::read_header(inner, limits, control.clone());
+        if let Some(control) = &control {
+            control.enforce()?;
+        }
+        result
+    }
+
+    fn read_header(
+        mut inner: R,
+        limits: ReaderLimits,
+        deadline: Option<Arc<Deadline>>,
+    ) -> Result<Self, Error> {
         let max_size = limits.max_size;
         let max_total_interfaces = limits.max_total_interfaces;
         let mut scratch = Vec::new();
@@ -98,7 +122,7 @@ impl<R: Read> Reader<R> {
             scratch,
             finished: false,
             cancellation: None,
-            deadline: None,
+            deadline,
         })
     }
 
@@ -108,14 +132,7 @@ impl<R: Read> Reader<R> {
         self
     }
 
-    /// Construction reads a header, so callers also gate before and after constructing a reader.
-    #[must_use]
-    pub fn with_deadline(mut self, deadline: std::sync::Arc<crate::budget::Deadline>) -> Self {
-        self.deadline = Some(deadline);
-        self
-    }
-
-    pub(crate) fn deadline(&self) -> Option<std::sync::Arc<crate::budget::Deadline>> {
+    pub(crate) fn deadline(&self) -> Option<Arc<Deadline>> {
         self.deadline.clone()
     }
 
@@ -123,10 +140,7 @@ impl<R: Read> Reader<R> {
         self.cancellation.clone()
     }
 
-    pub(crate) fn replace_deadline(
-        &mut self,
-        deadline: Option<std::sync::Arc<crate::budget::Deadline>>,
-    ) {
+    pub(crate) fn replace_deadline(&mut self, deadline: Option<Arc<Deadline>>) {
         self.deadline = deadline;
     }
 
@@ -255,17 +269,27 @@ impl<R: Read> Iterator for Reader<R> {
 
 impl<R: Read + Seek> Reader<R> {
     pub fn rewind(&mut self) -> Result<(), Error> {
-        self.check_interrupted()?;
         self.finished = true;
-        self.inner.rewind()?;
-        let fresh = Reader::with_limits(&mut self.inner, self.limits)?;
+        self.check_interrupted()?;
+        self.inner.rewind().map_err(|error| {
+            self.check_interrupted()
+                .err()
+                .unwrap_or_else(|| error.into())
+        })?;
+        self.check_interrupted()?;
+        let control = Arc::new(
+            Deadline::new(std::time::Duration::MAX)
+                .with_parent(self.deadline.clone())
+                .with_cancellation(self.cancellation.clone()),
+        );
+        let fresh = Reader::with_control(&mut self.inner, self.limits, Some(control))?;
         self.state = fresh.state;
         self.header = fresh.header;
         self.interfaces = fresh.interfaces;
         self.declares_fcs = fresh.declares_fcs;
         self.scratch = fresh.scratch;
-        self.finished = false;
         self.check_interrupted()?;
+        self.finished = false;
         Ok(())
     }
 }

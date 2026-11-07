@@ -12,9 +12,9 @@ use super::limits::Limits;
 /// preserves full capture-global indexing and IP reconstruction semantics.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Plan {
-    pub ip_reassembly: bool,
-    pub tcp_index: bool,
-    pub udp_index: bool,
+    ip_reassembly: bool,
+    tcp_index: bool,
+    udp_index: bool,
 }
 
 impl Default for Plan {
@@ -41,14 +41,13 @@ impl Plan {
             || requirements.udp_stream
             || needs.tcp_stream
             || needs.udp_stream
+            || needs.tcp_events
             || stream.is_some();
-        let mut plan = Self::physical(crate::filter::Requirements {
-            tcp_stream: indexed,
-            udp_stream: indexed,
-            ..Default::default()
-        });
-        plan.ip_reassembly |= needs.ip_reassembly;
-        plan
+        Self {
+            ip_reassembly: indexed || needs.ip_reassembly,
+            tcp_index: indexed,
+            udp_index: indexed,
+        }
     }
 
     /// Only the conversation indexes requested by compiled filters/projections,
@@ -86,9 +85,7 @@ pub struct Options<'a> {
     pub filter: Option<&'a Filter>,
     /// Keeps only the frames of one conversation, applied with the filter
     /// and matching exactly what `tcp.stream == N` or `udp.stream == N`
-    /// matches. Indices are assigned before selection, so the plan must
-    /// index the selected transport; [`Session`](crate::analysis::Session) derives
-    /// such a plan from this option.
+    /// matches. The selected transport is indexed before selection.
     pub stream: Option<crate::analysis::StreamRef>,
     /// Inclusive capture-time bounds applied with the filter. Comparison uses
     /// the timestamp's full precision and assumes nothing about ordering, so
@@ -105,4 +102,31 @@ pub struct Options<'a> {
     /// Deterministic policy applied when IP fragments carry conflicting bytes.
     pub ip_overlap: OverlapPolicy,
     pub limits: Limits,
+}
+
+pub(super) struct ResolvedStages {
+    pub(super) ip_reassembly: bool,
+    pub(super) tcp_index: bool,
+    pub(super) udp_index: bool,
+}
+
+impl Options<'_> {
+    pub(super) fn stages(&self) -> ResolvedStages {
+        let requirements = self
+            .filter
+            .map_or_else(Default::default, Filter::requirements);
+        let transport = self.stream.map(|stream| stream.transport);
+        let tcp_index = self.plan.tcp_index
+            || requirements.tcp_stream
+            || self.tcp_events
+            || transport == Some(crate::analysis::StreamTransport::Tcp);
+        let udp_index = self.plan.udp_index
+            || requirements.udp_stream
+            || transport == Some(crate::analysis::StreamTransport::Udp);
+        ResolvedStages {
+            ip_reassembly: self.plan.ip_reassembly || self.track_sources || tcp_index || udp_index,
+            tcp_index,
+            udp_index,
+        }
+    }
 }

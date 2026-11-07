@@ -13,64 +13,52 @@ use crate::command_options::{RouteArgs, RouteSelectionArgs, SendArgs, TemplateAr
 use crate::errors::CliError;
 use crate::input::read_recipe;
 
-pub(crate) trait LiveRequest {
-    fn validate(&self) -> Result<(), CliError>;
-    fn set_template(&mut self, template: core::template::Template);
-    fn template(&self) -> &core::template::Template;
-    fn budget_count(&self) -> Result<u64, CliError>;
-    fn set_send(&mut self, send: packetcraftr::send::Options);
+pub(crate) trait LiveDraft {
+    type Parameters: LiveParameters;
+    fn validate(self, max_template_packets: usize) -> Result<Self::Parameters, CliError>;
 }
 
-impl LiveRequest for packetcraftr::send::Request {
-    fn validate(&self) -> Result<(), CliError> {
-        Self::validate(self).map_err(CliError::classified)
+pub(crate) trait LiveParameters {
+    type Request;
+    fn budget_count(&self, template: &core::template::Template) -> Result<u64, CliError>;
+    fn into_request(
+        self,
+        template: core::template::Template,
+        send: packetcraftr::send::Options,
+    ) -> Self::Request;
+}
+
+impl LiveParameters for packetcraftr::send::Parameters {
+    type Request = packetcraftr::send::Request;
+
+    fn budget_count(&self, template: &core::template::Template) -> Result<u64, CliError> {
+        self.packet_count(template).map_err(CliError::classified)
     }
 
-    fn set_template(&mut self, template: core::template::Template) {
-        self.template = template;
-    }
-
-    fn template(&self) -> &core::template::Template {
-        &self.template
-    }
-
-    fn budget_count(&self) -> Result<u64, CliError> {
-        self.packet_count().map_err(CliError::classified)
-    }
-
-    fn set_send(&mut self, send: packetcraftr::send::Options) {
-        self.send = send;
+    fn into_request(
+        self,
+        template: core::template::Template,
+        send: packetcraftr::send::Options,
+    ) -> Self::Request {
+        self.into_request(template, send)
     }
 }
 
-impl LiveRequest for packetcraftr::exchange::Request {
-    fn validate(&self) -> Result<(), CliError> {
-        Self::validate(self).map_err(CliError::classified)
-    }
+impl LiveParameters for packetcraftr::exchange::Parameters {
+    type Request = packetcraftr::exchange::Request;
 
-    fn set_template(&mut self, template: core::template::Template) {
-        self.template = template;
-    }
-
-    fn template(&self) -> &core::template::Template {
-        &self.template
-    }
-
-    fn budget_count(&self) -> Result<u64, CliError> {
-        let count = self
-            .template
-            .expansion_len()
-            .map_err(CliError::classified)?;
+    fn budget_count(&self, template: &core::template::Template) -> Result<u64, CliError> {
+        let count = template.expansion_len().map_err(CliError::classified)?;
         Ok(u64::try_from(count).unwrap_or(u64::MAX))
     }
 
-    fn set_send(&mut self, send: packetcraftr::send::Options) {
-        self.send = send;
+    fn into_request(
+        self,
+        template: core::template::Template,
+        send: packetcraftr::send::Options,
+    ) -> Self::Request {
+        self.into_request(template, send)
     }
-}
-
-pub(crate) fn placeholder() -> core::template::Template {
-    core::template::Template::new(core::packet::Packet::default())
 }
 
 pub(crate) struct Prepared<R> {
@@ -78,16 +66,16 @@ pub(crate) struct Prepared<R> {
     pub(crate) client: Client,
 }
 
-pub(crate) fn prepare_live<R: LiveRequest>(
+pub(crate) fn prepare_live<D: LiveDraft>(
     invocation: &crate::invocation::Invocation,
     send: SendArgs,
     template: TemplateArgs,
-    mut request: R,
-) -> Result<Prepared<R>, CliError> {
+    draft: D,
+) -> Result<Prepared<<D::Parameters as LiveParameters>::Request>, CliError> {
     let max_template_packets = template.max_template_packets;
     let axes = template.parse()?;
     // Options fail before recipe parsing can trigger hostname work.
-    request.validate()?;
+    let parameters = draft.validate(max_template_packets)?;
     let registry = core::protocol::builtin::registry();
     let packet = read_recipe(
         &invocation.control,
@@ -95,10 +83,10 @@ pub(crate) fn prepare_live<R: LiveRequest>(
         &registry,
         core::packet::DEFAULT_MAX_LAYERS,
     )?;
-    request.set_template(axes.into_template(packet, &registry)?);
+    let template = axes.into_template(packet, &registry)?;
     let policy = send.policy.into_policy();
     policy.validate().map_err(CliError::classified)?;
-    let count = request.budget_count()?;
+    let count = parameters.budget_count(&template)?;
     policy
         .authorize(packetcraftr::policy::Operation::Wire(
             packetcraftr::policy::WireLimits::new(count, 0),
@@ -106,21 +94,24 @@ pub(crate) fn prepare_live<R: LiveRequest>(
         .map_err(CliError::classified)?;
     let first = route::authorize_expanded_destinations(
         invocation,
-        request.template(),
+        &template,
         max_template_packets,
         &policy,
     )?;
     let plan = route::options(&send.route.route)?;
     let destination = route::destination(invocation, send.route.destination, &first, &policy)?;
-    request.set_send(packetcraftr::send::Options {
-        destination,
-        plan,
-        build: core::build::Options {
-            mode: send.mode.into(),
-            ..core::build::Options::default()
+    let request = parameters.into_request(
+        template,
+        packetcraftr::send::Options {
+            destination,
+            plan,
+            build: core::build::Options {
+                mode: send.mode.into(),
+                ..core::build::Options::default()
+            },
+            allow_permissive_live: send.allow_permissive_live,
         },
-        allow_permissive_live: send.allow_permissive_live,
-    });
+    );
     Ok(Prepared {
         request,
         client: client(invocation, registry, policy, Runtime::Client),

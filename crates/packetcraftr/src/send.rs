@@ -16,4 +16,4 @@ pub use error::Error;
 pub use evidence::{Event, SentFrame};
 pub use options::Options;
 pub use report::{Aggregate, Collector, Report};
-pub use request::Request;
+pub use request::{Parameters, Request};

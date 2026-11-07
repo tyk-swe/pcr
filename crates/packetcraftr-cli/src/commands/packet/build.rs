@@ -21,7 +21,6 @@ use packetcraftr_core::error::Kind;
 use self::arguments::Args;
 use crate::errors::CliError;
 use crate::input::{apply_overrides, read_recipe};
-use crate::invocation::StreamEncoder;
 use crate::rendering::{render_diagnostics_stderr, stream_capture_error, stream_limits};
 
 use crate::output::contract::PublishedType;
@@ -66,18 +65,16 @@ impl crate::commands::Spec for Args {
         self,
         invocation: &crate::invocation::Invocation,
     ) -> Result<crate::commands::CommandExit, CliError> {
-        let format = invocation.format;
-        let stream = &invocation.output;
-        run(invocation, self, format, stream).map(|()| crate::commands::CommandExit::SUCCESS)
+        run(invocation, self).map(|()| crate::commands::CommandExit::SUCCESS)
     }
 }
 
 pub(super) fn run(
     invocation: &crate::invocation::Invocation,
     arguments: Args,
-    format: Format,
-    stream: &StreamEncoder,
 ) -> Result<(), CliError> {
+    let format = invocation.format;
+    let stream = &invocation.output;
     let capture = arguments.capture.resolve(format)?;
     let maximum = arguments.template.max_template_packets;
     let axes = arguments.template.parse()?;

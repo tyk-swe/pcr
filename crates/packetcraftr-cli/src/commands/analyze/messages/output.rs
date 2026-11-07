@@ -9,11 +9,24 @@ use crate::output::hex::compact_hex;
 
 use crate::output::frame::Source;
 
+use crate::output::published_enum;
 use crate::output::stream::StreamRecord;
 use packetcraftr_core::analysis::messages as core;
 use serde::Serialize;
 
-pub(crate) use core::Status;
+published_enum! {
+    pub(crate) enum Status from core::Status {
+        Complete => "complete",
+        Incomplete => "incomplete",
+        Malformed => "malformed",
+        Unsupported => "unsupported",
+        Gap => "gap",
+        Conflict => "conflict",
+        Reset => "reset",
+        Evicted => "evicted",
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub(crate) struct Message {
     pub index: u64,
@@ -36,7 +49,7 @@ impl TryFrom<core::Message> for Message {
             stream: v.stream,
             generation: v.generation,
             flow: v.flow.into(),
-            status: v.status,
+            status: v.status.into(),
             wire_hex: compact_hex(&v.wire),
             packet: v
                 .packet
@@ -70,7 +83,7 @@ impl From<core::Issue> for Issue {
             number: v.number,
             flow: v.flow.into(),
             stream: v.stream,
-            status: v.status,
+            status: v.status.into(),
         }
     }
 }
@@ -79,7 +92,29 @@ impl StreamRecord for Issue {
         "protocol_issue"
     }
 }
-pub(crate) type Summary = core::Summary;
+#[derive(Debug, Serialize)]
+pub(crate) struct Summary {
+    pub(crate) messages: u64,
+    pub(crate) complete_messages: u64,
+    pub(crate) incomplete_messages: u64,
+    pub(crate) malformed_messages: u64,
+    pub(crate) unsupported_messages: u64,
+    pub(crate) by_protocol: std::collections::BTreeMap<String, u64>,
+}
+
+impl From<core::Summary> for Summary {
+    fn from(value: core::Summary) -> Self {
+        Self {
+            messages: value.messages,
+            complete_messages: value.complete_messages,
+            incomplete_messages: value.incomplete_messages,
+            malformed_messages: value.malformed_messages,
+            unsupported_messages: value.unsupported_messages,
+            by_protocol: value.by_protocol,
+        }
+    }
+}
+
 analysis_complete!(core::Summary);
 #[derive(Debug, Serialize)]
 pub(crate) struct Report {

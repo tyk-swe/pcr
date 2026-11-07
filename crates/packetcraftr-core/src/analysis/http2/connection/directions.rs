@@ -4,12 +4,12 @@
 //! Per-direction byte buffers and the election of client and server flows.
 
 use super::Context;
+use crate::analysis::ScopedFlowKey;
 use crate::analysis::http2::Error;
 use crate::analysis::http2::budget::Charge;
 use crate::analysis::http2::buffer::SourceBuffer;
 use crate::analysis::http2::side::Side;
 use crate::analysis::provenance::SourceSet;
-use crate::analysis::reassembly::tcp::ScopedFlowKey;
 use crate::protocol::application::http2::{self as wire, hpack};
 use std::collections::HashMap;
 

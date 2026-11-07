@@ -133,3 +133,79 @@ impl Collection {
             .map_err(|source| Error::from(crate::Error::from(source)))
     }
 }
+
+#[derive(Clone, Debug)]
+pub struct Parameters {
+    timeout: Duration,
+    max_template_packets: usize,
+    collection: Collection,
+    stop: StopCondition,
+}
+
+impl Parameters {
+    pub fn new(
+        timeout: Duration,
+        max_template_packets: usize,
+        collection: Collection,
+        stop: StopCondition,
+    ) -> Result<Self, Error> {
+        validate_window(timeout, max_template_packets, &collection)?;
+        Ok(Self {
+            timeout,
+            max_template_packets,
+            collection,
+            stop,
+        })
+    }
+
+    pub fn into_request(self, template: Template, send: crate::send::Options) -> Request {
+        Request {
+            template,
+            send,
+            timeout: self.timeout,
+            max_template_packets: self.max_template_packets,
+            collection: self.collection,
+            stop: self.stop,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn window_preflight_precedes_collection_validation() {
+        let collection = Collection {
+            max_responses: usize::MAX,
+            ..Collection::default()
+        };
+        assert!(matches!(
+            Parameters::new(Duration::ZERO, 0, collection, StopCondition::Window),
+            Err(Error::InvalidRequest {
+                field: "timeout",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn validated_window_constructs_the_requested_operation() {
+        let timeout = Duration::from_millis(123);
+        let parameters = Parameters::new(
+            timeout,
+            2,
+            Collection::default(),
+            StopCondition::AllAnswered,
+        )
+        .unwrap();
+        let request = parameters.into_request(
+            Template::new(packetcraftr_core::packet::Packet::default()),
+            crate::send::Options::default(),
+        );
+        request.validate().unwrap();
+        assert_eq!(request.timeout, timeout);
+        assert_eq!(request.max_template_packets, 2);
+        assert_eq!(request.stop, StopCondition::AllAnswered);
+    }
+}

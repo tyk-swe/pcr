@@ -485,13 +485,9 @@ fn indexed_correlation_preserves_reply_eligibility() {
         .map(|(index, sent)| {
             (
                 index,
-                super::super::super::Pending {
-                    sent: Arc::clone(sent),
+                super::super::super::attempts::PendingView {
+                    sent: sent.as_ref(),
                     deadline: received + Duration::from_secs(1),
-                    best: None,
-                    passed: Vec::new(),
-                    last_response: None,
-                    charge: 0,
                 },
             )
         })
@@ -507,10 +503,15 @@ fn indexed_correlation_preserves_reply_eligibility() {
         vec![0, 1],
         "port collision retains both generations"
     );
-    let observe = |pending: &_, received, interface: &_| {
+    let observe = |pending: &std::collections::BTreeMap<
+        usize,
+        super::super::super::attempts::PendingView<'_>,
+    >,
+                   received,
+                   interface: &_| {
         super::super::indexed_candidates(
             &possible,
-            pending,
+            |index| pending.get(&index).copied(),
             |index| planned.get(index).map(|planned| planned.probe),
             &builtin::registry(),
             &response,
@@ -551,7 +552,7 @@ fn indexed_correlation_preserves_reply_eligibility() {
             pending
                 .get(&n)
                 .filter(|entry| received > entry.deadline)
-                .map(|entry| &entry.sent)
+                .map(|entry| entry.sent)
         },
         |index| planned.get(index).map(|planned| planned.probe),
         &builtin::registry(),
@@ -563,7 +564,7 @@ fn indexed_correlation_preserves_reply_eligibility() {
         pending
             .iter()
             .filter(|(_, entry)| received > entry.deadline)
-            .map(|(index, entry)| (*index, &entry.sent)),
+            .map(|(index, entry)| (*index, entry.sent)),
         &planned,
         &builtin::registry(),
         &response,
@@ -577,7 +578,7 @@ fn indexed_correlation_preserves_reply_eligibility() {
     let settled = pending.remove(&1).unwrap().sent;
     let late = super::super::indexed_settled(
         &possible,
-        |n| (n == 1).then_some(&settled),
+        |n| (n == 1).then_some(settled),
         |index| planned.get(index).map(|planned| planned.probe),
         &builtin::registry(),
         &response,

@@ -71,19 +71,16 @@ impl crate::commands::Spec for Args {
         self,
         invocation: &crate::invocation::Invocation,
     ) -> Result<crate::commands::CommandExit, CliError> {
-        let format = invocation.format;
-        let stream = &invocation.output;
-        run(invocation, self, format, stream.presentation())
-            .map(|()| crate::commands::CommandExit::SUCCESS)
+        run(invocation, self).map(|()| crate::commands::CommandExit::SUCCESS)
     }
 }
 
 pub(super) fn run(
     invocation: &crate::invocation::Invocation,
     arguments: Args,
-    format: Format,
-    presentation: crate::invocation::Presentation,
 ) -> Result<(), CliError> {
+    let format = invocation.format;
+    let presentation = invocation.output.presentation();
     let Args { route, policy } = arguments;
     let plan = prepare_plan(invocation, route, policy.into_policy())?;
     let route = plan

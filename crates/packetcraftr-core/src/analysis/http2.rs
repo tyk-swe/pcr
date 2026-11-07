@@ -40,9 +40,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use super::{
-    FrameRecord, Summary as RunSummary,
+    FrameRecord, ScopedFlowKey, Summary as RunSummary,
     application::{self, TcpSources},
-    reassembly::tcp::ScopedFlowKey,
     scope::Definition,
     session::{self, CollectorNeeds},
 };

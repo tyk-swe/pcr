@@ -1,7 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+
+use super::scope::ScopeId;
 use std::net::{IpAddr, SocketAddr};
 
 /// TCP and UDP conversation indices are allocated independently.
@@ -39,5 +41,41 @@ pub struct Endpoint {
 impl std::fmt::Display for Endpoint {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         SocketAddr::new(self.address, self.port).fmt(f)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct FlowKey {
+    pub source: IpAddr,
+    pub source_port: u16,
+    pub destination: IpAddr,
+    pub destination_port: u16,
+}
+
+impl FlowKey {
+    #[must_use]
+    pub fn reverse(&self) -> Self {
+        Self {
+            source: self.destination,
+            source_port: self.destination_port,
+            destination: self.source,
+            destination_port: self.source_port,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct ScopedFlowKey {
+    pub scope: ScopeId,
+    pub flow: FlowKey,
+}
+
+impl ScopedFlowKey {
+    #[must_use]
+    pub fn reverse(&self) -> Self {
+        Self {
+            scope: self.scope,
+            flow: self.flow.reverse(),
+        }
     }
 }

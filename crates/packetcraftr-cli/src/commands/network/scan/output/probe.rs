@@ -9,7 +9,6 @@ use std::time::Duration;
 
 use serde::Serialize;
 
-use packetcraftr::probe;
 use packetcraftr::scan as library;
 
 use super::Classification;
@@ -106,7 +105,7 @@ pub struct Probe {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sctp_scan: Option<SctpScan>,
     pub attempt: u32,
-    pub status: probe::Status,
+    pub status: crate::output::network::ProbeStatus,
     pub classification: Classification,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub responder: Option<IpAddr>,
@@ -142,7 +141,7 @@ impl TryFrom<library::ProbeEvidence> for Probe {
             tcp_scan: evidence.tcp_scan.map(TcpScan::from),
             sctp_scan: evidence.sctp_scan.map(SctpScan::from),
             attempt: evidence.attempt,
-            status: evidence.status,
+            status: evidence.status.into(),
             classification: evidence.classification.into(),
             responder: evidence.responder,
             sent_at: evidence.sent_at.try_into()?,

@@ -12,11 +12,14 @@ use crate::{
     invocation::StreamEncoder,
     rendering::{bounded_json_len, emit_published, write_raw},
 };
-use packetcraftr_core::{self as core, filter::Projection};
+use packetcraftr_core::{
+    self as core,
+    filter::{Context, Projection, Requirements},
+};
 use std::io::{self, Write};
 
 pub(crate) struct Projector {
-    pub(crate) projection: Projection,
+    projection: Projection,
     command: Command,
     format: Format,
     remaining: usize,
@@ -55,8 +58,8 @@ impl Projector {
             header_written: false,
         }))
     }
-    pub(crate) fn remaining(&self) -> usize {
-        self.remaining
+    pub(crate) fn requirements(&self) -> Requirements {
+        self.projection.requirements()
     }
     fn limit(&self) -> CliError {
         CliError::classified(core::filter::Error::ProjectionLimit {
@@ -93,9 +96,13 @@ impl Projector {
     pub(crate) fn emit(
         &mut self,
         source_frame: u64,
-        values: Vec<Option<core::field::Value>>,
+        context: &Context<'_>,
         stream: &StreamEncoder,
     ) -> Result<(), CliError> {
+        let values = self
+            .projection
+            .values(context, self.remaining)
+            .map_err(CliError::classified)?;
         let row = Row::try_from((source_frame, values)).map_err(CliError::classified)?;
         self.header()?;
         if self.format == Format::Text {
@@ -115,13 +122,29 @@ impl Projector {
             write_raw(&buffer.bytes)?;
         } else if self.format == Format::Ndjson {
             let event = output::projection::RowEvent::from((&self.projection, &row));
-            let bytes = bounded_json_len(&event, self.remaining, serde_json::ser::CompactFormatter)
-                .map_err(|error| error.into_cli_error(|| self.limit()))?;
-            self.charge(bytes)?;
-            stream.emit_published(Published::new(
-                output::projection::RowEvent::from((&self.projection, &row)),
-                Vec::new(),
-            ))?;
+            stream
+                .emit_data_counted(event, Vec::new(), &mut self.remaining)
+                .map_err(|error| match error {
+                    output::stream::MeteredError::Limit => self.limit(),
+                    output::stream::MeteredError::Encode(
+                        error @ output::stream::EncodeError::RecordLimit { .. },
+                    ) => {
+                        // Preserve projection-limit precedence when both byte ceilings are exceeded
+                        let event = output::projection::RowEvent::from((&self.projection, &row));
+                        match bounded_json_len(
+                            &event,
+                            self.remaining,
+                            serde_json::ser::CompactFormatter,
+                        ) {
+                            Ok(_) => CliError::from(error),
+                            Err(error) => error.into_cli_error(|| self.limit()),
+                        }
+                    }
+                    output::stream::MeteredError::Encode(error) => CliError::from(error),
+                    output::stream::MeteredError::Serialize(error) => {
+                        super::serialization_error(error)
+                    }
+                })?;
         } else {
             let bytes = bounded_json_len(&row, self.remaining, serde_json::ser::CompactFormatter)
                 .map_err(|error| error.into_cli_error(|| self.limit()))?;
@@ -193,4 +216,42 @@ pub(crate) fn missing_fields_error() -> CliError {
         core::error::Kind::Usage,
         "this output format requires --field selections",
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn projection_limit_precedes_record_limit_only_when_the_payload_exceeds_both() {
+        let record_limit = output::stream::MAX_RECORD_BYTES;
+        let registry = core::protocol::builtin::registry();
+        let frame = core::frame::Frame::new(
+            None,
+            core::frame::LinkType(147),
+            vec![0; record_limit / 2 - 1],
+        )
+        .unwrap();
+        let decoder =
+            core::filter::FrameDecoder::new(registry.clone(), None, record_limit).unwrap();
+        let decoded = decoder.decode(&frame).unwrap();
+        let context = Context::frame(&decoded, 1);
+        for (maximum, expected) in [
+            (record_limit, core::error::Code::PolicyProjectionLimit),
+            (record_limit * 2, core::error::Code::IoOutputRecordLimit),
+        ] {
+            let mut projector = Projector::prepare(
+                &["raw.bytes".to_owned()],
+                maximum,
+                &registry,
+                Command::Dissect,
+                Format::Ndjson,
+            )
+            .unwrap()
+            .unwrap();
+            let stream = StreamEncoder::new(Command::Dissect, io::sink());
+            let error = projector.emit(1, &context, &stream).unwrap_err();
+            assert_eq!(error.classification.code, expected);
+        }
+    }
 }

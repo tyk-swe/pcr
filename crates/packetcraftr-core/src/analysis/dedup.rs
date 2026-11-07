@@ -5,7 +5,7 @@ use crate::protocol::identity::TcpHeader;
 use crate::protocol::transport::Tcp;
 use bytes::Bytes;
 
-use crate::analysis::reassembly::tcp::ScopedFlowKey;
+use crate::analysis::ScopedFlowKey;
 use crate::analysis::serial::{serial_ge, serial_gt};
 
 /// Sender relative to the first captured frame, whose sender is the client.

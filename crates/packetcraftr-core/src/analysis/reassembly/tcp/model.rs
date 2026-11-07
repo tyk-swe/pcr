@@ -1,51 +1,13 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::net::IpAddr;
 use std::ops::Range;
 
 use bytes::Bytes;
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::analysis::scope::ScopeId;
+use crate::analysis::ScopedFlowKey;
 use crate::error::{Classification, Classified};
-
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub struct FlowKey {
-    pub source: IpAddr,
-    pub source_port: u16,
-    pub destination: IpAddr,
-    pub destination_port: u16,
-}
-
-impl FlowKey {
-    #[must_use]
-    pub fn reverse(&self) -> Self {
-        Self {
-            source: self.destination,
-            source_port: self.destination_port,
-            destination: self.source,
-            destination_port: self.source_port,
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub struct ScopedFlowKey {
-    pub scope: ScopeId,
-    pub flow: FlowKey,
-}
-
-impl ScopedFlowKey {
-    #[must_use]
-    pub fn reverse(&self) -> Self {
-        Self {
-            scope: self.scope,
-            flow: self.flow.reverse(),
-        }
-    }
-}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Segment {

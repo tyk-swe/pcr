@@ -18,7 +18,6 @@ use serde::Serialize;
 use crate::output::contract::Error;
 use crate::output::envelope::Published;
 use crate::output::frame::Captured;
-use packetcraftr::probe::Transport;
 
 use packetcraftr::scan as library;
 
@@ -93,7 +92,7 @@ pub(crate) struct Endpoint {
     pub address: IpAddr,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scope: Option<Scope>,
-    pub transport: Transport,
+    pub transport: crate::output::network::Transport,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub port: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -318,7 +317,7 @@ impl TryFrom<library::Endpoint> for Endpoint {
         Ok(Self {
             address: endpoint.address,
             scope: endpoint.scope.as_ref().map(Scope::from),
-            transport: endpoint.endpoint.transport(),
+            transport: endpoint.endpoint.transport().into(),
             port: endpoint.endpoint.port(),
             ip_protocol: endpoint.endpoint.ip_protocol(),
             classification: endpoint.classification.into(),

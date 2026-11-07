@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! Queued probe transmission and wake scheduling.
 
-use super::{Pending, Pipeline, check, limit, max_wait_secs, prepare::AdmittedProbe};
+use super::{Pipeline, check, limit, max_wait_secs};
 use crate::{
     clock::Clock,
     engine::preparation::RebuildError,
@@ -16,55 +16,37 @@ use std::{sync::Arc, time::Instant};
 impl<P: PacketProviders, K: Clock> Pipeline<'_, P, K> {
     pub(super) fn send_ready(&mut self, draining_captures: bool) -> Result<(), BoundaryError> {
         let now = self.executor.client.now();
-        while self
-            .ready_deadlines
-            .first()
-            .is_some_and(|(deadline, _)| *deadline <= now)
-        {
-            let (_, index) = self
-                .ready_deadlines
-                .pop_first()
-                .expect("due queued attempt");
-            if let Some(admitted) = self.ready.remove(&index) {
-                self.armed_ready.remove(&index);
-                let preview = if admitted.retained.is_some() {
-                    admitted.memory
-                } else {
-                    0
-                };
-                drop(admitted);
-                self.retained -= preview;
-                self.omit(index)?;
-            }
+        while let Some(index) = self.attempts.next_expired_ready(now) {
+            self.omit(index)?;
         }
         self.rotate_if_needed()?;
         while !draining_captures
-            && self.pending.len() < self.options.max_in_flight
+            && self.attempts.pending_count() < self.options.max_in_flight
             && self.executor.client.now() >= self.next_send
         {
             let Some(index) = self
-                .armed_ready
-                .iter()
-                .copied()
+                .attempts
+                .armed_indices()
                 .find(|index| !self.reply_overlaps(*index))
             else {
                 break;
             };
-            while self.ready.get(&index).is_some_and(|probe| {
-                self.retained.saturating_add(probe.memory) > self.options.max_prepared_bytes
-            }) && self.retire_recent()
+            while self
+                .attempts
+                .retained()
+                .saturating_add(self.attempts.queued_memory(index))
+                > self.options.max_prepared_bytes
+                && self.attempts.retire_recent()
             {}
-            if self.retained.saturating_add(self.ready[&index].memory)
+            if self
+                .attempts
+                .retained()
+                .saturating_add(self.attempts.queued_memory(index))
                 > self.options.max_prepared_bytes
             {
                 break;
             }
-            let admitted = self.ready.remove(&index).expect("armed attempt is queued");
-            self.armed_ready.remove(&index);
-            if let Some(deadline) = self.descriptions[&index].host_deadline {
-                self.ready_deadlines.remove(&(deadline, index));
-            }
-            self.send(index, admitted)?;
+            self.send(index)?;
             if !self.spacing.is_zero() {
                 break;
             }
@@ -73,15 +55,15 @@ impl<P: PacketProviders, K: Clock> Pipeline<'_, P, K> {
     }
 
     fn reply_overlaps(&self, index: usize) -> bool {
-        let next = self.descriptions[&index].probe();
-        self.pending
-            .keys()
-            .any(|pending| replies_overlap(next, self.descriptions[pending].probe()))
+        let next = self.attempts.description(index).probe();
+        self.attempts
+            .pending_indices()
+            .any(|pending| replies_overlap(next, self.attempts.description(pending).probe()))
     }
 
     fn omit(&mut self, index: usize) -> Result<(), BoundaryError> {
         self.failed_probe = None;
-        self.retire_description(index);
+        self.attempts.omit(index);
         self.output.event(PipelineEvent::Omitted { index })?;
         if let Some(stream) = &mut self.streaming {
             stream.next_ready = None;
@@ -89,46 +71,38 @@ impl<P: PacketProviders, K: Clock> Pipeline<'_, P, K> {
         Ok(())
     }
 
-    fn send(
-        &mut self,
-        index: usize,
-        AdmittedProbe {
-            cost,
-            memory,
-            retained,
-        }: AdmittedProbe,
-    ) -> Result<(), BoundaryError> {
+    fn send(&mut self, index: usize) -> Result<(), BoundaryError> {
         let client = self.executor.client;
         check(client, self.deadline, &self.options.control)?;
-        let preview_bytes = if retained.is_some() { memory } else { 0 };
-        let host_deadline = self.descriptions[&index].host_deadline;
+        let host_deadline = self.attempts.description(index).host_deadline;
         if host_deadline.is_some_and(|limit| client.now() >= limit) {
-            drop(retained);
-            self.retained -= preview_bytes;
             return self.omit(index);
         }
-        let descriptor = &self.descriptions[&index];
-        let timeout = descriptor.batch.batch().timeout;
-        let probe = descriptor.probe();
-        self.failed_probe = Some(probe.clone());
-        let route = descriptor.route.as_deref().unwrap_or_else(|| {
-            &self.plan.routes[&(
-                probe.address,
-                probe.scope.as_ref().map(|scope| scope.interface.clone()),
-            )]
+        self.failed_probe = Some(self.attempts.description(index).probe().clone());
+        let (prepared, memory) = self.attempts.prepare(index, |descriptor, admitted| {
+            let probe = descriptor.probe();
+            let route = descriptor.route.as_deref().unwrap_or_else(|| {
+                &self.plan.routes[&(
+                    probe.address,
+                    probe.scope.as_ref().map(|scope| scope.interface.clone()),
+                )]
+            });
+            match admitted.retained {
+                Some(retained) => {
+                    self.plan
+                        .admission
+                        .materialize_retained(retained, route, admitted.cost)
+                }
+                None => self.plan.admission.rebuild(
+                    probe.packet(&self.executor.operation.registry),
+                    route,
+                    admitted.cost,
+                ),
+            }
         });
-        let prepared = match retained {
-            Some(retained) => self
-                .plan
-                .admission
-                .materialize_retained(retained, route, cost),
-            None => self.plan.admission.rebuild(
-                probe.packet(&self.executor.operation.registry),
-                route,
-                cost,
-            ),
-        };
-        self.retained -= preview_bytes;
+        let descriptor = self.attempts.description(index);
+        let timeout = descriptor.batch.batch().timeout;
+        let probe = self.failed_probe.as_ref().expect("sending probe");
         let prepared = prepared.map_err(|error| match error {
             RebuildError::Changed { admitted } => limit("changed preparation size", admitted),
             RebuildError::Preparation(source) => BoundaryError::from_error(source),
@@ -180,25 +154,14 @@ impl<P: PacketProviders, K: Clock> Pipeline<'_, P, K> {
             .iter()
             .position(|interface| *interface == sent.route().plan.decision.interface)
             .ok_or_else(|| limit("changed capture interface", capture::MAX_SOURCES))?;
-        self.candidates.insert(
+        self.attempts.record_sent(
             index,
             source,
-            &sent.built().packet,
+            sent.clone(),
+            end,
+            memory,
             &self.executor.operation.registry,
         )?;
-        self.deadlines.insert(end, index);
-        self.pending.insert(
-            index,
-            Pending {
-                sent: sent.clone(),
-                deadline: end,
-                best: None,
-                passed: Vec::new(),
-                last_response: None,
-                charge: memory,
-            },
-        );
-        self.retained += memory;
         self.output.event(PipelineEvent::Sent { index, sent })?;
         self.qualification = Some(match self.qualification {
             Some((stage, first, last)) => {
@@ -216,29 +179,37 @@ impl<P: PacketProviders, K: Clock> Pipeline<'_, P, K> {
 
     pub(super) fn wake_time(&mut self) -> Instant {
         let mut earliest = self
-            .deadlines
-            .next()
+            .attempts
+            .next_deadline()
             .unwrap_or(self.deadline)
             .min(self.deadline);
-        if let Some((deadline, _)) = self.ready_deadlines.first() {
-            earliest = earliest.min(*deadline);
+        if let Some(deadline) = self.attempts.next_ready_deadline() {
+            earliest = earliest.min(deadline);
         }
         let can_send = self
-            .armed_ready
-            .iter()
-            .copied()
+            .attempts
+            .armed_indices()
             .find(|index| !self.reply_overlaps(*index))
             .is_some_and(|index| {
-                self.retained.saturating_add(self.ready[&index].memory)
+                self.attempts
+                    .retained()
+                    .saturating_add(self.attempts.queued_memory(index))
                     <= self.options.max_prepared_bytes
             });
         let can_refill = self.streaming.as_ref().is_some_and(|stream| {
             !stream.done
-                && self.pending.len().saturating_add(self.ready.len()) < self.options.max_in_flight
-                && self.retained.saturating_add(stream.max_probe_bytes)
+                && self
+                    .attempts
+                    .pending_count()
+                    .saturating_add(self.attempts.queued_count())
+                    < self.options.max_in_flight
+                && self
+                    .attempts
+                    .retained()
+                    .saturating_add(stream.max_probe_bytes)
                     <= self.options.max_prepared_bytes
         });
-        if self.pending.len() < self.options.max_in_flight && can_send {
+        if self.attempts.pending_count() < self.options.max_in_flight && can_send {
             earliest = earliest.min(self.next_send);
         }
         if can_refill {

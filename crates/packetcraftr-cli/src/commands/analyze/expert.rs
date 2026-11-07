@@ -13,7 +13,6 @@ use self::arguments::Args;
 use crate::commands::offline_analysis::prepare;
 use crate::errors::CliError;
 use crate::input::open_capture;
-use crate::invocation::StreamEncoder;
 
 use crate::output::contract::PublishedType;
 
@@ -65,21 +64,17 @@ impl crate::commands::Spec for Args {
         self,
         invocation: &crate::invocation::Invocation,
     ) -> Result<crate::commands::CommandExit, CliError> {
-        let format = invocation.format;
-        let stream = &invocation.output;
-        run(invocation, self, format, stream).map(|()| crate::commands::CommandExit::SUCCESS)
+        run(invocation, self).map(|()| crate::commands::CommandExit::SUCCESS)
     }
 }
 
 pub(super) fn run(
     invocation: &crate::invocation::Invocation,
     arguments: Args,
-    format: Format,
-    stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    let capture_limits = arguments.limits.capture.limits()?;
+    let format = invocation.format;
+    let stream = &invocation.output;
     let prepared = prepare(
-        capture_limits,
         arguments.limits,
         arguments.filter.as_deref(),
         &arguments.decode,
@@ -88,7 +83,7 @@ pub(super) fn run(
         &invocation.control,
         &invocation.output,
         &arguments.path,
-        capture_limits,
+        prepared.capture_limits,
     )?;
 
     let session = analysis::Session::new(
@@ -96,7 +91,7 @@ pub(super) fn run(
         prepared.session_options(invocation),
         analysis::expert::Collector::default(),
     );
-    let mut state = rendering::State::new(capture_limits.retention_ceiling());
+    let mut state = rendering::State::new(prepared.capture_limits.retention_ceiling());
     let selector = analysis::expert::Selector {
         min_severity: arguments.min_severity.into(),
         codes: arguments.codes,

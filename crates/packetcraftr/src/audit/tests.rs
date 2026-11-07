@@ -306,11 +306,14 @@ fn budget(units: u64, bytes: u64) -> Policy {
 
 fn tls_request(trust: &[u8]) -> TlsRequest {
     TlsRequest {
-        trust: tls::TrustStore::from_pem(trust).unwrap(),
-        limits: tls::Limits {
-            max_steps: MAX_STEPS,
-            max_wire_bytes_sent: MAX_WIRE_BYTES_SENT,
-            ..tls::Limits::default()
+        tls: TlsOptions {
+            trust: tls::TrustStore::from_pem(trust).unwrap(),
+            limits: tls::Limits {
+                max_steps: MAX_STEPS,
+                max_wire_bytes_sent: MAX_WIRE_BYTES_SENT,
+                ..tls::Limits::default()
+            },
+            ..TlsOptions::default()
         },
         ..TlsRequest::new(ENDPOINT)
     }
@@ -318,8 +321,7 @@ fn tls_request(trust: &[u8]) -> TlsRequest {
 
 fn https_request(trust: &[u8]) -> HttpRequest {
     HttpRequest {
-        connection: tls_request(trust),
-        tls: true,
+        transport: HttpTransport::Tls(tls_request(trust).tls),
         ..HttpRequest::new(ENDPOINT)
     }
 }
@@ -376,7 +378,10 @@ fn tls_handshake_respects_write_reservation() {
             ..tls::Limits::default()
         };
         let request = TlsRequest {
-            limits,
+            tls: TlsOptions {
+                limits,
+                ..tls_request(CA).tls
+            },
             ..tls_request(CA)
         };
         let policy = budget(1 + max_steps as u64, max_wire_bytes_sent as u64);
@@ -572,11 +577,17 @@ fn unusable_tls_rejected_before_connect() {
     for request in [
         TlsRequest::new(port_zero),
         TlsRequest {
-            timeout: Duration::ZERO,
+            connection: ConnectionOptions {
+                timeout: Duration::ZERO,
+                ..ConnectionOptions::new(ENDPOINT)
+            },
             ..tls_request(CA)
         },
         TlsRequest {
-            timeout: Duration::from_secs(3601),
+            connection: ConnectionOptions {
+                timeout: Duration::from_secs(3601),
+                ..ConnectionOptions::new(ENDPOINT)
+            },
             ..tls_request(CA)
         },
     ] {
@@ -590,7 +601,10 @@ fn unusable_tls_rejected_before_connect() {
 #[test]
 fn hourlong_tls_timeout_is_accepted() {
     let request = TlsRequest {
-        timeout: Duration::from_secs(3600),
+        connection: ConnectionOptions {
+            timeout: Duration::from_secs(3600),
+            ..ConnectionOptions::new(ENDPOINT)
+        },
         ..tls_request(CA)
     };
     let (client, _) = fake_client(&budget(TLS_UNITS, TLS_BYTES), Server::Tls, None);
@@ -710,5 +724,35 @@ fn final_response_uses_last_head() {
         );
         let report = client.audit_http(&HttpRequest::new(ENDPOINT)).unwrap();
         assert_eq!(report.measurements["status"], json!(status));
+    }
+}
+
+#[test]
+fn selected_tls_options_are_rejected_before_provider_access() {
+    for tls in [
+        TlsOptions {
+            server_name: Some("invalid\0name".into()),
+            ..TlsOptions::default()
+        },
+        TlsOptions {
+            limits: tls::Limits {
+                max_steps: 0,
+                ..tls::Limits::default()
+            },
+            ..TlsOptions::default()
+        },
+    ] {
+        let (client, observed) = fake_client(&budget(u64::MAX, u64::MAX), Server::Tls, None);
+        let request = TlsRequest {
+            tls: tls.clone(),
+            ..TlsRequest::new(ENDPOINT)
+        };
+        assert!(matches!(client.audit_tls(&request), Err(Error::Tls(_))));
+        let request = HttpRequest {
+            transport: HttpTransport::Tls(tls),
+            ..HttpRequest::new(ENDPOINT)
+        };
+        assert!(matches!(client.audit_http(&request), Err(Error::Tls(_))));
+        observed.lock().unwrap().assert_untouched();
     }
 }

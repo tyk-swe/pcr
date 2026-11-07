@@ -153,7 +153,7 @@ fn traced_hosts(trace: &crate::commands::network::scan::output::traceroute::Repo
         .count()
 }
 
-fn strategy_text(strategy: packetcraftr::probe::Transport, port: Option<u16>) -> String {
+fn strategy_text(strategy: crate::output::network::Transport, port: Option<u16>) -> String {
     match port {
         Some(port) => format!("{strategy}/{port}"),
         None => strategy.to_string(),

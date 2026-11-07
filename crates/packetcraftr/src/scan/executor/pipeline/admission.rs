@@ -3,8 +3,8 @@
 //! Preflight admission and bounded adaptive runtime estimates.
 
 use super::{
-    AdaptiveAdmission, CaptureSession, Planned, correlation, expiry, limit, max_wait_secs, prepare,
-    until, validate_options,
+    CaptureSession, Planned, correlation, expiry, limit, max_wait_secs, prepare, until,
+    validate_options,
 };
 use crate::{
     clock::Clock,
@@ -15,6 +15,19 @@ use crate::{
 };
 use packetcraftr_core::error::BoundaryError;
 use packetcraftr_netio::{capture, interface};
+
+pub(in crate::scan) struct AdaptiveAdmission {
+    pub(super) interfaces: Vec<interface::Id>,
+    pub(super) window: usize,
+    pub(super) many_interfaces: bool,
+    pub(super) max_description_bytes: usize,
+    pub(super) max_route_bytes: usize,
+    pub(super) max_map_route_bytes: usize,
+    pub(super) source_metadata_bytes: usize,
+    pub(super) max_source_name_bytes: usize,
+    pub(super) max_probe_bytes: usize,
+    pub(super) summary_bytes: usize,
+}
 
 /// Admits `batches` as [`super::run`] would and keeps nothing, so a stage over its
 /// preparation limit fails before anything is sent.

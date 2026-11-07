@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! Capture epoch rotation, accounting, and bounded reads.
 
-use super::correlation::{CandidateIndex, SeenFrames};
+use super::correlation::SeenFrames;
 use super::{Pipeline, check, limit, until};
 use crate::{clock::Clock, providers::PacketProviders, scan::executor::PipelineEvent};
 use packetcraftr_core::{
@@ -20,8 +20,9 @@ impl<P: PacketProviders, K: Clock> Pipeline<'_, P, K> {
         if self.streaming.is_none() {
             return Ok(());
         }
-        let changes = self.ready.iter().any(|(index, _)| {
-            self.descriptions[index]
+        let changes = self.attempts.queued_indices().any(|index| {
+            self.attempts
+                .description(index)
                 .route
                 .as_ref()
                 .is_some_and(|route| !self.plan.interfaces.contains(route.interface()))
@@ -32,15 +33,15 @@ impl<P: PacketProviders, K: Clock> Pipeline<'_, P, K> {
         // Every active interval finishes in its original capture epoch. Only
         // unstarted work crosses the rearm boundary, so no negative interval
         // spans an unobserved cleanup/activation gap.
-        if !self.pending.is_empty() {
+        if self.attempts.pending_count() != 0 {
             return Ok(());
         }
         self.close_group()?;
-        while self.retire_recent() {}
+        while self.attempts.retire_recent() {}
         let mut interfaces =
             Vec::with_capacity(self.options.max_in_flight.min(capture::MAX_SOURCES));
-        for index in self.ready.keys() {
-            let descriptor = &self.descriptions[index];
+        for index in self.attempts.queued_indices() {
+            let descriptor = &self.attempts.description(index);
             let probe = descriptor.probe();
             let route = descriptor.route.as_deref().unwrap_or_else(|| {
                 &self.plan.routes[&(
@@ -76,7 +77,6 @@ impl<P: PacketProviders, K: Clock> Pipeline<'_, P, K> {
         ));
         check(self.executor.client, self.deadline, &self.options.control)?;
         ready.map_err(BoundaryError::from_error)?;
-        self.armed_ready = self.ready.keys().copied().collect();
         self.capture_drain_limit = self
             .group
             .sources()
@@ -86,10 +86,7 @@ impl<P: PacketProviders, K: Clock> Pipeline<'_, P, K> {
             * self.group.sources().len();
         self.capture_drain_remaining = self.capture_drain_limit;
         self.seen = SeenFrames::new(self.options.max_evidence_frames);
-        self.candidates = CandidateIndex::new(
-            self.plan.interfaces.len(),
-            self.options.max_in_flight.saturating_mul(2),
-        );
+        self.attempts.begin_epoch(self.plan.interfaces.len());
         Ok(())
     }
 

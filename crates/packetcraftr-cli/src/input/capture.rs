@@ -111,16 +111,16 @@ fn bounded_reader<R: Read>(
     limits: OfflineCaptureLimits,
 ) -> Result<Reader<R>, CliError> {
     let bounds = limits.reader_bounds();
-    Reader::with_limits(
+    Reader::with_control(
         source,
         ReaderLimits {
             max_size: bounds.max_frame_bytes,
             max_interfaces_per_section: bounds.max_interfaces,
             ..ReaderLimits::default()
         },
+        Some(control.io_control()),
     )
-    .map(|reader| control.reader(reader.with_cancellation(control.cancellation.clone())))
-    .map_err(|error| interrupted_or(control, CliError::classified(error)))
+    .map_err(CliError::classified)
 }
 
 #[cfg(test)]

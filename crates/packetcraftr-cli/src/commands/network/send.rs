@@ -15,7 +15,7 @@ use crate::rendering::{
     emit_published, render_diagnostics_text, write_capture_file, write_hex_line, write_raw,
     write_summary_line,
 };
-use crate::system::{Prepared, placeholder, prepare_live};
+use crate::system::{LiveDraft, Prepared, prepare_live};
 
 fn prepare(
     invocation: &crate::invocation::Invocation,
@@ -27,13 +27,8 @@ fn prepare(
         repeat,
         rate,
     } = arguments;
-    let request = packetcraftr::send::Request {
-        repeat,
-        rate,
-        max_template_packets: template.max_template_packets,
-        ..packetcraftr::send::Request::new(placeholder(), packetcraftr::send::Options::default())
-    };
-    prepare_live(invocation, send, template, request)
+    let draft = Draft { repeat, rate };
+    prepare_live(invocation, send, template, draft)
 }
 
 fn writing(
@@ -84,19 +79,13 @@ impl crate::commands::Spec for Args {
         self,
         invocation: &crate::invocation::Invocation,
     ) -> Result<crate::commands::CommandExit, CliError> {
-        let format = invocation.format;
-        let stream = &invocation.output;
-        run(invocation, self, format, stream.presentation())
-            .map(|()| crate::commands::CommandExit::SUCCESS)
+        run(invocation, self).map(|()| crate::commands::CommandExit::SUCCESS)
     }
 }
 
-pub(super) fn run(
-    invocation: &crate::invocation::Invocation,
-    arguments: Args,
-    format: Format,
-    presentation: crate::invocation::Presentation,
-) -> Result<(), CliError> {
+fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<(), CliError> {
+    let format = invocation.format;
+    let presentation = invocation.output.presentation();
     let compression = arguments.send.compression.for_output(format)?;
     let prepared = prepare(invocation, arguments)?;
     match format {
@@ -218,4 +207,55 @@ fn sent_line(frame: &packetcraftr::send::SentFrame) -> String {
         route.plan.decision.interface.index,
         route.plan.mode
     )
+}
+
+struct Draft {
+    repeat: u32,
+    rate: Option<u32>,
+}
+impl LiveDraft for Draft {
+    type Parameters = packetcraftr::send::Parameters;
+    fn validate(self, max_template_packets: usize) -> Result<Self::Parameters, CliError> {
+        Self::Parameters::new(self.repeat, self.rate, max_template_packets)
+            .map_err(CliError::classified)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::output::{contract::Command, stream::StreamEncoder};
+    use clap::Parser;
+
+    #[derive(Parser)]
+    struct CommandLine {
+        #[command(flatten)]
+        arguments: Args,
+    }
+
+    #[test]
+    fn invalid_send_options_precede_recipe_io() {
+        let invocation = crate::invocation::Invocation::new(
+            Format::Json,
+            StreamEncoder::new(Command::Send, std::io::sink()).into(),
+            None,
+            Default::default(),
+            None,
+        );
+        let directory = tempfile::tempdir().unwrap();
+        let missing = directory.path().join("missing.json");
+        for (repeat, rate) in [(0, None), (1, Some(0))] {
+            let mut arguments = CommandLine::try_parse_from([
+                std::ffi::OsStr::new("send"),
+                std::ffi::OsStr::new("--packet-file"),
+                missing.as_os_str(),
+            ])
+            .unwrap()
+            .arguments;
+            arguments.repeat = repeat;
+            arguments.rate = rate;
+            let error = prepare(&invocation, arguments).err().unwrap();
+            assert_eq!(error.classification.code, core::error::Code::CliSendLimit);
+        }
+    }
 }

@@ -9,11 +9,11 @@ use super::super::Error;
 use super::super::buffer::union_balanced;
 use super::super::model::{IssueScope, Status};
 use super::{ConnectionState, Context, DirectionPhase, Fault, Phase};
+use crate::analysis::ScopedFlowKey;
 use crate::analysis::http2::IssueCode;
 use crate::analysis::http2::budget;
 use crate::analysis::http2::side::Side;
 use crate::analysis::provenance::SourceSet;
-use crate::analysis::reassembly::tcp::ScopedFlowKey;
 use bytes::Bytes;
 use std::collections::HashMap;
 

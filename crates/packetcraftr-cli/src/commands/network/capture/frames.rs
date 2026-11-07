@@ -193,14 +193,11 @@ fn emit_frame(
         let decoded = decoding.take_or_decode(source_frame, &frame)?;
         let tree = decoding.tree.as_mut();
         if let Some(projector) = projector {
-            let values = projector
-                .projection
-                .values(
-                    &core::filter::Context::frame(&decoded, source_frame),
-                    projector.remaining(),
-                )
-                .map_err(CliError::classified)?;
-            return projector.emit(source_frame, values, stream);
+            return projector.emit(
+                source_frame,
+                &core::filter::Context::frame(&decoded, source_frame),
+                stream,
+            );
         }
         return match format {
             Format::Text => {

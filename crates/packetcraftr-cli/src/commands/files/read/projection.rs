@@ -5,16 +5,12 @@ use packetcraftr_core as core;
 
 use super::arguments::Args;
 use crate::errors::CliError;
-use crate::invocation::StreamEncoder;
-use crate::output::contract::{Command, Format};
+use crate::output::contract::Command;
 use crate::rendering::Projector;
 
-pub(super) fn run(
-    invocation: &crate::invocation::Invocation,
-    args: Args,
-    format: Format,
-    stream: &StreamEncoder,
-) -> Result<(), CliError> {
+pub(super) fn run(invocation: &crate::invocation::Invocation, args: Args) -> Result<(), CliError> {
+    let format = invocation.format;
+    let stream = &invocation.output;
     let limits = args.limits.limits()?;
     let bounds = args.epoch.resolve()?;
     let selection = args.selection.resolve()?;
@@ -42,7 +38,7 @@ pub(super) fn run(
         crate::input::open_capture(&invocation.control, &invocation.output, &args.path, limits)?;
     let mut frames = 0u64;
     let mut bytes = 0u64;
-    if projector.projection.requirements().stream_index
+    if projector.requirements().stream_index
         || filter
             .as_ref()
             .is_some_and(|filter| filter.requirements().stream_index)
@@ -74,12 +70,8 @@ pub(super) fn run(
                     .map_err(|source| CliError::classified(source).into_boundary_error())?
                     .unwrap_or(true);
                 if kept {
-                    let values = projector
-                        .projection
-                        .values(&context, projector.remaining())
-                        .map_err(|source| CliError::classified(source).into_boundary_error())?;
                     projector
-                        .emit(record.number, values, stream)
+                        .emit(record.number, &context, stream)
                         .map_err(CliError::into_boundary_error)?;
                 }
                 Ok(())
@@ -117,11 +109,7 @@ pub(super) fn run(
                 continue;
             };
             let context = core::filter::Context::frame(&decoded, frames);
-            let values = projector
-                .projection
-                .values(&context, projector.remaining())
-                .map_err(CliError::classified)?;
-            projector.emit(frames, values, stream)?;
+            projector.emit(frames, &context, stream)?;
         }
     }
     projector.finish(invocation, frames, bytes, stream)

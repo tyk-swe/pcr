@@ -4,10 +4,9 @@
 //! Sourced cleartext HTTP/1 messages over reassembled TCP.
 
 use super::{
-    FrameRecord, Summary as RunSummary,
+    FrameRecord, ScopedFlowKey, Summary as RunSummary,
     application::{self, Error, Limits, TcpSources},
     provenance::{Accumulator, SourceSet},
-    reassembly::tcp::ScopedFlowKey,
     scope::Definition,
     session::{self, CollectorNeeds},
 };

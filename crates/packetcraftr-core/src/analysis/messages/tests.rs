@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 use super::*;
 use crate::analysis::{
+    FlowKey,
     provenance::{SourceFrame, Tracker},
-    reassembly::tcp::FlowKey,
     scope::Interner,
 };
 use std::time::UNIX_EPOCH;
@@ -1328,4 +1328,214 @@ fn directions_share_reclaimed_capacity() {
         peak <= 16,
         "{peak} allocated bytes exceed the configured limit"
     );
+}
+
+#[test]
+fn fragmented_tcp_resolves_event_filter_and_stream_dependencies() {
+    use crate::analysis::reassembly::tcp::Event as TcpEvent;
+    use crate::analysis::{CollectorNeeds, FrameRecord, Options, Plan, Session, SessionOptions};
+    use crate::budget::Deadline;
+    use crate::error::BoundaryError;
+    use crate::frame::{Frame, LinkType};
+    use crate::layer::Raw;
+    use crate::packet::Packet;
+    use crate::protocol::{link::Ethernet, network::Ipv4, transport::Tcp};
+
+    struct EventsOnly;
+
+    impl crate::analysis::Collector for EventsOnly {
+        type Event = TcpEvent;
+        type Summary = ();
+
+        fn needs(&self) -> CollectorNeeds {
+            CollectorNeeds {
+                tcp_events: true,
+                ..CollectorNeeds::default()
+            }
+        }
+
+        fn observe(&mut self, record: &FrameRecord<'_>) -> Result<Vec<TcpEvent>, BoundaryError> {
+            Ok(record.tcp_events.to_vec())
+        }
+
+        fn finish(
+            self,
+            run: &crate::analysis::Summary,
+            deadline: &Deadline,
+            sink: &mut dyn FnMut(TcpEvent) -> Result<(), BoundaryError>,
+        ) -> Result<(), BoundaryError> {
+            crate::analysis::session::deliver(deadline, run.trailing_tcp_events.clone(), sink)
+        }
+    }
+
+    let registry = crate::protocol::builtin::registry();
+    let mut packet = Packet::default();
+    packet.push(Ethernet::default());
+    packet.push(Ipv4 {
+        source: "192.0.2.1".parse().unwrap(),
+        destination: "192.0.2.2".parse().unwrap(),
+        ..Default::default()
+    });
+    packet.push(Tcp {
+        source_port: 40000,
+        destination_port: 1883,
+        sequence: 100,
+        flags: Tcp::ACK,
+        ..Default::default()
+    });
+    let payload = b"fragmented transport payload";
+    packet.push(Raw::new(Bytes::from_static(payload)));
+    let built = crate::build::Builder::new(registry.clone())
+        .build(packet, Default::default(), Default::default())
+        .unwrap();
+    let frame = Frame::new(Some(UNIX_EPOCH), LinkType::ETHERNET, built.bytes).unwrap();
+    let fragments = crate::transform::fragment(
+        &frame,
+        crate::transform::FragmentOptions {
+            mtu: 36,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert!(fragments.len() > 1);
+    let mut writer = crate::capture_file::Writer::new(
+        Vec::new(),
+        crate::capture_file::Format::Pcap,
+        LinkType::ETHERNET,
+    )
+    .unwrap();
+    for fragment in fragments {
+        writer.write_frame(&fragment).unwrap();
+    }
+    let capture = writer.into_inner();
+    let mut reader =
+        crate::capture_file::Reader::with_limits(&capture[..], Default::default()).unwrap();
+    let mut delivered = Vec::new();
+    Session::new(registry.clone(), SessionOptions::default(), EventsOnly)
+        .run(
+            &mut reader,
+            |_| Ok(()),
+            |event| {
+                if let TcpEvent::Data { bytes, .. } = event {
+                    delivered.extend_from_slice(&bytes);
+                }
+                Ok(())
+            },
+        )
+        .unwrap();
+    assert_eq!(delivered, payload);
+
+    let filter =
+        crate::filter::Filter::compile("tcp.stream == 0", &registry, Default::default()).unwrap();
+    for (filter, stream, tcp_events) in [
+        (None, None, true),
+        (Some(&filter), None, false),
+        (
+            None,
+            Some(crate::analysis::StreamRef {
+                transport: crate::analysis::StreamTransport::Tcp,
+                index: 0,
+            }),
+            false,
+        ),
+    ] {
+        let mut reader =
+            crate::capture_file::Reader::with_limits(&capture[..], Default::default()).unwrap();
+        let mut observed = Vec::new();
+        crate::analysis::run(
+            &mut reader,
+            registry.clone(),
+            &Options {
+                plan: Plan::physical(Default::default()),
+                filter,
+                stream,
+                tcp_events,
+                ..Options::default()
+            },
+            |record| {
+                if let Some(tcp) = record.tcp {
+                    observed.extend_from_slice(tcp.payload);
+                }
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(observed, payload);
+    }
+}
+
+#[test]
+fn capture_run_restores_reader_control_after_success_and_sink_failure() {
+    use crate::analysis::Options;
+    use crate::budget::{Cancellation, Deadline};
+    use crate::capture_file::{Error as CaptureError, Format, Reader, Writer};
+    use crate::frame::{Frame, LinkType};
+    use std::io::Cursor;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{Duration, Instant};
+
+    let frame = Frame::new(
+        Some(UNIX_EPOCH),
+        LinkType::ETHERNET,
+        Bytes::from_static(&[0; 14]),
+    )
+    .unwrap();
+    let mut writer = Writer::new(Vec::new(), Format::Pcap, frame.link_type).unwrap();
+    writer.write_frame(&frame).unwrap();
+    let capture = writer.into_inner();
+    for reject in [false, true] {
+        let start = Instant::now();
+        let run_elapsed = Arc::new(AtomicU64::new(0));
+        let run_clock = run_elapsed.clone();
+        let run_control = Arc::new(Deadline::with_time_source(
+            Duration::from_secs(1),
+            move || start + Duration::from_secs(run_clock.load(Ordering::SeqCst)),
+        ));
+        let reader_elapsed = Arc::new(AtomicU64::new(0));
+        let reader_clock = reader_elapsed.clone();
+        let reader_control = Arc::new(Deadline::with_time_source(
+            Duration::from_secs(10),
+            move || start + Duration::from_secs(reader_clock.load(Ordering::SeqCst)),
+        ));
+        let cancellation = Cancellation::default();
+        let mut reader = Reader::with_control(
+            Cursor::new(capture.clone()),
+            Default::default(),
+            Some(reader_control),
+        )
+        .unwrap()
+        .with_cancellation(cancellation.clone());
+        let result = crate::analysis::run(
+            &mut reader,
+            crate::protocol::builtin::registry(),
+            &Options {
+                deadline: Some(run_control),
+                ..Options::default()
+            },
+            |_| {
+                if reject {
+                    return Err(crate::error::BoundaryError::from_error(
+                        CaptureError::EmptyInput,
+                    ));
+                }
+                Ok(())
+            },
+        );
+        if reject {
+            assert!(matches!(result, Err(crate::analysis::Error::Sink { .. })));
+        } else {
+            assert_eq!(result.unwrap().frames_read, 1);
+        }
+        run_elapsed.store(2, Ordering::SeqCst);
+        reader.rewind().unwrap();
+        assert!(reader.next_frame().unwrap().is_some());
+        reader_elapsed.store(11, Ordering::SeqCst);
+        assert!(matches!(
+            reader.rewind(),
+            Err(CaptureError::DurationLimit { .. })
+        ));
+        cancellation.cancel();
+        assert!(matches!(reader.rewind(), Err(CaptureError::Cancelled(_))));
+    }
 }

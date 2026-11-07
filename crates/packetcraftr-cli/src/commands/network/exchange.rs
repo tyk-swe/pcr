@@ -12,8 +12,7 @@ use packetcraftr_core::error::Kind;
 
 use self::arguments::Args;
 use crate::errors::CliError;
-use crate::invocation::StreamEncoder;
-use crate::system::{Prepared, placeholder, prepare_live};
+use crate::system::{LiveDraft, Prepared, prepare_live};
 
 use crate::output::contract::PublishedType;
 
@@ -66,17 +65,13 @@ impl crate::commands::Spec for Args {
         self,
         invocation: &crate::invocation::Invocation,
     ) -> Result<crate::commands::CommandExit, CliError> {
-        run(invocation, self, invocation.format, &invocation.output)
-            .map(|()| crate::commands::CommandExit::SUCCESS)
+        run(invocation, self).map(|()| crate::commands::CommandExit::SUCCESS)
     }
 }
 
-pub(super) fn run(
-    invocation: &crate::invocation::Invocation,
-    arguments: Args,
-    format: Format,
-    stream: &StreamEncoder,
-) -> Result<(), CliError> {
+fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<(), CliError> {
+    let format = invocation.format;
+    let stream = &invocation.output;
     let compression = arguments.send.compression.for_output(format)?;
     let stop = arguments.stop();
     let Args {
@@ -89,23 +84,22 @@ pub(super) fn run(
         limits,
     } = arguments;
     let limits = limits.into_limits();
-    let mut request = packetcraftr::exchange::Request {
+    let draft = Draft {
         timeout: timeout.timeout(),
         stop,
-        max_template_packets: template.max_template_packets,
         collection: packetcraftr::exchange::Collection {
             max_responses,
             max_unmatched_frames,
             capture: limits,
-            ..packetcraftr::exchange::Collection::default()
+            decode: packetcraftr_core::decode::Options {
+                limits: packetcraftr_core::packet::Limits {
+                    max_packet_size: limits.snap_length,
+                    ..packetcraftr_core::packet::Limits::default()
+                },
+            },
         },
-        ..packetcraftr::exchange::Request::new(
-            placeholder(),
-            packetcraftr::send::Options::default(),
-        )
     };
-    request.collection.decode.limits.max_packet_size = limits.snap_length;
-    let Prepared { request, client } = prepare_live(invocation, send, template, request)?;
+    let Prepared { request, client } = prepare_live(invocation, send, template, draft)?;
     match format {
         Format::Ndjson => {
             let emit = crate::commands::execution::emitter(invocation, rendering::emit_event);
@@ -150,5 +144,63 @@ pub(super) fn run(
                 }
             }
         }
+    }
+}
+
+struct Draft {
+    timeout: std::time::Duration,
+    collection: packetcraftr::exchange::Collection,
+    stop: packetcraftr::exchange::StopCondition,
+}
+impl LiveDraft for Draft {
+    type Parameters = packetcraftr::exchange::Parameters;
+    fn validate(self, max_template_packets: usize) -> Result<Self::Parameters, CliError> {
+        Self::Parameters::new(
+            self.timeout,
+            max_template_packets,
+            self.collection,
+            self.stop,
+        )
+        .map_err(CliError::classified)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::output::{contract::Command, stream::StreamEncoder};
+    use clap::Parser;
+
+    #[derive(Parser)]
+    struct CommandLine {
+        #[command(flatten)]
+        arguments: Args,
+    }
+
+    #[test]
+    fn invalid_exchange_options_precede_recipe_io() {
+        let invocation = crate::invocation::Invocation::new(
+            Format::Json,
+            StreamEncoder::new(Command::Exchange, std::io::sink()).into(),
+            None,
+            Default::default(),
+            None,
+        );
+        let directory = tempfile::tempdir().unwrap();
+        let missing = directory.path().join("missing.json");
+        let arguments = CommandLine::try_parse_from([
+            std::ffi::OsStr::new("exchange"),
+            std::ffi::OsStr::new("--packet-file"),
+            missing.as_os_str(),
+            std::ffi::OsStr::new("--timeout-ms"),
+            std::ffi::OsStr::new("0"),
+        ])
+        .unwrap()
+        .arguments;
+        let error = run(&invocation, arguments).unwrap_err();
+        assert_eq!(
+            error.classification.code,
+            packetcraftr_core::error::Code::CliExchangeLimit
+        );
     }
 }

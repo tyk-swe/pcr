@@ -10,14 +10,20 @@ from support import load_script
 
 layers = load_script("check_layers")
 
-TABLE = {"mini": {("low",): 1, ("high",): 2, ("engine",): 3, ("engine", "stats"): 1}}
+DOCUMENTED = (
+    "//! | 1. Low | `low`, `engine::stats` |\n"
+    "//! | 2. High | `high` |\n"
+    "//! | 3. Top | `engine` |\n"
+)
 
 
-def workspace(files):
+def workspace(files: dict[str, str]):
     temporary = tempfile.TemporaryDirectory()
     root = Path(temporary.name)
     src = root / "crates" / "mini" / "src"
-    for relative, text in files.items():
+    src.mkdir(parents=True)
+    (src.parent / "Cargo.toml").write_text('[package]\nname = "mini"\n')
+    for relative, text in {"lib.rs": DOCUMENTED, **files}.items():
         path = src / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text)
@@ -28,20 +34,18 @@ class CheckLayersTests(unittest.TestCase):
     def check(self, files, allowlist=()):
         temporary, root = workspace(files)
         self.addCleanup(temporary.cleanup)
-        return layers.check_workspace(
-            root, layers=TABLE, allowlist=allowlist, require_documented=False
-        )
+        return layers.check_workspace(root, allowlist=allowlist)
 
     def check_documented(self, files):
         temporary, root = workspace(files)
         self.addCleanup(temporary.cleanup)
-        return layers.check_workspace(root, layers=TABLE, allowlist=())
+        return layers.check_workspace(root, allowlist=())
 
     def check_with_tests(self, files, allowlist=()):
         temporary, root = workspace(files)
         self.addCleanup(temporary.cleanup)
         return layers.check_workspace(
-            root, layers=TABLE, allowlist=allowlist, include_tests=True
+            root, allowlist=allowlist, include_tests=True
         )
 
     def test_downward_and_same_layer_dependencies_pass(self):
@@ -197,14 +201,9 @@ class CheckLayersTests(unittest.TestCase):
             "low.rs": "#[cfg(test)]\nmod tests { use crate::high::Thing; }",
         })
         self.addCleanup(temporary.cleanup)
-        real_layers, real_allowlist = layers.LAYERS, layers.ALLOWLIST
-        layers.LAYERS, layers.ALLOWLIST = TABLE, ()
-        try:
-            with io.StringIO() as out, redirect_stdout(out):
-                status = layers.main(["--root", str(root), "--report-tests"])
-                report = out.getvalue()
-        finally:
-            layers.LAYERS, layers.ALLOWLIST = real_layers, real_allowlist
+        with io.StringIO() as out, redirect_stdout(out):
+            status = layers.main(["--root", str(root), "--report-tests"])
+            report = out.getvalue()
         self.assertEqual(status, 0)
         self.assertIn("1 test layer coupling(s) (report only)", report)
 
@@ -239,17 +238,26 @@ class CheckLayersTests(unittest.TestCase):
         })
         self.assertEqual(problems, [])
 
-    def test_documented_table_drift_fails(self):
+    def test_dependencies_follow_the_documented_policy(self):
         problems = self.check_documented({
             "lib.rs": (
                 "//! | 1. Low | `engine::stats` |\n"
                 "//! | 2. High | `high`, `low` |\n"
                 "//! | 3. Top | `engine` |\n"
             ),
-            "low.rs": "pub struct Thing;",
+            "high.rs": "use crate::low::Thing;",
+            "engine/stats.rs": "use crate::high::Thing;",
         })
-        self.assertTrue(any("documents low at layer 2" in p for p in problems))
-        self.assertTrue(any("does not document low at layer 1" in p for p in problems))
+        self.assertEqual(len(problems), 1)
+        self.assertIn("engine::stats (layer 1) depends on high::Thing (layer 2)", problems[0])
+
+    def test_parent_policy_covers_children_with_specific_overrides(self):
+        problems = self.check({
+            "engine/new_child.rs": "use crate::high::Thing;",
+            "engine/stats/new_child.rs": "use crate::high::Thing;",
+        })
+        self.assertEqual(len(problems), 1)
+        self.assertIn("engine::stats::new_child (layer 1)", problems[0])
 
     def test_missing_documented_table_fails(self):
         problems = self.check_documented({
@@ -269,7 +277,7 @@ class CheckLayersTests(unittest.TestCase):
         })
         self.assertTrue(any("documents high at layers 1 and 2" in p for p in problems))
 
-    def test_workspace_crate_without_layer_entry_is_reported(self):
+    def test_workspace_crate_without_documented_layers_is_reported(self):
         with tempfile.TemporaryDirectory() as name:
             root = Path(name)
             extra = root / "crates" / "extra"
@@ -277,7 +285,7 @@ class CheckLayersTests(unittest.TestCase):
             (extra / "Cargo.toml").write_text('[package]\nname = "extra"\n')
             (extra / "src" / "lib.rs").write_text("pub struct Thing;")
             problems = layers.check_workspace(root)
-        self.assertTrue(any("extra: workspace crate has no layer table entry" in p
+        self.assertTrue(any("extra: lib.rs documents no layer table" in p
                             for p in problems))
 
 

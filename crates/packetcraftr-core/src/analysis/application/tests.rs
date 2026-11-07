@@ -3,8 +3,8 @@
 
 use super::*;
 use crate::analysis::{
+    FlowKey,
     provenance::{SourceFrame, Tracker},
-    reassembly::tcp::FlowKey,
     scope::Interner,
 };
 use std::time::UNIX_EPOCH;

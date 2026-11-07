@@ -2,11 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use super::{
-    Constraint, FrameRecord,
-    provenance::SourceSet,
-    reassembly::tcp::{Event as TcpEvent, ScopedFlowKey},
-    scope::Definition,
-    serial::serial_offset,
+    Constraint, FrameRecord, ScopedFlowKey, provenance::SourceSet,
+    reassembly::tcp::Event as TcpEvent, scope::Definition, serial::serial_offset,
 };
 use crate::{
     error::{Classification, Classified, Kind},

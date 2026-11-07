@@ -46,9 +46,7 @@ impl Control {
         }
     }
 
-    /// The control the output encoder enforces, always finite in effect
-    /// through cancellation even without a duration.
-    fn output_control(&self) -> Arc<Deadline> {
+    pub(crate) fn io_control(&self) -> Arc<Deadline> {
         self.deadline.clone().unwrap_or_else(|| {
             Arc::new(
                 Deadline::new(Duration::MAX).with_cancellation(Some(self.cancellation.clone())),
@@ -76,17 +74,6 @@ impl Control {
         Deadline::new(packetcraftr::deadline::PASSIVE_LOOKUP_TIMEOUT)
             .with_parent(self.deadline.clone())
             .with_cancellation(Some(self.cancellation.clone()))
-    }
-
-    pub(crate) fn reader<R: std::io::Read>(
-        &self,
-        reader: packetcraftr_core::capture_file::Reader<R>,
-    ) -> packetcraftr_core::capture_file::Reader<R> {
-        let reader = reader.with_cancellation(self.cancellation.clone());
-        match &self.deadline {
-            Some(deadline) => reader.with_deadline(deadline.clone()),
-            None => reader,
-        }
     }
 }
 
@@ -139,7 +126,7 @@ impl Invocation {
     }
 
     fn configure_output(mut self) -> Self {
-        let output = self.output.with_control(self.control.output_control());
+        let output = self.output.with_control(self.control.io_control());
         self.output = match &self.diagnostics {
             Some(diagnostics) => {
                 let diagnostics = diagnostics.clone();

@@ -6,7 +6,8 @@
 
 use std::time::{Duration, SystemTime};
 
-use crate::analysis::reassembly::tcp::{Event as TcpEvent, ScopedFlowKey};
+use crate::analysis::ScopedFlowKey;
+use crate::analysis::reassembly::tcp::Event as TcpEvent;
 use crate::analysis::scope::{Interner, ScopeId};
 use crate::decode::DecodedPacket;
 use crate::protocol::identity::TcpHeader;

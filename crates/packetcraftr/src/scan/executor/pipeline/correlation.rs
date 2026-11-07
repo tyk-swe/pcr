@@ -4,16 +4,15 @@
 mod index;
 pub(super) use index::{CandidateIndex, charge as index_charge};
 
-use super::Pending;
 #[cfg(test)]
 use super::Planned;
+use super::attempts::PendingView;
 use crate::evidence::SentPacket;
 use crate::scan::{Classification, evidence::Observation, profile};
 use packetcraftr_netio::capture::RecordIdentity;
 use std::{
-    collections::{BTreeMap, HashSet, VecDeque},
+    collections::{HashSet, VecDeque},
     net::IpAddr,
-    sync::Arc,
     time::Instant,
 };
 
@@ -64,9 +63,9 @@ impl Best {
     }
 }
 
-pub(super) fn indexed_candidates<'p>(
+pub(super) fn indexed_candidates<'s, 'p>(
     possible: &[usize],
-    pending: &BTreeMap<usize, Pending>,
+    pending: impl Fn(usize) -> Option<PendingView<'s>>,
     planned: impl Fn(usize) -> Option<&'p crate::scan::Probe>,
     registry: &packetcraftr_core::registry::Registry,
     decoded: &packetcraftr_core::decode::DecodedPacket,
@@ -76,7 +75,7 @@ pub(super) fn indexed_candidates<'p>(
     possible
         .iter()
         .filter_map(|index| {
-            let entry = pending.get(index)?;
+            let entry = pending(*index)?;
             if entry.sent.route().plan.decision.interface != *native_interface
                 || received < entry.sent.timing().freshness_marker().monotonic()
                 || received > entry.deadline
@@ -96,7 +95,7 @@ pub(super) fn indexed_candidates<'p>(
 
 pub(super) fn indexed_settled<'s, 'p>(
     possible: &[usize],
-    mut sent: impl FnMut(usize) -> Option<&'s Arc<SentPacket>>,
+    mut sent: impl FnMut(usize) -> Option<&'s SentPacket>,
     planned: impl Fn(usize) -> Option<&'p crate::scan::Probe>,
     registry: &packetcraftr_core::registry::Registry,
     decoded: &packetcraftr_core::decode::DecodedPacket,
@@ -136,7 +135,7 @@ thread_local! {
 
 #[cfg(test)]
 pub(super) fn candidates(
-    pending: &BTreeMap<usize, Pending>,
+    pending: &std::collections::BTreeMap<usize, PendingView<'_>>,
     planned: &[Planned<'_>],
     registry: &packetcraftr_core::registry::Registry,
     decoded: &packetcraftr_core::decode::DecodedPacket,
@@ -166,7 +165,7 @@ pub(super) fn candidates(
 /// frame was captured after transmission but is too late to be their outcome.
 #[cfg(test)]
 pub(super) fn settled<'s>(
-    settled: impl IntoIterator<Item = (usize, &'s Arc<SentPacket>)>,
+    settled: impl IntoIterator<Item = (usize, &'s SentPacket)>,
     planned: &[Planned<'_>],
     registry: &packetcraftr_core::registry::Registry,
     decoded: &packetcraftr_core::decode::DecodedPacket,

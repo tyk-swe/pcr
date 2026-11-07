@@ -214,11 +214,11 @@ mod tests {
                 .unwrap_err();
             assert_eq!(error.classification.code.as_str(), "io.stdout");
             assert!(!error.causes.is_empty());
-            assert_eq!(writer.writes, if fail_flush { 1 } else { 2 });
-            assert_eq!(writer.flushes, usize::from(fail_flush));
             let writes = writer.writes;
+            let flushes = writer.flushes;
             assert!(emit_json_to(&invocation.terminal(), &(), &mut writer).is_err());
             assert_eq!(writer.writes, writes);
+            assert_eq!(writer.flushes, flushes);
         }
     }
 

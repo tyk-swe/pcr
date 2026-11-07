@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::errors::CliError;
-use crate::invocation::StreamEncoder;
 use crate::output::envelope::Published;
 use crate::output::{
     self,
@@ -15,20 +14,20 @@ use crate::rendering::{
 
 pub(super) fn render_complete(
     invocation: &crate::invocation::Invocation,
-    format: Format,
-    snapshot: &output::capture::Snapshot,
+    summary: &output::capture::Summary,
+    stats: packetcraftr::Stats,
     diagnostics: Vec<packetcraftr_core::diagnostic::Diagnostic>,
-    stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    let output::capture::Snapshot { summary, stats } = snapshot;
+    let format = invocation.format;
+    let stream = &invocation.output;
     match format {
         Format::Json => emit_published(
             invocation,
             Command::Capture,
-            Published::new(summary, diagnostics).with_stats(stats.clone()),
+            Published::new(summary, diagnostics).with_stats(stats),
         ),
         Format::Ndjson => stream
-            .complete_published(Published::new(summary, diagnostics).with_stats(stats.clone()))
+            .complete_published(Published::new(summary, diagnostics).with_stats(stats))
             .map_err(Into::into),
         Format::Text => {
             write_summary_line(

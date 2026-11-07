@@ -9,7 +9,6 @@ use std::time::Duration;
 
 use serde::Serialize;
 
-use packetcraftr::probe::Transport;
 use packetcraftr::traceroute::hosts as library;
 
 use crate::commands::network::traceroute::output::{Completion, Hop, Probe};
@@ -63,7 +62,7 @@ impl Basis {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub struct StrategyPlan {
-    pub strategy: Transport,
+    pub strategy: crate::output::network::Transport,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub destination_port: Option<u16>,
 }
@@ -98,7 +97,7 @@ pub(crate) struct Observation {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub(crate) struct Selection {
-    pub strategy: Transport,
+    pub strategy: crate::output::network::Transport,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub destination_port: Option<u16>,
     pub basis: Basis,
@@ -123,7 +122,7 @@ impl TryFrom<&library::Selection> for Selection {
             ),
         };
         Ok(Self {
-            strategy: selection.strategy.transport,
+            strategy: selection.strategy.transport.into(),
             destination_port: selection.strategy.destination_port,
             basis,
             observation,

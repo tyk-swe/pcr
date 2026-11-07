@@ -8,8 +8,6 @@ use std::time::Duration;
 
 use serde::Serialize;
 
-use packetcraftr::probe::Transport;
-
 use packetcraftr::scan as library;
 
 use super::plan::{Inference, Plan};
@@ -109,7 +107,7 @@ pub struct EndpointSummary {
     pub address: IpAddr,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scope: Option<Scope>,
-    pub transport: Transport,
+    pub transport: crate::output::network::Transport,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub port: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -129,7 +127,7 @@ impl From<library::Endpoint> for Published<Event> {
                 endpoint: EndpointSummary {
                     address: endpoint.address,
                     scope: endpoint.scope.as_ref().map(Scope::from),
-                    transport: endpoint.endpoint.transport(),
+                    transport: endpoint.endpoint.transport().into(),
                     port: endpoint.endpoint.port(),
                     ip_protocol: endpoint.endpoint.ip_protocol(),
                     classification: endpoint.classification.into(),

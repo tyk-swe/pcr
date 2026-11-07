@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::net::IpAddr;
 
 use super::Error;
-use super::reassembly::tcp::ScopedFlowKey;
+use super::ScopedFlowKey;
 use crate::analysis::scope::ScopeId;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]

@@ -23,32 +23,18 @@ use sha2::{Digest, Sha256};
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 #[derive(Clone, Debug)]
-pub struct TlsRequest {
+pub struct ConnectionOptions {
     pub endpoint: SocketAddr,
-    pub server_name: Option<String>,
-    pub trust: tls::TrustStore,
-    pub limits: tls::Limits,
     pub timeout: Duration,
 }
-impl TlsRequest {
+impl ConnectionOptions {
     pub fn new(endpoint: SocketAddr) -> Self {
         Self {
             endpoint,
-            server_name: None,
-            trust: tls::TrustStore::default(),
-            limits: tls::Limits::default(),
             timeout: Duration::from_secs(5),
         }
     }
-    fn name(&self) -> tls::ServerName {
-        self.server_name.as_ref().map_or_else(
-            || tls::ServerName::Numeric(self.endpoint.ip()),
-            |name| tls::ServerName::Declared(name.clone()),
-        )
-    }
     fn validate(&self) -> Result<(), Error> {
-        self.limits.validate()?;
-        self.name().validate()?;
         if self.endpoint.port() == 0
             || crate::deadline::duration_violation(
                 self.timeout,
@@ -62,10 +48,46 @@ impl TlsRequest {
         Ok(())
     }
 }
+#[derive(Clone, Debug, Default)]
+pub struct TlsOptions {
+    pub server_name: Option<String>,
+    pub trust: tls::TrustStore,
+    pub limits: tls::Limits,
+}
+impl TlsOptions {
+    fn name(&self, endpoint: SocketAddr) -> tls::ServerName {
+        self.server_name.as_ref().map_or_else(
+            || tls::ServerName::Numeric(endpoint.ip()),
+            |name| tls::ServerName::Declared(name.clone()),
+        )
+    }
+    pub fn validate(&self, endpoint: SocketAddr) -> Result<(), tls::Error> {
+        self.limits.validate()?;
+        self.name(endpoint).validate()
+    }
+}
+#[derive(Clone, Debug)]
+pub struct TlsRequest {
+    pub connection: ConnectionOptions,
+    pub tls: TlsOptions,
+}
+impl TlsRequest {
+    pub fn new(endpoint: SocketAddr) -> Self {
+        Self {
+            connection: ConnectionOptions::new(endpoint),
+            tls: TlsOptions::default(),
+        }
+    }
+}
+#[derive(Clone, Debug)]
+pub enum HttpTransport {
+    Plain,
+    Tls(TlsOptions),
+}
 #[derive(Clone, Debug)]
 pub struct HttpRequest {
-    pub connection: TlsRequest,
-    pub tls: bool,
+    pub connection: ConnectionOptions,
+    pub transport: HttpTransport,
     pub host: String,
     pub path: String,
     pub max_response_bytes: usize,
@@ -73,14 +95,17 @@ pub struct HttpRequest {
 impl HttpRequest {
     pub fn new(endpoint: SocketAddr) -> Self {
         Self {
-            connection: TlsRequest::new(endpoint),
-            tls: false,
+            connection: ConnectionOptions::new(endpoint),
+            transport: HttpTransport::Plain,
             host: endpoint.to_string(),
             path: "/".into(),
             max_response_bytes: 65_535,
         }
     }
     fn request(&self) -> Result<Vec<u8>, Error> {
+        if let HttpTransport::Tls(options) = &self.transport {
+            options.validate(self.connection.endpoint)?;
+        }
         self.connection.validate()?;
         if self.host.is_empty()
             || self.host.len() > 1024
@@ -194,15 +219,19 @@ impl<P: TcpProviders> tcp::Provider for Authorized<P> {
         self.providers.tcp().connect(endpoint, deadline)
     }
 }
-fn tls_report(request: &TlsRequest, evidence: &tls::Evidence) -> Report {
+fn tls_report(
+    connection: &ConnectionOptions,
+    options: &TlsOptions,
+    evidence: &tls::Evidence,
+) -> Report {
     let mut report = Report::new("audit-tls");
-    let verified = tls::verify(evidence, &request.name(), &request.trust);
+    let verified = tls::verify(evidence, &options.name(connection.endpoint), &options.trust);
     report
         .measurements
-        .insert("endpoint".into(), json!(request.endpoint));
+        .insert("endpoint".into(), json!(connection.endpoint));
     report
         .measurements
-        .insert("server_name".into(), json!(request.server_name));
+        .insert("server_name".into(), json!(options.server_name));
     report
         .measurements
         .insert("protocol".into(), json!(evidence.protocol_version));
@@ -246,7 +275,7 @@ fn tls_report(request: &TlsRequest, evidence: &tls::Evidence) -> Report {
             let mut f = Finding::new(
                 rule,
                 Severity::High,
-                request.endpoint.to_string(),
+                connection.endpoint.to_string(),
                 summary,
                 json!(check),
                 remediation,
@@ -266,7 +295,7 @@ fn tls_report(request: &TlsRequest, evidence: &tls::Evidence) -> Report {
 impl<P: TcpProviders, K: Clock> Client<P, K> {
     fn audit_connection(
         &self,
-        request: &TlsRequest,
+        request: &ConnectionOptions,
         limits: SocketLimits,
         deadline: &Deadline,
     ) -> Result<(Connection<P>, SocketAddr), Error> {
@@ -294,19 +323,22 @@ impl<P: TcpProviders, K: Clock> Client<P, K> {
         Ok((stream, peer))
     }
     pub fn audit_tls(&self, request: &TlsRequest) -> Result<Report, Error> {
-        let deadline = self.deadline(request.timeout);
+        let connection = &request.connection;
+        let options = &request.tls;
+        let deadline = self.deadline(connection.timeout);
+        options.validate(connection.endpoint)?;
         let (stream, peer) =
-            self.audit_connection(request, tls_reservation(request.limits), &deadline)?;
+            self.audit_connection(connection, tls_reservation(options.limits), &deadline)?;
         let handshake = tls::connect(
             stream,
-            request.name(),
-            request.limits,
+            options.name(connection.endpoint),
+            options.limits,
             &deadline,
             reauthorize_peer(&self.policy, peer),
         )?;
         handshake.result?;
         deadline.enforce()?;
-        Ok(tls_report(request, &handshake.evidence))
+        Ok(tls_report(connection, options, &handshake.evidence))
     }
     /// Plain HTTP reserves one connection and the one request message that
     /// [`tcp::exchange`] writes, however many native writes that takes. HTTPS
@@ -315,26 +347,28 @@ impl<P: TcpProviders, K: Clock> Client<P, K> {
         let bytes = request.request()?;
         let connection = &request.connection;
         let deadline = self.deadline(connection.timeout);
-        let limits = if request.tls {
-            tls_reservation(connection.limits)
-        } else {
-            SocketLimits::new(1, 1, count(bytes.len()))
+        let limits = match &request.transport {
+            HttpTransport::Tls(options) => tls_reservation(options.limits),
+            HttpTransport::Plain => SocketLimits::new(1, 1, count(bytes.len())),
         };
         let (mut stream, peer) = self.audit_connection(connection, limits, &deadline)?;
         let mut tls_observation = None;
-        let exchange = if request.tls {
+        let exchange = if let HttpTransport::Tls(options) = &request.transport {
             let handshake = tls::connect(
                 stream,
-                connection.name(),
-                connection.limits,
+                options.name(connection.endpoint),
+                options.limits,
                 &deadline,
                 reauthorize_peer(&self.policy, peer),
             )?;
             let mut secure = handshake.result?;
-            let verification =
-                tls::verify(&handshake.evidence, &connection.name(), &connection.trust);
+            let verification = tls::verify(
+                &handshake.evidence,
+                &options.name(connection.endpoint),
+                &options.trust,
+            );
             if !verification.valid() {
-                let mut report = tls_report(connection, &handshake.evidence);
+                let mut report = tls_report(connection, options, &handshake.evidence);
                 report.kind = "audit-http".into();
                 report
                     .completeness
@@ -351,7 +385,7 @@ impl<P: TcpProviders, K: Clock> Client<P, K> {
             if let Some(e) = secure.terminal_error() {
                 return Err(Error::Io(e));
             }
-            tls_observation = Some(tls_report(connection, &secure.evidence()));
+            tls_observation = Some(tls_report(connection, options, &secure.evidence()));
             exchange
         } else {
             tcp::exchange(
@@ -372,8 +406,11 @@ impl<P: TcpProviders, K: Clock> Client<P, K> {
             _ => {}
         }
         let head = final_head(&exchange.response)?.ok_or(Error::IncompleteResponse)?;
-        let mut report =
-            security::http::audit(&head, &connection.endpoint.to_string(), request.tls);
+        let mut report = security::http::audit(
+            &head,
+            &connection.endpoint.to_string(),
+            matches!(request.transport, HttpTransport::Tls(_)),
+        );
         report
             .measurements
             .insert("host".into(), json!(request.host));

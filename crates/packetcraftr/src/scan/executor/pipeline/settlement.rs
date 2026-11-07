@@ -24,34 +24,19 @@ impl<P: PacketProviders, K: Clock> Pipeline<'_, P, K> {
     /// Completes the probes past their timeout once the capture queues have
     /// been drained, and reports whether they are still being drained.
     pub(super) fn settle_expired(&mut self) -> Result<bool, BoundaryError> {
-        if self.deadlines.notice_expired(self.executor.client.now()) {
+        if self.attempts.notice_expired(self.executor.client.now()) {
             self.capture_drain_remaining = self.capture_drain_limit;
         }
         // A callback can consume another probe's timeout while its reply is
         // already queued. Keep due probes until the bounded queues are drained.
-        let draining_captures = self.deadlines.is_draining() && self.capture_drain_remaining > 0;
+        let draining_captures = self.attempts.is_draining() && self.capture_drain_remaining > 0;
         if !draining_captures {
-            while let Some(index) = self.deadlines.pop_expired() {
+            while let Some(index) = self.attempts.pop_expired() {
                 self.complete(index)?;
             }
             self.capture_drain_remaining = self.capture_drain_limit;
         }
         Ok(draining_captures)
-    }
-
-    pub(super) fn retire_recent(&mut self) -> bool {
-        let Some((index, _, charge)) = self.recent.pop_front() else {
-            return false;
-        };
-        self.candidates.remove(index);
-        self.recent_sent.remove(&index);
-        self.retire_description(index);
-        self.retained -= charge;
-        true
-    }
-
-    pub(super) fn retire_description(&mut self, index: usize) {
-        drop(self.descriptions.remove(&index));
     }
 
     pub(super) fn ingest(&mut self, captured: capture::Captured) -> Result<(), BoundaryError> {
@@ -105,11 +90,11 @@ impl<P: PacketProviders, K: Clock> Pipeline<'_, P, K> {
             }
             return Ok(());
         };
-        let possible = self.candidates.lookup(source, &decoded.packet);
+        let possible = self.attempts.candidates(source, &decoded.packet);
         let mut candidates = indexed_candidates(
             &possible,
-            &self.pending,
-            |index| self.descriptions.get(&index).map(Descriptor::probe),
+            |index| self.attempts.pending_view(index),
+            |index| self.attempts.description_if(index).map(Descriptor::probe),
             &self.executor.operation.registry,
             &decoded,
             &self.plan.interfaces[source],
@@ -121,14 +106,8 @@ impl<P: PacketProviders, K: Clock> Pipeline<'_, P, K> {
             // a frame after their deadline cannot be their outcome either.
             let settled = indexed_settled(
                 &possible,
-                |index| {
-                    self.pending
-                        .get(&index)
-                        .filter(|entry| received > entry.deadline)
-                        .map(|entry| &entry.sent)
-                        .or_else(|| self.recent_sent.get(&index))
-                },
-                |index| self.descriptions.get(&index).map(Descriptor::probe),
+                |index| self.attempts.settled(index, received),
+                |index| self.attempts.description_if(index).map(Descriptor::probe),
                 &self.executor.operation.registry,
                 &decoded,
                 &self.plan.interfaces[source],
@@ -154,7 +133,7 @@ impl<P: PacketProviders, K: Clock> Pipeline<'_, P, K> {
         let (index, observation) = candidates.pop().expect("one candidate");
         if observation.response.reply == Reply::IpProtocolPayload
             && self.history.ambiguous(
-                self.descriptions[&index].probe(),
+                self.attempts.description(index).probe(),
                 &decoded.packet,
                 &self.plan.interfaces[source],
             )
@@ -167,15 +146,22 @@ impl<P: PacketProviders, K: Clock> Pipeline<'_, P, K> {
             return self.unattributed(raw, Attribution::Ambiguous, None);
         }
         let definitive = definitive(&observation);
-        let entry = self.pending.get_mut(&index).expect("candidate is pending");
+        let sent_at = self
+            .attempts
+            .pending_view(index)
+            .expect("candidate is pending")
+            .sent
+            .timing()
+            .freshness_marker()
+            .monotonic();
+        let entry = self.attempts.responses_mut(index);
         let candidate = Best {
             rank: observation.rank(),
             responder: observation.response.responder,
             response: crate::exchange::Response {
                 request_index: 0,
                 response: decoded,
-                latency: received
-                    .duration_since(entry.sent.timing().freshness_marker().monotonic()),
+                latency: received.duration_since(sent_at),
             },
         };
         if entry
@@ -194,11 +180,7 @@ impl<P: PacketProviders, K: Clock> Pipeline<'_, P, K> {
                 self.options.max_evidence_frames,
                 self.options.max_evidence_bytes,
             ) {
-                let Some(discarded) = self
-                    .pending
-                    .values_mut()
-                    .find_map(|entry| entry.passed.pop())
-                else {
+                let Some(discarded) = self.attempts.discard_duplicate() else {
                     return Err(match error {
                         RetentionError::FrameCountOverflow | RetentionError::FrameLimit => {
                             limit("evidence frames", self.options.max_evidence_frames)
@@ -212,7 +194,7 @@ impl<P: PacketProviders, K: Clock> Pipeline<'_, P, K> {
                     .release(discarded.response.frame.bytes().len());
                 self.evidence_limit()?;
             }
-            let entry = self.pending.get_mut(&index).expect("candidate is pending");
+            let entry = self.attempts.responses_mut(index);
             if let Some(previous) = entry.best.replace(candidate) {
                 self.buffer_duplicate(index, previous.response)?;
             }
@@ -239,11 +221,7 @@ impl<P: PacketProviders, K: Clock> Pipeline<'_, P, K> {
             )
             .is_ok()
         {
-            self.pending
-                .get_mut(&index)
-                .expect("candidate is pending")
-                .passed
-                .push(response);
+            self.attempts.responses_mut(index).passed.push(response);
             Ok(())
         } else {
             self.evidence_limit()
@@ -269,8 +247,8 @@ impl<P: PacketProviders, K: Clock> Pipeline<'_, P, K> {
         index: Option<usize>,
     ) -> Result<(), BoundaryError> {
         let sequence = index.and_then(|index| {
-            self.descriptions
-                .get(&index)
+            self.attempts
+                .description_if(index)
                 .map(|description| description.probe().sequence)
         });
         self.output.event(PipelineEvent::Unattributed {
@@ -281,54 +259,39 @@ impl<P: PacketProviders, K: Clock> Pipeline<'_, P, K> {
     }
 
     fn complete(&mut self, index: usize) -> Result<(), BoundaryError> {
-        let entry = self
-            .pending
-            .get_mut(&index)
-            .expect("completed pending probe");
-        entry.last_response = entry
-            .best
-            .as_ref()
-            .map(|best| best.response.response.frame.clone());
-        self.failed_probe = Some(self.descriptions[&index].probe().clone());
-        let stats = Stats {
-            packets_attempted: 1,
-            packets_completed: 1,
-            bytes: entry.sent.bytes_sent() as u64,
-            elapsed: entry.sent.timing().freshness_marker().monotonic().elapsed(),
-            capture: Default::default(),
-        };
-        let mut responses: Vec<_> = entry
-            .best
-            .take()
-            .map(|best| best.response)
-            .into_iter()
-            .collect();
-        responses.append(&mut entry.passed);
-        for response in &responses {
-            self.evidence.release(response.response.frame.bytes().len());
-        }
-        let execution = Evidence {
-            observation_quality: None,
-            permit: self.descriptions[&index].batch.batch().permit,
-            sent: vec![entry.sent.as_ref().clone()],
-            responses,
-            unsolicited: Vec::new(),
-            undecoded: Vec::new(),
-            diagnostics: Vec::new(),
-            stats,
-        };
-        self.output
-            .event(PipelineEvent::Completed { index, execution })?;
-        let entry = self
-            .pending
-            .remove(&index)
-            .expect("completed pending probe");
-        if self.recent.len() == self.options.max_in_flight {
-            self.retire_recent();
-        }
-        self.deadlines.remove(entry.deadline, index);
-        self.recent_sent.insert(index, entry.sent.clone());
-        self.recent.push_back((index, entry.sent, entry.charge));
+        self.failed_probe = Some(self.attempts.description(index).probe().clone());
+        let evidence = &mut self.evidence;
+        let output = &mut self.output;
+        self.attempts.complete(index, |description, sent, entry| {
+            let stats = Stats {
+                packets_attempted: 1,
+                packets_completed: 1,
+                bytes: sent.bytes_sent() as u64,
+                elapsed: sent.timing().freshness_marker().monotonic().elapsed(),
+                capture: Default::default(),
+            };
+            let mut responses: Vec<_> = entry
+                .best
+                .take()
+                .map(|best| best.response)
+                .into_iter()
+                .collect();
+            responses.append(&mut entry.passed);
+            for response in &responses {
+                evidence.release(response.response.frame.bytes().len());
+            }
+            let execution = Evidence {
+                observation_quality: None,
+                permit: description.batch.batch().permit,
+                sent: vec![sent.clone()],
+                responses,
+                unsolicited: Vec::new(),
+                undecoded: Vec::new(),
+                diagnostics: Vec::new(),
+                stats,
+            };
+            output.event(PipelineEvent::Completed { index, execution })
+        })?;
         if let Some(stream) = &mut self.streaming {
             stream.next_ready = None;
         }

@@ -3,6 +3,8 @@
 
 //! The CLI owns every published field, so a library serde change cannot
 //! silently change a frozen output family.
+//! Packet documents, field values, and machine-readable codes retain their
+//! explicit core-owned wire contracts.
 
 macro_rules! published_enum {
     (

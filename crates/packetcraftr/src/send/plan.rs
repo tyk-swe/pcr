@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use super::request::invalid;
-use super::{Error, Request};
+use super::{Error, Parameters, Request};
+use packetcraftr_core::template::Template;
 use packetcraftr_netio::deadline::MAX_WAIT;
 use std::time::Duration;
 
@@ -15,12 +16,14 @@ impl TryFrom<&Request> for Plan {
     type Error = Error;
 
     fn try_from(request: &Request) -> Result<Self, Error> {
-        request.validate()?;
-        let count = request
-            .template
-            .expansion_len()
-            .map_err(crate::Error::from)?;
-        if count == 0 || count > request.max_template_packets {
+        Self::new(&request.parameters()?, &request.template)
+    }
+}
+
+impl Plan {
+    pub(super) fn new(parameters: &Parameters, template: &Template) -> Result<Self, Error> {
+        let count = template.expansion_len().map_err(crate::Error::from)?;
+        if count == 0 || count > parameters.max_template_packets {
             return Err(invalid(
                 "max_template_packets",
                 "expansion must be non-empty and within the packet ceiling",
@@ -28,9 +31,9 @@ impl TryFrom<&Request> for Plan {
         }
         let total = u64::try_from(count)
             .ok()
-            .and_then(|count| count.checked_mul(u64::from(request.repeat)))
+            .and_then(|count| count.checked_mul(u64::from(parameters.repeat)))
             .ok_or_else(|| invalid("repeat", "expansion times repetition overflows u64"))?;
-        let delay = crate::clock::rate_delay(1, request.rate)
+        let delay = crate::clock::rate_delay(1, parameters.rate)
             .ok_or_else(|| invalid("rate", "rate-delay arithmetic overflowed"))?;
         let scheduled_nanos = u128::from(total - 1) * delay.as_nanos();
         if scheduled_nanos > MAX_WAIT.as_nanos() {

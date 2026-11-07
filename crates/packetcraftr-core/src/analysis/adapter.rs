@@ -10,7 +10,9 @@ use crate::layer::Layer;
 use crate::layer::Padding;
 use crate::packet::Packet;
 use crate::protocol::headers::{Ipv6ExtensionChain, is_walkable_ipv6_extension};
-use crate::protocol::identity::{self, FragmentHeader, NetworkHeader, TcpHeader};
+use crate::protocol::identity::{
+    self, FragmentHeader, NetworkHeader, TcpHeader, tunnel_identifier,
+};
 use crate::protocol::network::ip_protocol;
 use crate::protocol::transport::Tcp;
 use bytes::Bytes;
@@ -19,8 +21,9 @@ use crate::analysis::reassembly::ip::{
     Family as IpFamily, Fragment as ReassemblyFragment, Ipv4DatagramKey, Ipv4Fragment,
     Ipv6DatagramKey, Ipv6Fragment,
 };
-use crate::analysis::reassembly::tcp::{FlowKey, ScopedFlowKey, Segment};
+use crate::analysis::reassembly::tcp::Segment;
 use crate::analysis::scope::{EncapsulationIdentifier, Error as ScopeError, Interner, ScopeId};
+use crate::analysis::{FlowKey, ScopedFlowKey};
 
 pub(crate) struct IpFragments {
     pub(crate) atomic: Vec<IpFamily>,
@@ -63,44 +66,6 @@ fn ipv4_fragment(layer: &dyn Layer) -> Option<NetworkHeader> {
 fn ipv6_fragment(layer: &dyn Layer) -> Option<FragmentHeader> {
     identity::fragment_header(layer)
         .filter(|fragment| fragment.fragment_offset != 0 || fragment.more_fragments)
-}
-
-fn tunnel_identifier(
-    layer: &dyn Layer,
-    ethernet: Option<([u8; 6], [u8; 6])>,
-) -> Option<EncapsulationIdentifier> {
-    crate::protocol::identity::tunnel_identifier(layer, ethernet).map(|tunnel| match tunnel {
-        crate::protocol::identity::TunnelId::Vlan { vlan_id } => {
-            EncapsulationIdentifier::Vlan { vlan_id }
-        }
-        crate::protocol::identity::TunnelId::Vlan8021ad { vlan_id } => {
-            EncapsulationIdentifier::Vlan8021ad { vlan_id }
-        }
-        crate::protocol::identity::TunnelId::Vxlan { vni } => {
-            EncapsulationIdentifier::Vxlan { vni }
-        }
-        crate::protocol::identity::TunnelId::Geneve { vni } => {
-            EncapsulationIdentifier::Geneve { vni }
-        }
-        crate::protocol::identity::TunnelId::Gre { key } => EncapsulationIdentifier::Gre { key },
-        crate::protocol::identity::TunnelId::Mpls { label } => {
-            EncapsulationIdentifier::Mpls { label }
-        }
-        crate::protocol::identity::TunnelId::Pppoe {
-            session_id,
-            endpoints,
-        } => EncapsulationIdentifier::Pppoe {
-            session_id,
-            endpoints,
-        },
-        crate::protocol::identity::TunnelId::L2tpv3 { session_id } => {
-            EncapsulationIdentifier::L2tpv3 { session_id }
-        }
-        crate::protocol::identity::TunnelId::Erspan { vlan, session_id } => {
-            EncapsulationIdentifier::Erspan { vlan, session_id }
-        }
-        crate::protocol::identity::TunnelId::Ah { spi } => EncapsulationIdentifier::Ah { spi },
-    })
 }
 
 struct IpHop {
@@ -534,7 +499,8 @@ fn replayed_ipv6_encapsulation(decoded: &DecodedPacket) -> Vec<EncapsulationIden
                 return replayed;
             }
         } else if in_ipv6
-            && let Some(identity::TunnelId::Ah { spi }) = identity::tunnel_identifier(layer, None)
+            && let Some(EncapsulationIdentifier::Ah { spi }) =
+                identity::tunnel_identifier(layer, None)
         {
             replayed.push(EncapsulationIdentifier::Ah { spi });
         }

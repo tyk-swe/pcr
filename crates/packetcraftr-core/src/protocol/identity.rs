@@ -12,6 +12,7 @@
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use bytes::Bytes;
+use serde::Serialize;
 
 use super::{
     BuiltinProtocol,
@@ -65,13 +66,20 @@ pub fn transport_keys_are_reversed(request: &dyn Layer, response: &dyn Layer) ->
         && request.destination_port == response.source_port
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum TunnelId {
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum EncapsulationIdentifier {
     Vlan {
         vlan_id: u16,
     },
     Vlan8021ad {
         vlan_id: u16,
+    },
+    /// Direction-neutral endpoints of an outer IP header.
+    Network {
+        first: IpAddr,
+        second: IpAddr,
     },
     Vxlan {
         vni: u32,
@@ -87,6 +95,7 @@ pub enum TunnelId {
     },
     Pppoe {
         session_id: u16,
+        /// Sorted endpoints of the enclosing Ethernet header, when present.
         endpoints: Option<([u8; 6], [u8; 6])>,
     },
     L2tpv3 {
@@ -104,39 +113,39 @@ pub enum TunnelId {
 pub fn tunnel_identifier(
     layer: &dyn Layer,
     ethernet: Option<([u8; 6], [u8; 6])>,
-) -> Option<TunnelId> {
+) -> Option<EncapsulationIdentifier> {
     if let Some(vlan) = cast::<Vlan>(layer) {
-        Some(TunnelId::Vlan {
+        Some(EncapsulationIdentifier::Vlan {
             vlan_id: vlan.vlan_id,
         })
     } else if let Some(vlan) = cast::<Vlan8021ad>(layer) {
-        Some(TunnelId::Vlan8021ad {
+        Some(EncapsulationIdentifier::Vlan8021ad {
             vlan_id: vlan.vlan_id,
         })
     } else if let Some(vxlan) = cast::<Vxlan>(layer) {
-        Some(TunnelId::Vxlan { vni: vxlan.vni })
+        Some(EncapsulationIdentifier::Vxlan { vni: vxlan.vni })
     } else if let Some(geneve) = cast::<Geneve>(layer) {
-        Some(TunnelId::Geneve { vni: geneve.vni })
+        Some(EncapsulationIdentifier::Geneve { vni: geneve.vni })
     } else if let Some(gre) = cast::<Gre>(layer) {
-        Some(TunnelId::Gre { key: gre.key })
+        Some(EncapsulationIdentifier::Gre { key: gre.key })
     } else if let Some(mpls) = cast::<Mpls>(layer) {
-        Some(TunnelId::Mpls { label: mpls.label })
+        Some(EncapsulationIdentifier::Mpls { label: mpls.label })
     } else if let Some(pppoe) = cast::<Pppoe>(layer) {
-        Some(TunnelId::Pppoe {
+        Some(EncapsulationIdentifier::Pppoe {
             session_id: pppoe.session_id,
             endpoints: ethernet,
         })
     } else if let Some(l2tp) = cast::<L2tpv3>(layer) {
-        Some(TunnelId::L2tpv3 {
+        Some(EncapsulationIdentifier::L2tpv3 {
             session_id: l2tp.session_id,
         })
     } else if let Some(erspan) = cast::<Erspan>(layer) {
-        Some(TunnelId::Erspan {
+        Some(EncapsulationIdentifier::Erspan {
             vlan: erspan.vlan,
             session_id: erspan.session_id,
         })
     } else {
-        cast::<Ah>(layer).map(|ah| TunnelId::Ah { spi: ah.spi })
+        cast::<Ah>(layer).map(|ah| EncapsulationIdentifier::Ah { spi: ah.spi })
     }
 }
 

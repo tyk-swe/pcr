@@ -10,12 +10,13 @@ use crate::protocol::identity::TcpHeader;
 use crate::protocol::transport::Tcp;
 
 use crate::analysis::Error;
+use crate::analysis::ScopedFlowKey;
 use crate::analysis::pipeline::Limits;
 use crate::analysis::pipeline::clock::CaptureClock;
 use crate::analysis::pipeline::limits::DIRECTIONS_PER_CONVERSATION;
 use crate::analysis::reassembly::tcp::{
     Error as ReassemblyTcpError, Event as TcpEvent, Reassembler as TcpReassembler,
-    Resource as TcpResource, ScopedFlowKey, Segment,
+    Resource as TcpResource, Segment,
 };
 use crate::analysis::serial::serial_range_contains;
 

@@ -88,7 +88,7 @@ impl Stage {
             max_probes: options.max_probes,
             strategy: strategy.map(|strategy| {
                 crate::commands::network::scan::output::traceroute::StrategyPlan {
-                    strategy: strategy.transport,
+                    strategy: strategy.transport.into(),
                     destination_port: strategy.destination_port,
                 }
             }),

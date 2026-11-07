@@ -210,3 +210,109 @@ fn buffered_readback_preserves_semantics() {
         assert!(matches!(reader.rewind(), Err(Error::Cancelled(_))));
     }
 }
+
+struct InterruptingInput<F: FnMut()> {
+    input: Cursor<Vec<u8>>,
+    interrupt: F,
+    fail: bool,
+}
+
+impl<F: FnMut()> std::io::Read for InterruptingInput<F> {
+    fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
+        (self.interrupt)();
+        if self.fail {
+            return Err(std::io::Error::other("input failed"));
+        }
+        std::io::Read::read(&mut self.input, output)
+    }
+}
+
+impl<F: FnMut()> std::io::Seek for InterruptingInput<F> {
+    fn seek(&mut self, position: std::io::SeekFrom) -> std::io::Result<u64> {
+        std::io::Seek::seek(&mut self.input, position)
+    }
+}
+
+#[test]
+fn header_control_precedes_input_and_header_failures() {
+    use crate::budget::{Cancellation, Deadline};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::Instant;
+
+    for format in [Format::Pcap, Format::PcapNg] {
+        let cancellation = Cancellation::default();
+        cancellation.cancel();
+        let input = InterruptingInput {
+            input: Cursor::new(capture(format, &[])),
+            interrupt: || panic!("cancelled construction read input"),
+            fail: false,
+        };
+        let control = Arc::new(Deadline::new(Duration::MAX).with_cancellation(Some(cancellation)));
+        assert!(matches!(
+            Reader::with_control(input, ReaderLimits::default(), Some(control)),
+            Err(Error::Cancelled(_))
+        ));
+        for fail in [false, true] {
+            for bytes in [capture(format, &[]), vec![0; 4]] {
+                let cancellation = Cancellation::default();
+                let control = Arc::new(
+                    Deadline::new(Duration::MAX).with_cancellation(Some(cancellation.clone())),
+                );
+                let input = InterruptingInput {
+                    input: Cursor::new(bytes.clone()),
+                    interrupt: || cancellation.cancel(),
+                    fail,
+                };
+                assert!(matches!(
+                    Reader::with_control(input, ReaderLimits::default(), Some(control)),
+                    Err(Error::Cancelled(_))
+                ));
+
+                let elapsed = Arc::new(AtomicU64::new(0));
+                let now = elapsed.clone();
+                let start = Instant::now();
+                let control = Arc::new(Deadline::with_time_source(
+                    Duration::from_secs(1),
+                    move || start + Duration::from_secs(now.load(Ordering::Relaxed)),
+                ));
+                let input = InterruptingInput {
+                    input: Cursor::new(bytes),
+                    interrupt: || elapsed.store(2, Ordering::Relaxed),
+                    fail,
+                };
+                assert!(matches!(
+                    Reader::with_control(input, ReaderLimits::default(), Some(control)),
+                    Err(Error::DurationLimit { .. })
+                ));
+            }
+        }
+    }
+}
+
+#[test]
+fn rewind_preserves_independent_cancellation_and_stays_terminal_on_failure() {
+    use crate::budget::Cancellation;
+    use std::cell::Cell;
+
+    for format in [Format::Pcap, Format::PcapNg] {
+        let cancellation = Cancellation::default();
+        let interrupt = Cell::new(false);
+        let input = InterruptingInput {
+            input: Cursor::new(capture(format, &[frame(0, 0, 1, 60)])),
+            interrupt: || {
+                if interrupt.get() {
+                    cancellation.cancel();
+                }
+            },
+            fail: false,
+        };
+        let mut reader = Reader::with_limits(input, ReaderLimits::default())
+            .unwrap()
+            .with_cancellation(cancellation.clone());
+        interrupt.set(true);
+        reader.get_mut().fail = true;
+        assert!(matches!(reader.rewind(), Err(Error::Cancelled(_))));
+        assert!(reader.next_record().unwrap().is_none());
+    }
+}

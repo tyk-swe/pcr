@@ -8,9 +8,10 @@ use packetcraftr::fuzz as live_fuzz;
 use packetcraftr_core::fuzz::{self as packet_fuzz, Totals};
 
 use crate::output::contract::Error as ContractError;
-use crate::output::envelope::{Error as OutputError, Published, Stats};
+use crate::output::envelope::Diagnostic;
+use crate::output::envelope::{Error as OutputError, Published};
 use crate::output::frame::{Captured, Wire};
-use packetcraftr_core::diagnostic::Diagnostic;
+use packetcraftr::Stats;
 
 fn operation_stats(value: &packet_fuzz::Stats) -> Stats {
     Stats {
@@ -309,7 +310,7 @@ fn convert_case(
         responses: captured(responses)?,
         unmatched: captured(unmatched)?,
         undecoded: captured(undecoded)?,
-        diagnostics,
+        diagnostics: diagnostics.into_iter().map(Into::into).collect(),
     })
 }
 

@@ -335,7 +335,7 @@ pub(crate) struct Usage {
     pub attempts: u64,
     pub write_bytes: u64,
     pub read_bytes: u64,
-    pub tls: library::TlsUsage,
+    pub tls: TlsUsage,
 }
 
 #[derive(Debug, Serialize)]
@@ -369,7 +369,7 @@ impl TryFrom<library::Report> for Report {
                 attempts: value.usage.attempts,
                 write_bytes: value.usage.write_bytes,
                 read_bytes: value.usage.read_bytes,
-                tls: value.usage.tls,
+                tls: value.usage.tls.into(),
             },
             elapsed: value.elapsed,
             complete: value.complete,
@@ -403,6 +403,25 @@ impl From<Report> for Complete {
             elapsed: report.elapsed,
             complete: report.complete,
             cancelled: report.cancelled,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct TlsUsage {
+    pub(crate) write_bytes: u64,
+    pub(crate) read_bytes: u64,
+    pub(crate) certificate_bytes: u64,
+    pub(crate) steps: u64,
+}
+
+impl From<library::TlsUsage> for TlsUsage {
+    fn from(value: library::TlsUsage) -> Self {
+        Self {
+            write_bytes: value.write_bytes,
+            read_bytes: value.read_bytes,
+            certificate_bytes: value.certificate_bytes,
+            steps: value.steps,
         }
     }
 }

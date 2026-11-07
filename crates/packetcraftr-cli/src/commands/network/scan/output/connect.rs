@@ -126,7 +126,7 @@ pub(crate) struct Summary {
     /// The reverse-DNS lookups' packet statistics, which socket statistics
     /// cannot hold; absent when no lookup ran.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub reverse_dns_stats: Option<packetcraftr::Stats>,
+    pub reverse_dns_stats: Option<crate::output::envelope::Stats>,
     pub scheduling: super::Scheduling,
 }
 impl Summary {
@@ -142,7 +142,7 @@ impl Summary {
             planned_duration: report.planned_duration,
             plan,
             socket_stats: report.stats.into(),
-            reverse_dns_stats,
+            reverse_dns_stats: reverse_dns_stats.map(Into::into),
             scheduling: report.scheduling.into(),
         }
     }

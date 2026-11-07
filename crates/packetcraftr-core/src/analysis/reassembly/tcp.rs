@@ -13,7 +13,9 @@ use super::expiry::ExpiryIndex;
 use state::TcpFlowState;
 
 mod model;
-pub use model::{Error, Event, FlowKey, Malformed, Resource, ScopedFlowKey, Segment};
+pub use model::{Error, Event, Malformed, Resource, Segment};
+
+use crate::analysis::ScopedFlowKey;
 mod engine;
 mod limits;
 pub(crate) use limits::Field;

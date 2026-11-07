@@ -75,24 +75,10 @@ pub trait Layer: Any + Send + Sync + fmt::Debug {
     fn schema(&self) -> &'static Schema;
     fn clone_box(&self) -> Box<dyn Layer>;
 
-    fn field_by_index(&self, index: usize) -> Option<field::Value> {
-        let declared = self.schema().fields.get(index)?;
-        self.field(declared.name)
-    }
+    fn field_by_index(&self, index: usize) -> Option<field::Value>;
 
-    fn set_field_by_index(
-        &mut self,
-        index: usize,
-        value: field::Value,
-    ) -> Result<(), field::Error> {
-        let Some(declared) = self.schema().fields.get(index) else {
-            return Err(field::Error::UnknownField {
-                protocol: *self.protocol_id(),
-                field: index.to_string(),
-            });
-        };
-        self.set_field(declared.name, value)
-    }
+    fn set_field_by_index(&mut self, index: usize, value: field::Value)
+    -> Result<(), field::Error>;
 
     fn field(&self, name: &str) -> Option<field::Value> {
         self.field_by_index(self.schema().field_index(name)?)

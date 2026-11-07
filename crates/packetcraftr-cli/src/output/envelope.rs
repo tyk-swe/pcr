@@ -5,12 +5,72 @@ use std::fmt;
 
 use serde::Serialize;
 
-use packetcraftr_core::diagnostic::Diagnostic;
-use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
+use packetcraftr_core::diagnostic::Diagnostic as RuntimeDiagnostic;
+use packetcraftr_core::error::{Classification, Classified, Coordinate};
 
 use super::contract::{Command, Mode, SCHEMA};
 
-pub use packetcraftr::Stats;
+published_enum! {
+    pub enum Kind from packetcraftr_core::error::Kind {
+        Usage => "usage",
+        Packet => "packet",
+        Capability => "capability",
+        Io => "io",
+        Policy => "policy",
+        Internal => "internal",
+    }
+}
+
+published_enum! {
+    pub enum Severity from packetcraftr_core::diagnostic::Severity {
+        Info => "info",
+        Warning => "warning",
+        Error => "error",
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Diagnostic {
+    pub code: &'static str,
+    pub severity: Severity,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub layer: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub field: Option<&'static str>,
+}
+impl From<packetcraftr_core::diagnostic::Diagnostic> for Diagnostic {
+    fn from(value: packetcraftr_core::diagnostic::Diagnostic) -> Self {
+        Self {
+            code: value.code,
+            severity: value.severity.into(),
+            message: value.message,
+            layer: value.layer,
+            field: value.field,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct Stats {
+    pub packets_attempted: u64,
+    pub packets_completed: u64,
+    pub bytes: u64,
+    pub elapsed: std::time::Duration,
+    pub capture: super::capture::Stats,
+}
+
+impl From<packetcraftr::Stats> for Stats {
+    fn from(value: packetcraftr::Stats) -> Self {
+        Self {
+            packets_attempted: value.packets_attempted,
+            packets_completed: value.packets_completed,
+            bytes: value.bytes,
+            elapsed: value.elapsed,
+            capture: value.capture.into(),
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub enum ErrorContext {
@@ -70,7 +130,7 @@ impl Error {
     ) -> Self {
         Self {
             code: classification.code.as_str().to_owned(),
-            kind: classification.kind,
+            kind: classification.kind.into(),
             message: message.into(),
             causes,
             context: None,
@@ -107,12 +167,12 @@ impl Error {
 #[derive(Clone, Debug)]
 pub struct Published<T> {
     pub result: T,
-    pub diagnostics: Vec<Diagnostic>,
-    pub stats: Option<Stats>,
+    pub diagnostics: Vec<RuntimeDiagnostic>,
+    pub stats: Option<packetcraftr::Stats>,
 }
 
 impl<T> Published<T> {
-    pub(crate) fn new(result: T, diagnostics: Vec<Diagnostic>) -> Self {
+    pub(crate) fn new(result: T, diagnostics: Vec<RuntimeDiagnostic>) -> Self {
         Self {
             result,
             diagnostics,
@@ -121,7 +181,7 @@ impl<T> Published<T> {
     }
 
     #[must_use]
-    pub(crate) fn with_stats(mut self, stats: Stats) -> Self {
+    pub(crate) fn with_stats(mut self, stats: packetcraftr::Stats) -> Self {
         self.stats = Some(stats);
         self
     }
@@ -170,8 +230,8 @@ impl<T> Envelope<T> {
             sequence: None,
             event: None,
             payload: OutputPayload::Success { result },
-            diagnostics,
-            stats,
+            diagnostics: diagnostics.into_iter().map(Into::into).collect(),
+            stats: stats.map(Into::into),
             resources: None,
         }
     }
@@ -181,7 +241,7 @@ impl<T> Envelope<T> {
         sequence: u64,
         event: &'static str,
         result: T,
-        diagnostics: Vec<Diagnostic>,
+        diagnostics: Vec<RuntimeDiagnostic>,
     ) -> Self {
         Self {
             schema: SCHEMA,
@@ -190,7 +250,7 @@ impl<T> Envelope<T> {
             sequence: Some(sequence),
             event: Some(event),
             payload: OutputPayload::Success { result },
-            diagnostics,
+            diagnostics: diagnostics.into_iter().map(Into::into).collect(),
             stats: None,
             resources: None,
         }
@@ -203,8 +263,8 @@ impl<T> Envelope<T> {
     }
 
     #[must_use]
-    pub fn with_stats(mut self, stats: Stats) -> Self {
-        self.stats = Some(stats);
+    pub fn with_stats(mut self, stats: packetcraftr::Stats) -> Self {
+        self.stats = Some(stats.into());
         self
     }
 }
@@ -236,5 +296,50 @@ impl Envelope<()> {
             stats: None,
             resources: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use packetcraftr_core::{diagnostic, error::Code};
+    use serde_json::json;
+
+    #[test]
+    fn envelope_maps_runtime_diagnostics_statistics_and_error_kind() {
+        let diagnostic = RuntimeDiagnostic {
+            code: "output.test",
+            severity: diagnostic::Severity::Warning,
+            message: "bounded output".into(),
+            layer: Some(2),
+            field: None,
+        };
+        let published = Published::new(json!({ "ready": true }), vec![diagnostic]).with_stats(
+            packetcraftr::Stats {
+                packets_attempted: 3,
+                packets_completed: 2,
+                bytes: 27,
+                elapsed: std::time::Duration::new(1, 2),
+                ..packetcraftr::Stats::default()
+            },
+        );
+        let value = serde_json::to_value(Envelope::published(Command::Send, published)).unwrap();
+        assert_eq!(
+            value["diagnostics"],
+            json!([{ "code": "output.test", "severity": "warning", "message": "bounded output", "layer": 2 }])
+        );
+        assert_eq!(value["stats"]["packets_attempted"], 3);
+        assert_eq!(value["stats"]["packets_completed"], 2);
+        assert_eq!(value["stats"]["bytes"], 27);
+        assert_eq!(value["stats"]["elapsed"], json!({ "secs": 1, "nanos": 2 }));
+        let classification = Classification::new(
+            Code::CliSendLimit,
+            packetcraftr_core::error::Kind::Usage,
+            None,
+        );
+        let error = serde_json::to_value(Error::new(classification, "invalid options", Vec::new()))
+            .unwrap();
+        assert_eq!(error["kind"], "usage");
+        assert_eq!(error["code"], Code::CliSendLimit.as_str());
     }
 }

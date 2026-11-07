@@ -20,7 +20,6 @@ use packetcraftr_core::error::Kind;
 use self::arguments::Args;
 use crate::errors::CliError;
 use crate::input::open_capture;
-use crate::invocation::StreamEncoder;
 use crate::rendering::{FieldTree, finish_compressed_output};
 
 use capture_output::CaptureOutput;
@@ -79,21 +78,19 @@ impl crate::commands::Spec for Args {
         self,
         invocation: &crate::invocation::Invocation,
     ) -> Result<crate::commands::CommandExit, CliError> {
-        let format = invocation.format;
-        let stream = &invocation.output;
-        run(invocation, self, format, stream).map(|()| crate::commands::CommandExit::SUCCESS)
+        run(invocation, self).map(|()| crate::commands::CommandExit::SUCCESS)
     }
 }
 
 pub(super) fn run(
     invocation: &crate::invocation::Invocation,
     arguments: Args,
-    format: Format,
-    stream: &StreamEncoder,
 ) -> Result<(), CliError> {
+    let format = invocation.format;
+    let stream = &invocation.output;
     let compression = arguments.compression.for_output(format)?;
     if !arguments.fields.is_empty() {
-        return projection::run(invocation, arguments, format, stream);
+        return projection::run(invocation, arguments);
     }
     if matches!(format, Format::Json) {
         return Err(crate::rendering::missing_fields_error());

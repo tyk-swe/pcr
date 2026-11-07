@@ -7,8 +7,9 @@ use std::collections::{BTreeMap, HashMap};
 
 use crate::diagnostic::Severity;
 
+use crate::analysis::ScopedFlowKey;
 use crate::analysis::pipeline::{FrameRecord, Summary as RunSummary};
-use crate::analysis::reassembly::tcp::{Event as TcpEvent, ScopedFlowKey};
+use crate::analysis::reassembly::tcp::Event as TcpEvent;
 use crate::analysis::session::{self, CollectorNeeds};
 use crate::analysis::{StreamRef, StreamTransport};
 use crate::error::BoundaryError;

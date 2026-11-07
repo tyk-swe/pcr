@@ -4,10 +4,9 @@
 mod transactions;
 
 use super::{
-    FrameRecord, StreamTransport, Summary as RunSummary,
+    FrameRecord, ScopedFlowKey, StreamTransport, Summary as RunSummary,
     application::{self, Error, Limits, TcpSources},
     provenance::{Accumulator, SourceSet},
-    reassembly::tcp::ScopedFlowKey,
     scope::Definition,
     session::{self, CollectorNeeds},
 };

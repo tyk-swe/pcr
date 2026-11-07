@@ -28,6 +28,7 @@ use crate::output::contract::{Command, Format};
 use crate::rendering::emit_published;
 
 pub(super) struct AnalysisSetup {
+    pub(super) capture_limits: crate::command_options::OfflineCaptureLimits,
     pub(super) registry: Arc<Registry>,
     pub(super) filter: Option<Filter>,
     pub(super) time_bounds: Option<packetcraftr_core::frame::TimeBounds>,
@@ -72,11 +73,11 @@ impl AnalysisSetup {
 }
 
 pub(super) fn prepare(
-    capture_limits: crate::command_options::OfflineCaptureLimits,
     limits: OfflineLimitsArgs,
     filter_source: Option<&str>,
     decode: &DecodeArgs,
 ) -> Result<AnalysisSetup, CliError> {
+    let capture_limits = limits.capture.limits()?;
     let duration = limits.duration;
     let ip_overlap = limits.ip_overlap.into();
     let time_bounds = limits.epoch.resolve()?;
@@ -112,6 +113,7 @@ pub(super) fn prepare(
     limits.validate().map_err(CliError::classified)?;
 
     Ok(AnalysisSetup {
+        capture_limits,
         registry,
         filter,
         time_bounds,
@@ -141,8 +143,7 @@ pub(super) fn inspect<C: analysis::Collector>(
         application,
         selector,
     } = inspection;
-    let capture_limits = limits.capture.limits()?;
-    let setup = prepare(capture_limits, limits, None, decode)?;
+    let setup = prepare(limits, None, decode)?;
     let session = analysis::Session::new(
         setup.registry.clone(),
         analysis::SessionOptions {
@@ -155,7 +156,7 @@ pub(super) fn inspect<C: analysis::Collector>(
         &invocation.control,
         &invocation.output,
         path,
-        capture_limits,
+        setup.capture_limits,
     )?;
     let mut output = EventOutput::new(invocation, application.max_output_bytes());
     let outcome = session

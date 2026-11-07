@@ -66,19 +66,16 @@ impl crate::commands::Spec for Args {
         self,
         invocation: &crate::invocation::Invocation,
     ) -> Result<crate::commands::CommandExit, CliError> {
-        let format = invocation.format;
-        let stream = &invocation.output;
-        run(invocation, self, format, stream.presentation())
-            .map(|()| crate::commands::CommandExit::SUCCESS)
+        run(invocation, self).map(|()| crate::commands::CommandExit::SUCCESS)
     }
 }
 
 pub(super) fn run(
     invocation: &crate::invocation::Invocation,
     arguments: Args,
-    format: Format,
-    presentation: crate::invocation::Presentation,
 ) -> Result<(), CliError> {
+    let format = invocation.format;
+    let presentation = invocation.output.presentation();
     arguments.validate_selection()?;
     let table = Table::from(arguments.table);
     if format == Format::Csv && matches!(table, Table::Overview | Table::Fragments) {
@@ -89,9 +86,7 @@ pub(super) fn run(
     }
     let top = arguments.effective_top();
     let aggregation = analysis::stats::Table::from(arguments.table);
-    let capture_limits = arguments.limits.capture.limits()?;
     let prepared = prepare(
-        capture_limits,
         arguments.limits,
         arguments.filter.as_deref(),
         &arguments.decode,
@@ -106,7 +101,7 @@ pub(super) fn run(
         &invocation.control,
         &invocation.output,
         &arguments.path,
-        capture_limits,
+        prepared.capture_limits,
     )?;
 
     let options = prepared.options(invocation);

@@ -74,18 +74,16 @@ impl crate::commands::Spec for Args {
         self,
         invocation: &crate::invocation::Invocation,
     ) -> Result<crate::commands::CommandExit, CliError> {
-        let format = invocation.format;
-        let stream = &invocation.output;
-        run(invocation, self, format, stream).map(|()| crate::commands::CommandExit::SUCCESS)
+        run(invocation, self).map(|()| crate::commands::CommandExit::SUCCESS)
     }
 }
 
 pub(super) fn run(
     invocation: &crate::invocation::Invocation,
     arguments: Args,
-    format: Format,
-    stream: &crate::invocation::StreamEncoder,
 ) -> Result<(), CliError> {
+    let format = invocation.format;
+    let stream = &invocation.output;
     arguments.tree.validate_format(format)?;
     let registry = arguments.decode.registry()?;
     if arguments.fields.is_empty() && matches!(format, Format::Ndjson) {
@@ -100,7 +98,7 @@ pub(super) fn run(
     )?;
     if projector
         .as_ref()
-        .is_some_and(|projector| projector.projection.requirements().stream_index)
+        .is_some_and(|projector| projector.requirements().stream_index)
     {
         return Err(CliError::new(
             Kind::Usage,
@@ -155,11 +153,7 @@ pub(super) fn run(
     };
     if let Some(mut projector) = projector {
         if kept {
-            let values = projector
-                .projection
-                .values(&context, projector.remaining())
-                .map_err(CliError::classified)?;
-            projector.emit(1, values, stream)?;
+            projector.emit(1, &context, stream)?;
         }
         return projector.finish(
             invocation,

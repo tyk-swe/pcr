@@ -249,7 +249,11 @@ impl<P: PacketProviders, K: Clock> Pipeline<'_, P, K> {
     pub(super) fn refill(&mut self, draining: bool) -> Result<(), BoundaryError> {
         if draining
             || self.streaming.is_none()
-            || self.pending.len().saturating_add(self.ready.len()) >= self.options.max_in_flight
+            || self
+                .attempts
+                .pending_count()
+                .saturating_add(self.attempts.queued_count())
+                >= self.options.max_in_flight
             || self.executor.client.now() < self.next_send
         {
             return Ok(());
@@ -267,31 +271,28 @@ impl<P: PacketProviders, K: Clock> Pipeline<'_, P, K> {
             .as_ref()
             .expect("streaming checked")
             .max_probe_bytes;
-        while self.retained.saturating_add(maximum) > self.options.max_prepared_bytes
-            && self.retire_recent()
+        while self.attempts.retained().saturating_add(maximum) > self.options.max_prepared_bytes
+            && self.attempts.retire_recent()
         {}
-        if self.retained.saturating_add(maximum) > self.options.max_prepared_bytes {
-            for probe in self.ready.values_mut().rev() {
-                if self.retained.saturating_add(maximum) <= self.options.max_prepared_bytes {
-                    break;
-                }
-                if let Some(preview) = probe.retained.take() {
-                    drop(preview);
-                    self.retained -= probe.memory;
-                }
-            }
+        if self.attempts.retained().saturating_add(maximum) > self.options.max_prepared_bytes {
+            self.attempts
+                .discard_previews(maximum, self.options.max_prepared_bytes);
         }
         let room = self
             .options
             .max_prepared_bytes
-            .saturating_sub(self.retained);
+            .saturating_sub(self.attempts.retained());
         let capacity = self
             .options
             .max_in_flight
-            .saturating_sub(self.pending.len().saturating_add(self.ready.len()))
+            .saturating_sub(
+                self.attempts
+                    .pending_count()
+                    .saturating_add(self.attempts.queued_count()),
+            )
             .min(room / maximum.max(1));
         if capacity == 0 {
-            if self.pending.is_empty() {
+            if self.attempts.pending_count() == 0 {
                 return Err(limit(
                     "prepared descriptions",
                     self.options.max_prepared_bytes,
@@ -311,12 +312,13 @@ impl<P: PacketProviders, K: Clock> Pipeline<'_, P, K> {
         stream.done = poll.done;
         stream.next_ready = poll.next_ready;
         for offer in poll.batches {
-            if self.descriptions.contains_key(&offer.index) {
+            if self.attempts.contains(offer.index) {
                 return Err(limit("stream attempt identity", crate::scan::MAX_PROBES));
             }
             let probe = offer.batch.probe()?;
             let keep = self
-                .retained
+                .attempts
+                .retained()
                 .saturating_add(maximum.saturating_mul(selected.saturating_add(1)))
                 <= self.options.max_prepared_bytes;
             let (route, mut admitted) = prepare::admit_one(
@@ -355,31 +357,25 @@ impl<P: PacketProviders, K: Clock> Pipeline<'_, P, K> {
             }
             if admitted.retained.is_some()
                 && self
-                    .retained
+                    .attempts
+                    .retained()
                     .saturating_add(admitted.memory)
                     .saturating_add(maximum)
                     > self.options.max_prepared_bytes
             {
                 drop(admitted.retained.take());
             }
-            if admitted.retained.is_some() {
-                self.retained += admitted.memory;
-            }
-            if self.plan.interfaces.contains(route.interface()) {
-                self.armed_ready.insert(offer.index);
-            }
-            if let Some(deadline) = offer.host_deadline {
-                self.ready_deadlines.insert((deadline, offer.index));
-            }
-            self.descriptions.insert(
+            let armed = self.plan.interfaces.contains(route.interface());
+            self.attempts.queue(
                 offer.index,
                 Descriptor {
                     batch: BatchStorage::Owned(offer.batch),
                     host_deadline: offer.host_deadline,
                     route: Some(Box::new(route)),
                 },
+                admitted,
+                armed,
             );
-            self.ready.insert(offer.index, admitted);
         }
         self.rotate_if_needed()
     }

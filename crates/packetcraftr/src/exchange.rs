@@ -27,7 +27,8 @@ pub(crate) use plan::Prepared;
 pub use report::{Aggregate, Collector, Report};
 pub(crate) use request::Step;
 pub use request::{
-    Collection, DEFAULT_MAX_RESPONSES, DEFAULT_MAX_UNMATCHED_FRAMES, Request, StopCondition,
+    Collection, DEFAULT_MAX_RESPONSES, DEFAULT_MAX_UNMATCHED_FRAMES, Parameters, Request,
+    StopCondition,
 };
 pub(crate) use shutdown::CaptureGuard;
 pub(crate) use window::Window;

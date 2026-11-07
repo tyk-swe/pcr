@@ -694,3 +694,100 @@ $ target/debug/packetcraftr analyze http2 examples/captures/http2-multiplexed.pc
 The full integration suite, feature matrix, platform builds, coverage, and
 mutation jobs were not run locally. No check thresholds or allowlists were
 relaxed.
+
+## Structural cleanup, 2026-11-07
+
+The initial read-only audit found the following remaining root causes.
+The user selected comment and test cleanup, allowed Rust API changes, and
+required preservation of CLI behavior and published output contracts.
+
+### Decisions and problems addressed
+
+- Make indexed layer access the required implementation contract.
+  - Getter and setter defaults otherwise call each other recursively.
+- Resolve analysis stages once from requested behavior.
+  - Independent plan flags, selected streams, TCP events, and provenance
+    tracking can disagree about indexing and IP reconstruction.
+- Apply reader control before capture headers are consumed.
+  - Attaching control after construction requires compensating caller gates.
+  - Preserve cancellation without a configured duration and controlled rewind.
+- Give shared identities their actual owner.
+  - UDP and conversation indexing import transport-neutral keys from TCP.
+  - Protocol and analysis duplicate encapsulation vocabulary and conversion.
+- Separate plain HTTP connections from TLS configuration.
+  - A TLS request and independent boolean make unused TLS fields mandatory.
+- Use the shared socket identity rule in connect scans.
+  - Direct endpoint equality rejects equivalent mapped IPv4 peers.
+- Give scan attempt transitions one private owner.
+  - Queued, pending, recent, expiry, correlation, and accounting structures
+    require coordinated writes across several execution modules.
+  - Preserve indexed lookup, bounded recent history, and publication failures.
+- Prepare actual send and exchange requests from validated parameters.
+  - Placeholder packets and mutable request repair encode a caller convention.
+  - Preserve option validation, packet planning, and authorization ordering.
+- Finish the CLI-owned published output seam.
+  - Runtime statistics, diagnostics, capture metadata, probe vocabulary,
+    identification, messages, and topology still reach Serde directly.
+  - Keep explicit packet, field-value, and machine-code contracts and preserve
+    the existing schema, null, omission, and duration representations.
+- Put projection extraction and charging inside the projector.
+  - Callers currently coordinate exposed projection state and remaining bytes.
+  - NDJSON separately serializes rows for counting and publication.
+- Return validated capture limits with offline analysis preparation.
+  - Callers supply both validated limits and raw arguments containing them.
+- Read layer rules from the existing crate-root tables.
+  - A second hardcoded policy duplicates those tables.
+  - Add explicit engine and client parent rules before removing that copy.
+- Load release inventories explicitly at the packaging entry point.
+  - Importing the module currently reads and validates a checkout implicitly.
+  - Preserve the checked-in inventory and every packaging safety check.
+- Clean up comments and tests after preserving behavior.
+  - Move fixture-only topology assertions into real output conversion coverage.
+  - Test publication retry refusal without pinning buffering call counts.
+
+Repeated messages-registry construction stays unless it can be removed without
+changing validation precedence or introducing a collector factory. Platform
+ownership, protocol framing, bounded cancellation polling, and independently
+versioned document contracts retain their previously recorded reasons.
+
+### Verification and completion
+
+All decisions above are implemented. The approved Rust API changes are in
+place, while CLI behavior and the published v19 wire contract are preserved.
+The comment review retained protocol, safety, platform, and public contract
+explanations. Test cleanup moved topology checks onto actual conversion output,
+replaced buffering call-count assumptions with retry behavior, and strengthened
+projection coverage across all three supported formats.
+
+Focused validation passed 100 Rust tests and 33 Python tests. Combined Clippy
+passed for core, workflows, and CLI libraries and tests with warnings denied
+and default features disabled. Formatting, layer, coupling, file-size, and
+output schema checks passed without relaxed ceilings or new exceptions. The
+output checker also validated actual CLI stdout against the unchanged schema.
+Full feature/platform, coverage, mutation, and fuzz matrices remain CI work.
+
+Independent follow-up reviews found two remaining problems and verified their
+fixes. The scan owner now exposes immutable identity views and response-only
+mutation, keeping deadlines, accounting, and collection layouts private.
+Projection preserves its limit error when a row exceeds both projection and
+record capacity, while successful NDJSON rows serialize once. Final core,
+workflow, CLI output/preparation, and tooling reviews found no further
+actionable issues in the agreed changes.
+
+The following commands ran against the rebuilt CLI and exited successfully.
+The excerpts are actual stdout. A temporary TCP listener was bound to
+127.0.0.1 port 53769 during the mapped-address scan.
+
+```text
+$ target/debug/packetcraftr --output ndjson files read examples/captures/protocol-mqtt.pcap --field frame.number --max-frames 1
+{"schema":"packetcraftr.output/v19","command":"read","mode":"stream","sequence":0,"event":"fields","status":"success","result":{"columns":["frame.number"],"source_frame":1,"values":[1]},"diagnostics":[]}
+{"schema":"packetcraftr.output/v19","command":"read","mode":"stream","sequence":1,"event":"complete","status":"success","result":{"columns":["frame.number"],"rows_written":1,"frames_read":1,"captured_bytes_read":60},"diagnostics":[]}
+
+$ target/debug/packetcraftr --output text analyze http2 examples/captures/http2-multiplexed.pcapng
+1 HTTP/2 connections (1 prior knowledge, 0 h2c, 0 unsupported); 7 messages (7 complete, 0 incomplete, 0 malformed, 0 limited); 0 issues
+
+$ target/debug/packetcraftr network scan ::ffff:127.0.0.1 --connect --ports 53769 --attempts 1 --timeout-ms 300 --max-duration-ms 2000
+::ffff:127.0.0.1 tcp-connect/53769 classification=open
+  inferred=open rule=tcp_connect.connected supporting=0 conflicting=- unanswered=- failed=- port-hint=-
+1 socket connections attempted; 1 succeeded; elapsed 1.316ms
+```

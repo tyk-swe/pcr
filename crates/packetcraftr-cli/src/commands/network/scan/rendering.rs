@@ -7,8 +7,11 @@ mod traceroute;
 use hosts::render_hosts_text;
 use traceroute::render_traceroute_text;
 
-use crate::output;
-use packetcraftr::scan::{SctpScan, TcpScan};
+use crate::output::{
+    self,
+    network::{ProbeStatus, Transport},
+    scan_failure::{SctpMode as SctpScan, TcpMode as TcpScan},
+};
 
 use crate::errors::CliError;
 use crate::rendering::{
@@ -42,17 +45,15 @@ pub(super) fn render_text(
     render_plan_text(invocation, &result.plan)?;
     for endpoint in &result.endpoints {
         let endpoint_name = match endpoint.transport {
-            packetcraftr::probe::Transport::Icmp => endpoint.transport.to_string(),
-            packetcraftr::probe::Transport::Ip => {
+            Transport::Icmp => endpoint.transport.to_string(),
+            Transport::Ip => {
                 format!(
                     "{}/{}",
                     endpoint.transport,
                     render_optional(endpoint.ip_protocol, |value| value.to_string())
                 )
             }
-            packetcraftr::probe::Transport::Tcp
-            | packetcraftr::probe::Transport::Udp
-            | packetcraftr::probe::Transport::Sctp => {
+            Transport::Tcp | Transport::Udp | Transport::Sctp => {
                 format!(
                     "{}/{}",
                     endpoint.transport,
@@ -259,7 +260,7 @@ pub(super) fn tcp_scan_text(tcp_scan: super::output::plan::TcpScan) -> String {
     );
     match tcp_scan.mode {
         TcpScan::Syn => line,
-        TcpScan::Custom { .. } => {
+        TcpScan::Custom => {
             format!("{line} (observation-only: replies are reported, no port state is inferred)")
         }
         TcpScan::Ack
@@ -294,7 +295,7 @@ fn visible_probes(
 ) -> impl Iterator<Item = &super::output::Probe> {
     probes.iter().filter(move |evidence| {
         presentation.verbose
-            || evidence.status == packetcraftr::probe::Status::Timeout
+            || evidence.status == ProbeStatus::Timeout
             || evidence.application.as_ref().is_some_and(|application| {
                 application.status == super::output::ApplicationStatus::Rejected
             })
@@ -399,7 +400,7 @@ fn connect_probe_text(
 /// The scan's planned duration against the operation's achieved packet rate,
 /// which spans discovery, neighbor requests, and enrichment as well as probes;
 /// the plan covers discovery and the scan, not enrichment.
-fn throughput_text(planned: std::time::Duration, stats: &output::envelope::Stats) -> String {
+fn throughput_text(planned: std::time::Duration, stats: &packetcraftr::Stats) -> String {
     format!(
         "scan planned timeout+pacing {}; operation achieved {:.2} packets/s over {}",
         duration_text(planned),

@@ -133,7 +133,7 @@ pub struct Collector {
     replies: BTreeMap<u64, (u16, u64)>,
     beacons: BTreeMap<BeaconKey, BeaconGroup>,
     stream_sources: BTreeMap<u64, Vec<u64>>,
-    syns: BTreeMap<analysis::reassembly::tcp::ScopedFlowKey, BTreeSet<u32>>,
+    syns: BTreeMap<analysis::ScopedFlowKey, BTreeSet<u32>>,
     observations: usize,
 }
 impl Collector {
@@ -667,9 +667,8 @@ mod tests {
 
     fn dns_event(name: &str) -> dns::Event {
         use crate::analysis::{
-            StreamTransport,
+            FlowKey, ScopedFlowKey, StreamTransport,
             provenance::{SourceFrame, Tracker},
-            reassembly::tcp::{FlowKey, ScopedFlowKey},
             scope::Interner,
         };
         use crate::protocol::application::dns::{Dns, Question};

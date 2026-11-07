@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::collections::HashMap;
-use std::net::IpAddr;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -10,49 +9,7 @@ use thiserror::Error;
 
 use crate::error::{Classification, Classified, Kind};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-#[non_exhaustive]
-pub enum EncapsulationIdentifier {
-    Vlan {
-        vlan_id: u16,
-    },
-    Vlan8021ad {
-        vlan_id: u16,
-    },
-    /// Direction-neutral endpoints of an outer IP header.
-    Network {
-        first: IpAddr,
-        second: IpAddr,
-    },
-    Vxlan {
-        vni: u32,
-    },
-    Geneve {
-        vni: u32,
-    },
-    Gre {
-        key: Option<u32>,
-    },
-    Mpls {
-        label: u32,
-    },
-    Pppoe {
-        session_id: u16,
-        /// Sorted endpoints of the enclosing Ethernet header, when present.
-        endpoints: Option<([u8; 6], [u8; 6])>,
-    },
-    L2tpv3 {
-        session_id: u32,
-    },
-    Erspan {
-        vlan: u16,
-        session_id: u16,
-    },
-    Ah {
-        spi: u32,
-    },
-}
+pub use crate::protocol::identity::EncapsulationIdentifier;
 
 /// Keys offered to one index or reassembler must use IDs issued by the same [`Interner`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]

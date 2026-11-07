@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 pub(in crate::commands) mod output;
-use crate::output::contract::Format;
 
 use packetcraftr_netio as net;
 
@@ -44,16 +43,15 @@ impl crate::commands::Spec for Args {
         self,
         invocation: &crate::invocation::Invocation,
     ) -> Result<crate::commands::CommandExit, CliError> {
-        let format = invocation.format;
-        run(invocation, self, format).map(|()| crate::commands::CommandExit::SUCCESS)
+        run(invocation, self).map(|()| crate::commands::CommandExit::SUCCESS)
     }
 }
 
 pub(super) fn run(
     invocation: &crate::invocation::Invocation,
     arguments: Args,
-    format: Format,
 ) -> Result<(), CliError> {
+    let format = invocation.format;
     let routes = collect_routes(
         &arguments,
         || crate::system::interfaces(invocation, None),

@@ -95,18 +95,13 @@ impl crate::commands::Spec for Args {
         self,
         invocation: &crate::invocation::Invocation,
     ) -> Result<crate::commands::CommandExit, CliError> {
-        let format = invocation.format;
-        let stream = &invocation.output;
-        run(invocation, self, format, stream).map(|()| crate::commands::CommandExit::SUCCESS)
+        run(invocation, self).map(|()| crate::commands::CommandExit::SUCCESS)
     }
 }
 
-pub(super) fn run(
-    invocation: &crate::invocation::Invocation,
-    args: Args,
-    format: Format,
-    stream: &StreamEncoder,
-) -> Result<(), CliError> {
+pub(super) fn run(invocation: &crate::invocation::Invocation, args: Args) -> Result<(), CliError> {
+    let format = invocation.format;
+    let stream = &invocation.output;
     let timeout = args.timeout.timeout();
     if timeout > net::deadline::MAX_WAIT || SystemClock.now().checked_add(timeout).is_none() {
         return Err(CliError::classified(net::Error::InvalidCaptureTimeout {
@@ -139,7 +134,7 @@ pub(super) fn run(
     )?;
     if projector
         .as_ref()
-        .is_some_and(|projector| projector.projection.requirements().stream_index)
+        .is_some_and(|projector| projector.requirements().stream_index)
     {
         return Err(CliError::new(
             Kind::Usage,
@@ -395,8 +390,13 @@ fn drive<P: packetcraftr::CaptureProviders>(
             )
             .map_err(|error| error.with_capture(snapshot.clone()))?;
     }
-    rendering::render_complete(invocation, format, &snapshot, report.diagnostics, stream)
-        .map_err(|error| error.with_capture(snapshot))
+    rendering::render_complete(
+        invocation,
+        &snapshot.summary,
+        report.stats,
+        report.diagnostics,
+    )
+    .map_err(|error| error.with_capture(snapshot))
 }
 
 /// A panic in the selector or sink leaves the state as it was, which finalization still needs.

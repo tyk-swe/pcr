@@ -6,10 +6,10 @@ use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::time::{Duration, SystemTime};
 
+use crate::analysis::ScopedFlowKey;
 use crate::analysis::StreamTransport;
 use crate::analysis::conversation_index::CanonicalFlow;
 use crate::analysis::pipeline::{FrameRecord, Summary as RunSummary};
-use crate::analysis::reassembly::tcp::ScopedFlowKey;
 use crate::analysis::{Constraint, Error};
 
 mod report;

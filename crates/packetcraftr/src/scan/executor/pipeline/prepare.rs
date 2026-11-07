@@ -1,13 +1,14 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-use super::{Planned, limit};
+use super::limit;
 use crate::error::FromFailure as _;
 use crate::{
     clock::Clock,
     engine::preparation::{AdmittedCost, Admitting, AuthorizedRoute, RetainedAdmission},
     exchange::WorkflowExecutor,
+    probe::Batch,
     providers::PacketProviders,
-    scan::executor::PipelineOptions,
+    scan::{Probe, executor::PipelineOptions},
 };
 use packetcraftr_core::error::BoundaryError;
 use packetcraftr_core::{budget::Deadline, field, packet::Packet};
@@ -25,6 +26,19 @@ pub(super) struct Plan<'c, P, K> {
     pub interfaces_bytes: usize,
     pub base_bytes: usize,
 }
+#[derive(Clone, Copy)]
+pub(super) struct Planned<'b> {
+    pub(super) probe: &'b Probe,
+}
+
+impl<'b> Planned<'b> {
+    pub(super) fn new(batch: &'b Batch<Probe>) -> Result<Self, BoundaryError> {
+        Ok(Self {
+            probe: batch.probe()?,
+        })
+    }
+}
+
 pub(super) struct AdmittedProbe {
     pub cost: AdmittedCost,
     pub memory: usize,

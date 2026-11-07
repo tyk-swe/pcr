@@ -1,9 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::analysis::ScopedFlowKey;
 use crate::analysis::http2::IssueCode;
 use crate::analysis::provenance::SourceSet;
-use crate::analysis::reassembly::tcp::ScopedFlowKey;
 use crate::protocol::application::http;
 use crate::protocol::application::http2 as wire;
 use bytes::Bytes;

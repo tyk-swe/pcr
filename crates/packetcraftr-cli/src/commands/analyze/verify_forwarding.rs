@@ -7,7 +7,6 @@ mod rendering;
 
 use std::path::Path;
 
-use crate::output::contract::Format;
 use packetcraftr_core::analysis::{self, forwarding};
 use packetcraftr_core::error::{Classification, Kind};
 use packetcraftr_core::filter::Filter;
@@ -19,7 +18,6 @@ use crate::commands::offline_analysis::{self, AnalysisSetup};
 use crate::errors::CliError;
 use crate::filtering::{self, Capabilities};
 use crate::input::open_capture_hashed;
-use crate::invocation::StreamEncoder;
 use crate::output::capture::CaptureSource;
 
 const VERDICT_NOT_PASS: u8 = 1;
@@ -74,18 +72,16 @@ impl crate::commands::Spec for Args {
         self,
         invocation: &crate::invocation::Invocation,
     ) -> Result<crate::commands::CommandExit, CliError> {
-        let format = invocation.format;
-        let stream = &invocation.output;
-        run(invocation, self, format, stream)
+        run(invocation, self)
     }
 }
 
 pub(super) fn run(
     invocation: &crate::invocation::Invocation,
     arguments: Args,
-    format: Format,
-    stream: &StreamEncoder,
 ) -> Result<CommandExit, CliError> {
+    let format = invocation.format;
+    let stream = &invocation.output;
     let stdin = Path::new("-");
     if arguments.ingress == stdin && arguments.egress == stdin {
         return Err(CliError::from_classification(
@@ -98,9 +94,7 @@ pub(super) fn run(
             Vec::new(),
         ));
     }
-    let capture_limits = arguments.limits.capture.limits()?;
-    let prepared =
-        offline_analysis::prepare(capture_limits, arguments.limits, None, &arguments.decode)?;
+    let prepared = offline_analysis::prepare(arguments.limits, None, &arguments.decode)?;
     let rules = forwarding::Rules::compile_declarations(
         forwarding::Declarations {
             identity: &arguments.identity,
@@ -127,7 +121,7 @@ pub(super) fn run(
         invocation,
         prepared: &prepared,
         rules: &rules,
-        limits: capture_limits,
+        limits: prepared.capture_limits,
         max_evidence_bytes: arguments.max_evidence_bytes,
     };
     let (ingress, ingress_source) = collection.collect(

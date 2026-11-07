@@ -43,16 +43,15 @@ impl crate::commands::Spec for Args {
         self,
         invocation: &crate::invocation::Invocation,
     ) -> Result<crate::commands::CommandExit, CliError> {
-        let format = invocation.format;
-        run(invocation, self, format).map(|()| crate::commands::CommandExit::SUCCESS)
+        run(invocation, self).map(|()| crate::commands::CommandExit::SUCCESS)
     }
 }
 
 pub(super) fn run(
     invocation: &crate::invocation::Invocation,
     arguments: Args,
-    format: Format,
 ) -> Result<(), CliError> {
+    let format = invocation.format;
     match arguments.protocol {
         Some(name) => describe_protocol(invocation, &name, format),
         None => list_protocols(invocation, format),

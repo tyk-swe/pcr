@@ -9,7 +9,6 @@ use crate::output::contract::Format;
 use crate::output::envelope::Published;
 use crate::{
     errors::CliError,
-    invocation::StreamEncoder,
     rendering::{emit_published, write_capture_file, write_hex_line, write_stdout_line},
 };
 use packetcraftr_core::{self as core, frame::Frame};
@@ -58,18 +57,13 @@ impl crate::commands::Spec for Args {
         self,
         invocation: &crate::invocation::Invocation,
     ) -> Result<crate::commands::CommandExit, CliError> {
-        let format = invocation.format;
-        let stream = &invocation.output;
-        run(invocation, self, format, stream).map(|()| crate::commands::CommandExit::SUCCESS)
+        run(invocation, self).map(|()| crate::commands::CommandExit::SUCCESS)
     }
 }
 
-pub(crate) fn run(
-    invocation: &crate::invocation::Invocation,
-    args: Args,
-    format: Format,
-    stream: &StreamEncoder,
-) -> Result<(), CliError> {
+pub(crate) fn run(invocation: &crate::invocation::Invocation, args: Args) -> Result<(), CliError> {
+    let format = invocation.format;
+    let stream = &invocation.output;
     let compression = args.compression.for_output(format)?;
     let registry = core::protocol::builtin::registry();
     let packet = crate::input::read_recipe(

@@ -159,7 +159,7 @@ impl From<packetcraftr_netio::capture::TimestampType> for TimestampType {
             value: value.value,
             name: value.name,
             description: value.description,
-            source: value.source,
+            source: value.source.map(Into::into),
         }
     }
 }
@@ -313,7 +313,7 @@ impl TryFrom<packetcraftr::route::Materialized> for MaterializedRoute {
                         .map(Captured::try_from)
                         .collect::<Result<_, _>>()?,
                     evidence_truncated: resolution.evidence_truncated,
-                    capture_statistics: resolution.capture_statistics,
+                    capture_statistics: resolution.capture_statistics.into(),
                 })
             })
             .transpose()?;
@@ -321,5 +321,22 @@ impl TryFrom<packetcraftr::route::Materialized> for MaterializedRoute {
             plan: route.plan.into(),
             neighbor,
         })
+    }
+}
+
+published_enum! {
+    pub enum Transport from packetcraftr::probe::Transport {
+        Tcp => "tcp",
+        Udp => "udp",
+        Sctp => "sctp",
+        Icmp => "icmp",
+        Ip => "ip",
+    }
+}
+
+published_enum! {
+    pub enum ProbeStatus from packetcraftr::probe::Status {
+        Response => "response",
+        Timeout => "timeout",
     }
 }

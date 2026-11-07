@@ -16,7 +16,6 @@ use self::arguments::{Args, Direction};
 use crate::commands::offline_analysis::prepare;
 use crate::errors::CliError;
 use crate::input::open_capture;
-use crate::invocation::StreamEncoder;
 
 use analysis::follow::{Chunk, Collector};
 use rendering::State;
@@ -78,18 +77,16 @@ impl crate::commands::Spec for Args {
         self,
         invocation: &crate::invocation::Invocation,
     ) -> Result<crate::commands::CommandExit, CliError> {
-        let format = invocation.format;
-        let stream = &invocation.output;
-        run(invocation, self, format, stream).map(|()| crate::commands::CommandExit::SUCCESS)
+        run(invocation, self).map(|()| crate::commands::CommandExit::SUCCESS)
     }
 }
 
 pub(super) fn run(
     invocation: &crate::invocation::Invocation,
     arguments: Args,
-    format: Format,
-    stream: &StreamEncoder,
 ) -> Result<(), CliError> {
+    let format = invocation.format;
+    let stream = &invocation.output;
     let selector = arguments.stream.get()?;
     if format == Format::Raw && arguments.direction == Direction::Both {
         return Err(CliError::new(
@@ -98,8 +95,7 @@ pub(super) fn run(
              choose --direction client or --direction server",
         ));
     }
-    let capture_limits = arguments.limits.capture.limits()?;
-    let prepared = prepare(capture_limits, arguments.limits, None, &arguments.decode)?;
+    let prepared = prepare(arguments.limits, None, &arguments.decode)?;
     let max_output_bytes = crate::command_options::OutputBytes::new(
         arguments.max_application_output_bytes,
         "--max-application-output-bytes",
@@ -121,7 +117,7 @@ pub(super) fn run(
         &invocation.control,
         &invocation.output,
         &arguments.path,
-        capture_limits,
+        prepared.capture_limits,
     )?;
 
     // Indices stay capture-global, so the index stats reports is the index extracted here.
@@ -134,7 +130,7 @@ pub(super) fn run(
         Collector::new(selector),
     );
     let direction = arguments.direction;
-    let mut state = State::new(capture_limits.retention_ceiling());
+    let mut state = State::new(prepared.capture_limits.retention_ceiling());
     let mut sink = |chunk: Chunk| -> Result<(), packetcraftr_core::error::BoundaryError> {
         if direction_matches(direction, &chunk) {
             if let Some(files) = files.as_mut() {

@@ -6,7 +6,7 @@
 use crate::output::published_enum;
 use serde::Serialize;
 
-use packetcraftr::probe::Transport;
+use crate::output::network::Transport;
 
 use crate::output::scan_failure::icmp_request;
 pub(crate) use crate::output::scan_failure::{SctpScan, TcpScan};
@@ -84,7 +84,7 @@ published_enum! {
 /// One discovery probe; `port` is absent for ICMP and IP-protocol probes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub struct DiscoveryProbe {
-    pub transport: Transport,
+    pub transport: crate::output::network::Transport,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub port: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -132,7 +132,7 @@ impl Discovery {
                 .probes
                 .iter()
                 .map(|probe| DiscoveryProbe {
-                    transport: probe.transport(),
+                    transport: probe.transport().into(),
                     port: probe.port(),
                     ip_protocol: probe.ip_protocol(),
                     icmp_request: icmp_request(*probe),
@@ -227,7 +227,7 @@ impl From<&library::Selected> for IpProtocols {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub(crate) struct PortEndpoint {
-    pub transport: Transport,
+    pub transport: crate::output::network::Transport,
     pub port: u16,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub port_hint: Option<&'static str>,
@@ -246,7 +246,7 @@ impl From<&library::Selected> for Ports {
                 .filter_map(|endpoint| {
                     let transport = endpoint.transport();
                     endpoint.port().map(|port| PortEndpoint {
-                        transport,
+                        transport: transport.into(),
                         port,
                         port_hint: library::catalog::hint(transport, port),
                     })

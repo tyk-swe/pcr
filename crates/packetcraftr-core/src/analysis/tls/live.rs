@@ -9,8 +9,8 @@ use std::time::SystemTime;
 use bytes::{Buf as _, BytesMut};
 
 use crate::analysis::Endpoint;
+use crate::analysis::ScopedFlowKey;
 use crate::analysis::dedup::{Deduplicator, PeerDirection};
-use crate::analysis::reassembly::tcp::ScopedFlowKey;
 use crate::protocol::application::tls::{
     CONTENT_TYPE_ALERT, CONTENT_TYPE_APPLICATION_DATA, CONTENT_TYPE_CHANGE_CIPHER_SPEC,
     CONTENT_TYPE_HANDSHAKE, ClientHello, Handshake, Outcome, Record, ServerHello, parse_handshake,

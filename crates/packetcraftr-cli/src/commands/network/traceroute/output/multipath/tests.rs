@@ -164,6 +164,41 @@ fn aggregate_and_stream_preserve_multipath_evidence() {
             .collect();
         assert_eq!(Value::Array(values), aggregate[field]);
     }
+    let mut nodes = std::collections::BTreeMap::new();
+    let mut edges = std::collections::BTreeMap::<String, Value>::new();
+    for (_, update) in streamed.iter().filter(|(kind, _)| *kind == "topology") {
+        for node in update["topology"]["nodes"].as_array().unwrap() {
+            nodes.insert(
+                format!("{}:{}", node["hop_limit"], node["responder"]),
+                node.clone(),
+            );
+        }
+        for edge in update["topology"]["edges"].as_array().unwrap() {
+            let key = format!("{}:{}", edge["from"], edge["to"]);
+            if let Some(previous) = edges.get_mut(&key) {
+                previous["evidence"]
+                    .as_array_mut()
+                    .unwrap()
+                    .extend(edge["evidence"].as_array().unwrap().iter().cloned());
+            } else {
+                edges.insert(key, edge.clone());
+            }
+        }
+    }
+    assert_eq!(
+        json!(nodes.into_values().collect::<Vec<_>>()),
+        aggregate["topology"]["nodes"]
+    );
+    assert_eq!(
+        json!(edges.into_values().collect::<Vec<_>>()),
+        aggregate["topology"]["edges"]
+    );
+    assert_eq!(aggregate["strategy"], "udp");
+    assert_eq!(
+        aggregate["completions"][0]["completion"],
+        "destination_reached"
+    );
+    assert_eq!(aggregate["probes"][0]["replies"][0]["kind"], "intermediate");
     assert_eq!(terminal["summary"], aggregate["summary"]);
     assert_eq!(terminal["flow_summaries"], aggregate["flow_summaries"]);
     assert_eq!(
@@ -176,63 +211,4 @@ fn aggregate_and_stream_preserve_multipath_evidence() {
     );
     assert!(terminal.get("topology").is_none());
     assert!(terminal.get("probes").is_none());
-}
-
-#[test]
-fn stream_fixture_reconstructs_aggregate_topology() {
-    let aggregate: Value = serde_json::from_str(include_str!(
-        "../../../../../../../../examples/documents/output-traceroute-multipath-success.json"
-    ))
-    .unwrap();
-    let mut nodes = std::collections::BTreeMap::new();
-    let mut edges = std::collections::BTreeMap::<String, Value>::new();
-    let mut probes = Vec::new();
-    let mut completed = 0;
-    for (sequence, line) in include_str!(
-        "../../../../../../../../examples/documents/output-traceroute-multipath-stream.ndjson"
-    )
-    .lines()
-    .enumerate()
-    {
-        let record: Value = serde_json::from_str(line).unwrap();
-        assert_eq!(record["sequence"], sequence);
-        assert_eq!(record["result"]["mode"], "multipath");
-        match record["event"].as_str().unwrap() {
-            "probe" => probes.push(record["result"]["probe"].clone()),
-            "topology" => {
-                for node in record["result"]["topology"]["nodes"].as_array().unwrap() {
-                    nodes.insert(
-                        format!("{}:{}", node["hop_limit"], node["responder"]),
-                        node.clone(),
-                    );
-                }
-                for edge in record["result"]["topology"]["edges"].as_array().unwrap() {
-                    let key = format!("{}:{}", edge["from"], edge["to"]);
-                    if let Some(previous) = edges.get_mut(&key) {
-                        previous["evidence"]
-                            .as_array_mut()
-                            .unwrap()
-                            .extend(edge["evidence"].as_array().unwrap().iter().cloned());
-                    } else {
-                        edges.insert(key, edge.clone());
-                    }
-                }
-            }
-            "complete" => {
-                completed += 1;
-                assert_eq!(record["result"]["summary"], aggregate["result"]["summary"]);
-            }
-            _ => {}
-        }
-    }
-    assert_eq!(completed, 1);
-    assert_eq!(json!(probes), aggregate["result"]["probes"]);
-    assert_eq!(
-        json!(nodes.into_values().collect::<Vec<_>>()),
-        aggregate["result"]["topology"]["nodes"]
-    );
-    assert_eq!(
-        json!(edges.into_values().collect::<Vec<_>>()),
-        aggregate["result"]["topology"]["edges"]
-    );
 }

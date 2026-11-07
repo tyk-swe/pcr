@@ -156,6 +156,7 @@ where
     F: FnMut(FrameRecord<'_>) -> Result<(), crate::error::BoundaryError>,
 {
     let limits = &options.limits;
+    let stages = options.stages();
     let decoder = Dissector::new(registry);
     let mut tcp_streams = StreamIndex::default();
     let mut udp_streams = StreamIndex::default();
@@ -218,7 +219,7 @@ where
                 tracker.single(crate::analysis::provenance::SourceFrame { number, timestamp })
             })
             .transpose()?;
-        let (derived, clock_regression) = if options.plan.ip_reassembly || options.track_sources {
+        let (derived, clock_regression) = if stages.ip_reassembly {
             advance_ip_reassembly(
                 &mut ip_dispatch,
                 &stage,
@@ -250,7 +251,7 @@ where
         });
 
         // Assign stream IDs before filtering to keep them stable across runs.
-        let segment = match tcp.filter(|_| options.plan.tcp_index || options.tcp_events) {
+        let segment = match tcp.filter(|_| stages.tcp_index) {
             Some(elected) => tcp_segment(
                 elected.decoded,
                 elected.transport,
@@ -267,7 +268,7 @@ where
             });
             view.payload = &segment.payload;
         }
-        let udp_flow = match udp.filter(|_| options.plan.udp_index) {
+        let udp_flow = match udp.filter(|_| stages.udp_index) {
             Some(elected) => udp_flow(
                 elected.decoded,
                 elected.transport,

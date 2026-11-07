@@ -1,12 +1,14 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 mod admission;
+mod attempts;
 mod capture_lifecycle;
 mod correlation;
 mod settlement;
 mod streaming;
 mod transmission;
 
+pub(in crate::scan) use admission::AdaptiveAdmission;
 pub(super) use admission::{admit, admit_adaptive};
 pub(super) use streaming::run_stream;
 
@@ -14,55 +16,33 @@ mod expiry;
 mod prepare;
 use super::{PipelineEvent, PipelineFeed, PipelineOptions};
 use crate::probe::Batch;
-use crate::scan::{PendingEvidence, PipelineFailure, Probe, SentProbe};
+use crate::scan::{PipelineFailure, Probe};
 use crate::{
     Client, Stats,
     clock::Clock,
     engine::execution::{limits::check_rate, rate_delay},
-    evidence::{RetentionBudget, SentPacket},
+    evidence::RetentionBudget,
     exchange::WorkflowExecutor,
     providers::{CaptureProviders, PacketProviders},
 };
-use correlation::{Best, CandidateIndex, SeenFrames};
+use attempts::{Attempts, BatchStorage, Descriptor};
+use correlation::SeenFrames;
 use packetcraftr_core::{
     budget::Deadline,
     decode::Dissector,
     error::{BoundaryError, Classification as ErrorClassification, Kind},
-    frame::Frame,
 };
 use packetcraftr_netio::{
     capture::{self, Group, GroupRequest, Session as _},
     deadline::MAX_WAIT,
-    interface,
     transmit::Provider as _,
 };
-use prepare::{AdmittedProbe, Plan};
+use prepare::{AdmittedProbe, Plan, Planned};
 use std::{
-    collections::{BTreeMap, BTreeSet, HashSet, VecDeque},
+    collections::{BTreeMap, HashSet},
     sync::Arc,
     time::{Duration, Instant},
 };
-
-struct Pending {
-    sent: Arc<SentPacket>,
-    deadline: Instant,
-    best: Option<Best>,
-    passed: Vec<crate::exchange::Response>,
-    last_response: Option<Frame>,
-    charge: usize,
-}
-#[derive(Clone, Copy)]
-struct Planned<'b> {
-    probe: &'b Probe,
-}
-
-impl<'b> Planned<'b> {
-    fn new(batch: &'b Batch<Probe>) -> Result<Self, BoundaryError> {
-        Ok(Self {
-            probe: batch.probe()?,
-        })
-    }
-}
 
 fn validate_options(
     batches: &[Batch<Probe>],
@@ -188,43 +168,8 @@ pub(super) fn run<P: PacketProviders, K: Clock>(
     pipeline.finish(result)
 }
 
-pub(in crate::scan) struct AdaptiveAdmission {
-    interfaces: Vec<interface::Id>,
-    window: usize,
-    many_interfaces: bool,
-    max_description_bytes: usize,
-    max_route_bytes: usize,
-    max_map_route_bytes: usize,
-    source_metadata_bytes: usize,
-    max_source_name_bytes: usize,
-    max_probe_bytes: usize,
-    summary_bytes: usize,
-}
-
 type CaptureSession<P> = <<P as CaptureProviders>::Capture as capture::Provider>::Capture;
 
-enum BatchStorage<'a> {
-    Borrowed(&'a Batch<Probe>),
-    Owned(Batch<Probe>),
-}
-impl BatchStorage<'_> {
-    fn batch(&self) -> &Batch<Probe> {
-        match self {
-            Self::Borrowed(batch) => batch,
-            Self::Owned(batch) => batch,
-        }
-    }
-}
-struct Descriptor<'a> {
-    batch: BatchStorage<'a>,
-    host_deadline: Option<Instant>,
-    route: Option<Box<crate::engine::preparation::AuthorizedRoute>>,
-}
-impl Descriptor<'_> {
-    fn probe(&self) -> &Probe {
-        &self.batch.batch().probes[0]
-    }
-}
 enum Output<'a> {
     Fixed(&'a mut dyn FnMut(PipelineEvent) -> Result<(), BoundaryError>),
     Stream(&'a mut dyn PipelineFeed),
@@ -255,10 +200,7 @@ struct Pipeline<'a, P: PacketProviders, K> {
     history: &'a mut super::reply_history::ReplyHistory,
     executor: &'a WorkflowExecutor<'a, P, K>,
     transmitter: Box<dyn packetcraftr_netio::transmit::Provider + 'a>,
-    descriptions: BTreeMap<usize, Descriptor<'a>>,
-    ready: BTreeMap<usize, AdmittedProbe>,
-    armed_ready: BTreeSet<usize>,
-    ready_deadlines: BTreeSet<(Instant, usize)>,
+    attempts: Attempts<'a>,
     streaming: Option<Streaming>,
     options: PipelineOptions,
     deadline: Instant,
@@ -272,11 +214,6 @@ struct Pipeline<'a, P: PacketProviders, K> {
     decoder: Dissector,
     spacing: Duration,
     stats: Stats,
-    pending: BTreeMap<usize, Pending>,
-    recent: VecDeque<(usize, Arc<SentPacket>, usize)>,
-    recent_sent: BTreeMap<usize, Arc<SentPacket>>,
-    candidates: CandidateIndex,
-    retained: usize,
     evidence: RetentionBudget,
     failed_probe: Option<Probe>,
     seen: SeenFrames,
@@ -285,7 +222,6 @@ struct Pipeline<'a, P: PacketProviders, K> {
     next_send: Instant,
     capture_drain_limit: usize,
     capture_drain_remaining: usize,
-    deadlines: expiry::PendingDeadlines,
 }
 
 impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
@@ -377,28 +313,20 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
                 .len()
                 .min(options.max_in_flight.saturating_mul(2))
         };
-        let ready = descriptions
-            .keys()
-            .copied()
-            .zip(std::mem::take(&mut plan.probes))
-            .collect::<BTreeMap<_, _>>();
-        let armed_ready = ready.keys().copied().collect();
-        let ready_deadlines = descriptions
-            .iter()
-            .filter_map(|(index, description)| {
-                description.host_deadline.map(|deadline| (deadline, *index))
-            })
-            .collect();
         let seen = SeenFrames::new(options.max_evidence_frames);
-        let retained = plan.base_bytes;
+        let attempts = Attempts::new(
+            descriptions,
+            std::mem::take(&mut plan.probes),
+            source_count,
+            capacity,
+            options.max_in_flight,
+            plan.base_bytes,
+        );
         Ok(Self {
             history,
             executor,
             transmitter: executor.client.providers.transmit().session(),
-            descriptions,
-            ready,
-            armed_ready,
-            ready_deadlines,
+            attempts,
             streaming,
             options,
             deadline,
@@ -412,11 +340,6 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
             decoder: Dissector::new(executor.operation.registry.clone()),
             spacing: Duration::ZERO,
             stats: Stats::default(),
-            pending: BTreeMap::new(),
-            recent: VecDeque::new(),
-            recent_sent: BTreeMap::new(),
-            candidates: CandidateIndex::new(source_count, capacity),
-            retained,
             evidence: RetentionBudget::default(),
             failed_probe: None,
             seen,
@@ -425,7 +348,6 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
             next_send: started,
             capture_drain_limit,
             capture_drain_remaining: capture_drain_limit,
-            deadlines: expiry::PendingDeadlines::default(),
         })
     }
 
@@ -447,12 +369,18 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
         )
         .map_err(BoundaryError::from_error)?;
         self.next_send = self.executor.client.now();
-        while !self.done() || !self.ready.is_empty() || !self.pending.is_empty() {
+        while !self.done()
+            || self.attempts.queued_count() != 0
+            || self.attempts.pending_count() != 0
+        {
             check(self.executor.client, self.deadline, &self.options.control)?;
             let draining_captures = self.settle_expired()?;
             self.refill(draining_captures)?;
             self.send_ready(draining_captures)?;
-            if self.done() && self.ready.is_empty() && self.pending.is_empty() {
+            if self.done()
+                && self.attempts.queued_count() == 0
+                && self.attempts.pending_count() == 0
+            {
                 break;
             }
             let Some(captured) = self.read_frame(draining_captures)? else {
@@ -522,29 +450,510 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
         Err(BoundaryError::from_error(PipelineFailure {
             source,
             stats,
-            pending: pending_evidence(&self.pending, &self.descriptions),
+            pending: self.attempts.pending_evidence(),
             failed_probe: self.failed_probe,
             capture_sources,
             cleanup,
         }))
     }
 }
-fn pending_evidence(
-    pending: &BTreeMap<usize, Pending>,
-    descriptions: &BTreeMap<usize, Descriptor<'_>>,
-) -> Vec<PendingEvidence> {
-    pending
-        .iter()
-        .map(|(index, entry)| PendingEvidence {
-            sent: SentProbe {
-                probe: descriptions[index].probe().clone(),
-                sent: entry.sent.clone(),
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        engine::operation::Operation,
+        evidence::{ExecutionPermit, SentPacket},
+        policy::{DestinationConstraint, Policy},
+        scan::{
+            Stage,
+            executor::{PipelineBatch, PipelinePoll},
+        },
+    };
+    use packetcraftr_core::{
+        build::{Builder, Options as BuildOptions},
+        codec::Addresses,
+        frame::{Frame, LinkType},
+        packet::Packet,
+        protocol::{builtin, network::Ipv4, transport::Tcp},
+    };
+    use packetcraftr_netio::{
+        Error as LiveIoError, interface,
+        link::{Capability, Mode},
+        route::{Decision, Scope, SelectionReason},
+        transmit,
+    };
+    use std::{collections::VecDeque, convert::Infallible, net::IpAddr, sync::Mutex};
+
+    #[derive(Default)]
+    struct Observed {
+        frames: VecDeque<capture::Captured>,
+        armed: Vec<interface::Id>,
+        shutdown: usize,
+    }
+
+    #[derive(Clone, Default)]
+    struct Network(Arc<Mutex<Observed>>);
+
+    fn interface(index: u32) -> interface::Id {
+        interface::Id {
+            index,
+            name: format!("controlled{}", index - 1),
+        }
+    }
+
+    impl interface::Provider for Network {
+        fn interfaces(&self, _: &Deadline) -> Result<Vec<interface::Info>, interface::Error> {
+            Ok((1..=2)
+                .map(|index| interface::Info {
+                    id: interface(index),
+                    description: None,
+                    mac_address: None,
+                    addresses: Vec::new(),
+                    flags: Default::default(),
+                    mtu: Some(9000),
+                    capability: Capability::Layer3,
+                    link_type: LinkType::RAW,
+                })
+                .collect())
+        }
+    }
+
+    impl packetcraftr_netio::route::Provider for Network {
+        type Error = Infallible;
+        fn lookup_with_preferences(
+            &self,
+            destination: IpAddr,
+            _: Option<&interface::Id>,
+            _: Option<IpAddr>,
+            _: &Deadline,
+        ) -> Result<Decision, Self::Error> {
+            Ok(Decision {
+                interface: interface(if destination == "10.0.0.3".parse::<IpAddr>().unwrap() {
+                    2
+                } else {
+                    1
+                }),
+                source_mac: None,
+                selected_source: Some("10.0.0.2".parse().unwrap()),
+                preferred_source: None,
+                next_hop: None,
+                selection_reason: SelectionReason::OnLink,
+                destination_scope: Scope::Private,
+                mtu: 9000,
+                capability: Capability::Layer3,
+                link_type: LinkType::RAW,
+            })
+        }
+    }
+
+    impl transmit::Provider for Network {
+        fn send(&self, frame: transmit::Outbound<'_>) -> Result<transmit::Report, LiveIoError> {
+            Ok(transmit::Submission::start().complete(frame.bytes().len(), frame.bytes().clone()))
+        }
+    }
+
+    struct Session {
+        network: Network,
+        metadata: capture::Metadata,
+        stats: capture::Stats,
+    }
+
+    impl capture::Provider for Network {
+        type Capture = Session;
+        fn arm_capture(
+            &self,
+            request: &capture::Request,
+            _: &Deadline,
+        ) -> Result<Session, LiveIoError> {
+            self.0.lock().unwrap().armed.push(request.interface.clone());
+            Ok(Session {
+                network: self.clone(),
+                metadata: capture::Metadata {
+                    interface: request.interface.clone(),
+                    link_type: LinkType::RAW,
+                    snap_length: request.limits.snap_length,
+                    native: Default::default(),
+                },
+                stats: Default::default(),
+            })
+        }
+    }
+
+    impl capture::Session for Session {
+        fn metadata(&self) -> &capture::Metadata {
+            &self.metadata
+        }
+        fn wait_ready(&mut self, _: &Deadline) -> Result<(), LiveIoError> {
+            Ok(())
+        }
+        fn next_captured_frame(
+            &mut self,
+            deadline: &Deadline,
+        ) -> Result<Option<capture::Captured>, LiveIoError> {
+            let mut observed = self.network.0.lock().unwrap();
+            if let Some(frame) = observed
+                .frames
+                .pop_front_if(|frame| frame.frame.interface == Some(self.metadata.interface.index))
+            {
+                self.stats.received_frames += 1;
+                self.stats.received_bytes += frame.frame.bytes().len() as u64;
+                return Ok(Some(frame));
+            }
+            drop(observed);
+            std::thread::sleep(
+                deadline
+                    .live_remaining()
+                    .unwrap_or_default()
+                    .min(Duration::from_millis(1)),
+            );
+            Ok(None)
+        }
+        fn shutdown(&mut self) -> Result<(), LiveIoError> {
+            self.network.0.lock().unwrap().shutdown += 1;
+            Ok(())
+        }
+        fn stats(&self) -> capture::Stats {
+            self.stats
+        }
+        fn observation_quality(&self) -> capture::ObservationQuality {
+            capture::ObservationQuality::NoReportedLoss
+        }
+    }
+
+    type Providers = crate::ProviderSet<Network, Network, Network, Network>;
+    type TestClient = Client<Providers>;
+
+    fn fixture() -> (TestClient, Network) {
+        let network = Network::default();
+        let policy = Policy {
+            allowed_destinations: ["10.0.0.1", "10.0.0.3"]
+                .map(|address| DestinationConstraint::Exact(address.parse().unwrap()))
+                .into(),
+            ..Policy::default()
+        };
+        (
+            Client::new(
+                builtin::registry(),
+                policy,
+                crate::ProviderSet::packet(
+                    network.clone(),
+                    network.clone(),
+                    network.clone(),
+                    network.clone(),
+                ),
+            ),
+            network,
+        )
+    }
+
+    fn batch(sequence: u64, address: &str) -> Batch<Probe> {
+        Batch {
+            probes: vec![Probe {
+                sequence,
+                stage: Stage::Scan,
+                address: address.parse().unwrap(),
+                scope: None,
+                endpoint: crate::probe::Endpoint::Tcp { port: 80 },
+                tcp_scan: Default::default(),
+                sctp_scan: Default::default(),
+                attempt: 1,
+                udp_payload: Default::default(),
+                udp_profile: None,
+            }],
+            timeout: Duration::from_millis(100),
+            permit: ExecutionPermit::new(),
+            sequence,
+        }
+    }
+
+    fn executor<'a>(
+        client: &'a TestClient,
+        operation: &'a Operation,
+    ) -> WorkflowExecutor<'a, Providers> {
+        WorkflowExecutor::new(
+            client,
+            operation,
+            crate::send::Options {
+                plan: crate::route::Options {
+                    link_mode: Mode::Layer3,
+                    ..Default::default()
+                },
+                ..Default::default()
             },
-            response: entry
-                .best
-                .as_ref()
-                .map(|best| best.response.response.frame.clone())
-                .or_else(|| entry.last_response.clone()),
-        })
-        .collect()
+            Default::default(),
+        )
+    }
+
+    fn options(client: &TestClient) -> PipelineOptions {
+        PipelineOptions {
+            max_in_flight: 1,
+            probes_per_second: None,
+            max_duration: Duration::from_secs(2),
+            control: client.deadline(Duration::from_secs(2)),
+            max_prepared_bytes: 1024 * 1024,
+            max_evidence_frames: 100,
+            max_evidence_bytes: 1024 * 1024,
+            preceding: Stats::default(),
+        }
+    }
+
+    fn response(sent: &SentPacket) -> capture::Captured {
+        let ip = sent.built().packet.get::<Ipv4>().unwrap();
+        let tcp = sent.built().packet.get::<Tcp>().unwrap();
+        let mut packet = Packet::default();
+        packet.push(Ipv4 {
+            source: ip.destination,
+            destination: ip.source,
+            ..Default::default()
+        });
+        packet.push(Tcp {
+            source_port: tcp.destination_port,
+            destination_port: tcp.source_port,
+            acknowledgment: tcp.sequence.wrapping_add(1),
+            flags: Tcp::SYN | Tcp::ACK,
+            ..Default::default()
+        });
+        let built = Builder::new(builtin::registry())
+            .build(packet, Addresses::default(), BuildOptions::default())
+            .unwrap();
+        let mut frame = Frame::new(None, LinkType::RAW, built.bytes).unwrap();
+        frame.interface = Some(sent.route().plan.decision.interface.index);
+        capture::Captured::new(frame, Some(Instant::now()))
+    }
+
+    fn history() -> super::super::reply_history::ReplyHistory {
+        super::super::reply_history::ReplyHistory::new(false)
+    }
+
+    #[test]
+    fn completed_attempt_remains_available_for_late_attribution() {
+        let (client, network) = fixture();
+        let operation = Operation::new(&client, Duration::from_secs(2));
+        let executor = executor(&client, &operation);
+        let mut completed = Vec::new();
+        let mut late = Vec::new();
+        let stats = run(
+            &executor,
+            &[batch(0, "10.0.0.1"), batch(1, "10.0.0.1")],
+            options(&client),
+            &mut |event| {
+                match event {
+                    PipelineEvent::Sent { index: 0, sent } => {
+                        network
+                            .0
+                            .lock()
+                            .unwrap()
+                            .frames
+                            .extend([response(&sent), response(&sent)]);
+                    }
+                    PipelineEvent::Completed { index, execution } => {
+                        completed.push((index, execution.responses.len()));
+                    }
+                    PipelineEvent::Unattributed {
+                        attribution: crate::scan::Attribution::Late,
+                        sequence,
+                        ..
+                    } => late.push(sequence),
+                    _ => {}
+                }
+                Ok(())
+            },
+            &mut history(),
+        )
+        .unwrap();
+        assert_eq!(stats.packets_completed, 2);
+        assert_eq!(completed, [(0, 1), (1, 0)]);
+        assert_eq!(late, [Some(0)]);
+        let observed = network.0.lock().unwrap();
+        assert_eq!(observed.shutdown, observed.armed.len());
+    }
+
+    #[test]
+    fn completion_publication_failure_retains_pending_response_and_failed_probe() {
+        let (client, network) = fixture();
+        let operation = Operation::new(&client, Duration::from_secs(2));
+        let executor = executor(&client, &operation);
+        let error = run(
+            &executor,
+            &[batch(0, "10.0.0.1")],
+            options(&client),
+            &mut |event| {
+                match event {
+                    PipelineEvent::Sent { sent, .. } => {
+                        network.0.lock().unwrap().frames.push_back(response(&sent));
+                    }
+                    PipelineEvent::Completed { .. } => return Err(limit("test publication", 0)),
+                    _ => {}
+                }
+                Ok(())
+            },
+            &mut history(),
+        )
+        .unwrap_err();
+        let failure = std::error::Error::source(&error)
+            .unwrap()
+            .downcast_ref::<PipelineFailure>()
+            .unwrap();
+        assert_eq!(failure.pending.len(), 1);
+        assert_eq!(failure.pending[0].sent.probe.sequence, 0);
+        assert!(failure.pending[0].response.is_some());
+        assert_eq!(failure.failed_probe.as_ref().unwrap().sequence, 0);
+        assert_eq!(failure.stats.packets_completed, 1);
+        assert!(failure.cleanup.is_none());
+    }
+
+    #[test]
+    fn queued_capture_is_settled_before_elapsed_timeout() {
+        let (client, network) = fixture();
+        let operation = Operation::new(&client, Duration::from_secs(2));
+        let executor = executor(&client, &operation);
+        let probe = batch(0, "10.0.0.1");
+        let mut replies = Vec::new();
+        run(
+            &executor,
+            std::slice::from_ref(&probe),
+            options(&client),
+            &mut |event| {
+                match event {
+                    PipelineEvent::Sent { sent, .. } => {
+                        network.0.lock().unwrap().frames.push_back(response(&sent));
+                        std::thread::sleep(probe.timeout + Duration::from_millis(5));
+                    }
+                    PipelineEvent::Completed { execution, .. } => {
+                        replies.push(execution.responses.len());
+                    }
+                    _ => {}
+                }
+                Ok(())
+            },
+            &mut history(),
+        )
+        .unwrap();
+        assert_eq!(replies, [1]);
+    }
+
+    struct Feed {
+        batches: VecDeque<PipelineBatch>,
+        network: Network,
+        first: Option<Arc<SentPacket>>,
+        previous: Option<Arc<SentPacket>>,
+        sent: Vec<usize>,
+        completed: Vec<(usize, usize)>,
+        omitted: Vec<usize>,
+        late: Vec<Option<u64>>,
+    }
+
+    impl crate::scan::executor::PipelineFeed for Feed {
+        fn poll(&mut self, capacity: usize, _: Instant) -> Result<PipelinePoll, BoundaryError> {
+            Ok(PipelinePoll {
+                batches: if capacity == 0 {
+                    Vec::new()
+                } else {
+                    self.batches.pop_front().into_iter().collect()
+                },
+                next_ready: None,
+                done: self.batches.is_empty(),
+            })
+        }
+        fn event(&mut self, event: PipelineEvent) -> Result<(), BoundaryError> {
+            match event {
+                PipelineEvent::Sent { index, sent } => {
+                    self.sent.push(index);
+                    if self.batches.is_empty() {
+                        let mut oldest = response(self.first.as_ref().unwrap());
+                        oldest.frame.interface = Some(sent.route().plan.decision.interface.index);
+                        self.network
+                            .0
+                            .lock()
+                            .unwrap()
+                            .frames
+                            .extend([oldest, response(self.previous.as_ref().unwrap())]);
+                    } else {
+                        self.network
+                            .0
+                            .lock()
+                            .unwrap()
+                            .frames
+                            .push_back(response(&sent));
+                        self.first.get_or_insert_with(|| sent.clone());
+                        self.previous = Some(sent);
+                    }
+                }
+                PipelineEvent::Completed { index, execution } => {
+                    self.completed.push((index, execution.responses.len()));
+                }
+                PipelineEvent::Omitted { index } => self.omitted.push(index),
+                PipelineEvent::Unattributed {
+                    attribution: crate::scan::Attribution::Late,
+                    sequence,
+                    ..
+                } => self.late.push(sequence),
+                _ => {}
+            }
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn stream_releases_bounded_history_and_rotates_only_after_settlement() {
+        let (client, network) = fixture();
+        let operation = Operation::new(&client, Duration::from_secs(2));
+        let executor = executor(&client, &operation);
+        let batches = (0..=25)
+            .map(|index| batch(index, if index < 12 { "10.0.0.1" } else { "10.0.0.3" }))
+            .collect::<Vec<_>>();
+        let mut options = options(&client);
+        options.max_prepared_bytes = 64 * 1024;
+        let mut admission = AdaptiveAdmission::new(1);
+        for batch in &batches {
+            admission::admit_adaptive(
+                &executor,
+                std::slice::from_ref(batch),
+                &options,
+                &mut admission,
+            )
+            .unwrap();
+        }
+        let mut feed = Feed {
+            batches: batches
+                .into_iter()
+                .enumerate()
+                .map(|(index, batch)| PipelineBatch {
+                    index,
+                    batch,
+                    host_deadline: (index == 0).then(|| client.now() - Duration::from_millis(1)),
+                })
+                .collect(),
+            network: network.clone(),
+            first: None,
+            previous: None,
+            sent: Vec::new(),
+            completed: Vec::new(),
+            omitted: Vec::new(),
+            late: Vec::new(),
+        };
+        let stats = streaming::run_stream(
+            &executor,
+            options,
+            &admission,
+            feed.batches.len(),
+            &mut feed,
+            &mut history(),
+        )
+        .unwrap();
+        assert_eq!(feed.omitted, [0]);
+        assert_eq!(feed.sent, (1..=25).collect::<Vec<_>>());
+        assert_eq!(
+            feed.completed,
+            (1..=25)
+                .map(|index| (index, usize::from(index != 25)))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(feed.late, [Some(24)]);
+        assert_eq!(stats.packets_completed, feed.sent.len() as u64);
+        let observed = network.0.lock().unwrap();
+        assert_eq!(observed.armed, [interface(1), interface(2)]);
+        assert_eq!(observed.shutdown, observed.armed.len());
+    }
 }

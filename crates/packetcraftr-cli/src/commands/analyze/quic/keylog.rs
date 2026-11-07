@@ -12,9 +12,18 @@ pub(super) struct Input {
 impl Input {
     pub(super) fn open(path: Option<&Path>) -> Result<Self, CliError> {
         let file = path
-            .map(File::open)
-            .transpose()
-            .map_err(|e| CliError::caused(Kind::Io, &e))?;
+            .map(|path| {
+                let metadata =
+                    std::fs::metadata(path).map_err(|error| CliError::caused(Kind::Io, &error))?;
+                if !metadata.is_file() {
+                    return Err(CliError::new(
+                        Kind::Usage,
+                        "TLS key log must be a regular file",
+                    ));
+                }
+                File::open(path).map_err(|error| CliError::caused(Kind::Io, &error))
+            })
+            .transpose()?;
         Ok(Self { file, read: 0 })
     }
     pub(super) fn poll(

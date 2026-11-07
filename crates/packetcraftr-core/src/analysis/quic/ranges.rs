@@ -60,11 +60,6 @@ impl Ranges {
         self.bytes += extra;
         Ok(repeated)
     }
-    pub(super) fn end(&self) -> u64 {
-        self.pieces
-            .last_key_value()
-            .map_or(0, |(&offset, bytes)| offset + bytes.len() as u64)
-    }
     pub(super) fn prefix(&self, offset: u64) -> Vec<u8> {
         let mut output = Vec::new();
         let mut cursor = offset;
@@ -124,6 +119,7 @@ impl Ranges {
 
 pub(super) struct StreamState {
     pub(super) ranges: Ranges,
+    pub(super) observed_end: u64,
     pub(super) final_size: Option<u64>,
     pub(super) reset_error: Option<u64>,
     pub(super) final_size_error: bool,
@@ -133,6 +129,7 @@ impl StreamState {
     pub(super) fn new() -> Self {
         Self {
             ranges: Ranges::default(),
+            observed_end: 0,
             final_size: None,
             reset_error: None,
             final_size_error: false,
@@ -140,11 +137,19 @@ impl StreamState {
         }
     }
     pub(super) fn set_final(&mut self, size: u64) -> Result<(), Error> {
-        if self.final_size.is_some_and(|old| old != size) || size < self.ranges.end() {
+        if self.final_size.is_some_and(|old| old != size) || size < self.observed_end {
             self.final_size_error = true;
             return Err(Error::Invalid);
         }
         self.final_size = Some(size);
+        Ok(())
+    }
+    pub(super) fn observe_end(&mut self, end: u64) -> Result<(), Error> {
+        self.observed_end = self.observed_end.max(end);
+        if self.final_size.is_some_and(|size| self.observed_end > size) {
+            self.final_size_error = true;
+            return Err(Error::Invalid);
+        }
         Ok(())
     }
     pub(super) fn insert(
@@ -156,11 +161,9 @@ impl StreamState {
     ) -> Result<u64, Error> {
         let end = offset
             .checked_add(data.len() as u64)
+            .filter(|end| *end < 1_u64 << 62)
             .ok_or(Error::Invalid)?;
-        if self.final_size.is_some_and(|size| end > size) {
-            self.final_size_error = true;
-            return Err(Error::Invalid);
-        }
+        self.observe_end(end)?;
         if fin {
             self.set_final(end)?;
         }

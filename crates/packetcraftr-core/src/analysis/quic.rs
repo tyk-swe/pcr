@@ -375,6 +375,11 @@ impl Collector {
                     &self.limits,
                     true,
                 );
+                if result == Err(Error::Authentication)
+                    && item.reason != PendingReason::Authentication
+                {
+                    state.report.metrics.authentication_failures += 1;
+                }
                 match result {
                     Ok(false) | Err(Error::Authentication) => {
                         item.reason = if result.is_err() {

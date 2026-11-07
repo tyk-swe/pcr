@@ -8,7 +8,7 @@ packetcraftr --output ndjson analyze quic --interface eth0 --keylog session.keys
 packetcraftr --output json analyze quic capture.pcapng --keylog session.keys --connection 0 --stream 0 --direction client --include-data
 ```
 
-Use an endpoint that supports TLS key logging. `SSLKEYLOGFILE` support depends on the endpoint and its build. Key logs contain sensitive session secrets. The analyzer reads secrets locally and never includes them in reports. Missing secrets still permit Initial handshake metadata, including visible SNI, offered ALPN, and QUIC fingerprints. ECH outer names are identified as outer names.
+Key logs must be regular files. Pipes, devices and directories are rejected before capture starts. Use an endpoint that supports TLS key logging. `SSLKEYLOGFILE` support depends on the endpoint and its build. Key logs contain sensitive session secrets. The analyzer reads secrets locally and never includes them in reports. Missing secrets still permit Initial handshake metadata, including visible SNI, offered ALPN, and QUIC fingerprints. ECH outer names are identified as outer names.
 
 File and live inputs are mutually exclusive. Offline builds work without libpcap. Live input uses the existing native capture workflow, feature requirements, permissions, queue bounds, cancellation, and cleanup. `--capture-filter` applies numeric BPF before queue admission. `--filter` applies after IP reconstruction. Connection, stream, and direction selectors apply after connection assembly, preserving handshake context.
 

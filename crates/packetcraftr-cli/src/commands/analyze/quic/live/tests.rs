@@ -131,11 +131,16 @@ struct Command {
     #[command(flatten)]
     args: Args,
 }
-fn capture(cancel: bool, fail_cleanup: bool, drops: u64) -> (Result<Outcome, CliError>, usize) {
+fn capture(
+    cancel: bool,
+    fail_cleanup: bool,
+    drops: u64,
+    max_output_bytes: Option<usize>,
+) -> (Result<Outcome, CliError>, usize, Args, Invocation) {
     let directory = tempfile::tempdir().unwrap();
     let keys = directory.path().join("session.keys");
     std::fs::write(&keys, []).unwrap();
-    let args = Command::parse_from([
+    let mut args = Command::parse_from([
         "quic",
         "--interface",
         "mock",
@@ -143,6 +148,8 @@ fn capture(cancel: bool, fail_cleanup: bool, drops: u64) -> (Result<Outcome, Cli
         keys.to_str().unwrap(),
     ])
     .args;
+    args.max_application_output_bytes =
+        max_output_bytes.unwrap_or(args.max_application_output_bytes);
     let cancellation = Cancellation::default();
     let invocation = Invocation::new(
         crate::output::contract::Format::Json,
@@ -207,11 +214,11 @@ fn capture(cancel: bool, fail_cleanup: bool, drops: u64) -> (Result<Outcome, Cli
         Duration::from_secs(30),
     );
     let result = drive(&client, request, context, &args, &invocation);
-    (result, shutdowns.load(Ordering::Relaxed))
+    (result, shutdowns.load(Ordering::Relaxed), args, invocation)
 }
 #[test]
 fn live_quic_follows_appended_secrets_and_preserves_capture_loss() {
-    let (outcome, shutdowns) = capture(false, false, 1);
+    let (outcome, shutdowns, _, _) = capture(false, false, 1, None);
     let outcome = outcome.unwrap_or_else(|e| panic!("{}", e.message));
     assert_eq!(shutdowns, 1);
     assert_eq!(
@@ -242,7 +249,7 @@ fn live_quic_follows_appended_secrets_and_preserves_capture_loss() {
 #[test]
 fn live_quic_cancellation_and_cleanup_failure_preserve_partial_evidence() {
     for (cancel, fail_cleanup) in [(true, false), (false, true)] {
-        let (outcome, shutdowns) = capture(cancel, fail_cleanup, 0);
+        let (outcome, shutdowns, _, _) = capture(cancel, fail_cleanup, 0, None);
         let error = outcome.err().expect("capture must fail");
         assert!(shutdowns >= 1);
         let snapshot = error
@@ -257,4 +264,27 @@ fn live_quic_cancellation_and_cleanup_failure_preserve_partial_evidence() {
             assert!(!snapshot.summary.capture_statistics_complete);
         }
     }
+}
+
+#[test]
+fn live_quic_finalization_failure_retains_capture_statistics() {
+    let (outcome, shutdowns, args, invocation) = capture(false, false, 7, Some(1));
+    let outcome = outcome.unwrap_or_else(|error| panic!("{}", error.message));
+    assert_eq!(shutdowns, 1);
+    let error = super::super::finish(
+        &args,
+        &invocation,
+        outcome.run,
+        Some(outcome.capture),
+        outcome.collector,
+        outcome.secrets,
+        outcome.state,
+    )
+    .unwrap_err();
+    let snapshot = error
+        .output_error()
+        .capture
+        .expect("capture evidence after finalization failure");
+    assert_eq!(snapshot.summary.sources[0].statistics.dropped_frames, 7);
+    assert_eq!(snapshot.summary.frames_delivered, 9);
 }

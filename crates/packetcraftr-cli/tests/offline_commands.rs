@@ -1684,3 +1684,43 @@ fn quic_text_payloads_distinguish_rejected_early_data() {
         == "data connection=0 stream=0 direction=client offset=0 early_data=true hex=6561726c79"));
     assert!(text.lines().any(|line| line == "data connection=0 stream=0 direction=client offset=0 early_data=false hex=7265706c6163656d656e74"));
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn quic_keylog_rejects_idle_nonregular_input() {
+    let capture = capture_path("quic-demo-v1.pcap");
+    let args = [
+        "--output",
+        "json",
+        "analyze",
+        "quic",
+        capture.to_str().unwrap(),
+        "--keylog",
+        "/dev/stdin",
+    ];
+    let mut child = Command::new(env!("CARGO_BIN_EXE_packetcraftr"))
+        .args(args)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while child.try_wait().unwrap().is_none() {
+        if std::time::Instant::now() >= until {
+            child.kill().unwrap();
+            child.wait().unwrap();
+            panic!("nonregular key-log input must be rejected without waiting for a writer");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let output = child.wait_with_output().unwrap();
+    assert!(!output.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(
+        report["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("regular file")
+    );
+}

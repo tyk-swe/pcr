@@ -320,7 +320,7 @@ impl State {
             + self
                 .streams
                 .values()
-                .map(|s| 256 + s.ranges.memory())
+                .map(|s| 264 + s.ranges.memory())
                 .sum::<usize>()
             + self
                 .crypto

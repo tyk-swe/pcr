@@ -98,7 +98,7 @@ fn run(args: Args, invocation: &Invocation) -> Result<(), CliError> {
     secrets.poll(&mut collector, invocation, args.path.is_some())?;
     let mut state = rendering::State::new(&args)?;
     let encoder = &invocation.output;
-    let (run, capture, mut collector, mut secrets, mut state) = if let Some(path) = &args.path {
+    let (run, capture, collector, secrets, state) = if let Some(path) = &args.path {
         let mut reader = crate::input::open_capture(
             &invocation.control,
             &invocation.output,
@@ -130,90 +130,110 @@ fn run(args: Args, invocation: &Invocation) -> Result<(), CliError> {
             live.state,
         )
     };
-    secrets.poll(&mut collector, invocation, true)?;
-    let owned_deadline;
-    let deadline = if let Some(deadline) = &invocation.control.deadline {
-        deadline.as_ref()
-    } else {
-        owned_deadline = Deadline::new(args.limits.max_duration());
-        &owned_deadline
-    };
-    let input_incomplete = run.input_incomplete()
-        || capture.as_ref().is_some_and(|capture| {
-            !capture.summary.capture_statistics_complete
-                || capture.summary.sources.iter().any(|source| {
-                    source.statistics.dropped_frames > 0
-                        || source.statistics.receiver_dropped_frames > 0
-                        || source.statistics.overflow_events > 0
-                })
-        });
-    if input_incomplete {
-        collector.mark_capture_incomplete();
-        state.mark_capture_incomplete();
-    }
-    let engine = collector
-        .finish(deadline, |event| {
-            state
-                .event(event, &args, invocation, encoder)
-                .map_err(CliError::into_boundary_error)
-        })
-        .map_err(CliError::classified)?;
-    if (args.connection.is_some() || args.stream.is_some()) && state.selected == 0 {
-        return Err(CliError::new(
-            Kind::Usage,
-            "no QUIC connection or stream matched the selectors",
-        ));
-    }
-    state.publish(invocation)?;
-    let summary = output::Summary {
-        engine: engine.into(),
-        frames_read: run.frames_read,
-        frames_matched: run.frames_matched,
-        bytes_read: run.bytes_read,
-        clock: run.clock.into(),
-        ip_reassembly: (&run.ip_reassembly).into(),
-        incomplete_sources: run.incomplete_sources.len() as u64,
-        source_outcomes_omitted: run.source_outcomes_omitted,
-        input_incomplete,
-        connections_selected: state.selected,
-        connections_omitted: state.omitted,
-        application_output_bytes: state.output_bytes,
-    };
-    match invocation.format {
-        Format::Text => write_stdout_line(
-            invocation,
-            format_args!(
-                "QUIC connections={} selected={} packets={} decrypted={} unassociated={} malformed={} evictions={} rejected_keys={} input_incomplete={}",
-                summary.engine.connections,
-                summary.connections_selected,
-                summary.engine.packets,
-                summary.engine.decrypted_packets,
-                summary.engine.unassociated_packets,
-                summary.engine.malformed_datagrams,
-                summary.engine.connections_evicted,
-                summary.engine.keylog_records_rejected,
-                summary.input_incomplete
+    finish(&args, invocation, run, capture, collector, secrets, state)
+}
+
+fn finish(
+    args: &Args,
+    invocation: &Invocation,
+    run: analysis::Summary,
+    capture: Option<crate::output::capture::Snapshot>,
+    mut collector: quic::Collector,
+    mut secrets: keylog::Input,
+    mut state: rendering::State,
+) -> Result<(), CliError> {
+    let snapshot = capture.clone();
+    let result = (|| {
+        let encoder = &invocation.output;
+        secrets.poll(&mut collector, invocation, true)?;
+        let owned_deadline;
+        let deadline = if let Some(deadline) = &invocation.control.deadline {
+            deadline.as_ref()
+        } else {
+            owned_deadline = Deadline::new(args.limits.max_duration());
+            &owned_deadline
+        };
+        let input_incomplete = run.input_incomplete()
+            || capture.as_ref().is_some_and(|capture| {
+                !capture.summary.capture_statistics_complete
+                    || capture.summary.sources.iter().any(|source| {
+                        source.statistics.dropped_frames > 0
+                            || source.statistics.receiver_dropped_frames > 0
+                            || source.statistics.overflow_events > 0
+                    })
+            });
+        if input_incomplete {
+            collector.mark_capture_incomplete();
+            state.mark_capture_incomplete();
+        }
+        let engine = collector
+            .finish(deadline, |event| {
+                state
+                    .event(event, args, invocation, encoder)
+                    .map_err(CliError::into_boundary_error)
+            })
+            .map_err(CliError::classified)?;
+        if (args.connection.is_some() || args.stream.is_some()) && state.selected == 0 {
+            return Err(CliError::new(
+                Kind::Usage,
+                "no QUIC connection or stream matched the selectors",
+            ));
+        }
+        state.publish(invocation)?;
+        let summary = output::Summary {
+            engine: engine.into(),
+            frames_read: run.frames_read,
+            frames_matched: run.frames_matched,
+            bytes_read: run.bytes_read,
+            clock: run.clock.into(),
+            ip_reassembly: (&run.ip_reassembly).into(),
+            incomplete_sources: run.incomplete_sources.len() as u64,
+            source_outcomes_omitted: run.source_outcomes_omitted,
+            input_incomplete,
+            connections_selected: state.selected,
+            connections_omitted: state.omitted,
+            application_output_bytes: state.output_bytes,
+        };
+        match invocation.format {
+            Format::Text => write_stdout_line(
+                invocation,
+                format_args!(
+                    "QUIC connections={} selected={} packets={} decrypted={} unassociated={} malformed={} evictions={} rejected_keys={} input_incomplete={}",
+                    summary.engine.connections,
+                    summary.connections_selected,
+                    summary.engine.packets,
+                    summary.engine.decrypted_packets,
+                    summary.engine.unassociated_packets,
+                    summary.engine.malformed_datagrams,
+                    summary.engine.connections_evicted,
+                    summary.engine.keylog_records_rejected,
+                    summary.input_incomplete
+                ),
             ),
-        ),
-        Format::Json => emit_published(
-            invocation,
-            Command::Quic,
-            Published::new(
-                output::Report {
-                    connections: state.retained,
-                    summary,
-                    capture,
+            Format::Json => emit_published(
+                invocation,
+                Command::Quic,
+                Published::new(
+                    output::Report {
+                        connections: state.retained,
+                        summary,
+                        capture,
+                    },
+                    Vec::new(),
+                ),
+            ),
+            Format::Ndjson => Ok(encoder.complete_published(Published::new(
+                output::Event::Complete {
+                    summary: Box::new(summary),
+                    capture: capture.map(Box::new),
                 },
                 Vec::new(),
-            ),
-        ),
-        Format::Ndjson => Ok(encoder.complete_published(Published::new(
-            output::Event::Complete {
-                summary: Box::new(summary),
-                capture: capture.map(Box::new),
-            },
-            Vec::new(),
-        ))?),
-        other => other.unreachable(),
-    }
+            ))?),
+            other => other.unreachable(),
+        }
+    })();
+    result.map_err(|error: CliError| match snapshot {
+        Some(capture) => error.with_capture(capture),
+        None => error,
+    })
 }

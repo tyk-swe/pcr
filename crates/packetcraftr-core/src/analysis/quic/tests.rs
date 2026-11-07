@@ -1362,3 +1362,124 @@ fn quic_session_retains_capture_loss_hidden_by_display_filter() {
     assert!(!connections[0].streams.is_empty());
     assert!(connections[0].streams.iter().all(|stream| stream.complete));
 }
+
+#[test]
+fn quic_buffered_authentication_failures_are_counted_once() {
+    for delayed in [false, true] {
+        let mut h = Harness::new(Limits::default());
+        h.hellos(Version::V1, 0x1301);
+        if !delayed {
+            h.collector.append_keylog(keylog(0x1301).as_bytes(), true);
+        }
+        let keys = Keys::new(Suite::Aes128, Version::V1, &traffic_secret(0x1301, 0x33)).unwrap();
+        let mut corrupt = short_packet(true, 0, false, &stream_frame(0, b"corrupt", true), &keys);
+        *corrupt.last_mut().unwrap() ^= 1;
+        h.feed(true, &corrupt);
+        if delayed {
+            h.collector.append_keylog(keylog(0x1301).as_bytes(), true);
+        }
+        let deadline = crate::budget::Deadline::new(Duration::from_secs(30));
+        h.collector.refresh(&deadline, |_| Ok(())).unwrap();
+        let unrelated = format!(
+            "CLIENT_TRAFFIC_SECRET_0 {} {}\n",
+            "88".repeat(32),
+            "33".repeat(32)
+        );
+        h.collector.append_keylog(unrelated.as_bytes(), true);
+        h.collector.refresh(&deadline, |_| Ok(())).unwrap();
+        h.feed(true, &short_packet(true, 1, false, &[1], &keys));
+        let (connections, _) = h.finish();
+        let connection = &connections[0];
+        assert_eq!(connection.metrics.authentication_failures, 1);
+        assert_eq!(connection.pending_packets, 1);
+        assert!(
+            connection
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "authentication_failed")
+        );
+    }
+}
+
+#[test]
+fn quic_unretained_stream_offsets_constrain_final_sizes() {
+    for empty_first in [true, false] {
+        for data in [&b""[..], &b"discarded"[..]] {
+            let mut h = Harness::new(Limits {
+                max_stream_bytes: 3,
+                ..Limits::default()
+            });
+            h.hellos(Version::V1, 0x1301);
+            h.collector.append_keylog(keylog(0x1301).as_bytes(), true);
+            let keys =
+                Keys::new(Suite::Aes128, Version::V1, &traffic_secret(0x1301, 0x33)).unwrap();
+            let high_offset = stream_frame(10, data, false);
+            let final_data = stream_frame(0, b"abc", true);
+            let packets = if empty_first {
+                [high_offset, final_data]
+            } else {
+                [final_data, high_offset]
+            };
+            for (number, packet) in packets.iter().enumerate() {
+                h.feed(
+                    true,
+                    &short_packet(true, number as u64, false, packet, &keys),
+                );
+            }
+            let (connections, _) = h.finish();
+            let stream = &connections[0].streams[0];
+            assert!(connections[0].incomplete);
+            assert!(stream.final_size_error);
+            assert!(!stream.complete);
+        }
+    }
+}
+
+#[test]
+fn quic_accepted_early_data_preserves_observed_offsets_without_payloads() {
+    for finish_before_acceptance in [true, false] {
+        let mut h = Harness::new(Limits::default());
+        h.hellos(Version::V1, 0x1301);
+        h.collector.append_keylog(keylog(0x1301).as_bytes(), true);
+        let early = Keys::new(Suite::Aes128, Version::V1, &traffic_secret(0x1301, 0x77)).unwrap();
+        let client = Keys::new(Suite::Aes128, Version::V1, &traffic_secret(0x1301, 0x33)).unwrap();
+        let server = Keys::new(Suite::Aes128, Version::V1, &traffic_secret(0x1301, 0x55)).unwrap();
+        h.feed(
+            true,
+            &long_packet(
+                Version::V1,
+                PacketKind::ZeroRtt,
+                true,
+                0,
+                &stream_frame(10, &[], false),
+                &early,
+            ),
+        );
+        let final_packet = short_packet(true, 1, false, &stream_frame(0, b"abc", true), &client);
+        if finish_before_acceptance {
+            h.feed(true, &final_packet);
+        }
+        let extensions = extension(42, &[]);
+        let body = [&(extensions.len() as u16).to_be_bytes()[..], &extensions].concat();
+        h.feed(
+            false,
+            &long_packet(
+                Version::V1,
+                PacketKind::Handshake,
+                false,
+                0,
+                &crypto_frame(&handshake(8, &body), 0),
+                &server,
+            ),
+        );
+        if !finish_before_acceptance {
+            h.feed(true, &final_packet);
+        }
+        let (connections, _) = h.finish();
+        let stream = &connections[0].streams[0];
+        assert_eq!(connections[0].early_data, super::EarlyData::Accepted);
+        assert!(!stream.early_data);
+        assert!(stream.final_size_error);
+        assert!(!stream.complete);
+    }
+}

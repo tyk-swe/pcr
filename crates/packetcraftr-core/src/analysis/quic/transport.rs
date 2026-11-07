@@ -175,6 +175,9 @@ impl State {
                 .entry((id, direction, false))
                 .or_insert_with(StreamState::new);
             destination.ranges.conflicting |= state.ranges.conflicting;
+            if let Err(error) = destination.observe_end(state.observed_end) {
+                first_error.get_or_insert(error);
+            }
             for range in state.ranges.finish() {
                 match destination.insert(range.offset, &range.data, false, limits) {
                     Ok(repeated) => self.report.metrics.repeated_stream_bytes += repeated,

@@ -33,7 +33,7 @@
     "subject": "192.0.2.1 \u2192 198.51.100.2:443",
     "summary": "Regularly spaced TCP connection attempts"
   },
-  "schema": "packetcraftr.output/v19",
+  "schema": "packetcraftr.output/v20",
   "sequence": 0,
   "status": "success"
 }

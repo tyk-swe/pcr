@@ -780,8 +780,8 @@ The excerpts are actual stdout. A temporary TCP listener was bound to
 
 ```text
 $ target/debug/packetcraftr --output ndjson files read examples/captures/protocol-mqtt.pcap --field frame.number --max-frames 1
-{"schema":"packetcraftr.output/v19","command":"read","mode":"stream","sequence":0,"event":"fields","status":"success","result":{"columns":["frame.number"],"source_frame":1,"values":[1]},"diagnostics":[]}
-{"schema":"packetcraftr.output/v19","command":"read","mode":"stream","sequence":1,"event":"complete","status":"success","result":{"columns":["frame.number"],"rows_written":1,"frames_read":1,"captured_bytes_read":60},"diagnostics":[]}
+{"schema":"packetcraftr.output/v20","command":"read","mode":"stream","sequence":0,"event":"fields","status":"success","result":{"columns":["frame.number"],"source_frame":1,"values":[1]},"diagnostics":[]}
+{"schema":"packetcraftr.output/v20","command":"read","mode":"stream","sequence":1,"event":"complete","status":"success","result":{"columns":["frame.number"],"rows_written":1,"frames_read":1,"captured_bytes_read":60},"diagnostics":[]}
 
 $ target/debug/packetcraftr --output text analyze http2 examples/captures/http2-multiplexed.pcapng
 1 HTTP/2 connections (1 prior knowledge, 0 h2c, 0 unsupported); 7 messages (7 complete, 0 incomplete, 0 malformed, 0 limited); 0 issues

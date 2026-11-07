@@ -8,7 +8,7 @@
     "received": 0,
     "replies_sent": 0
   },
-  "schema": "packetcraftr.output/v19",
+  "schema": "packetcraftr.output/v20",
   "sequence": 0,
   "status": "success"
 }

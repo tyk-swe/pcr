@@ -152,6 +152,7 @@ fn malformed_protocol_may_hide_destination(protocol: BuiltinProtocol) -> bool {
         | BuiltinProtocol::Rtp
         | BuiltinProtocol::Rtcp
         | BuiltinProtocol::Stun
+        | BuiltinProtocol::Quic
         | BuiltinProtocol::Dtls
         | BuiltinProtocol::ModbusTcp
         | BuiltinProtocol::BacnetIp

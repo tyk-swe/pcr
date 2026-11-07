@@ -1,0 +1,178 @@
+{
+  "schema": "packetcraftr.output/v20",
+  "command": "quic",
+  "mode": "stream",
+  "sequence": 0,
+  "event": "connection",
+  "status": "success",
+  "result": {
+    "connection": {
+      "connection": 0,
+      "scope": {
+        "id": 0,
+        "interface": null,
+        "encapsulation": []
+      },
+      "version": 1,
+      "client_endpoint": {
+        "address": "192.0.2.1",
+        "port": 55555
+      },
+      "server_endpoint": {
+        "address": "198.51.100.1",
+        "port": 443
+      },
+      "first_frame": 1,
+      "last_frame": 9,
+      "source_frames": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "source_frames_omitted": 0,
+      "connection_ids": [
+        "8394c8f03e515708",
+        "1212121212121212",
+        "3434343434343434",
+        "5656565656565656"
+      ],
+      "paths": [
+        {
+          "source": {
+            "address": "192.0.2.1",
+            "port": 55555
+          },
+          "destination": {
+            "address": "198.51.100.1",
+            "port": 443
+          }
+        },
+        {
+          "source": {
+            "address": "192.0.2.1",
+            "port": 55556
+          },
+          "destination": {
+            "address": "198.51.100.1",
+            "port": 443
+          }
+        }
+      ],
+      "sni": "quic.example.test",
+      "sni_is_outer": false,
+      "offered_alpn": [
+        "quic-test"
+      ],
+      "negotiated_alpn": "quic-test",
+      "cipher_suite": 4865,
+      "ja3": "b83c07d520523bd9eacbe38a891d3504",
+      "ja4": "q13d0104qt_0f2cb44170f4_c8abead0ac40",
+      "client_hello_frame": 1,
+      "server_hello_frame": 2,
+      "hello_elapsed_ms": 10.0,
+      "client_finished_frame": 3,
+      "server_finished_frame": 2,
+      "handshake_done_frame": 6,
+      "early_data": "not_observed",
+      "client_transport_parameters": [
+        {
+          "id": 3,
+          "value_hex": "44b0"
+        }
+      ],
+      "server_transport_parameters": [
+        {
+          "id": 14,
+          "value_hex": "04"
+        }
+      ],
+      "streams": [
+        {
+          "id": 0,
+          "direction": "client",
+          "ranges": [
+            {
+              "offset": 0,
+              "length": 11
+            }
+          ],
+          "final_size": 11,
+          "complete": true,
+          "conflicting_overlap": false,
+          "final_size_error": false,
+          "omitted_bytes": 0,
+          "early_data": false
+        },
+        {
+          "id": 0,
+          "direction": "server",
+          "ranges": [
+            {
+              "offset": 0,
+              "length": 21
+            }
+          ],
+          "final_size": 21,
+          "complete": true,
+          "conflicting_overlap": false,
+          "final_size_error": false,
+          "omitted_bytes": 0,
+          "early_data": false
+        },
+        {
+          "id": 4,
+          "direction": "client",
+          "ranges": [
+            {
+              "offset": 0,
+              "length": 13
+            }
+          ],
+          "final_size": 13,
+          "complete": true,
+          "conflicting_overlap": false,
+          "final_size_error": false,
+          "omitted_bytes": 0,
+          "early_data": false
+        }
+      ],
+      "metrics": {
+        "packets": 10,
+        "decrypted_packets": 10,
+        "initial_packets": 2,
+        "handshake_packets": 2,
+        "zero_rtt_packets": 0,
+        "one_rtt_packets": 6,
+        "duplicate_packets": 0,
+        "reordered_packets": 1,
+        "observed_packet_gaps": 0,
+        "repeated_stream_bytes": 0,
+        "datagrams": 1,
+        "datagram_bytes": 5,
+        "flow_control_blocks": 0,
+        "key_updates": 1,
+        "path_challenges": 1,
+        "validated_paths": 1,
+        "retry_packets": 0,
+        "authentication_failures": 0,
+        "ack_samples": 0
+      },
+      "diagnostics": [],
+      "diagnostics_omitted": 0,
+      "pending_packets": 0,
+      "closed": true,
+      "close_error": 0,
+      "close_reason": "done",
+      "stateless_reset": false,
+      "incomplete": false,
+      "end_reason": "capture_end"
+    }
+  },
+  "diagnostics": []
+}

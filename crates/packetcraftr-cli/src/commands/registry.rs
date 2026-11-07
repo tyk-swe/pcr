@@ -247,6 +247,8 @@ commands! {
     /// Compute aggregate statistics over a capture file.
     #[command(after_long_help = analyze::stats::arguments::AFTER_LONG_HELP)]
     Stats(analyze::stats::arguments::Args) = "stats" => ("analyze", "stats", 8),
+    #[command(about = "Decrypt QUIC v1/v2 captures and reconstruct streams, with optional live capture and TLS key logs") ]
+    Quic(analyze::quic::arguments::Args) = "quic" => ("analyze", "quic", 42),
     /// Assemble TLS handshake sessions from a capture file.
     #[command(after_long_help = analyze::tls::arguments::AFTER_LONG_HELP)]
     Tls(analyze::tls::arguments::Args) = "tls" => ("analyze", "tls", 14),

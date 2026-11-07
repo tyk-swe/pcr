@@ -37,7 +37,7 @@ class ForwardingConsumerTests(unittest.TestCase):
 
     def test_unrelated_output_identity_is_rejected(self):
         for schema in ('packetcraftr.output/v2', 'packetcraftr.output/v18',
-                       'packetcraftr.output/v20', '', None):
+                       f'{consumer.SCHEMA}/unsupported', '', None):
             value = envelope() | {'schema': schema}
             with self.subTest(schema=schema), self.assertRaises(consumer.ContractError) as caught:
                 consume(value)

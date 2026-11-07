@@ -258,6 +258,7 @@ impl State {
         }
         self.retired_sequences
             .remove(&(issued.owner, issued.sequence));
+        self.context_changed = true;
         Ok(())
     }
     pub(super) fn retire_cid(

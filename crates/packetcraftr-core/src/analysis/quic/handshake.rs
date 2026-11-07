@@ -198,6 +198,7 @@ impl State {
                 for cid in &mut self.cids {
                     if cid.owner == Direction::Server && cid.sequence == Some(0) {
                         cid.token = Some(token);
+                        self.context_changed = true;
                     }
                 }
             }

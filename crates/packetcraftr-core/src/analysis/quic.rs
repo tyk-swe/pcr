@@ -248,7 +248,7 @@ impl Collector {
             self.summary.packets += 1;
             state.record_datagram(&input, &self.limits);
             let before = state.report.metrics.decrypted_packets;
-            let mut result = state.process(
+            let result = state.process(
                 &packet,
                 &Observation {
                     direction,
@@ -260,21 +260,6 @@ impl Collector {
                 &self.limits,
                 false,
             );
-            if short
-                && packet.bytes.len() >= 21
-                && matches!(result, Ok(false) | Err(Error::Authentication))
-                && state.cids.iter().any(|cid| {
-                    !cid.retired
-                        && cid.owner == direction
-                        && cid
-                            .token
-                            .is_some_and(|token| packet.bytes.ends_with(&token))
-                })
-            {
-                state.report.stateless_reset = true;
-                state.report.closed = true;
-                result = Ok(true);
-            }
             self.handle_result(
                 &mut state,
                 result,
@@ -589,13 +574,14 @@ impl Collector {
                     .copied()
                     .filter(|(id, dir)| {
                         self.states.get(id).is_some_and(|s| {
-                            s.report.paths.iter().any(|p| {
-                                if *dir == Direction::Client {
-                                    *p == flow.flow
-                                } else {
-                                    p.reverse() == flow.flow
-                                }
-                            })
+                            (length != 0 || !s.report.closed)
+                                && s.report.paths.iter().any(|p| {
+                                    if *dir == Direction::Client {
+                                        *p == flow.flow
+                                    } else {
+                                        p.reverse() == flow.flow
+                                    }
+                                })
                         })
                     })
                     .collect();

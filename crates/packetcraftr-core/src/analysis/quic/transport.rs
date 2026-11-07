@@ -57,6 +57,7 @@ impl State {
             for p in &mut self.protections {
                 p.previous_initial = p.initial.take();
             }
+            self.context_changed = true;
             return Ok(true);
         }
         if packet.kind == PacketKind::VersionNegotiation {
@@ -68,7 +69,23 @@ impl State {
             );
             return Ok(true);
         }
-        let Some(opened) = self.open(packet, direction, log)? else {
+        let opened = self.open(packet, direction, log);
+        if packet.kind == PacketKind::OneRtt
+            && packet.bytes.len() >= 21
+            && matches!(opened, Ok(None) | Err(Error::Authentication))
+            && self.cids.iter().any(|cid| {
+                !cid.retired
+                    && cid.owner == direction
+                    && cid
+                        .token
+                        .is_some_and(|token| packet.bytes.ends_with(&token))
+            })
+        {
+            self.report.stateless_reset = true;
+            self.report.closed = true;
+            return Ok(true);
+        }
+        let Some(opened) = opened? else {
             return Ok(false);
         };
         self.accept(packet, observation, opened, limits)?;

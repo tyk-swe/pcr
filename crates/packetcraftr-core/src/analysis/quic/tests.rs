@@ -762,6 +762,174 @@ fn quic_packet_number_wrap_and_authenticated_invalid_headers_preserve_stream_sta
 }
 
 #[test]
+fn quic_retry_key_changes_recover_buffered_server_initials() {
+    // Retry vectors from RFC 9001/9369 Appendix A.4, May 2021/2023.
+    let retry_cid = [0xf0, 0x67, 0xa5, 0x50, 0x2a, 0x42, 0x62, 0xb5];
+    for (version, retry) in [
+        (
+            Version::V1,
+            "ff000000010008f067a5502a4262b5746f6b656e04a265ba2eff4d829058fb3f0f2496ba",
+        ),
+        (
+            Version::V2,
+            "cf6b3343cf0008f067a5502a4262b5746f6b656ec8646ce8bfe33952d955543665dcc7b6",
+        ),
+    ] {
+        let mut h = Harness::new(Limits::default());
+        h.feed(
+            true,
+            &long_packet_with_cids(
+                version,
+                PacketKind::Initial,
+                &ORIGINAL,
+                &[],
+                0,
+                &crypto_frame(&hello(true, 0x1301), 0),
+                &Keys::initial(version, &ORIGINAL, true).unwrap(),
+            ),
+        );
+        h.feed(
+            false,
+            &long_packet_with_cids(
+                version,
+                PacketKind::Initial,
+                &[],
+                &retry_cid,
+                0,
+                &crypto_frame(&hello(false, 0x1301), 0),
+                &Keys::initial(version, &retry_cid, false).unwrap(),
+            ),
+        );
+        h.feed(false, &unhex(retry).unwrap());
+        let (connections, summary) = h.finish();
+        assert_eq!(connections.len(), 1);
+        assert_eq!(summary.decrypted_packets, 2);
+        assert_eq!(connections[0].pending_packets, 0);
+        assert_eq!(connections[0].server_hello_frame, Some(2));
+        assert_eq!(connections[0].cipher_suite, Some(0x1301));
+        assert_eq!(connections[0].metrics.retry_packets, 1);
+    }
+}
+
+#[test]
+fn quic_zero_length_cid_tuple_reuse_keeps_connections_distinct() {
+    let mut h = Harness::new(Limits::default());
+    h.collector.append_keylog(keylog(0x1301).as_bytes(), true);
+    let next_dcid = [0x91; 8];
+    let keys = Keys::new(Suite::Aes128, Version::V1, &traffic_secret(0x1301, 0x44)).unwrap();
+    for (dcid, data) in [
+        (&ORIGINAL, b"first".as_slice()),
+        (&next_dcid, b"second".as_slice()),
+    ] {
+        h.feed(
+            true,
+            &long_packet_with_cids(
+                Version::V1,
+                PacketKind::Initial,
+                dcid,
+                &[],
+                0,
+                &crypto_frame(&hello(true, 0x1301), 0),
+                &Keys::initial(Version::V1, dcid, true).unwrap(),
+            ),
+        );
+        h.feed(
+            false,
+            &long_packet_with_cids(
+                Version::V1,
+                PacketKind::Initial,
+                &[],
+                &[],
+                0,
+                &crypto_frame(&hello(false, 0x1301), 0),
+                &Keys::initial(Version::V1, dcid, false).unwrap(),
+            ),
+        );
+        h.feed(
+            false,
+            &short_packet_to(
+                &[],
+                0,
+                false,
+                &[stream_frame(0, data, true), vec![29, 0, 0]].concat(),
+                &keys,
+            ),
+        );
+    }
+    let (connections, summary) = h.finish();
+    assert_eq!(connections.len(), 2);
+    assert_eq!(summary.decrypted_packets, 6);
+    assert_eq!(summary.ambiguous_packets, 0);
+    for (connection, data, sources) in [
+        (&connections[0], b"first".as_slice(), vec![1, 2, 3]),
+        (&connections[1], b"second".as_slice(), vec![4, 5, 6]),
+    ] {
+        assert!(connection.closed && !connection.incomplete);
+        assert_eq!(connection.source_frames, sources);
+        assert!(connection.streams[0].complete);
+        assert_eq!(connection.streams[0].ranges[0].data.as_ref(), data);
+    }
+}
+
+#[test]
+fn quic_buffered_stateless_resets_use_tokens_learned_later() {
+    for version in [Version::V1, Version::V2] {
+        for transport_parameter in [true, false] {
+            for delayed_secrets in [true, false] {
+                let mut h = Harness::new(Limits::default());
+                h.hellos(version, 0x1301);
+                if !delayed_secrets {
+                    h.collector.append_keylog(keylog(0x1301).as_bytes(), true);
+                }
+                let token = [0xab; 16];
+                let keys = Keys::new(
+                    Suite::Aes128,
+                    version,
+                    &traffic_secret(0x1301, if transport_parameter { 0x55 } else { 0x44 }),
+                )
+                .unwrap();
+                let encrypted = |number: u64, data: &[u8]| {
+                    if transport_parameter {
+                        long_packet(version, PacketKind::Handshake, false, number, data, &keys)
+                    } else {
+                        short_packet(false, number, false, data, &keys)
+                    }
+                };
+                h.feed(false, &encrypted(2, &[1]));
+                h.feed(
+                    false,
+                    &[&[0x40][..], &CLIENT_CID, &[0x98; 12], &token].concat(),
+                );
+                let issue = if transport_parameter {
+                    let extensions = extension(57, &[&varint(2), &varint(16), &token[..]].concat());
+                    crypto_frame(
+                        &handshake(
+                            8,
+                            &[&(extensions.len() as u16).to_be_bytes()[..], &extensions].concat(),
+                        ),
+                        0,
+                    )
+                } else {
+                    [&[24, 1, 0, 8][..], &[0x78; 8], &token].concat()
+                };
+                h.feed(false, &encrypted(1, &issue));
+                if delayed_secrets {
+                    h.collector.append_keylog(keylog(0x1301).as_bytes(), true);
+                }
+                let (connections, summary) = h.finish();
+                let connection = &connections[0];
+                assert!(connection.stateless_reset && connection.closed && !connection.incomplete);
+                assert_eq!(connection.pending_packets, 0);
+                assert_eq!(connection.source_frames, vec![1, 2, 3, 4, 5]);
+                assert_eq!(connection.last_frame, 5);
+                assert_eq!(summary.packets, 5);
+                assert_eq!(summary.decrypted_packets, 4);
+            }
+        }
+    }
+}
+
+#[test]
 fn quic_retry_preserves_packet_numbers_and_changes_initial_keys_only_after_integrity() {
     let mut h = Harness::new(Limits::default());
     h.feed(true, &unhex(CLIENT_9001).unwrap());

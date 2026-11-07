@@ -153,6 +153,23 @@ fn long_packet_with_cids(
     plain: &[u8],
     keys: &Keys,
 ) -> Vec<u8> {
+    encoded_long_packet(
+        version,
+        kind,
+        (destination, source),
+        (number, 4),
+        plain,
+        keys,
+    )
+}
+fn encoded_long_packet(
+    version: Version,
+    kind: PacketKind,
+    (destination, source): (&[u8], &[u8]),
+    (number, width): (u64, u8),
+    plain: &[u8],
+    keys: &Keys,
+) -> Vec<u8> {
     let ty = match (version, kind) {
         (Version::V1, PacketKind::Initial) => 0,
         (Version::V1, PacketKind::Handshake) | (Version::V2, PacketKind::ZeroRtt) => 2,
@@ -160,7 +177,7 @@ fn long_packet_with_cids(
         (Version::V2, PacketKind::Handshake) => 3,
         _ => panic!("test packet kind"),
     };
-    let mut header = vec![0xc3 | (ty << 4)];
+    let mut header = vec![0xc0 | (ty << 4) | (width - 1)];
     header.extend_from_slice(&version.wire().to_be_bytes());
     header.push(destination.len() as u8);
     header.extend_from_slice(destination);
@@ -169,9 +186,9 @@ fn long_packet_with_cids(
     if kind == PacketKind::Initial {
         header.push(0);
     }
-    header.extend(varint(4 + plain.len() as u64 + 16));
+    header.extend(varint(u64::from(width) + plain.len() as u64 + 16));
     let offset = header.len();
-    header.extend_from_slice(&(number as u32).to_be_bytes());
+    header.extend_from_slice(&number.to_be_bytes()[8 - usize::from(width)..]);
     keys.seal(header, offset, number, plain)
 }
 fn short_packet(client: bool, number: u64, phase: bool, plain: &[u8], keys: &Keys) -> Vec<u8> {
@@ -767,6 +784,7 @@ fn quic_retry_preserves_packet_numbers_and_changes_initial_keys_only_after_integ
     assert_eq!(connections[0].metrics.retry_packets, 1);
     assert_eq!(summary.decrypted_packets, 2);
     assert_eq!(connections[0].metrics.authentication_failures, 1);
+    assert_eq!(connections[0].pending_packets, 0);
 }
 
 #[test]
@@ -815,6 +833,107 @@ fn quic_packet_number_context_recovers_buffered_short_encodings() {
     assert_eq!(summary.decrypted_packets, 4);
     assert!(connection.streams[0].complete);
     assert_eq!(&connection.streams[0].ranges[0].data[..], b"ab");
+}
+
+#[test]
+fn quic_packet_number_context_recovers_buffered_long_packets() {
+    for version in [Version::V1, Version::V2] {
+        let mut h = Harness::new(Limits::default());
+        let keys = Keys::initial(version, &ORIGINAL, true).unwrap();
+        let client_hello = hello(true, 0x1301);
+        h.feed(
+            true,
+            &long_packet(
+                version,
+                PacketKind::Initial,
+                true,
+                0,
+                &crypto_frame(&client_hello[..4], 0),
+                &keys,
+            ),
+        );
+        h.feed(
+            true,
+            &encoded_long_packet(
+                version,
+                PacketKind::Initial,
+                (&ORIGINAL, &CLIENT_CID),
+                (256, 1),
+                &crypto_frame(&client_hello[4..], 4),
+                &keys,
+            ),
+        );
+        h.feed(
+            true,
+            &long_packet(version, PacketKind::Initial, true, 255, &[1], &keys),
+        );
+        let (connections, summary) = h.finish();
+        assert_eq!(summary.decrypted_packets, 3);
+        assert_eq!(connections[0].pending_packets, 0);
+        assert_eq!(connections[0].sni.as_deref(), Some("quic.example.test"));
+
+        let mut h = Harness::new(Limits::default());
+        h.hellos(version, 0x1301);
+        h.collector.append_keylog(keylog(0x1301).as_bytes(), true);
+        let keys = Keys::new(Suite::Aes128, version, &traffic_secret(0x1301, 0x55)).unwrap();
+        let extensions = extension(16, b"\0\x0a\x09quic-test");
+        let encrypted_extensions = handshake(
+            8,
+            &[&(extensions.len() as u16).to_be_bytes()[..], &extensions].concat(),
+        );
+        h.feed(
+            false,
+            &encoded_long_packet(
+                version,
+                PacketKind::Handshake,
+                (&CLIENT_CID, &SERVER_CID),
+                (256, 1),
+                &crypto_frame(&encrypted_extensions, 0),
+                &keys,
+            ),
+        );
+        h.feed(
+            false,
+            &long_packet(version, PacketKind::Handshake, false, 255, &[1], &keys),
+        );
+        let (connections, summary) = h.finish();
+        assert_eq!(summary.decrypted_packets, 4);
+        assert_eq!(connections[0].pending_packets, 0);
+        assert_eq!(connections[0].negotiated_alpn.as_deref(), Some("quic-test"));
+
+        let mut h = Harness::new(Limits::default());
+        h.hellos(version, 0x1301);
+        h.collector.append_keylog(keylog(0x1301).as_bytes(), true);
+        let keys = Keys::new(Suite::Aes128, version, &traffic_secret(0x1301, 0x77)).unwrap();
+        h.feed(
+            true,
+            &encoded_long_packet(
+                version,
+                PacketKind::ZeroRtt,
+                (&ORIGINAL, &CLIENT_CID),
+                (256, 1),
+                &stream_frame(1, b"b", true),
+                &keys,
+            ),
+        );
+        h.feed(
+            true,
+            &long_packet(
+                version,
+                PacketKind::ZeroRtt,
+                true,
+                255,
+                &stream_frame(0, b"a", false),
+                &keys,
+            ),
+        );
+        let (connections, summary) = h.finish();
+        assert_eq!(summary.decrypted_packets, 4);
+        assert_eq!(connections[0].pending_packets, 0);
+        assert!(connections[0].streams[0].early_data);
+        assert!(connections[0].streams[0].complete);
+        assert_eq!(&connections[0].streams[0].ranges[0].data[..], b"ab");
+    }
 }
 
 #[test]

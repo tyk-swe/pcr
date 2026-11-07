@@ -12,7 +12,7 @@ use crate::error::BoundaryError;
 use crate::field::WireValue;
 pub use crate::protocol::application::quic::Error;
 use crate::protocol::{
-    application::quic::{PacketKind, Version, parse_packet},
+    application::quic::{Packet, PacketKind, Version, parse_packet},
     identity,
 };
 use bytes::Bytes;
@@ -278,6 +278,7 @@ impl Collector {
             self.handle_result(
                 &mut state,
                 result,
+                &packet,
                 Pending {
                     reason: PendingReason::MissingSecrets,
                     bytes: Bytes::copy_from_slice(packet.bytes),
@@ -305,13 +306,19 @@ impl Collector {
             self.evict("buffer_limit", events);
         }
     }
-    fn handle_result(&self, state: &mut State, result: Result<bool, Error>, pending: Pending) {
+    fn handle_result(
+        &self,
+        state: &mut State,
+        result: Result<bool, Error>,
+        packet: &Packet<'_>,
+        pending: Pending,
+    ) {
         match result {
             Ok(true) => {}
             Ok(false) => self.defer(state, pending),
             Err(Error::Authentication) => {
                 state.report.metrics.authentication_failures += 1;
-                if pending.bytes.first().is_some_and(|b| b & 0x80 == 0) {
+                if packet.number_offset.is_some() {
                     self.defer(
                         state,
                         Pending {

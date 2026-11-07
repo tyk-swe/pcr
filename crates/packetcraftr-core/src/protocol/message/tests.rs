@@ -976,6 +976,91 @@ fn ospfv2_preserves_authentication_digest() {
 }
 
 #[test]
+fn dtls_record_bodies_follow_content_type_and_epoch() {
+    let registry = builtin::registry();
+    let fragments = field::Value::List(vec![field::Value::Object(record([
+        ("message_type", 1_u8.into()),
+        ("length", 4_u8.into()),
+        ("message_sequence", 3_u8.into()),
+        ("offset", 1_u8.into()),
+        ("data", Bytes::from_static(b"ab").into()),
+    ]))]);
+    for kind in 20_u8..=24 {
+        for epoch in [0_u16, 1, u16::MAX] {
+            let handshake = kind == 22 && epoch == 0;
+            let (carried, uncarried, value, extra, empty) = if handshake {
+                (
+                    "handshakes",
+                    "data",
+                    fragments.clone(),
+                    Bytes::from_static(b"lost").into(),
+                    Bytes::new().into(),
+                )
+            } else {
+                (
+                    "data",
+                    "handshakes",
+                    Bytes::from_static(b"body").into(),
+                    fragments.clone(),
+                    field::Value::List(Vec::new()),
+                )
+            };
+            let layer = Dtls {
+                records: Records(vec![
+                    record([
+                        ("content_type", 23_u8.into()),
+                        ("epoch", 1_u16.into()),
+                        ("sequence", 0_u64.into()),
+                        ("data", Bytes::from_static(b"first").into()),
+                    ]),
+                    record([
+                        ("content_type", kind.into()),
+                        ("epoch", epoch.into()),
+                        ("sequence", 0xffffffffffff_u64.into()),
+                        (carried, value),
+                    ]),
+                ]),
+            };
+            for mode in [Mode::Strict, Mode::Permissive] {
+                for extra in [
+                    None,
+                    Some(extra.clone()),
+                    Some(empty.clone()),
+                    Some(true.into()),
+                ] {
+                    let mut current = layer.clone();
+                    if let Some(extra) = &extra {
+                        current.records.0[1].insert(uncarried.into(), extra.clone());
+                    }
+                    let mut packet = Packet::default();
+                    packet.push(current);
+                    let json =
+                        serde_json::to_string(&document::Packet::from_packet(&packet)).unwrap();
+                    let document =
+                        document::Packet::parse(&json, document::Format::Json, json.len()).unwrap();
+                    let result = build_in(document.to_packet(&registry, 16).unwrap(), mode);
+                    if extra.is_some() {
+                        let error = result.unwrap_err();
+                        assert!(
+                            error.contains(&format!("records[1].{uncarried}")),
+                            "{kind} {epoch} {mode:?}: {error}"
+                        );
+                        continue;
+                    }
+                    let built = result.unwrap();
+                    assert!(built.diagnostics.is_empty());
+                    let decoded = decode("dtls", &built.bytes).unwrap();
+                    assert_eq!(decoded.layer.downcast_ref::<Dtls>().unwrap(), &layer);
+                    let mut packet = Packet::default();
+                    packet.push_boxed(decoded.layer);
+                    assert_eq!(build_in(packet, mode).unwrap().bytes, built.bytes);
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn dtls_rejects_oversized_fragment_offsets() {
     let fragment = field::Value::Object(record([
         ("message_type", 1_u8.into()),

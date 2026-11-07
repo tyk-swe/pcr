@@ -79,7 +79,7 @@ pub(super) struct State {
     pub(super) hello_time: Option<SystemTime>,
     pub(super) last_packet: Option<(Direction, PacketKind, u64)>,
     pub(super) key_revision: u64,
-    pub(super) keys_changed: bool,
+    pub(super) context_changed: bool,
     pub(super) retry_seen: bool,
     pub(super) early_acceptance: Option<bool>,
     pub(super) source_frames: BTreeSet<u64>,
@@ -176,7 +176,7 @@ impl State {
             hello_time: None,
             last_packet: None,
             key_revision: 0,
-            keys_changed: false,
+            context_changed: false,
             retry_seen: false,
             early_acceptance: None,
             source_frames: BTreeSet::new(),
@@ -417,8 +417,24 @@ impl State {
         }
         self.report
     }
-    pub(super) fn learn_cid(&mut self, id: &[u8], owner: Direction, limits: &Limits, frame: u64) {
-        if self.cids.iter().any(|c| c.id == id && c.owner == owner) {
+    pub(super) fn learn_cid(
+        &mut self,
+        id: &[u8],
+        owner: Direction,
+        sequence: Option<u64>,
+        limits: &Limits,
+        frame: u64,
+    ) {
+        if let Some(cid) = self
+            .cids
+            .iter_mut()
+            .find(|c| c.id == id && c.owner == owner)
+        {
+            cid.sequence = cid.sequence.or(sequence);
+            cid.retired |= cid.sequence.is_some_and(|sequence| {
+                sequence < self.retire_before[owner.index()]
+                    || self.retired_sequences.contains(&(owner, sequence))
+            });
             return;
         }
         if self.cids.len() >= limits.max_connection_ids {
@@ -433,9 +449,12 @@ impl State {
         self.cids.push(Cid {
             id: id.to_vec(),
             owner,
-            sequence: Some(0),
+            sequence,
             token: None,
-            retired: false,
+            retired: sequence.is_some_and(|sequence| {
+                sequence < self.retire_before[owner.index()]
+                    || self.retired_sequences.contains(&(owner, sequence))
+            }),
         });
     }
 }

@@ -134,6 +134,25 @@ fn long_packet(
     plain: &[u8],
     keys: &Keys,
 ) -> Vec<u8> {
+    long_packet_with_cids(
+        version,
+        kind,
+        if client { &ORIGINAL } else { &CLIENT_CID },
+        if client { &CLIENT_CID } else { &SERVER_CID },
+        number,
+        plain,
+        keys,
+    )
+}
+fn long_packet_with_cids(
+    version: Version,
+    kind: PacketKind,
+    destination: &[u8],
+    source: &[u8],
+    number: u64,
+    plain: &[u8],
+    keys: &Keys,
+) -> Vec<u8> {
     let ty = match (version, kind) {
         (Version::V1, PacketKind::Initial) => 0,
         (Version::V1, PacketKind::Handshake) | (Version::V2, PacketKind::ZeroRtt) => 2,
@@ -143,10 +162,10 @@ fn long_packet(
     };
     let mut header = vec![0xc3 | (ty << 4)];
     header.extend_from_slice(&version.wire().to_be_bytes());
-    header.push(8);
-    header.extend_from_slice(if client { &ORIGINAL } else { &CLIENT_CID });
-    header.push(8);
-    header.extend_from_slice(if client { &CLIENT_CID } else { &SERVER_CID });
+    header.push(destination.len() as u8);
+    header.extend_from_slice(destination);
+    header.push(source.len() as u8);
+    header.extend_from_slice(source);
     if kind == PacketKind::Initial {
         header.push(0);
     }
@@ -776,42 +795,162 @@ fn quic_aes256_traffic_keys_match_independent_sha384_vectors() {
 }
 
 #[test]
-fn quic_version_changes_are_reported_without_guessing_keys_or_buffering() {
+fn quic_packet_number_context_recovers_buffered_short_encodings() {
     let mut h = Harness::new(Limits::default());
-    h.flow.flow.destination_port = 4433;
     h.hellos(Version::V1, 0x1301);
-    let dcid = unhex("8394c8f03e515708").unwrap();
-    let server = Keys::initial(Version::V2, &dcid, false).unwrap();
-    let packet = long_packet(
-        Version::V2,
-        PacketKind::Initial,
-        false,
-        0,
-        &crypto_frame(&hello(false, 0x1301), 0),
-        &server,
+    h.collector.append_keylog(keylog(0x1301).as_bytes(), true);
+    let keys = Keys::new(Suite::Aes128, Version::V1, &traffic_secret(0x1301, 0x33)).unwrap();
+    let header = [&[0x40][..], &SERVER_CID, &[0]].concat();
+    h.feed(
+        true,
+        &keys.seal(header, 9, 256, &stream_frame(1, b"b", true)),
     );
-    h.feed(false, &packet);
-    let mut retry = packet.clone();
-    retry[0] &= !0x30;
-    h.feed(false, &retry);
-    let mut unknown = packet;
-    unknown[1..5].copy_from_slice(&99_u32.to_be_bytes());
-    h.feed(false, &unknown);
+    h.feed(
+        true,
+        &short_packet(true, 255, false, &stream_frame(0, b"a", false), &keys),
+    );
     let (connections, summary) = h.finish();
-    assert_eq!(connections.len(), 1);
-    assert_eq!(summary.decrypted_packets, 2);
-    assert_eq!(summary.unsupported_versions, 1);
-    assert_eq!(connections[0].metrics.authentication_failures, 0);
-    assert_eq!(connections[0].pending_packets, 0);
-    assert_eq!(connections[0].server_hello_frame, Some(2));
-    assert_eq!(
-        connections[0]
-            .diagnostics
-            .iter()
-            .filter(|d| d.code == "unsupported_version_transition")
-            .count(),
-        2
-    );
+    let connection = &connections[0];
+    assert_eq!(connection.pending_packets, 0);
+    assert_eq!(summary.decrypted_packets, 4);
+    assert!(connection.streams[0].complete);
+    assert_eq!(&connection.streams[0].ranges[0].data[..], b"ab");
+}
+
+#[test]
+fn quic_initial_cid_adoption_and_retry_keep_reset_tokens_in_their_sequence_space() {
+    let retry_cid = [0xf0, 0x67, 0xa5, 0x50, 0x2a, 0x42, 0x62, 0xb5];
+    let retry =
+        unhex("ff000000010008f067a5502a4262b5746f6b656e04a265ba2eff4d829058fb3f0f2496ba").unwrap();
+    for (retried, server_cid) in [(false, ORIGINAL), (true, SERVER_CID), (true, retry_cid)] {
+        for retired in [true, false] {
+            let mut h = Harness::new(Limits::default());
+            h.collector.append_keylog(keylog(0x1301).as_bytes(), true);
+            h.feed(
+                true,
+                &long_packet_with_cids(
+                    Version::V1,
+                    PacketKind::Initial,
+                    &ORIGINAL,
+                    &[],
+                    0,
+                    &crypto_frame(&hello(true, 0x1301), 0),
+                    &Keys::initial(Version::V1, &ORIGINAL, true).unwrap(),
+                ),
+            );
+            if retried {
+                h.feed(false, &retry);
+            }
+            let initial_dcid = if retried { retry_cid } else { ORIGINAL };
+            h.feed(
+                false,
+                &long_packet_with_cids(
+                    Version::V1,
+                    PacketKind::Initial,
+                    &[],
+                    &server_cid,
+                    0,
+                    &crypto_frame(&hello(false, 0x1301), 0),
+                    &Keys::initial(Version::V1, &initial_dcid, false).unwrap(),
+                ),
+            );
+            let token = [0xab; 16];
+            let parameters = [&[2, 16][..], &token].concat();
+            let extensions = extension(57, &parameters);
+            let body = [&(extensions.len() as u16).to_be_bytes()[..], &extensions].concat();
+            let handshake_keys =
+                Keys::new(Suite::Aes128, Version::V1, &traffic_secret(0x1301, 0x55)).unwrap();
+            h.feed(
+                false,
+                &long_packet_with_cids(
+                    Version::V1,
+                    PacketKind::Handshake,
+                    &[],
+                    &server_cid,
+                    0,
+                    &crypto_frame(&handshake(8, &body), 0),
+                    &handshake_keys,
+                ),
+            );
+            let server =
+                Keys::new(Suite::Aes128, Version::V1, &traffic_secret(0x1301, 0x44)).unwrap();
+            h.feed(
+                false,
+                &short_packet_to(
+                    &[],
+                    0,
+                    false,
+                    &[&[24, 1, 0, 8][..], &[0x78; 8], &[0xcd; 16]].concat(),
+                    &server,
+                ),
+            );
+            if retired {
+                let client =
+                    Keys::new(Suite::Aes128, Version::V1, &traffic_secret(0x1301, 0x33)).unwrap();
+                h.feed(
+                    true,
+                    &short_packet_to(&[0x78; 8], 0, false, &[25, 0], &client),
+                );
+            }
+            h.feed(false, &[&[0x40][..], &[0x99; 20], &token].concat());
+            let (connections, _) = h.finish();
+            assert_eq!(connections[0].stateless_reset, !retired);
+            assert_eq!(connections[0].closed, !retired);
+        }
+    }
+}
+
+#[test]
+fn quic_version_changes_are_reported_without_guessing_keys_or_buffering() {
+    for supported_transition in [true, false] {
+        let mut h = Harness::new(Limits::default());
+        h.flow.flow.destination_port = 4433;
+        h.hellos(Version::V1, 0x1301);
+        let dcid = unhex("8394c8f03e515708").unwrap();
+        let server = Keys::initial(Version::V2, &dcid, false).unwrap();
+        let packet = long_packet(
+            Version::V2,
+            PacketKind::Initial,
+            false,
+            0,
+            &crypto_frame(&hello(false, 0x1301), 0),
+            &server,
+        );
+        if supported_transition {
+            h.feed(false, &packet);
+            let mut retry = packet.clone();
+            retry[0] &= !0x30;
+            h.feed(false, &retry);
+        }
+        let mut unknown = packet;
+        unknown[1..5].copy_from_slice(&99_u32.to_be_bytes());
+        h.feed(false, &unknown);
+        h.collector.append_keylog(keylog(0x1301).as_bytes(), true);
+        let server = Keys::new(Suite::Aes128, Version::V1, &traffic_secret(0x1301, 0x44)).unwrap();
+        h.feed(false, &short_packet(false, 0, false, &[29, 0, 0], &server));
+        let frames = h.frame;
+        let (connections, summary) = h.finish();
+        assert_eq!(connections.len(), 1);
+        assert_eq!(summary.decrypted_packets, 3);
+        assert_eq!(summary.unsupported_versions, 1);
+        assert_eq!(connections[0].metrics.authentication_failures, 0);
+        assert_eq!(connections[0].pending_packets, 0);
+        assert_eq!(connections[0].server_hello_frame, Some(2));
+        assert!(connections[0].closed && connections[0].incomplete);
+        assert_eq!(
+            connections[0].source_frames,
+            (1..=frames).collect::<Vec<_>>()
+        );
+        assert_eq!(connections[0].metrics.packets, frames);
+        assert_eq!(
+            connections[0]
+                .diagnostics
+                .iter()
+                .filter(|d| d.code == "unsupported_version_transition")
+                .count(),
+            if supported_transition { 3 } else { 1 }
+        );
+    }
 }
 
 #[test]

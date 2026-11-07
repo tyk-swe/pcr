@@ -126,7 +126,7 @@ impl State {
                 protection.key_phase = opened.key_phase;
                 protection.generation_start = Some(opened.number);
                 self.report.metrics.key_updates += 1;
-                self.keys_changed = true;
+                self.context_changed = true;
                 Ok(Some(opened))
             }
             _ => Err(Error::Invalid),

@@ -74,7 +74,7 @@ impl State {
                         self.report.ja4 = Some(tls::ja4(&hello, tls::Transport::Quic));
                         self.report.client_hello_frame = Some(frame);
                         self.hello_time = Some(timestamp);
-                        self.keys_changed = true;
+                        self.context_changed = true;
                         for extension in &hello.extensions {
                             if extension.kind == 0x39 {
                                 self.report.client_transport_parameters =
@@ -92,7 +92,7 @@ impl State {
                             .hello_time
                             .and_then(|t| timestamp.duration_since(t).ok())
                             .map(|d| d.as_secs_f64() * 1000.0);
-                        self.keys_changed = true;
+                        self.context_changed = true;
                         if super::crypto::Suite::from_tls(hello.cipher_suite).is_none() {
                             self.diagnostic(frame, "unsupported_cipher", "The negotiated TLS cipher suite is not supported for QUIC decryption", limits);
                         }

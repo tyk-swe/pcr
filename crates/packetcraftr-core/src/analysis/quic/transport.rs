@@ -53,7 +53,7 @@ impl State {
             self.retry_seen = true;
             self.report.metrics.retry_packets += 1;
             self.initial_dcid = packet.scid.to_vec();
-            self.learn_cid(packet.scid, Direction::Server, limits, number);
+            self.learn_cid(packet.scid, Direction::Server, None, limits, number);
             for p in &mut self.protections {
                 p.previous_initial = p.initial.take();
             }
@@ -103,13 +103,16 @@ impl State {
                 self.report.metrics.observed_packet_gaps += opened.number - largest - 1;
             }
         }
-        p.largest[space] = Some(p.largest[space].map_or(opened.number, |n| n.max(opened.number)));
+        if p.largest[space].is_none_or(|largest| opened.number > largest) {
+            p.largest[space] = Some(opened.number);
+            self.context_changed = true;
+        }
         p.seen[space].insert(opened.number);
         if p.seen[space].len() > limits.max_ranges {
             p.seen[space].pop_first();
         }
         if !packet.scid.is_empty() || packet.kind == PacketKind::Initial {
-            self.learn_cid(packet.scid, direction, limits, number);
+            self.learn_cid(packet.scid, direction, Some(0), limits, number);
         }
         let canonical = if direction == Direction::Client {
             flow.clone()

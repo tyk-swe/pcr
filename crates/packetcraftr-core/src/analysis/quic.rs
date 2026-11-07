@@ -208,7 +208,9 @@ impl Collector {
                 {
                     self.summary.unsupported_versions += 1;
                 }
-                continue;
+                if association.is_none() {
+                    continue;
+                }
             }
             let (index, direction, length) = if let Some(association) = association {
                 association
@@ -349,11 +351,11 @@ impl Collector {
         state.pending.push_back(pending);
     }
     fn retry(&self, state: &mut State) {
-        if state.key_revision == self.keylog.revision() && !state.keys_changed {
+        if state.key_revision == self.keylog.revision() && !state.context_changed {
             return;
         }
         state.key_revision = self.keylog.revision();
-        state.keys_changed = false;
+        state.context_changed = false;
         for _ in 0..self.limits.max_pending_packets {
             let mut progressed = false;
             let pending = std::mem::take(&mut state.pending);
@@ -399,7 +401,7 @@ impl Collector {
                 break;
             }
         }
-        state.keys_changed = false;
+        state.context_changed = false;
     }
     pub fn refresh<F>(
         &mut self,

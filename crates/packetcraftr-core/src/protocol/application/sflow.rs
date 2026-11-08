@@ -124,8 +124,23 @@ impl Sflow {
         for s in &self.samples.0 {
             let format = u32::try_from(number(s, "format", NAME)?)
                 .map_err(|_| invalid(NAME, "format overflow"))?;
+            let keys = fields(format);
+            for field in SAMPLES {
+                let active = match field.name {
+                    "format" | "padding" => true,
+                    "data" => keys.is_none(),
+                    "records" => keys.is_some(),
+                    name => keys.is_some_and(|keys| keys.contains(&name)),
+                };
+                if !active && s.contains_key(field.name) {
+                    return Err(invalid(
+                        NAME,
+                        format!("{} is not part of sample format {format}", field.name),
+                    ));
+                }
+            }
             let mut p = Writer::new(NAME, max);
-            if let Some(keys) = fields(format) {
+            if let Some(keys) = keys {
                 for key in keys {
                     p.u32(
                         u32::try_from(number(s, key, NAME)?)

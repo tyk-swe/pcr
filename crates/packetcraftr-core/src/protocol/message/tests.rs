@@ -402,6 +402,72 @@ fn protocol_expansion_reference_vectors() {
 }
 
 #[test]
+fn dnp3_header_fields_follow_present_headers() {
+    use crate::protocol::application::dnp3::Dnp3;
+
+    let registry = builtin::registry();
+    for (has_transport, transport, has_application, function) in [
+        (false, 0xc0, false, 1),
+        (true, 0, false, 1),
+        (true, 0x80, false, 1),
+        (true, 0x40, true, 1),
+        (true, 0xc0, true, 1),
+        (true, 0x40, true, 0x81),
+        (true, 0xc0, true, 0x81),
+    ] {
+        let base = Dnp3 {
+            has_transport,
+            transport,
+            has_application,
+            function,
+            data: if has_transport {
+                Bytes::from(vec![0xa5; 33])
+            } else {
+                Bytes::new()
+            },
+            ..Default::default()
+        };
+        let cases = [
+            ("transport", transport | 1, has_transport),
+            ("application_control", 0xc1, has_application),
+            ("function", function + 1, has_application),
+            ("indications", 42, has_application && function & 128 != 0),
+        ];
+        for mode in [Mode::Strict, Mode::Permissive] {
+            for (field, value, carried) in cases {
+                for changed in [false, true] {
+                    let mut layer = base.clone();
+                    if changed {
+                        layer.set_field(field, value.into()).unwrap();
+                    }
+                    let mut packet = Packet::default();
+                    packet.push(layer.clone());
+                    let json =
+                        serde_json::to_string(&document::Packet::from_packet(&packet)).unwrap();
+                    let document =
+                        document::Packet::parse(&json, document::Format::Json, json.len()).unwrap();
+                    let result = build_in(document.to_packet(&registry, 16).unwrap(), mode);
+                    if changed && !carried {
+                        let error = result.unwrap_err();
+                        assert!(error.contains(field), "{mode:?} {field}: {error}");
+                        continue;
+                    }
+                    let built = result.unwrap();
+                    assert!(built.diagnostics.is_empty(), "{mode:?} {layer:?}");
+                    assert_eq!(built.packet.get::<Dnp3>(), Some(&layer));
+                    let decoded = decode("dnp3", &built.bytes).unwrap();
+                    let mut packet = Packet::default();
+                    packet.push_boxed(decoded.layer);
+                    assert_eq!(packet.get::<Dnp3>(), Some(&layer));
+                    let rebuilt = build_in(packet, mode).unwrap();
+                    assert_eq!(rebuilt.bytes, built.bytes);
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn ipv6_ospf_survives_authentication_header() {
     let registry = builtin::registry();
     let mut packet = Packet::default();
@@ -581,6 +647,102 @@ fn reference_packet_prefixes_are_bounded() {
                     decoded.consumed + decoded.payload_len <= len,
                     "{name}: prefix {len}"
                 );
+            }
+        }
+    }
+}
+
+#[test]
+fn modbus_fields_follow_the_pdu_form_and_function() {
+    use crate::protocol::application::modbus_tcp::{ModbusTcp, PduForm};
+
+    let registry = builtin::registry();
+    for (form, function, carried) in [
+        (PduForm::Request, 1, "address quantity"),
+        (PduForm::Request, 2, "address quantity"),
+        (PduForm::Request, 3, "address quantity"),
+        (PduForm::Request, 4, "address quantity"),
+        (PduForm::Request, 5, "address value"),
+        (PduForm::Request, 6, "address value"),
+        (PduForm::Request, 15, "address quantity data"),
+        (PduForm::Request, 16, "address quantity data"),
+        (PduForm::Response, 1, "data"),
+        (PduForm::Response, 2, "data"),
+        (PduForm::Response, 3, "data"),
+        (PduForm::Response, 4, "data"),
+        (PduForm::Response, 5, "address value"),
+        (PduForm::Response, 6, "address value"),
+        (PduForm::Response, 15, "address quantity"),
+        (PduForm::Response, 16, "address quantity"),
+        (PduForm::Exception, 131, "exception_code"),
+        (PduForm::Raw, 3, "data"),
+        (PduForm::Raw, 23, "data"),
+    ] {
+        let data = match (form, function) {
+            (PduForm::Request, 15) => Bytes::from_static(&[0xa5]),
+            (PduForm::Request, 16) | (PduForm::Response, 1..=4) | (PduForm::Raw, _) => {
+                Bytes::from_static(&[0xa5, 0x5a])
+            }
+            _ => Bytes::new(),
+        };
+        let base = ModbusTcp {
+            form,
+            function,
+            data,
+            ..Default::default()
+        };
+        for mode in [Mode::Strict, Mode::Permissive] {
+            for (field, value) in [
+                ("address", field::Value::Unsigned(42)),
+                ("quantity", 2_u64.into()),
+                ("value", 0xff00_u64.into()),
+                ("exception_code", 2_u64.into()),
+                ("data", Bytes::from_static(&[0x12, 0x34]).into()),
+            ] {
+                for changed in [false, true] {
+                    let mut layer = base.clone();
+                    if changed {
+                        layer.set_field(field, value.clone()).unwrap();
+                        if form == PduForm::Request && matches!(function, 15 | 16) {
+                            let count = if function == 15 {
+                                usize::from(layer.quantity).div_ceil(8)
+                            } else {
+                                usize::from(layer.quantity) * 2
+                            };
+                            layer.data = Bytes::from(vec![0x12; count]);
+                        }
+                    }
+                    let mut packet = Packet::default();
+                    packet.push(layer.clone());
+                    let json =
+                        serde_json::to_string(&document::Packet::from_packet(&packet)).unwrap();
+                    let document =
+                        document::Packet::parse(&json, document::Format::Json, json.len()).unwrap();
+                    let result = build_in(document.to_packet(&registry, 16).unwrap(), mode);
+                    if changed && !carried.split_whitespace().any(|name| name == field) {
+                        let error = result.unwrap_err();
+                        assert!(
+                            error.contains(field),
+                            "{form:?} {function} {mode:?} {field}: {error}"
+                        );
+                        continue;
+                    }
+                    let built = result.unwrap();
+                    assert!(built.diagnostics.is_empty(), "{layer:?}");
+                    let decoded = decode("modbus_tcp", &built.bytes).unwrap();
+                    let mut packet = Packet::default();
+                    packet.push_boxed(decoded.layer.clone_box());
+                    assert_eq!(build_in(packet, mode).unwrap().bytes, built.bytes);
+                    let mut interpreted =
+                        decoded.layer.downcast_ref::<ModbusTcp>().unwrap().clone();
+                    if matches!(form, PduForm::Request | PduForm::Response) {
+                        interpreted.interpret(form == PduForm::Response).unwrap();
+                    }
+                    assert_eq!(interpreted, layer, "{mode:?} {field}");
+                    let mut packet = Packet::default();
+                    packet.push(interpreted);
+                    assert_eq!(build_in(packet, mode).unwrap().bytes, built.bytes);
+                }
             }
         }
     }
@@ -814,6 +976,91 @@ fn ospfv2_preserves_authentication_digest() {
 }
 
 #[test]
+fn dtls_record_bodies_follow_content_type_and_epoch() {
+    let registry = builtin::registry();
+    let fragments = field::Value::List(vec![field::Value::Object(record([
+        ("message_type", 1_u8.into()),
+        ("length", 4_u8.into()),
+        ("message_sequence", 3_u8.into()),
+        ("offset", 1_u8.into()),
+        ("data", Bytes::from_static(b"ab").into()),
+    ]))]);
+    for kind in 20_u8..=24 {
+        for epoch in [0_u16, 1, u16::MAX] {
+            let handshake = kind == 22 && epoch == 0;
+            let (carried, uncarried, value, extra, empty) = if handshake {
+                (
+                    "handshakes",
+                    "data",
+                    fragments.clone(),
+                    Bytes::from_static(b"lost").into(),
+                    Bytes::new().into(),
+                )
+            } else {
+                (
+                    "data",
+                    "handshakes",
+                    Bytes::from_static(b"body").into(),
+                    fragments.clone(),
+                    field::Value::List(Vec::new()),
+                )
+            };
+            let layer = Dtls {
+                records: Records(vec![
+                    record([
+                        ("content_type", 23_u8.into()),
+                        ("epoch", 1_u16.into()),
+                        ("sequence", 0_u64.into()),
+                        ("data", Bytes::from_static(b"first").into()),
+                    ]),
+                    record([
+                        ("content_type", kind.into()),
+                        ("epoch", epoch.into()),
+                        ("sequence", 0xffffffffffff_u64.into()),
+                        (carried, value),
+                    ]),
+                ]),
+            };
+            for mode in [Mode::Strict, Mode::Permissive] {
+                for extra in [
+                    None,
+                    Some(extra.clone()),
+                    Some(empty.clone()),
+                    Some(true.into()),
+                ] {
+                    let mut current = layer.clone();
+                    if let Some(extra) = &extra {
+                        current.records.0[1].insert(uncarried.into(), extra.clone());
+                    }
+                    let mut packet = Packet::default();
+                    packet.push(current);
+                    let json =
+                        serde_json::to_string(&document::Packet::from_packet(&packet)).unwrap();
+                    let document =
+                        document::Packet::parse(&json, document::Format::Json, json.len()).unwrap();
+                    let result = build_in(document.to_packet(&registry, 16).unwrap(), mode);
+                    if extra.is_some() {
+                        let error = result.unwrap_err();
+                        assert!(
+                            error.contains(&format!("records[1].{uncarried}")),
+                            "{kind} {epoch} {mode:?}: {error}"
+                        );
+                        continue;
+                    }
+                    let built = result.unwrap();
+                    assert!(built.diagnostics.is_empty());
+                    let decoded = decode("dtls", &built.bytes).unwrap();
+                    assert_eq!(decoded.layer.downcast_ref::<Dtls>().unwrap(), &layer);
+                    let mut packet = Packet::default();
+                    packet.push_boxed(decoded.layer);
+                    assert_eq!(build_in(packet, mode).unwrap().bytes, built.bytes);
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn dtls_rejects_oversized_fragment_offsets() {
     let fragment = field::Value::Object(record([
         ("message_type", 1_u8.into()),
@@ -840,6 +1087,137 @@ fn dtls_rejects_oversized_fragment_offsets() {
             .build(packet, Addresses::default(), Default::default())
             .is_err()
     );
+}
+
+#[test]
+fn sflow_samples_reject_inactive_fields_and_preserve_supported_forms() {
+    let registry = builtin::registry();
+    let builder = crate::build::Builder::new(registry.clone());
+    let numeric = [
+        "sequence",
+        "source_id",
+        "source_type",
+        "source_index",
+        "sampling_rate",
+        "sample_pool",
+        "drops",
+        "input_format",
+        "input",
+        "output_format",
+        "output",
+    ];
+    for (format, keys) in [
+        (
+            1_u32,
+            vec![
+                "sequence",
+                "source_id",
+                "sampling_rate",
+                "sample_pool",
+                "drops",
+                "input",
+                "output",
+            ],
+        ),
+        (2, vec!["sequence", "source_id"]),
+        (
+            3,
+            vec![
+                "sequence",
+                "source_type",
+                "source_index",
+                "sampling_rate",
+                "sample_pool",
+                "drops",
+                "input_format",
+                "input",
+                "output_format",
+                "output",
+            ],
+        ),
+        (4, vec!["sequence", "source_type", "source_index"]),
+        (4097, vec![]),
+    ] {
+        let sample = record([("format", format.into())])
+            .into_iter()
+            .chain(keys.iter().map(|key| ((*key).to_owned(), 42_u32.into())))
+            .chain(if keys.is_empty() {
+                vec![
+                    ("data".to_owned(), Bytes::from_static(b"A").into()),
+                    ("padding".to_owned(), Bytes::from_static(b"XYZ").into()),
+                ]
+            } else {
+                vec![(
+                    "records".to_owned(),
+                    field::Value::List(vec![field::Value::Object(record([
+                        ("format", 4097_u32.into()),
+                        ("data", Bytes::from_static(b"A").into()),
+                        ("padding", Bytes::from_static(b"XYZ").into()),
+                    ]))]),
+                )]
+            })
+            .collect::<std::collections::BTreeMap<_, _>>();
+        for mode in [Mode::Strict, Mode::Permissive] {
+            for extra in std::iter::once(None).chain(
+                numeric
+                    .iter()
+                    .copied()
+                    .chain(["records", "data"])
+                    .filter(|key| !sample.contains_key(*key))
+                    .flat_map(|key| {
+                        [
+                            (key, field::Value::Unsigned(0)),
+                            (key, field::Value::Unsigned(99)),
+                            (key, Bytes::from_static(b"lost").into()),
+                            (key, field::Value::List(vec![])),
+                        ]
+                    })
+                    .map(Some),
+            ) {
+                let fields = sample
+                    .clone()
+                    .into_iter()
+                    .chain(extra.clone().map(|(key, value)| (key.to_owned(), value)))
+                    .collect();
+                let mut packet = Packet::default();
+                packet.push(Sflow {
+                    samples: Records(vec![fields]),
+                    ..Default::default()
+                });
+                let json = serde_json::to_string(&document::Packet::from_packet(&packet)).unwrap();
+                let packet = document::Packet::parse(&json, document::Format::Json, json.len())
+                    .unwrap()
+                    .to_packet(&registry, 16)
+                    .unwrap();
+                let result = builder.build(
+                    packet,
+                    Addresses::default(),
+                    crate::build::Options {
+                        mode,
+                        ..Default::default()
+                    },
+                );
+                if let Some((key, _)) = extra {
+                    let error = result.err().unwrap_or_else(|| {
+                        panic!("format {format} silently discarded {key} in {mode:?}")
+                    });
+                    assert!(format!("{error:?}").contains(key), "{error:?}");
+                } else {
+                    let built = result.unwrap();
+                    assert!(built.diagnostics.is_empty());
+                    let materialized = built.packet.get::<Sflow>().unwrap();
+                    for (key, value) in &sample {
+                        assert_eq!(
+                            materialized.samples.0[0].get(key),
+                            Some(value),
+                            "{format} {key}"
+                        );
+                    }
+                    builder_round_trip("sflow", &built.bytes);
+                }
+            }
+        }
+    }
 }
 
 #[test]
@@ -1040,6 +1418,174 @@ fn ethernet_ip_preserves_opaque_errors() {
             wire.extend_from_slice(&[0; 12]);
             wire.extend_from_slice(data);
             builder_round_trip("ethernet_ip", &wire);
+        }
+    }
+}
+
+#[test]
+fn ethernet_ip_fields_follow_command_and_status() {
+    use crate::protocol::application::ethernet_ip::EthernetIp;
+
+    let registry = builtin::registry();
+    let values = [
+        ("protocol_version", 2_u16.into(), &[0x65][..]),
+        ("flags", 1_u16.into(), &[0x65][..]),
+        ("interface_handle", 7_u32.into(), &[0x6f, 0x70][..]),
+        ("timeout", 23_u16.into(), &[0x6f, 0x70][..]),
+        (
+            "items",
+            field::Value::List(vec![field::Value::Object(record([
+                ("kind", 0xb2_u16.into()),
+                ("data", Bytes::from_static(&[0xa5, 0x5a]).into()),
+            ]))]),
+            &[0x6f, 0x70][..],
+        ),
+        (
+            "data",
+            field::Value::Bytes(Bytes::from_static(&[0xa5, 0x5a])),
+            &[0x63][..],
+        ),
+    ];
+    for mode in [Mode::Strict, Mode::Permissive] {
+        for command in [0x65, 0x66, 0x6f, 0x70, 0x63] {
+            for status in [0, 100] {
+                let default = EthernetIp {
+                    command,
+                    status,
+                    ..Default::default()
+                };
+                let cases = std::iter::once((default.clone(), None)).chain(values.iter().map(
+                    |(name, value, commands)| {
+                        let mut layer = default.clone();
+                        layer.set_field(name, value.clone()).unwrap();
+                        let carried = if status == 0 {
+                            commands.contains(&command)
+                        } else {
+                            *name == "data"
+                        };
+                        (layer, (!carried).then_some(*name))
+                    },
+                ));
+                for (layer, rejected) in cases {
+                    let mut packet = Packet::default();
+                    packet.push(layer.clone());
+                    let document = document::Packet::from_packet(&packet);
+                    let result = build_in(document.to_packet(&registry, 16).unwrap(), mode);
+                    if let Some(name) = rejected {
+                        let error = result.unwrap_err();
+                        assert!(
+                            error.contains(name),
+                            "{command:#x} {status} {mode:?}: {error}"
+                        );
+                        continue;
+                    }
+                    let built = result.unwrap();
+                    assert!(built.diagnostics.is_empty());
+                    let decoded = decode("ethernet_ip", &built.bytes).unwrap();
+                    assert_eq!(decoded.layer.downcast_ref::<EthernetIp>(), Some(&layer));
+                    let mut packet = Packet::default();
+                    packet.push_boxed(decoded.layer);
+                    let document = document::Packet::from_packet(&packet);
+                    let rebuilt =
+                        build_in(document.to_packet(&registry, 16).unwrap(), mode).unwrap();
+                    assert_eq!(rebuilt.bytes, built.bytes);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn opcua_tcp_rejects_fields_outside_selected_message() {
+    use crate::protocol::application::opcua_tcp::OpcuaTcp;
+
+    let registry = builtin::registry();
+    let values = [
+        (
+            "protocol_version",
+            field::Value::Unsigned(1),
+            &[b"HEL", b"ACK"][..],
+        ),
+        ("receive_buffer", 8192_u32.into(), &[b"HEL", b"ACK"][..]),
+        ("send_buffer", 8192_u32.into(), &[b"HEL", b"ACK"][..]),
+        ("max_message_size", 999_u32.into(), &[b"HEL", b"ACK"][..]),
+        ("max_chunk_count", 8_u32.into(), &[b"HEL", b"ACK"][..]),
+        (
+            "endpoint_url",
+            Bytes::from_static(b"opc.tcp://example.invalid:4840").into(),
+            &[b"HEL", b"RHE"][..],
+        ),
+        ("endpoint_null", true.into(), &[b"HEL", b"RHE"][..]),
+        (
+            "server_uri",
+            Bytes::from_static(b"urn:example:server").into(),
+            &[b"RHE"][..],
+        ),
+        ("server_uri_null", true.into(), &[b"RHE"][..]),
+        ("status_code", 42_u32.into(), &[b"ERR"][..]),
+        (
+            "reason",
+            Bytes::from_static(b"test reason").into(),
+            &[b"ERR"][..],
+        ),
+        ("reason_null", true.into(), &[b"ERR"][..]),
+        (
+            "secure_channel",
+            42_u32.into(),
+            &[b"OPN", b"MSG", b"CLO"][..],
+        ),
+        (
+            "data",
+            Bytes::from_static(&[0xa5, 0x5a]).into(),
+            &[b"OPN", b"MSG", b"CLO"][..],
+        ),
+    ];
+    for mode in [Mode::Strict, Mode::Permissive] {
+        for message_type in [b"HEL", b"ACK", b"ERR", b"RHE", b"OPN", b"MSG", b"CLO"] {
+            let chunks = if matches!(message_type, b"OPN" | b"MSG" | b"CLO") {
+                &b"FCA"[..]
+            } else {
+                &b"F"[..]
+            };
+            for chunk_type in chunks {
+                let default = OpcuaTcp {
+                    message_type: Bytes::from_static(message_type),
+                    chunk_type: *chunk_type,
+                    ..Default::default()
+                };
+                let cases = std::iter::once((default.clone(), None)).chain(values.iter().map(
+                    |(name, value, messages)| {
+                        let carried = messages.contains(&message_type);
+                        let mut layer = default.clone();
+                        if *name == "endpoint_null" && carried {
+                            layer.endpoint_url = Bytes::new();
+                        }
+                        layer.set_field(name, value.clone()).unwrap();
+                        (layer, (!carried).then_some(*name))
+                    },
+                ));
+                for (layer, rejected) in cases {
+                    let mut packet = Packet::default();
+                    packet.push(layer.clone());
+                    let document = document::Packet::from_packet(&packet);
+                    let result = build_in(document.to_packet(&registry, 16).unwrap(), mode);
+                    if let Some(name) = rejected {
+                        let error = result.unwrap_err();
+                        assert!(error.contains(name), "{message_type:?} {mode:?}: {error}");
+                        continue;
+                    }
+                    let built = result.unwrap();
+                    assert!(built.diagnostics.is_empty());
+                    let decoded = decode("opcua_tcp", &built.bytes).unwrap();
+                    assert_eq!(decoded.layer.downcast_ref::<OpcuaTcp>(), Some(&layer));
+                    let mut packet = Packet::default();
+                    packet.push_boxed(decoded.layer);
+                    let document = document::Packet::from_packet(&packet);
+                    let rebuilt =
+                        build_in(document.to_packet(&registry, 16).unwrap(), mode).unwrap();
+                    assert_eq!(rebuilt.bytes, built.bytes);
+                }
+            }
         }
     }
 }
@@ -1406,6 +1952,96 @@ fn resp_supports_edits_filters_and_projection() {
                     Bytes::from_static(b"NEXT").into()
                 ]))]
             );
+        }
+    }
+}
+
+#[test]
+fn bacnet_fields_follow_selected_headers() {
+    use crate::protocol::application::bacnet_ip::BacnetIp;
+
+    let registry = builtin::registry();
+    for bvlc_function in [0, 1, 4, 10, 11, 255] {
+        let npdu = matches!(bvlc_function, 4 | 10 | 11);
+        for control in [0, 8, 32, 40, 128, 136, 160, 168] {
+            for network_message_type in [0, 128, 255] {
+                if (!npdu && control != 0) || (control & 128 == 0 && network_message_type != 0) {
+                    continue;
+                }
+                let base = BacnetIp {
+                    bvlc_function,
+                    control,
+                    network_message_type,
+                    data: Bytes::from_static(b"\x10\x08"),
+                    ..Default::default()
+                };
+                let destination = npdu && control & 32 != 0;
+                let source = npdu && control & 8 != 0;
+                let network_message = npdu && control & 128 != 0;
+                let cases: [(&str, field::Value, bool); 9] = [
+                    (
+                        "forwarded_address",
+                        Bytes::from_static(b"\x01\x02\x03\x04\x05\x06").into(),
+                        bvlc_function == 4,
+                    ),
+                    ("control", u64::from(control | 1).into(), npdu),
+                    ("destination_network", 42_u64.into(), destination),
+                    (
+                        "destination_address",
+                        Bytes::from_static(b"\x01\x02").into(),
+                        destination,
+                    ),
+                    ("hop_count", 42_u64.into(), destination),
+                    ("source_network", 42_u64.into(), source),
+                    (
+                        "source_address",
+                        Bytes::from_static(b"\x03\x04").into(),
+                        source,
+                    ),
+                    (
+                        "network_message_type",
+                        u64::from(network_message_type ^ 1).into(),
+                        network_message,
+                    ),
+                    (
+                        "vendor_id",
+                        42_u64.into(),
+                        network_message && network_message_type >= 128,
+                    ),
+                ];
+                for mode in [Mode::Strict, Mode::Permissive] {
+                    for (field, value, carried) in &cases {
+                        for changed in [false, true] {
+                            let mut layer = base.clone();
+                            if changed {
+                                layer.set_field(field, value.clone()).unwrap();
+                            }
+                            let mut packet = Packet::default();
+                            packet.push(layer.clone());
+                            let json =
+                                serde_json::to_string(&document::Packet::from_packet(&packet))
+                                    .unwrap();
+                            let document =
+                                document::Packet::parse(&json, document::Format::Json, json.len())
+                                    .unwrap();
+                            let result = build_in(document.to_packet(&registry, 16).unwrap(), mode);
+                            if changed && !carried {
+                                let error = result.unwrap_err();
+                                assert!(error.contains(field), "{mode:?} {field}: {error}");
+                                continue;
+                            }
+                            let built = result.unwrap();
+                            assert!(built.diagnostics.is_empty(), "{mode:?} {layer:?}");
+                            assert_eq!(built.packet.get::<BacnetIp>(), Some(&layer));
+                            let decoded = decode("bacnet_ip", &built.bytes).unwrap();
+                            let mut packet = Packet::default();
+                            packet.push_boxed(decoded.layer);
+                            assert_eq!(packet.get::<BacnetIp>(), Some(&layer));
+                            assert_eq!(build_in(packet, mode).unwrap().bytes, built.bytes);
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -2201,6 +2837,29 @@ fn slice<'a>(name: &str, field: &str, wire: &'a [u8]) -> &'a [u8] {
 
 #[test]
 fn application_layouts_expose_exact_content_ranges() {
+    let rtp = b"\xb1\x60\0\x01\0\0\0\x02\0\0\0\x03CSRC\xbe\xde\0\x01EXT!PAY\0\0\0\x04";
+    for (field, expected) in [
+        ("csrcs", b"CSRC".as_slice()),
+        ("has_extension", b"\xb1"),
+        ("extension_profile", b"\xbe\xde"),
+        ("extension_data", b"EXT!"),
+        ("payload", b"PAY"),
+        ("padding", b"\0\0\0\x04"),
+    ] {
+        assert_eq!(slice("rtp", field, rtp), expected);
+    }
+    for wire in [
+        b"\x80\0\0\0\0\0\0\0\0\0\0\0".as_slice(),
+        b"\x90\0\0\0\0\0\0\0\0\0\0\0\xbe\xde\0\0",
+    ] {
+        for field in ["csrcs", "payload", "padding"] {
+            assert_eq!(slice("rtp", field, wire), b"");
+        }
+        if wire[0] & 16 != 0 {
+            assert_eq!(slice("rtp", "extension_data", wire), b"");
+        }
+        builder_round_trip("rtp", wire);
+    }
     for (name, version) in [("sip", "SIP/2.0"), ("rtsp", "RTSP/1.0")] {
         let wire = format!("OPTIONS * {version}\r\nContent-Length:3\r\n\r\nabc");
         assert_eq!(slice(name, "body", wire.as_bytes()), b"abc");
@@ -3096,6 +3755,371 @@ fn snmp_pdu_fields_survive_document_and_wire_round_trips() {
                     document::Packet::parse(&json, document::Format::Json, json.len()).unwrap();
                 let rebuilt = build_in(document.to_packet(&registry, 16).unwrap(), mode).unwrap();
                 assert_eq!(rebuilt.bytes, built.bytes, "{mode:?}: {layer:?}");
+            }
+        }
+    }
+}
+
+#[test]
+fn iec104_fields_follow_frame_type() {
+    use crate::protocol::application::iec104::{FrameType, Iec104};
+
+    let registry = builtin::registry();
+    let values = [
+        ("send_sequence", 123_u16.into(), [true, false, false]),
+        ("receive_sequence", 234_u16.into(), [true, true, false]),
+        ("u_control", 11_u8.into(), [false, false, true]),
+        ("asdu_type", 101_u8.into(), [true, false, false]),
+        ("variable_structure", 2_u8.into(), [true, false, false]),
+        ("cause", 7_u16.into(), [true, false, false]),
+        ("common_address", 2_u16.into(), [true, false, false]),
+        (
+            "objects",
+            field::Value::Bytes(Bytes::from_static(&[1, 2, 3, 4])),
+            [true, false, false],
+        ),
+    ];
+    for mode in [Mode::Strict, Mode::Permissive] {
+        for (index, frame_type) in [FrameType::I, FrameType::S, FrameType::U]
+            .into_iter()
+            .enumerate()
+        {
+            let default = Iec104 {
+                frame_type,
+                ..Default::default()
+            };
+            let cases = std::iter::once((default.clone(), None)).chain(values.iter().map(
+                |(name, value, carried)| {
+                    let mut layer = default.clone();
+                    layer.set_field(name, value.clone()).unwrap();
+                    (layer, (!carried[index]).then_some(*name))
+                },
+            ));
+            for (layer, rejected) in cases {
+                let mut packet = Packet::default();
+                packet.push(layer.clone());
+                let document = document::Packet::from_packet(&packet);
+                let packet = document.to_packet(&registry, 16).unwrap();
+                let result = build_in(packet, mode);
+                if let Some(name) = rejected {
+                    let error = result.unwrap_err();
+                    assert!(error.contains(name), "{frame_type:?} {mode:?}: {error}");
+                    continue;
+                }
+                let built = result.unwrap();
+                assert!(built.diagnostics.is_empty());
+                let decoded = decode("iec104", &built.bytes).unwrap();
+                assert_eq!(decoded.layer.downcast_ref::<Iec104>(), Some(&layer));
+                let mut packet = Packet::default();
+                packet.push_boxed(decoded.layer);
+                let document = document::Packet::from_packet(&packet);
+                let rebuilt = build_in(document.to_packet(&registry, 16).unwrap(), mode).unwrap();
+                assert_eq!(rebuilt.bytes, built.bytes);
+            }
+        }
+    }
+}
+
+#[test]
+fn ipfix_rejects_fields_absent_from_selected_wire_form() {
+    use crate::protocol::application::ipfix::Ipfix;
+    let list = |values| field::Value::List(values);
+    let template = |fields, scope| {
+        field::Value::Object(record([
+            ("template_id", 256_u16.into()),
+            ("fields", fields),
+            ("scope_count", scope),
+        ]))
+    };
+    let field = |enterprise| {
+        field::Value::Object(record([
+            ("element_id", 8_u16.into()),
+            ("length", 4_u16.into()),
+            ("enterprise", enterprise),
+        ]))
+    };
+    let registry = builtin::registry();
+    for value in [
+        Bytes::from_static(b"AB").into(),
+        Bytes::new().into(),
+        field::Value::Bool(true),
+        42_u16.into(),
+        0_u16.into(),
+        field::Value::Signed(0),
+    ] {
+        let cases = [
+            (
+                record([
+                    ("id", 2_u16.into()),
+                    ("records", list(vec![])),
+                    ("data", value.clone()),
+                ]),
+                "data",
+            ),
+            (
+                record([
+                    ("id", 3_u16.into()),
+                    ("records", list(vec![])),
+                    ("data", value.clone()),
+                ]),
+                "data",
+            ),
+            (
+                record([
+                    ("id", 256_u16.into()),
+                    ("data", Bytes::new().into()),
+                    ("records", value.clone()),
+                ]),
+                "records",
+            ),
+            (
+                record([
+                    ("id", 256_u16.into()),
+                    ("data", Bytes::new().into()),
+                    ("padding", value.clone()),
+                ]),
+                "padding",
+            ),
+            (
+                record([
+                    ("id", 2_u16.into()),
+                    ("records", list(vec![template(list(vec![]), value.clone())])),
+                ]),
+                "scope_count",
+            ),
+            (
+                record([
+                    ("id", 3_u16.into()),
+                    ("records", list(vec![template(list(vec![]), value.clone())])),
+                ]),
+                "scope_count",
+            ),
+            (
+                record([
+                    ("id", 3_u16.into()),
+                    (
+                        "records",
+                        list(vec![template(
+                            list(vec![field(value.clone())]),
+                            1_u16.into(),
+                        )]),
+                    ),
+                ]),
+                "enterprise",
+            ),
+            (
+                record([
+                    ("id", 2_u16.into()),
+                    (
+                        "records",
+                        list(vec![template(
+                            list(vec![field::Value::Object(record([
+                                ("element_id", 8_u16.into()),
+                                ("length", 4_u16.into()),
+                            ]))]),
+                            value.clone(),
+                        )]),
+                    ),
+                ]),
+                "scope_count",
+            ),
+        ];
+        for (set, key) in cases {
+            let mut packet = Packet::default();
+            packet.push(Ipfix {
+                sets: Records(vec![set]),
+                ..Default::default()
+            });
+            let json = serde_json::to_string(&document::Packet::from_packet(&packet)).unwrap();
+            let document =
+                document::Packet::parse(&json, document::Format::Json, json.len()).unwrap();
+            for mode in [Mode::Strict, Mode::Permissive] {
+                let result = build_in(document.to_packet(&registry, 16).unwrap(), mode);
+                if key == "scope_count" && value == field::Value::Unsigned(0) {
+                    assert!(result.is_ok(), "{key} {value:?} {mode:?}");
+                    continue;
+                }
+                assert!(result.is_err(), "{key} {value:?} {mode:?}");
+                assert!(result.unwrap_err().contains(key));
+            }
+        }
+    }
+}
+
+#[test]
+fn ipfix_supported_forms_preserve_bytes() {
+    use crate::protocol::application::ipfix::Ipfix;
+    let registry = builtin::registry();
+    for id in [0_u16, 2, 3, 256, 65535] {
+        for enterprise in [false, true] {
+            for withdrawal in [false, true] {
+                let fields = if withdrawal {
+                    vec![]
+                } else {
+                    vec![field::Value::Object(
+                        record([
+                            (
+                                "element_id",
+                                (if enterprise { 0x8008_u16 } else { 8 }).into(),
+                            ),
+                            ("length", 4_u16.into()),
+                        ])
+                        .into_iter()
+                        .chain(enterprise.then(|| ("enterprise".to_owned(), 42_u32.into())))
+                        .collect(),
+                    )]
+                };
+                let set = if matches!(id, 2 | 3) {
+                    record([
+                        ("id", id.into()),
+                        ("padding", Bytes::from_static(b"ABC").into()),
+                        (
+                            "records",
+                            field::Value::List(vec![field::Value::Object(record([
+                                ("template_id", 256_u16.into()),
+                                ("scope_count", u16::from(id == 3 && !withdrawal).into()),
+                                ("fields", field::Value::List(fields)),
+                            ]))]),
+                        ),
+                    ])
+                } else {
+                    record([
+                        ("id", id.into()),
+                        ("data", Bytes::from_static(b"payload").into()),
+                    ])
+                };
+                let mut packet = Packet::default();
+                packet.push(Ethernet::default());
+                packet.push(Ipv4::default());
+                packet.push(Udp {
+                    destination_port: 4739,
+                    ..Default::default()
+                });
+                packet.push(Ipfix {
+                    sets: Records(vec![set]),
+                    ..Default::default()
+                });
+                let json = serde_json::to_string(&document::Packet::from_packet(&packet)).unwrap();
+                let document =
+                    document::Packet::parse(&json, document::Format::Json, json.len()).unwrap();
+                for mode in [Mode::Strict, Mode::Permissive] {
+                    let built = build_in(document.to_packet(&registry, 16).unwrap(), mode).unwrap();
+                    assert!(built.diagnostics.is_empty());
+                    let decoded = crate::decode::Dissector::new(registry.clone())
+                        .decode(
+                            Frame::new(None, LinkType::ETHERNET, built.bytes.clone()).unwrap(),
+                            Default::default(),
+                        )
+                        .unwrap();
+                    assert_eq!(decoded.packet.get::<Ipfix>(), built.packet.get::<Ipfix>());
+                    assert!(decoded.packet.get::<Ipfix>().is_some());
+                    let rebuilt = build_in(decoded.packet, mode).unwrap();
+                    assert_eq!(rebuilt.bytes, built.bytes);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn amqp_rejects_fields_absent_from_the_frame() {
+    use crate::protocol::application::amqp::Amqp;
+    let registry = builtin::registry();
+    for layer in [
+        Amqp {
+            channel: 1,
+            ..Default::default()
+        },
+        Amqp {
+            payload: Bytes::from_static(b"data"),
+            ..Default::default()
+        },
+        Amqp {
+            frame_type: 2,
+            payload: Bytes::from(vec![0; 13]),
+            ..Default::default()
+        },
+        Amqp {
+            frame_type: 2,
+            payload: Bytes::from([vec![0; 13], vec![1]].concat()),
+            ..Default::default()
+        },
+    ] {
+        for mode in [Mode::Strict, Mode::Permissive] {
+            let mut packet = Packet::default();
+            packet.push(layer.clone());
+            assert!(build_in(packet, mode).is_err(), "{mode:?}: {layer:?}");
+        }
+    }
+    for frame_type in [0, 1, 2, 3, 8] {
+        let base = Amqp {
+            frame_type,
+            payload: if frame_type == 2 {
+                Bytes::from(vec![0; 14])
+            } else {
+                Bytes::new()
+            },
+            ..Default::default()
+        };
+        for (name, value, carried) in [
+            ("channel", 7_u16.into(), frame_type != 0),
+            ("class_id", 60_u16.into(), frame_type == 1),
+            ("method_id", 40_u16.into(), frame_type == 1),
+            (
+                "payload",
+                Bytes::from_static(b"data").into(),
+                frame_type != 0,
+            ),
+        ] {
+            if carried {
+                continue;
+            }
+            let mut layer = base.clone();
+            layer.set_field(name, value).unwrap();
+            let mut packet = Packet::default();
+            packet.push(layer);
+            let document = document::Packet::from_packet(&packet);
+            for mode in [Mode::Strict, Mode::Permissive] {
+                let error = build_in(document.to_packet(&registry, 16).unwrap(), mode).unwrap_err();
+                assert!(error.contains(name), "{mode:?}: {error}");
+            }
+        }
+        let populated = match frame_type {
+            1 => Amqp {
+                channel: 7,
+                class_id: 60,
+                method_id: 40,
+                payload: Bytes::from_static(b"arguments"),
+                ..base.clone()
+            },
+            2 => Amqp {
+                channel: 7,
+                ..base.clone()
+            },
+            3 => Amqp {
+                channel: 7,
+                payload: Bytes::from_static(b"body"),
+                ..base.clone()
+            },
+            _ => base.clone(),
+        };
+        for layer in [base, populated] {
+            for mode in [Mode::Strict, Mode::Permissive] {
+                let mut packet = Packet::default();
+                packet.push(layer.clone());
+                let document = document::Packet::from_packet(&packet);
+                let built = build_in(document.to_packet(&registry, 16).unwrap(), mode).unwrap();
+                assert_eq!(built.packet.get::<Amqp>(), Some(&layer));
+                assert!(built.diagnostics.is_empty());
+                round_trip("amqp", &built.bytes);
+                let rebuilt = build_in(
+                    document::Packet::from_packet(&built.packet)
+                        .to_packet(&registry, 16)
+                        .unwrap(),
+                    mode,
+                )
+                .unwrap();
+                assert_eq!(rebuilt.bytes, built.bytes);
             }
         }
     }

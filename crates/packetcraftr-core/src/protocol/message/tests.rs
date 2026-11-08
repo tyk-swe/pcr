@@ -3688,3 +3688,204 @@ fn iec104_fields_follow_frame_type() {
         }
     }
 }
+
+#[test]
+fn ipfix_rejects_fields_absent_from_selected_wire_form() {
+    use crate::protocol::application::ipfix::Ipfix;
+    let list = |values| field::Value::List(values);
+    let template = |fields, scope| {
+        field::Value::Object(record([
+            ("template_id", 256_u16.into()),
+            ("fields", fields),
+            ("scope_count", scope),
+        ]))
+    };
+    let field = |enterprise| {
+        field::Value::Object(record([
+            ("element_id", 8_u16.into()),
+            ("length", 4_u16.into()),
+            ("enterprise", enterprise),
+        ]))
+    };
+    let registry = builtin::registry();
+    for value in [
+        Bytes::from_static(b"AB").into(),
+        Bytes::new().into(),
+        field::Value::Bool(true),
+        42_u16.into(),
+        0_u16.into(),
+        field::Value::Signed(0),
+    ] {
+        let cases = [
+            (
+                record([
+                    ("id", 2_u16.into()),
+                    ("records", list(vec![])),
+                    ("data", value.clone()),
+                ]),
+                "data",
+            ),
+            (
+                record([
+                    ("id", 3_u16.into()),
+                    ("records", list(vec![])),
+                    ("data", value.clone()),
+                ]),
+                "data",
+            ),
+            (
+                record([
+                    ("id", 256_u16.into()),
+                    ("data", Bytes::new().into()),
+                    ("records", value.clone()),
+                ]),
+                "records",
+            ),
+            (
+                record([
+                    ("id", 256_u16.into()),
+                    ("data", Bytes::new().into()),
+                    ("padding", value.clone()),
+                ]),
+                "padding",
+            ),
+            (
+                record([
+                    ("id", 2_u16.into()),
+                    ("records", list(vec![template(list(vec![]), value.clone())])),
+                ]),
+                "scope_count",
+            ),
+            (
+                record([
+                    ("id", 3_u16.into()),
+                    ("records", list(vec![template(list(vec![]), value.clone())])),
+                ]),
+                "scope_count",
+            ),
+            (
+                record([
+                    ("id", 3_u16.into()),
+                    (
+                        "records",
+                        list(vec![template(
+                            list(vec![field(value.clone())]),
+                            1_u16.into(),
+                        )]),
+                    ),
+                ]),
+                "enterprise",
+            ),
+            (
+                record([
+                    ("id", 2_u16.into()),
+                    (
+                        "records",
+                        list(vec![template(
+                            list(vec![field::Value::Object(record([
+                                ("element_id", 8_u16.into()),
+                                ("length", 4_u16.into()),
+                            ]))]),
+                            value.clone(),
+                        )]),
+                    ),
+                ]),
+                "scope_count",
+            ),
+        ];
+        for (set, key) in cases {
+            let mut packet = Packet::default();
+            packet.push(Ipfix {
+                sets: Records(vec![set]),
+                ..Default::default()
+            });
+            let json = serde_json::to_string(&document::Packet::from_packet(&packet)).unwrap();
+            let document =
+                document::Packet::parse(&json, document::Format::Json, json.len()).unwrap();
+            for mode in [Mode::Strict, Mode::Permissive] {
+                let result = build_in(document.to_packet(&registry, 16).unwrap(), mode);
+                if key == "scope_count" && value == field::Value::Unsigned(0) {
+                    assert!(result.is_ok(), "{key} {value:?} {mode:?}");
+                    continue;
+                }
+                assert!(result.is_err(), "{key} {value:?} {mode:?}");
+                assert!(result.unwrap_err().contains(key));
+            }
+        }
+    }
+}
+
+#[test]
+fn ipfix_supported_forms_preserve_bytes() {
+    use crate::protocol::application::ipfix::Ipfix;
+    let registry = builtin::registry();
+    for id in [0_u16, 2, 3, 256, 65535] {
+        for enterprise in [false, true] {
+            for withdrawal in [false, true] {
+                let fields = if withdrawal {
+                    vec![]
+                } else {
+                    vec![field::Value::Object(
+                        record([
+                            (
+                                "element_id",
+                                (if enterprise { 0x8008_u16 } else { 8 }).into(),
+                            ),
+                            ("length", 4_u16.into()),
+                        ])
+                        .into_iter()
+                        .chain(enterprise.then(|| ("enterprise".to_owned(), 42_u32.into())))
+                        .collect(),
+                    )]
+                };
+                let set = if matches!(id, 2 | 3) {
+                    record([
+                        ("id", id.into()),
+                        ("padding", Bytes::from_static(b"ABC").into()),
+                        (
+                            "records",
+                            field::Value::List(vec![field::Value::Object(record([
+                                ("template_id", 256_u16.into()),
+                                ("scope_count", u16::from(id == 3 && !withdrawal).into()),
+                                ("fields", field::Value::List(fields)),
+                            ]))]),
+                        ),
+                    ])
+                } else {
+                    record([
+                        ("id", id.into()),
+                        ("data", Bytes::from_static(b"payload").into()),
+                    ])
+                };
+                let mut packet = Packet::default();
+                packet.push(Ethernet::default());
+                packet.push(Ipv4::default());
+                packet.push(Udp {
+                    destination_port: 4739,
+                    ..Default::default()
+                });
+                packet.push(Ipfix {
+                    sets: Records(vec![set]),
+                    ..Default::default()
+                });
+                let json = serde_json::to_string(&document::Packet::from_packet(&packet)).unwrap();
+                let document =
+                    document::Packet::parse(&json, document::Format::Json, json.len()).unwrap();
+                for mode in [Mode::Strict, Mode::Permissive] {
+                    let built = build_in(document.to_packet(&registry, 16).unwrap(), mode).unwrap();
+                    assert!(built.diagnostics.is_empty());
+                    let decoded = crate::decode::Dissector::new(registry.clone())
+                        .decode(
+                            Frame::new(None, LinkType::ETHERNET, built.bytes.clone()).unwrap(),
+                            Default::default(),
+                        )
+                        .unwrap();
+                    assert_eq!(decoded.packet.get::<Ipfix>(), built.packet.get::<Ipfix>());
+                    assert!(decoded.packet.get::<Ipfix>().is_some());
+                    let rebuilt = build_in(decoded.packet, mode).unwrap();
+                    assert_eq!(rebuilt.bytes, built.bytes);
+                }
+            }
+        }
+    }
+}

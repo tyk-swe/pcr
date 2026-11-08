@@ -620,6 +620,141 @@ fn files_export_honors_capture_limits() {
 }
 
 #[test]
+fn files_export_keeps_dependencies_of_earlier_fragment_matches() {
+    use packetcraftr_core::build::Builder;
+    use packetcraftr_core::capture_file::{Format, Writer};
+    use packetcraftr_core::frame::{Frame, LinkType};
+    use packetcraftr_core::layer::Raw;
+    use packetcraftr_core::packet::Packet;
+    use packetcraftr_core::protocol::{
+        builtin,
+        link::Ethernet,
+        network::{Ipv4, Ipv6},
+        transport::Udp,
+    };
+    use packetcraftr_core::transform::{FragmentOptions, fragment};
+    use std::time::UNIX_EPOCH;
+
+    for ipv6 in [false, true] {
+        let mut packet = Packet::default();
+        packet.push(Ethernet::default());
+        if ipv6 {
+            packet.push(Ipv6 {
+                source: "2001:db8::1".parse().unwrap(),
+                destination: "2001:db8::2".parse().unwrap(),
+                ..Default::default()
+            });
+        } else {
+            packet.push(Ipv4 {
+                source: "192.0.2.1".parse().unwrap(),
+                destination: "192.0.2.2".parse().unwrap(),
+                ..Default::default()
+            });
+        }
+        packet.push(Udp {
+            source_port: 40000,
+            destination_port: 40001,
+            ..Default::default()
+        });
+        packet.push(Raw::new(vec![0xa5; 32]));
+        let built = Builder::new(builtin::registry())
+            .build(packet, Default::default(), Default::default())
+            .unwrap();
+        let original = Frame::new(Some(UNIX_EPOCH), LinkType::ETHERNET, built.bytes).unwrap();
+        let fragments = fragment(
+            &original,
+            FragmentOptions {
+                mtu: if ipv6 { 64 } else { 36 },
+                identification: Some(1),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(fragments.len() > 2);
+
+        for format in [Format::Pcap, Format::PcapNg] {
+            for reverse in [false, true] {
+                for incomplete in [false, true] {
+                    let directory = tempfile::tempdir().unwrap();
+                    let source = directory.path().join("fragments.pcap");
+                    let destination = directory.path().join("exported.pcap");
+                    let mut selected = fragments.clone();
+                    if incomplete {
+                        selected.pop();
+                    }
+                    if reverse {
+                        selected.reverse();
+                    }
+                    let expected: Vec<_> = selected
+                        .iter()
+                        .map(|frame| frame.bytes().to_vec())
+                        .collect();
+                    let numbers: Vec<_> = (0..selected.len())
+                        .map(|index| if index == 0 { 1 } else { index + 2 })
+                        .collect();
+                    selected.insert(1, original.clone());
+                    let mut writer = Writer::new(
+                        std::fs::File::create(&source).unwrap(),
+                        format,
+                        LinkType::ETHERNET,
+                    )
+                    .unwrap();
+                    for frame in selected {
+                        writer.write_frame(&frame).unwrap();
+                    }
+                    writer.flush().unwrap();
+                    let args = [
+                        "--output",
+                        "json",
+                        "files",
+                        "export",
+                        source.to_str().unwrap(),
+                        "--filter",
+                        "frame.number == 1",
+                        "--write",
+                        destination.to_str().unwrap(),
+                    ];
+                    let report: serde_json::Value =
+                        serde_json::from_str(&assert_success(&run(&args), &args)).unwrap();
+                    assert_eq!(
+                        report["result"]["source_frames"],
+                        serde_json::json!(numbers),
+                        "ipv6={ipv6}, format={format}, reverse={reverse}, incomplete={incomplete}"
+                    );
+                    assert_eq!(capture_frames(&destination), expected);
+                    assert_eq!(
+                        report["result"]["selected_complete_datagrams"],
+                        u64::from(!incomplete)
+                    );
+                    assert_eq!(
+                        report["result"]["selected_incomplete_datagrams"]
+                            .as_array()
+                            .unwrap()
+                            .len(),
+                        usize::from(incomplete)
+                    );
+
+                    let refused = directory.path().join("refused.pcap");
+                    let limit = (expected.len() - 1).to_string();
+                    let args = [
+                        &args[..7],
+                        &[
+                            "--write",
+                            refused.to_str().unwrap(),
+                            "--max-selected-frames",
+                            &limit,
+                        ],
+                    ]
+                    .concat();
+                    assert_error(&run(&args), "policy.export_limit");
+                    assert!(!refused.exists());
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn forwarding_limits_apply_to_both_inputs() {
     let ingress = capture_path("dns-response.pcap");
     let egress = capture_path("http-stream.pcap");

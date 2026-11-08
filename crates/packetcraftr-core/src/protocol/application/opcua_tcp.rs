@@ -74,6 +74,57 @@ message_codec!(OpcuaTcpCodec, OpcuaTcp, opcuatcp_schema);
 
 const NAME: &str = crate::protocol::BuiltinProtocol::OpcuaTcp.as_str();
 impl OpcuaTcp {
+    fn reject_uncarried_fields(&self) -> Result<(), Error> {
+        let message_type = self.message_type.as_ref();
+        let negotiation = matches!(message_type, b"HEL" | b"ACK");
+        let endpoint = matches!(message_type, b"HEL" | b"RHE");
+        let reverse_hello = message_type == b"RHE";
+        let error = message_type == b"ERR";
+        let secure = matches!(message_type, b"OPN" | b"MSG" | b"CLO");
+        let defaults = Self::default();
+        let fields = [
+            (
+                "protocol_version",
+                !negotiation && self.protocol_version != 0,
+            ),
+            (
+                "receive_buffer",
+                !negotiation && self.receive_buffer != defaults.receive_buffer,
+            ),
+            (
+                "send_buffer",
+                !negotiation && self.send_buffer != defaults.send_buffer,
+            ),
+            (
+                "max_message_size",
+                !negotiation && self.max_message_size != 0,
+            ),
+            ("max_chunk_count", !negotiation && self.max_chunk_count != 0),
+            (
+                "endpoint_url",
+                !endpoint && self.endpoint_url != defaults.endpoint_url,
+            ),
+            ("endpoint_null", !endpoint && self.endpoint_null),
+            ("server_uri", !reverse_hello && !self.server_uri.is_empty()),
+            ("server_uri_null", !reverse_hello && self.server_uri_null),
+            ("status_code", !error && self.status_code != 0),
+            ("reason", !error && !self.reason.is_empty()),
+            ("reason_null", !error && self.reason_null),
+            ("secure_channel", !secure && self.secure_channel != 0),
+            ("data", !secure && !self.data.is_empty()),
+        ];
+        if let Some((field, _)) = fields.into_iter().find(|(_, uncarried)| *uncarried) {
+            return Err(invalid(
+                NAME,
+                format!(
+                    "{field} is not part of message type {}",
+                    String::from_utf8_lossy(message_type)
+                ),
+            ));
+        }
+        Ok(())
+    }
+
     fn encode_wire(&self, c: &EncodeContext<'_>) -> Result<Vec<u8>, Error> {
         if self.message_type.len() != 3 || !matches!(self.chunk_type, b'F' | b'C' | b'A') {
             return Err(invalid(NAME, "invalid UACP header"));
@@ -104,6 +155,7 @@ impl OpcuaTcp {
             }
             _ => return Err(unsupported(NAME, "unknown UACP message type")),
         }
+        self.reject_uncarried_fields()?;
         if !matches!(self.message_type.as_ref(), b"OPN" | b"MSG" | b"CLO")
             && self.chunk_type != b'F'
         {

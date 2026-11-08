@@ -84,7 +84,52 @@ message_codec!(Iec104Codec, Iec104, iec104_schema);
 
 const NAME: &str = crate::protocol::BuiltinProtocol::Iec104.as_str();
 impl Iec104 {
+    fn reject_uncarried_fields(&self) -> Result<(), Error> {
+        let default = Self::default();
+        let information = self.frame_type == FrameType::I;
+        let fields = [
+            (
+                "send_sequence",
+                !information && self.send_sequence != default.send_sequence,
+            ),
+            (
+                "receive_sequence",
+                self.frame_type == FrameType::U
+                    && self.receive_sequence != default.receive_sequence,
+            ),
+            (
+                "u_control",
+                self.frame_type != FrameType::U && self.u_control != default.u_control,
+            ),
+            (
+                "asdu_type",
+                !information && self.asdu_type != default.asdu_type,
+            ),
+            (
+                "variable_structure",
+                !information && self.variable_structure != default.variable_structure,
+            ),
+            ("cause", !information && self.cause != default.cause),
+            (
+                "common_address",
+                !information && self.common_address != default.common_address,
+            ),
+            ("objects", !information && self.objects != default.objects),
+        ];
+        if let Some((field, _)) = fields.into_iter().find(|(_, uncarried)| *uncarried) {
+            return Err(invalid(
+                NAME,
+                format!(
+                    "{field} is not part of frame type {}",
+                    self.frame_type.as_str()
+                ),
+            ));
+        }
+        Ok(())
+    }
+
     fn encode_wire(&self, c: &EncodeContext<'_>) -> Result<Vec<u8>, Error> {
+        self.reject_uncarried_fields()?;
         if self.send_sequence > 32767 || self.receive_sequence > 32767 {
             return Err(invalid(NAME, "sequence exceeds 15 bits"));
         }

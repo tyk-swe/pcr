@@ -55,7 +55,7 @@ impl Dtls {
             return Err(invalid(NAME, "empty DTLS datagram"));
         }
         let mut w = Writer::new(NAME, c.remaining_packet_bytes);
-        for r in &self.records.0 {
+        for (index, r) in self.records.0.iter().enumerate() {
             let kind = u8::try_from(number(r, "content_type", NAME)?)
                 .map_err(|_| invalid(NAME, "content type overflow"))?;
             let epoch = u16::try_from(number(r, "epoch", NAME)?)
@@ -64,8 +64,18 @@ impl Dtls {
             if seq > 0xffffffffffff {
                 return Err(invalid(NAME, "sequence overflow"));
             }
+            let handshake = kind == 22 && epoch == 0;
+            let uncarried = if handshake { "data" } else { "handshakes" };
+            if r.contains_key(uncarried) {
+                return Err(invalid(
+                    NAME,
+                    format!(
+                        "records[{index}].{uncarried} is not part of content type {kind} at epoch {epoch}"
+                    ),
+                ));
+            }
             let mut p = Writer::new(NAME, c.remaining_packet_bytes);
-            if kind == 22 && epoch == 0 {
+            if handshake {
                 let Some(field::Value::List(v)) = r.get("handshakes") else {
                     return Err(invalid(NAME, "handshake records require fragments"));
                 };

@@ -107,3 +107,6 @@ pub(crate) use iec104::Iec104Codec;
 
 pub mod opcua_tcp;
 pub(crate) use opcua_tcp::OpcuaTcpCodec;
+
+pub mod quic;
+pub(crate) use quic::QuicCodec;

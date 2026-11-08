@@ -140,7 +140,7 @@
       }
     ]
   },
-  "schema": "packetcraftr.output/v19",
+  "schema": "packetcraftr.output/v20",
   "sequence": 5,
   "status": "success"
 }

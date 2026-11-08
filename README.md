@@ -42,6 +42,7 @@ packetcraftr --output hex packet build --packet-file examples/documents/packet-d
 packetcraftr files read examples/captures/dns-response.pcap --dissect
 packetcraftr analyze dns examples/captures/dns-response.pcap
 packetcraftr analyze http examples/captures/http-stream.pcap
+packetcraftr analyze quic examples/captures/quic-demo-v1.pcap --keylog examples/captures/quic-demo.keys
 packetcraftr --output json files read examples/captures/protocol-mqtt.pcap --field frame.number
 ```
 
@@ -76,3 +77,5 @@ text output only.
 
 PacketcraftR is licensed under [AGPL-3.0-only](LICENSE). Third-party attribution
 is listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+See [QUIC transport analysis](docs/quic-analysis.md) for offline and live decryption, key logs, stream export, and bounded diagnostics.

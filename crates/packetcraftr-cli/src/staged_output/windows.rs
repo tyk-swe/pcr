@@ -76,6 +76,13 @@ pub(super) struct Staged {
 }
 
 impl Staged {
+    pub(super) fn directory(&self) -> io::Result<Directory> {
+        Ok(Directory {
+            path: self.directory.path.clone(),
+            _handle: self.directory._handle.try_clone()?,
+        })
+    }
+
     pub(super) fn file(&self) -> &File {
         self.file.as_file()
     }

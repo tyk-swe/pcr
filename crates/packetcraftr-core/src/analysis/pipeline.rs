@@ -11,6 +11,7 @@ use std::time::{Duration, SystemTime};
 use crate::budget::Deadline;
 use crate::capture_file::Reader;
 use crate::decode::{DecodedPacket, Dissector};
+use crate::filter::Filter;
 use crate::registry::Registry;
 
 use crate::analysis::adapter::{
@@ -50,10 +51,19 @@ pub struct Summary {
     pub frames_read: u64,
     pub bytes_read: u64,
     pub frames_matched: u64,
+    pub truncated_frames: u64,
     pub trailing_tcp_events: Vec<TcpEvent>,
     pub ip_reassembly: IpReassemblyReport,
     pub interfaces: Vec<crate::capture_file::Interface>,
     pub scopes: Vec<crate::analysis::scope::Definition>,
+}
+
+impl Summary {
+    pub fn input_incomplete(&self) -> bool {
+        self.truncated_frames > 0
+            || !self.incomplete_sources.is_empty()
+            || self.source_outcomes_omitted > 0
+    }
 }
 
 /// Reassembly idle expiry follows capture timestamps, independent of wall-clock
@@ -155,48 +165,140 @@ where
     I: FnMut(IpEventRecord) -> Result<(), crate::error::BoundaryError>,
     F: FnMut(FrameRecord<'_>) -> Result<(), crate::error::BoundaryError>,
 {
-    let limits = &options.limits;
-    let stages = options.stages();
-    let decoder = Dissector::new(registry);
-    let mut tcp_streams = StreamIndex::default();
-    let mut udp_streams = StreamIndex::default();
-    // One physical frame can introduce at most a fragment base scope plus one
-    // TCP and one UDP analysis scope.
-    let max_scopes = usize::try_from(limits.max_frames)
-        .unwrap_or(usize::MAX)
-        .saturating_mul(3)
-        .min(MAX_SCOPES);
-    let mut scopes = Interner::with_limits(ScopeLimits {
-        max_scopes,
-        max_bytes: limits.max_scope_bytes,
-    })
-    .map_err(|source| Error::Scope { number: 0, source })?;
-    let mut reassembly_dispatch = ReassemblyDispatch::new(options.tcp_events, limits)?;
-    let mut ip_dispatch = IpDispatch::new(limits.ip.clone(), options.ip_overlap)?;
-    let mut provenance = options
-        .track_sources
-        .then(|| {
-            crate::analysis::provenance::Tracker::new(
-                limits.max_provenance_bytes,
-                limits.ip.max_retained_outcomes,
-            )
-        })
-        .transpose()?;
-    let stage = FrameStage {
-        decoder: &decoder,
-        deadline: &deadline,
-    };
-
-    let mut input = limits.capture_budget()?;
-    let mut frames_matched = 0_u64;
+    let mut processor = FramePipeline::start(registry, options.clone(), deadline)?;
     loop {
-        enforce_deadline(&deadline)?;
-        let Some((number, frame)) = next_frame(reader, &mut input)? else {
+        enforce_deadline(&processor.deadline)?;
+        let number = processor.input.frames().saturating_add(1);
+        let Some(frame) = reader
+            .next_frame()
+            .map_err(|source| Error::Capture { number, source })?
+        else {
             break;
         };
+        processor.push(number, frame, &mut ip_sink, &mut sink)?;
+    }
+    processor.finish(reader.interfaces().to_vec(), ip_sink)
+}
+
+/// Incremental packet analysis with the same reconstruction and selection as capture-file runs.
+pub struct FramePipeline {
+    options: Options<'static>,
+    filter: Option<Filter>,
+    stages: options::ResolvedStages,
+    deadline: Arc<Deadline>,
+    decoder: Dissector,
+    tcp_streams: StreamIndex,
+    udp_streams: StreamIndex,
+    scopes: Interner,
+    reassembly_dispatch: ReassemblyDispatch,
+    ip_dispatch: IpDispatch,
+    provenance: Option<crate::analysis::provenance::Tracker>,
+    input: crate::capture_file::Budget,
+    frames_matched: u64,
+    truncated_frames: u64,
+}
+
+impl FramePipeline {
+    pub fn new(registry: Arc<Registry>, options: Options<'_>) -> Result<Self, Error> {
+        let deadline = Arc::new(
+            Deadline::new(options.limits.max_duration)
+                .with_cancellation(options.cancellation.clone())
+                .with_parent(options.deadline.clone()),
+        );
+        Self::start(registry, options, deadline)
+    }
+
+    fn start(
+        registry: Arc<Registry>,
+        options: Options<'_>,
+        deadline: Arc<Deadline>,
+    ) -> Result<Self, Error> {
+        options.limits.validate()?;
+        let stages = options.stages();
+        let filter = options.filter.cloned();
+        let options = Options {
+            filter: None,
+            ..options
+        };
+        let limits = &options.limits;
+        let max_scopes = usize::try_from(limits.max_frames)
+            .unwrap_or(usize::MAX)
+            .saturating_mul(3)
+            .min(MAX_SCOPES);
+        let scopes = Interner::with_limits(ScopeLimits {
+            max_scopes,
+            max_bytes: limits.max_scope_bytes,
+        })
+        .map_err(|source| Error::Scope { number: 0, source })?;
+        let reassembly_dispatch = ReassemblyDispatch::new(options.tcp_events, limits)?;
+        let ip_dispatch = IpDispatch::new(limits.ip.clone(), options.ip_overlap)?;
+        let provenance = options
+            .track_sources
+            .then(|| {
+                crate::analysis::provenance::Tracker::new(
+                    limits.max_provenance_bytes,
+                    limits.ip.max_retained_outcomes,
+                )
+            })
+            .transpose()?;
+        let input = limits.capture_budget()?;
+        Ok(Self {
+            options,
+            filter,
+            stages,
+            deadline,
+            decoder: Dissector::new(registry),
+            tcp_streams: StreamIndex::default(),
+            udp_streams: StreamIndex::default(),
+            scopes,
+            reassembly_dispatch,
+            ip_dispatch,
+            provenance,
+            input,
+            frames_matched: 0,
+            truncated_frames: 0,
+        })
+    }
+
+    /// Processes a frame at its one-based source position before filtering.
+    pub fn push<I, F>(
+        &mut self,
+        number: u64,
+        frame: Frame,
+        mut ip_sink: I,
+        mut sink: F,
+    ) -> Result<(), Error>
+    where
+        I: FnMut(IpEventRecord) -> Result<(), crate::error::BoundaryError>,
+        F: FnMut(FrameRecord<'_>) -> Result<(), crate::error::BoundaryError>,
+    {
+        let Self {
+            options,
+            filter,
+            stages,
+            deadline,
+            decoder,
+            tcp_streams,
+            udp_streams,
+            scopes,
+            reassembly_dispatch,
+            ip_dispatch,
+            provenance,
+            input,
+            frames_matched,
+            truncated_frames,
+        } = self;
+        enforce_deadline(deadline)?;
+        input
+            .charge(frame.captured_length())
+            .map_err(|source| Error::Capture { number, source })?;
+        *truncated_frames = truncated_frames.saturating_add(u64::from(frame.is_truncated()));
+        let limits = &options.limits;
+        let stages = *stages;
+        let stage = FrameStage { decoder, deadline };
         let timestamp = match frame.timestamp {
             Some(timestamp) => timestamp,
-            None if options.time_bounds.is_some() => continue,
+            None if options.time_bounds.is_some() => return Ok(()),
             None => return Err(Error::TimestampUnavailable { number }),
         };
         let decoded = decoder
@@ -221,16 +323,16 @@ where
             .transpose()?;
         let (derived, clock_regression) = if stages.ip_reassembly {
             advance_ip_reassembly(
-                &mut ip_dispatch,
+                ip_dispatch,
                 &stage,
-                &mut scopes,
+                scopes,
                 PhysicalFrame {
                     decoded: &decoded,
                     number,
                     timestamp,
                 },
                 &mut ip_sink,
-                &mut provenance,
+                provenance,
                 physical_sources.as_ref(),
             )?
         } else {
@@ -252,13 +354,8 @@ where
 
         // Assign stream IDs before filtering to keep them stable across runs.
         let segment = match tcp.filter(|_| stages.tcp_index) {
-            Some(elected) => tcp_segment(
-                elected.decoded,
-                elected.transport,
-                elected.base,
-                &mut scopes,
-            )
-            .map_err(|source| Error::Scope { number, source })?,
+            Some(elected) => tcp_segment(elected.decoded, elected.transport, elected.base, scopes)
+                .map_err(|source| Error::Scope { number, source })?,
             None => None,
         };
         if let (Some(view), Some(segment)) = (&mut tcp_view, &segment) {
@@ -269,13 +366,8 @@ where
             view.payload = &segment.payload;
         }
         let udp_flow = match udp.filter(|_| stages.udp_index) {
-            Some(elected) => udp_flow(
-                elected.decoded,
-                elected.transport,
-                elected.base,
-                &mut scopes,
-            )
-            .map_err(|source| Error::Scope { number, source })?,
+            Some(elected) => udp_flow(elected.decoded, elected.transport, elected.base, scopes)
+                .map_err(|source| Error::Scope { number, source })?,
             None => None,
         };
         if let (Some(view), Some(flow)) = (&mut udp_view, &udp_flow) {
@@ -289,7 +381,7 @@ where
             timestamp,
             decoded: &decoded,
             derived_datagrams: &derived,
-            scopes: &scopes,
+            scopes,
             physical_sources: physical_sources.as_ref(),
             tcp: tcp_view,
             udp: udp_view,
@@ -299,7 +391,7 @@ where
         if let Some(bounds) = options.time_bounds
             && !bounds.contains(Some(timestamp))
         {
-            continue;
+            return Ok(());
         }
         if let Some(selected) = options.stream {
             let conversation = match selected.transport {
@@ -307,17 +399,17 @@ where
                 StreamTransport::Udp => record.udp.and_then(|view| view.conversation),
             };
             if conversation.is_none_or(|stream| stream.index != selected.index) {
-                continue;
+                return Ok(());
             }
         }
-        if let Some(filter) = options.filter
+        if let Some(filter) = filter.as_ref()
             && !record
                 .matches(filter)
                 .map_err(|source| Error::Filter { number, source })?
         {
-            continue;
+            return Ok(());
         }
-        frames_matched = frames_matched.saturating_add(1);
+        *frames_matched = frames_matched.saturating_add(1);
 
         let tcp_events = reassembly_dispatch.dispatch(
             record.tcp.map(|view| view.header),
@@ -326,41 +418,54 @@ where
             number,
         )?;
 
-        enforce_deadline(&deadline)?;
+        enforce_deadline(deadline)?;
         record.tcp_events = &tcp_events;
         sink(record).map_err(|source| Error::Sink { number, source })?;
+
+        Ok(())
     }
 
-    enforce_deadline(&deadline)?;
-    let (frames_read, bytes_read) = (input.frames(), input.captured_bytes());
-    for event in ip_dispatch.flush() {
-        enforce_deadline(&deadline)?;
-        ip_sink(IpEventRecord {
-            number: frames_read,
-            event,
+    pub fn finish<I>(
+        mut self,
+        interfaces: Vec<crate::capture_file::Interface>,
+        mut ip_sink: I,
+    ) -> Result<Summary, Error>
+    where
+        I: FnMut(IpEventRecord) -> Result<(), crate::error::BoundaryError>,
+    {
+        enforce_deadline(&self.deadline)?;
+        let (frames_read, bytes_read) = (self.input.frames(), self.input.captured_bytes());
+        for event in self.ip_dispatch.flush() {
+            enforce_deadline(&self.deadline)?;
+            ip_sink(IpEventRecord {
+                number: frames_read,
+                event,
+            })
+            .map_err(|source| Error::Sink {
+                number: frames_read,
+                source,
+            })?;
+        }
+        enforce_deadline(&self.deadline)?;
+        let (incomplete_sources, source_outcomes_omitted) = self
+            .provenance
+            .map(crate::analysis::provenance::Tracker::finish)
+            .transpose()?
+            .unwrap_or_default();
+        Ok(Summary {
+            incomplete_sources,
+            source_outcomes_omitted,
+            frames_read,
+            bytes_read,
+            frames_matched: self.frames_matched,
+            truncated_frames: self.truncated_frames,
+            clock: self.ip_dispatch.clock_report().clone(),
+            trailing_tcp_events: self.reassembly_dispatch.flush(),
+            ip_reassembly: self.ip_dispatch.report().clone(),
+            interfaces,
+            scopes: self.scopes.definitions().to_vec(),
         })
-        .map_err(|source| Error::Sink {
-            number: frames_read,
-            source,
-        })?;
     }
-    enforce_deadline(&deadline)?;
-    let (incomplete_sources, source_outcomes_omitted) = provenance
-        .map(crate::analysis::provenance::Tracker::finish)
-        .transpose()?
-        .unwrap_or_default();
-    Ok(Summary {
-        incomplete_sources,
-        source_outcomes_omitted,
-        frames_read,
-        bytes_read,
-        frames_matched,
-        clock: ip_dispatch.clock_report().clone(),
-        trailing_tcp_events: reassembly_dispatch.flush(),
-        ip_reassembly: ip_dispatch.report().clone(),
-        interfaces: reader.interfaces().to_vec(),
-        scopes: scopes.definitions().to_vec(),
-    })
 }
 
 struct FrameStage<'a> {
@@ -562,23 +667,6 @@ fn decode_derived(
         payload_bytes: datagram.final_payload_length,
         replayed_prefix_layers: replayed_ip_prefix_layers(source),
     })
-}
-
-fn next_frame<R: Read>(
-    reader: &mut Reader<R>,
-    input: &mut crate::capture_file::Budget,
-) -> Result<Option<(u64, crate::frame::Frame)>, Error> {
-    let number = input.frames().saturating_add(1);
-    let Some(frame) = reader
-        .next_frame()
-        .map_err(|source| Error::Capture { number, source })?
-    else {
-        return Ok(None);
-    };
-    input
-        .charge(frame.captured_length())
-        .map_err(|source| Error::Capture { number, source })?;
-    Ok(Some((input.frames(), frame)))
 }
 
 fn enforce_deadline(deadline: &Deadline) -> Result<(), Error> {

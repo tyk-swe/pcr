@@ -126,6 +126,6 @@
     },
     "target": "127.0.0.1"
   },
-  "schema": "packetcraftr.output/v19",
+  "schema": "packetcraftr.output/v20",
   "status": "success"
 }

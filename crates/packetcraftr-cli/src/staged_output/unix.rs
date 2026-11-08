@@ -89,6 +89,10 @@ enum Staging {
 }
 
 impl Staged {
+    pub(super) fn directory(&self) -> io::Result<Directory> {
+        Ok(Directory(Arc::clone(&self.directory.0)))
+    }
+
     pub(super) fn file(&self) -> &File {
         &self.file
     }

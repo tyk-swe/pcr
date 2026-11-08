@@ -12,9 +12,9 @@ use crate::layer::{Id, Layer, MalformedCodec, PaddingCodec, RawCodec};
 use application::{
     AmqpCodec, BacnetIpCodec, BgpCodec, CoapCodec, Dhcpv4Codec, Dhcpv6Codec, Dnp3Codec, DnsCodec,
     DtlsCodec, EthernetIpCodec, HttpCodec, Iec104Codec, IpfixCodec, LdapCodec, MemcachedCodec,
-    ModbusTcpCodec, MqttCodec, Netflowv5Codec, NtpCodec, OpcuaTcpCodec, RadiusCodec, RespCodec,
-    RtcpCodec, RtpCodec, RtspCodec, SflowCodec, SipCodec, SnmpCodec, SsdpCodec, StunCodec,
-    SyslogCodec, TftpCodec, TlsCodec,
+    ModbusTcpCodec, MqttCodec, Netflowv5Codec, NtpCodec, OpcuaTcpCodec, QuicCodec, RadiusCodec,
+    RespCodec, RtcpCodec, RtpCodec, RtspCodec, SflowCodec, SipCodec, SnmpCodec, SsdpCodec,
+    StunCodec, SyslogCodec, TftpCodec, TlsCodec,
 };
 use capture::{BsdLoopCodec, BsdNullCodec, LinuxSll2Codec, LinuxSllCodec};
 use link::{
@@ -95,6 +95,7 @@ macro_rules! builtin_protocol_catalog {
             PppIpv6cp { canonical: "ppp_ipv6cp", aliases: [], constructible: true, exact_round_trip: true, matcher: None, layer: [tunnel::PppIpv6cp], codec: PppIpv6cpCodec, tcp: [], udp: [], coverage: "IPv6CP configuration and termination messages with ordered options.", framing: Control, message: true }
             PppLcp { canonical: "ppp_lcp", aliases: [], constructible: true, exact_round_trip: true, matcher: None, layer: [tunnel::PppLcp], codec: PppLcpCodec, tcp: [], udp: [], coverage: "PPP LCP configuration, termination, reject and echo messages.", framing: Control, message: true }
             Pppoe { canonical: "pppoe", aliases: [], constructible: true, exact_round_trip: true, matcher: None, layer: [tunnel::Pppoe], codec: PppoeCodec, tcp: [], udp: [], coverage: "", framing: Datagram, message: false }
+            Quic { canonical: "quic", aliases: [], constructible: false, exact_round_trip: false, matcher: None, layer: [application::quic::Quic], codec: QuicCodec, tcp: [], udp: [443], coverage: "QUIC v1/v2 packet envelopes; stateful decryption and stream reassembly through analyze quic.", framing: Datagram, message: true }
             Radius { canonical: "radius", aliases: [], constructible: true, exact_round_trip: true, matcher: None, layer: [application::radius::Radius], codec: RadiusCodec, tcp: [], udp: [1812, 1813], coverage: "RADIUS envelope and ordered attributes; authenticators are supplied bytes.", framing: Radius, message: true }
             Raw { canonical: "raw", aliases: ["payload", "bytes"], constructible: true, exact_round_trip: true, matcher: None, layer: [crate::layer::Raw], codec: RawCodec, tcp: [], udp: [], coverage: "", framing: Datagram, message: false }
             RawIp { canonical: "raw_ip", aliases: ["rawip"], constructible: false, exact_round_trip: false, matcher: None, layer: [], codec: RawIpCodec, tcp: [], udp: [], coverage: "", framing: Datagram, message: false }

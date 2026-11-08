@@ -89,7 +89,7 @@
     "subject": "null|192.168.56.10|tcp|443",
     "summary": "Endpoint comparison lacks conclusive evidence"
   },
-  "schema": "packetcraftr.output/v19",
+  "schema": "packetcraftr.output/v20",
   "sequence": 0,
   "status": "success"
 }

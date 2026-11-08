@@ -104,6 +104,7 @@ pub struct Options<'a> {
     pub limits: Limits,
 }
 
+#[derive(Clone, Copy)]
 pub(super) struct ResolvedStages {
     pub(super) ip_reassembly: bool,
     pub(super) tcp_index: bool,

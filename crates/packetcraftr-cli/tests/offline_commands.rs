@@ -1577,3 +1577,285 @@ mod stalled_inputs {
         }
     }
 }
+
+#[test]
+fn quic_decryption_exposes_metadata_by_default_and_payloads_only_when_requested() {
+    let keys = capture_path("quic-demo.keys");
+    for name in ["quic-demo-v1.pcap", "quic-demo-v2.pcapng"] {
+        let capture = capture_path(name);
+        let args = [
+            "--output",
+            "json",
+            "analyze",
+            "quic",
+            capture.to_str().unwrap(),
+            "--keylog",
+            keys.to_str().unwrap(),
+        ];
+        let value: serde_json::Value =
+            serde_json::from_str(&assert_success(&run(&args), &args)).unwrap();
+        let connection = &value["result"]["connections"][0];
+        assert_eq!(connection["sni"], "quic.example.test");
+        assert_eq!(connection["negotiated_alpn"], "quic-test");
+        assert_eq!(connection["metrics"]["key_updates"], 1);
+        assert_eq!(connection["metrics"]["validated_paths"], 1);
+        assert_eq!(connection["incomplete"], false);
+        assert!(
+            connection["streams"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|stream| stream["ranges"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .all(|range| range.get("data_hex").is_none()))
+        );
+        let selected = [
+            "--output",
+            "json",
+            "analyze",
+            "quic",
+            capture.to_str().unwrap(),
+            "--keylog",
+            keys.to_str().unwrap(),
+            "--connection",
+            "0",
+            "--stream",
+            "0",
+            "--direction",
+            "client",
+            "--include-data",
+        ];
+        let selected: serde_json::Value =
+            serde_json::from_str(&assert_success(&run(&selected), &selected)).unwrap();
+        let streams = selected["result"]["connections"][0]["streams"]
+            .as_array()
+            .unwrap();
+        assert_eq!(streams.len(), 1);
+        assert_eq!(
+            streams[0]["ranges"][0]["data_hex"],
+            "68656c6c6f20776f726c64"
+        );
+        let ndjson = [
+            "--output",
+            "ndjson",
+            "analyze",
+            "quic",
+            capture.to_str().unwrap(),
+            "--keylog",
+            keys.to_str().unwrap(),
+            "--stream",
+            "0",
+            "--direction",
+            "client",
+            "--include-data",
+        ];
+        let events: Vec<serde_json::Value> = assert_success(&run(&ndjson), &ndjson)
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        let payload = events
+            .iter()
+            .find(|event| event["event"] == "stream_data")
+            .unwrap();
+        assert_eq!(
+            payload["result"]["stream_data"]["data_hex"],
+            streams[0]["ranges"][0]["data_hex"]
+        );
+        assert_eq!(events.last().unwrap()["event"], "complete");
+    }
+}
+
+#[test]
+fn quic_exports_exact_contiguous_ranges_and_refuses_to_overwrite_them() {
+    let directory = tempfile::tempdir().unwrap();
+    let capture = capture_path("quic-demo-v2.pcapng");
+    let keys = capture_path("quic-demo.keys");
+    let args = [
+        "--output",
+        "json",
+        "analyze",
+        "quic",
+        capture.to_str().unwrap(),
+        "--keylog",
+        keys.to_str().unwrap(),
+        "--write",
+        directory.path().to_str().unwrap(),
+    ];
+    assert_success(&run(&args), &args);
+    let manifest = directory.path().join("quic-manifest.json");
+    let original = std::fs::read(&manifest).unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&original).unwrap();
+    let streams = value["connections"][0]["streams"].as_array().unwrap();
+    for (id, direction, expected) in [
+        (0, "client", &b"hello world"[..]),
+        (0, "server", &b"received hello world\n"[..]),
+        (4, "client", &b"updated keys\n"[..]),
+    ] {
+        let stream = streams
+            .iter()
+            .find(|stream| stream["id"] == id && stream["direction"] == direction)
+            .unwrap();
+        let ranges = stream["ranges"].as_array().unwrap();
+        assert_eq!(ranges.len(), 1);
+        assert_eq!(ranges[0]["offset"], 0);
+        assert_eq!(stream["complete"], true);
+        assert_eq!(
+            std::fs::read(directory.path().join(ranges[0]["file"].as_str().unwrap())).unwrap(),
+            expected
+        );
+    }
+    assert!(!run(&args).status.success());
+    assert_eq!(std::fs::read(&manifest).unwrap(), original);
+    for stream in streams {
+        let range = &stream["ranges"][0];
+        assert_eq!(
+            std::fs::metadata(directory.path().join(range["file"].as_str().unwrap()))
+                .unwrap()
+                .len(),
+            range["length"].as_u64().unwrap()
+        );
+    }
+}
+
+#[test]
+fn quic_missing_secrets_and_payload_limits_are_explicit() {
+    let capture = capture_path("quic-demo-v1.pcap");
+    let args = [
+        "--output",
+        "json",
+        "analyze",
+        "quic",
+        capture.to_str().unwrap(),
+    ];
+    let value: serde_json::Value =
+        serde_json::from_str(&assert_success(&run(&args), &args)).unwrap();
+    let connection = &value["result"]["connections"][0];
+    assert_eq!(connection["sni"], "quic.example.test");
+    assert_eq!(connection["incomplete"], true);
+    assert!(connection["pending_packets"].as_u64().unwrap() > 0);
+    assert!(connection["streams"].as_array().unwrap().is_empty());
+    let keys = capture_path("quic-demo.keys");
+    let bounded = [
+        "--output",
+        "json",
+        "analyze",
+        "quic",
+        capture.to_str().unwrap(),
+        "--keylog",
+        keys.to_str().unwrap(),
+        "--include-data",
+        "--max-application-output-bytes",
+        "2",
+    ];
+    let output = run(&bounded);
+    assert!(!output.status.success());
+    assert!(stdout(&output).contains("QUIC application output"));
+}
+
+#[test]
+fn quic_capture_incompleteness_reaches_retired_reports_and_exports() {
+    let keys = capture_path("quic-demo.keys");
+    for name in ["quic-demo-truncated.pcap", "quic-demo-incomplete-ip.pcap"] {
+        for filtered in [false, true] {
+            let capture = capture_path(name);
+            let directory = tempfile::tempdir().unwrap();
+            let mut args = vec![
+                "--output",
+                "json",
+                "analyze",
+                "quic",
+                capture.to_str().unwrap(),
+                "--keylog",
+                keys.to_str().unwrap(),
+                "--connection",
+                "0",
+                "--write",
+                directory.path().to_str().unwrap(),
+            ];
+            if filtered {
+                args.extend(["--filter", "udp"]);
+            }
+            let output = run(&args);
+            assert_success(&output, &args);
+            let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(report["result"]["summary"]["input_incomplete"], true);
+            let connection = &report["result"]["connections"][0];
+            assert_eq!(connection["incomplete"], true);
+            assert_eq!(connection["closed"], true);
+            assert!(
+                connection["streams"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .all(|stream| stream["complete"] == true)
+            );
+            let manifest: serde_json::Value = serde_json::from_slice(
+                &std::fs::read(directory.path().join("quic-manifest.json")).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(manifest["connections"][0]["incomplete"], true);
+        }
+    }
+}
+
+#[test]
+fn quic_text_payloads_distinguish_rejected_early_data() {
+    let capture = capture_path("quic-demo-early-data.pcap");
+    let keys = capture_path("quic-demo-early-data.keys");
+    let args = [
+        "analyze",
+        "quic",
+        capture.to_str().unwrap(),
+        "--keylog",
+        keys.to_str().unwrap(),
+        "--include-data",
+    ];
+    let output = run(&args);
+    assert_success(&output, &args);
+    let text = stdout(&output);
+    assert!(text.lines().any(|line| line
+        == "data connection=0 stream=0 direction=client offset=0 early_data=true hex=6561726c79"));
+    assert!(text.lines().any(|line| line == "data connection=0 stream=0 direction=client offset=0 early_data=false hex=7265706c6163656d656e74"));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn quic_keylog_rejects_idle_nonregular_input() {
+    let capture = capture_path("quic-demo-v1.pcap");
+    let args = [
+        "--output",
+        "json",
+        "analyze",
+        "quic",
+        capture.to_str().unwrap(),
+        "--keylog",
+        "/dev/stdin",
+    ];
+    let mut child = Command::new(env!("CARGO_BIN_EXE_packetcraftr"))
+        .args(args)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while child.try_wait().unwrap().is_none() {
+        if std::time::Instant::now() >= until {
+            child.kill().unwrap();
+            child.wait().unwrap();
+            panic!("nonregular key-log input must be rejected without waiting for a writer");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let output = child.wait_with_output().unwrap();
+    assert!(!output.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(
+        report["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("regular file")
+    );
+}

@@ -8,6 +8,7 @@ pub(in crate::commands) mod expert;
 pub(in crate::commands) mod follow;
 pub(in crate::commands) mod http;
 pub(in crate::commands) mod http2;
+pub(in crate::commands) mod quic;
 pub(in crate::commands) mod report;
 pub(in crate::commands) mod scan_diff;
 pub(in crate::commands) mod security;

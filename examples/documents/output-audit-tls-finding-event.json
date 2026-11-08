@@ -17,7 +17,7 @@
     "subject": "127.0.0.1:46671",
     "summary": "Certificate chain did not validate"
   },
-  "schema": "packetcraftr.output/v19",
+  "schema": "packetcraftr.output/v20",
   "sequence": 0,
   "status": "success"
 }

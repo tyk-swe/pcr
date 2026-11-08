@@ -144,6 +144,38 @@ impl StagedFile {
         destination: &Path,
         publication: Publication,
     ) -> Result<Self, CliError> {
+        let requested = destination
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        Self::stage_in(invocation, destination, publication, || {
+            platform::Directory::open(requested)
+        })
+    }
+
+    /// Stages a sibling using the directory already bound by this file.
+    pub(crate) fn stage_sibling(&self, name: &OsStr) -> Result<Self, CliError> {
+        if file_name(Path::new(name)) != Some(name) {
+            return Err(CliError::from_classification(
+                CLASSIFICATION,
+                "output sibling requires a single file name",
+                Vec::new(),
+            ));
+        }
+        Self::stage_in(
+            &self.invocation,
+            &self.destination.with_file_name(name),
+            Publication::NoClobber,
+            || self.staged.directory(),
+        )
+    }
+
+    fn stage_in(
+        invocation: &crate::invocation::Invocation,
+        destination: &Path,
+        publication: Publication,
+        directory: impl FnOnce() -> std::io::Result<platform::Directory>,
+    ) -> Result<Self, CliError> {
         invocation.check()?;
         let Some(file_name) = file_name(destination) else {
             return Err(CliError::from_classification(
@@ -155,12 +187,7 @@ impl StagedFile {
                 Vec::new(),
             ));
         };
-        let requested = destination
-            .parent()
-            .filter(|parent| !parent.as_os_str().is_empty())
-            .unwrap_or(Path::new("."));
-        let directory = platform::Directory::open(requested)
-            .map_err(|source| output("stage", destination, source))?;
+        let directory = directory().map_err(|source| output("stage", destination, source))?;
         let existing = directory
             .existing(file_name)
             .map_err(|source| output("inspect", destination, source))?;

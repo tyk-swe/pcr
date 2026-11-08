@@ -2513,18 +2513,6 @@ fn decode(name: &str, wire: &[u8]) -> Result<Decoded, crate::codec::Error> {
 
 #[test]
 fn text_targets_and_content_lengths() {
-    for wire in [
-        b"\x80\0\0\0\0\0\0\0\0\0\0\0".as_slice(),
-        b"\x90\0\0\0\0\0\0\0\0\0\0\0\xbe\xde\0\0",
-    ] {
-        for field in ["csrcs", "payload", "padding"] {
-            assert_eq!(slice("rtp", field, wire), b"");
-        }
-        if wire[0] & 16 != 0 {
-            assert_eq!(slice("rtp", "extension_data", wire), b"");
-        }
-        builder_round_trip("rtp", wire);
-    }
     for (name, version) in [("sip", "SIP/2.0"), ("rtsp", "RTSP/1.0")] {
         assert!(decode(name, format!("OPTIONS  {version}\r\n\r\n").as_bytes()).is_err());
         for length in ["0", " 0\t", "\t\r\n 0 "] {

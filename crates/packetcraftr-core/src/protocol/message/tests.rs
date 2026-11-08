@@ -843,6 +843,137 @@ fn dtls_rejects_oversized_fragment_offsets() {
 }
 
 #[test]
+fn sflow_samples_reject_inactive_fields_and_preserve_supported_forms() {
+    let registry = builtin::registry();
+    let builder = crate::build::Builder::new(registry.clone());
+    let numeric = [
+        "sequence",
+        "source_id",
+        "source_type",
+        "source_index",
+        "sampling_rate",
+        "sample_pool",
+        "drops",
+        "input_format",
+        "input",
+        "output_format",
+        "output",
+    ];
+    for (format, keys) in [
+        (
+            1_u32,
+            vec![
+                "sequence",
+                "source_id",
+                "sampling_rate",
+                "sample_pool",
+                "drops",
+                "input",
+                "output",
+            ],
+        ),
+        (2, vec!["sequence", "source_id"]),
+        (
+            3,
+            vec![
+                "sequence",
+                "source_type",
+                "source_index",
+                "sampling_rate",
+                "sample_pool",
+                "drops",
+                "input_format",
+                "input",
+                "output_format",
+                "output",
+            ],
+        ),
+        (4, vec!["sequence", "source_type", "source_index"]),
+        (4097, vec![]),
+    ] {
+        let sample = record([("format", format.into())])
+            .into_iter()
+            .chain(keys.iter().map(|key| ((*key).to_owned(), 42_u32.into())))
+            .chain(if keys.is_empty() {
+                vec![
+                    ("data".to_owned(), Bytes::from_static(b"A").into()),
+                    ("padding".to_owned(), Bytes::from_static(b"XYZ").into()),
+                ]
+            } else {
+                vec![(
+                    "records".to_owned(),
+                    field::Value::List(vec![field::Value::Object(record([
+                        ("format", 4097_u32.into()),
+                        ("data", Bytes::from_static(b"A").into()),
+                        ("padding", Bytes::from_static(b"XYZ").into()),
+                    ]))]),
+                )]
+            })
+            .collect::<std::collections::BTreeMap<_, _>>();
+        for mode in [Mode::Strict, Mode::Permissive] {
+            for extra in std::iter::once(None).chain(
+                numeric
+                    .iter()
+                    .copied()
+                    .chain(["records", "data"])
+                    .filter(|key| !sample.contains_key(*key))
+                    .flat_map(|key| {
+                        [
+                            (key, field::Value::Unsigned(0)),
+                            (key, field::Value::Unsigned(99)),
+                            (key, Bytes::from_static(b"lost").into()),
+                            (key, field::Value::List(vec![])),
+                        ]
+                    })
+                    .map(Some),
+            ) {
+                let fields = sample
+                    .clone()
+                    .into_iter()
+                    .chain(extra.clone().map(|(key, value)| (key.to_owned(), value)))
+                    .collect();
+                let mut packet = Packet::default();
+                packet.push(Sflow {
+                    samples: Records(vec![fields]),
+                    ..Default::default()
+                });
+                let json = serde_json::to_string(&document::Packet::from_packet(&packet)).unwrap();
+                let packet = document::Packet::parse(&json, document::Format::Json, json.len())
+                    .unwrap()
+                    .to_packet(&registry, 16)
+                    .unwrap();
+                let result = builder.build(
+                    packet,
+                    Addresses::default(),
+                    crate::build::Options {
+                        mode,
+                        ..Default::default()
+                    },
+                );
+                if let Some((key, _)) = extra {
+                    let error = result.err().unwrap_or_else(|| {
+                        panic!("format {format} silently discarded {key} in {mode:?}")
+                    });
+                    assert!(format!("{error:?}").contains(key), "{error:?}");
+                } else {
+                    let built = result.unwrap();
+                    assert!(built.diagnostics.is_empty());
+                    let materialized = built.packet.get::<Sflow>().unwrap();
+                    for (key, value) in &sample {
+                        assert_eq!(
+                            materialized.samples.0[0].get(key),
+                            Some(value),
+                            "{format} {key}"
+                        );
+                    }
+                    builder_round_trip("sflow", &built.bytes);
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn sflow_samples_support_edits_and_projection() {
     let registry = builtin::registry();
     let json = include_str!("../../../../../examples/documents/packet-sflow.json");

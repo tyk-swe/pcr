@@ -56,6 +56,9 @@ impl Ipfix {
                 .map_err(|_| invalid(NAME, "set ID overflow"))?;
             let mut body = Writer::new(NAME, max);
             if matches!(id, 2 | 3) {
+                if set.contains_key("data") {
+                    return Err(invalid(NAME, "template sets do not carry data"));
+                }
                 let Some(field::Value::List(records)) = set.get("records") else {
                     return Err(invalid(NAME, "template set requires records"));
                 };
@@ -83,6 +86,11 @@ impl Ipfix {
                             u16::try_from(number(rec, "scope_count", NAME)?)
                                 .map_err(|_| invalid(NAME, "scope count overflow"))?,
                         )?;
+                    } else if rec
+                        .get("scope_count")
+                        .is_some_and(|value| !matches!(value, field::Value::Unsigned(0)))
+                    {
+                        return Err(invalid(NAME, "this template does not carry scope_count"));
                     }
                     for f in fields {
                         let field::Value::Object(f) = f else {
@@ -100,6 +108,8 @@ impl Ipfix {
                                 u32::try_from(number(f, "enterprise", NAME)?)
                                     .map_err(|_| invalid(NAME, "enterprise overflow"))?,
                             )?;
+                        } else if f.contains_key("enterprise") {
+                            return Err(invalid(NAME, "this field does not carry enterprise"));
                         }
                     }
                 }
@@ -110,6 +120,11 @@ impl Ipfix {
                     body.put(pad)?;
                 }
             } else {
+                for key in ["records", "padding"] {
+                    if set.contains_key(key) {
+                        return Err(invalid(NAME, format!("data sets do not carry {key}")));
+                    }
+                }
                 body.put(data(set, "data", NAME)?)?;
             }
             sets.u16(id)?;

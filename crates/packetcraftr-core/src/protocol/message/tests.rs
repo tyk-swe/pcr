@@ -4020,3 +4020,107 @@ fn ipfix_supported_forms_preserve_bytes() {
         }
     }
 }
+
+#[test]
+fn amqp_rejects_fields_absent_from_the_frame() {
+    use crate::protocol::application::amqp::Amqp;
+    let registry = builtin::registry();
+    for layer in [
+        Amqp {
+            channel: 1,
+            ..Default::default()
+        },
+        Amqp {
+            payload: Bytes::from_static(b"data"),
+            ..Default::default()
+        },
+        Amqp {
+            frame_type: 2,
+            payload: Bytes::from(vec![0; 13]),
+            ..Default::default()
+        },
+        Amqp {
+            frame_type: 2,
+            payload: Bytes::from([vec![0; 13], vec![1]].concat()),
+            ..Default::default()
+        },
+    ] {
+        for mode in [Mode::Strict, Mode::Permissive] {
+            let mut packet = Packet::default();
+            packet.push(layer.clone());
+            assert!(build_in(packet, mode).is_err(), "{mode:?}: {layer:?}");
+        }
+    }
+    for frame_type in [0, 1, 2, 3, 8] {
+        let base = Amqp {
+            frame_type,
+            payload: if frame_type == 2 {
+                Bytes::from(vec![0; 14])
+            } else {
+                Bytes::new()
+            },
+            ..Default::default()
+        };
+        for (name, value, carried) in [
+            ("channel", 7_u16.into(), frame_type != 0),
+            ("class_id", 60_u16.into(), frame_type == 1),
+            ("method_id", 40_u16.into(), frame_type == 1),
+            (
+                "payload",
+                Bytes::from_static(b"data").into(),
+                frame_type != 0,
+            ),
+        ] {
+            if carried {
+                continue;
+            }
+            let mut layer = base.clone();
+            layer.set_field(name, value).unwrap();
+            let mut packet = Packet::default();
+            packet.push(layer);
+            let document = document::Packet::from_packet(&packet);
+            for mode in [Mode::Strict, Mode::Permissive] {
+                let error = build_in(document.to_packet(&registry, 16).unwrap(), mode).unwrap_err();
+                assert!(error.contains(name), "{mode:?}: {error}");
+            }
+        }
+        let populated = match frame_type {
+            1 => Amqp {
+                channel: 7,
+                class_id: 60,
+                method_id: 40,
+                payload: Bytes::from_static(b"arguments"),
+                ..base.clone()
+            },
+            2 => Amqp {
+                channel: 7,
+                ..base.clone()
+            },
+            3 => Amqp {
+                channel: 7,
+                payload: Bytes::from_static(b"body"),
+                ..base.clone()
+            },
+            _ => base.clone(),
+        };
+        for layer in [base, populated] {
+            for mode in [Mode::Strict, Mode::Permissive] {
+                let mut packet = Packet::default();
+                packet.push(layer.clone());
+                let document = document::Packet::from_packet(&packet);
+                let built = build_in(document.to_packet(&registry, 16).unwrap(), mode).unwrap();
+                assert_eq!(built.packet.get::<Amqp>(), Some(&layer));
+                assert!(built.diagnostics.is_empty());
+                round_trip("amqp", &built.bytes);
+                let rebuilt = build_in(
+                    document::Packet::from_packet(&built.packet)
+                        .to_packet(&registry, 16)
+                        .unwrap(),
+                    mode,
+                )
+                .unwrap();
+                assert_eq!(rebuilt.bytes, built.bytes);
+            }
+        }
+    }
+}

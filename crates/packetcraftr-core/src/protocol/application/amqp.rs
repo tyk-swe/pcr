@@ -45,6 +45,19 @@ const NAME: &str = crate::protocol::BuiltinProtocol::Amqp.as_str();
 pub(crate) const PREFACE: &[u8; 8] = b"AMQP\0\0\x09\x01";
 impl Amqp {
     fn encode_wire(&self, c: &EncodeContext<'_>) -> Result<Vec<u8>, Error> {
+        for (field, unused) in [
+            ("channel", self.frame_type == 0 && self.channel != 0),
+            ("class_id", self.frame_type != 1 && self.class_id != 0),
+            ("method_id", self.frame_type != 1 && self.method_id != 0),
+            ("payload", self.frame_type == 0 && !self.payload.is_empty()),
+        ] {
+            if unused {
+                return Err(invalid(
+                    NAME,
+                    format!("{field} is not part of frame type {}", self.frame_type),
+                ));
+            }
+        }
         let mut w = Writer::new(NAME, c.remaining_packet_bytes);
         if self.frame_type == 0 {
             w.put(PREFACE)?;

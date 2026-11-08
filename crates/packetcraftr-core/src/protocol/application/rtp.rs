@@ -136,11 +136,16 @@ impl Rtp {
         for _ in 0..h & 15 {
             s.csrcs.0.push(record([("ssrc", r.u32()?.into())]));
         }
+        r.mark(5, 12..r.pos);
+        r.mark(6, 0..1);
         if s.has_extension {
+            r.mark(7, r.pos..r.pos + 2);
             s.extension_profile = r.u16()?;
             let len = usize::from(r.u16()?) * 4;
+            r.mark(8, r.pos..r.pos + len);
             s.extension_data = Bytes::copy_from_slice(r.take(len)?);
         }
+        let payload_start = r.pos;
         let remaining = r.rest();
         let pad = if h & 32 != 0 {
             let n = remaining.last().copied().unwrap_or(0) as usize;
@@ -151,6 +156,8 @@ impl Rtp {
         } else {
             0
         };
+        r.mark(9, payload_start..b.len() - pad);
+        r.mark(10, b.len() - pad..b.len());
         s.payload = Bytes::copy_from_slice(&remaining[..remaining.len() - pad]);
         s.padding = Bytes::copy_from_slice(&remaining[remaining.len() - pad..]);
         Ok((s, r.take_layouts()))

@@ -2513,6 +2513,18 @@ fn decode(name: &str, wire: &[u8]) -> Result<Decoded, crate::codec::Error> {
 
 #[test]
 fn text_targets_and_content_lengths() {
+    for wire in [
+        b"\x80\0\0\0\0\0\0\0\0\0\0\0".as_slice(),
+        b"\x90\0\0\0\0\0\0\0\0\0\0\0\xbe\xde\0\0",
+    ] {
+        for field in ["csrcs", "payload", "padding"] {
+            assert_eq!(slice("rtp", field, wire), b"");
+        }
+        if wire[0] & 16 != 0 {
+            assert_eq!(slice("rtp", "extension_data", wire), b"");
+        }
+        builder_round_trip("rtp", wire);
+    }
     for (name, version) in [("sip", "SIP/2.0"), ("rtsp", "RTSP/1.0")] {
         assert!(decode(name, format!("OPTIONS  {version}\r\n\r\n").as_bytes()).is_err());
         for length in ["0", " 0\t", "\t\r\n 0 "] {
@@ -2706,6 +2718,29 @@ fn slice<'a>(name: &str, field: &str, wire: &'a [u8]) -> &'a [u8] {
 
 #[test]
 fn application_layouts_expose_exact_content_ranges() {
+    let rtp = b"\xb1\x60\0\x01\0\0\0\x02\0\0\0\x03CSRC\xbe\xde\0\x01EXT!PAY\0\0\0\x04";
+    for (field, expected) in [
+        ("csrcs", b"CSRC".as_slice()),
+        ("has_extension", b"\xb1"),
+        ("extension_profile", b"\xbe\xde"),
+        ("extension_data", b"EXT!"),
+        ("payload", b"PAY"),
+        ("padding", b"\0\0\0\x04"),
+    ] {
+        assert_eq!(slice("rtp", field, rtp), expected);
+    }
+    for wire in [
+        b"\x80\0\0\0\0\0\0\0\0\0\0\0".as_slice(),
+        b"\x90\0\0\0\0\0\0\0\0\0\0\0\xbe\xde\0\0",
+    ] {
+        for field in ["csrcs", "payload", "padding"] {
+            assert_eq!(slice("rtp", field, wire), b"");
+        }
+        if wire[0] & 16 != 0 {
+            assert_eq!(slice("rtp", "extension_data", wire), b"");
+        }
+        builder_round_trip("rtp", wire);
+    }
     for (name, version) in [("sip", "SIP/2.0"), ("rtsp", "RTSP/1.0")] {
         let wire = format!("OPTIONS * {version}\r\nContent-Length:3\r\n\r\nabc");
         assert_eq!(slice(name, "body", wire.as_bytes()), b"abc");

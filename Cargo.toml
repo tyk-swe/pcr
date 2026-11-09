@@ -28,7 +28,7 @@ mod_module_files = "deny"
 wildcard_imports = "deny"
 
 [workspace.dependencies]
-webpki-roots = "1.0.10"
+webpki-roots = "1.0.11"
 # `deny.toml` rejects wildcard dependencies, so each internal path dependency
 # pins the shared workspace version. Bump these with `workspace.package.version`.
 packetcraftr = { path = "crates/packetcraftr", version = "0.5.0-beta.3", default-features = false }
@@ -38,7 +38,7 @@ packetcraftr-netio = { path = "crates/packetcraftr-netio", version = "0.5.0-beta
 anstream = "1.0.0"
 getrandom = { version = "0.4.3", features = ["std"] }
 bytes = { version = "1.12.1", features = ["serde"] }
-flate2 = { version = "1.1.10", default-features = false, features = ["rust_backend"] }
+flate2 = { version = "1.1.11", default-features = false, features = ["rust_backend"] }
 zstd = { version = "0.14.3", default-features = false }
 clap = { version = "4.6.7", features = ["derive"] }
 clap_lex = "1.1.1"
@@ -59,15 +59,15 @@ ring = "0.17.14"
 rustls = { version = "0.23.46", default-features = false, features = ["std", "ring", "tls12"] }
 # Safe handle-relative filesystem and readiness calls for staged output and
 # cancellable inputs. Tempfile already brings this exact crate on Unix.
-rustix = { version = "1.1.5", default-features = false, features = ["std", "fs", "event"] }
+rustix = { version = "1.1.6", default-features = false, features = ["std", "fs", "event"] }
 
 futures-util = { version = "0.3.34", default-features = false }
 libc = { version = "0.2.191", default-features = false }
 libloading = "0.9.0"
 pcap = { version = "2.5.0", default-features = false }
-rtnetlink = { version = "0.23.0", default-features = false, features = ["tokio_socket"] }
+rtnetlink = { version = "0.24.0", default-features = false, features = ["tokio_socket"] }
 socket2 = { version = "0.6.5", default-features = false, features = ["all"] }
-tokio = { version = "1.54.0", default-features = false, features = ["rt"] }
+tokio = { version = "1.54.1", default-features = false, features = ["rt"] }
 windows = { version = "0.62.2", default-features = false, features = [
     "std",
     "Win32_Foundation",

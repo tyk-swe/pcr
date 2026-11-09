@@ -62,16 +62,11 @@ highlight = "simplest-path"
 skip = [
     # Ring 0.17.14 requires getrandom 0.2; direct randomness uses 0.4.
     { name = "getrandom", version = "=0.2.17" },
-    # rtnetlink 0.23 requires nix 0.30; ctrlc 3.5 uses 0.31 for portable signals.
-    { name = "nix", version = "=0.30.1" },
     # pcap 2.5 pins these older runtime and build dependencies.
     { name = "bitflags", version = "=1.3.2" },
     { name = "errno", version = "=0.2.8" },
     { name = "libloading", version = "=0.8.9" },
     { name = "windows-sys", version = "=0.36.1" },
-    # rustix 1.1.6 pins windows-sys 0.52; tokio and socket2 use 0.61.
-    { name = "windows-sys", version = "=0.52.0" },
-    { name = "windows_x86_64_msvc", version = "=0.52.6" },
     # Current proc-macro dependencies still span syn 2 and syn 3.
     { name = "syn", version = "=2.0.119" },
 ]

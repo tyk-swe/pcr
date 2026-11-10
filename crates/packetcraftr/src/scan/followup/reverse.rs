@@ -59,10 +59,10 @@ impl ReverseLookup {
 
 impl From<batch::Question<dns::Aggregate>> for ReverseLookup {
     fn from(question: batch::Question<dns::Aggregate>) -> Self {
-        let result = question.result.as_ref();
+        let result = question.outcome.result();
         Self {
             query_name: question.query_name,
-            status: question.status,
+            status: question.outcome.status(),
             outcome: result.map(|result| result.report().completion.outcome()),
             response_code: result
                 .and_then(|result| result.report().completion.response())
@@ -77,7 +77,7 @@ impl From<batch::Question<dns::Aggregate>> for ReverseLookup {
                 })
                 .unwrap_or_default(),
             names_truncated: false,
-            error: question.error.as_ref().map(ToString::to_string),
+            error: question.outcome.error().map(ToString::to_string),
         }
     }
 }
@@ -321,16 +321,14 @@ impl Lookup {
                         // DNS batches retain failures as question data. These
                         // interruptions instead stop the follow-up operation,
                         // preserving the clock's original error source.
-                        .map(|question| match question {
-                            batch::Question {
-                                error:
-                                    Some(
-                                        error @ (dns::Error::Cancelled(_)
-                                        | dns::Error::Clock { .. }),
-                                    ),
-                                ..
-                            } => Err(error),
-                            question => Ok(ReverseLookup::from(question)),
+                        .map(|question| match question.outcome {
+                            batch::Outcome::Failed(
+                                error @ (dns::Error::Cancelled(_) | dns::Error::Clock { .. }),
+                            ) => Err(error),
+                            outcome => Ok(ReverseLookup::from(batch::Question {
+                                outcome,
+                                ..question
+                            })),
                         })
                         .collect::<Result<_, _>>()?,
                     aggregate.stats,
@@ -554,7 +552,7 @@ pub(super) fn last_batch_send(
 ) -> Option<Instant> {
     let failed = questions
         .iter()
-        .any(|question| question.status == batch::QuestionStatus::Failed);
+        .any(|question| question.outcome.status() == batch::QuestionStatus::Failed);
     if failed && (stats.bytes > 0 || stats.packets_attempted > 0) {
         return Some(now);
     }
@@ -562,7 +560,7 @@ pub(super) fn last_batch_send(
     // any sent attempt marks the batch's end conservatively.
     questions
         .iter()
-        .filter_map(|question| question.result.as_ref())
+        .filter_map(|question| question.outcome.result())
         .flat_map(dns::Aggregate::attempts)
         .any(|attempt| attempt.sent_at().is_some())
         .then_some(now)

@@ -167,30 +167,60 @@ pub struct Question<R = super::Report> {
     pub query_name: String,
     pub query_type: QueryType,
     pub transaction_id: u16,
-    pub status: QuestionStatus,
-    /// Present exactly when `status` is [`QuestionStatus::Completed`].
-    pub result: Option<R>,
-    /// Present exactly when `status` is [`QuestionStatus::Failed`].
-    pub error: Option<Error>,
+    pub outcome: Outcome<R>,
+}
+
+#[derive(Debug)]
+pub enum Outcome<R> {
+    Completed(R),
+    Failed(Error),
+    Unattempted,
+}
+
+impl<R> Outcome<R> {
+    pub const fn status(&self) -> QuestionStatus {
+        match self {
+            Self::Completed(_) => QuestionStatus::Completed,
+            Self::Failed(_) => QuestionStatus::Failed,
+            Self::Unattempted => QuestionStatus::Unattempted,
+        }
+    }
+
+    pub const fn result(&self) -> Option<&R> {
+        match self {
+            Self::Completed(result) => Some(result),
+            Self::Failed(_) | Self::Unattempted => None,
+        }
+    }
+
+    pub const fn error(&self) -> Option<&Error> {
+        match self {
+            Self::Failed(error) => Some(error),
+            Self::Completed(_) | Self::Unattempted => None,
+        }
+    }
 }
 
 impl<R> Question<R> {
-    fn ended(request: &super::Request, status: QuestionStatus) -> Self {
+    fn new(request: &super::Request, outcome: Outcome<R>) -> Self {
         Self {
             query_name: request.query_name.clone(),
             query_type: request.query_type,
             transaction_id: request.transaction_id,
-            status,
-            result: None,
-            error: None,
+            outcome,
         }
     }
 
+    fn unattempted(request: &super::Request) -> Self {
+        Self::new(request, Outcome::Unattempted)
+    }
+
     fn failed(request: &super::Request, error: Error) -> Self {
-        Self {
-            error: Some(error),
-            ..Self::ended(request, QuestionStatus::Failed)
-        }
+        Self::new(request, Outcome::Failed(error))
+    }
+
+    fn completed(request: &super::Request, result: R) -> Self {
+        Self::new(request, Outcome::Completed(result))
     }
 }
 
@@ -207,7 +237,7 @@ impl Report {
     pub fn status_counts(&self) -> (usize, usize, usize) {
         let mut counts = (0, 0, 0);
         for question in &self.questions {
-            match question.status {
+            match question.outcome.status() {
                 QuestionStatus::Completed => counts.0 += 1,
                 QuestionStatus::Failed => counts.1 += 1,
                 QuestionStatus::Unattempted => counts.2 += 1,
@@ -272,12 +302,11 @@ impl Collector {
                     query_name: question.query_name,
                     query_type: question.query_type,
                     transaction_id: question.transaction_id,
-                    status: question.status,
-                    result: question
-                        .result
-                        .map(|report| events.finish(report))
-                        .transpose()?,
-                    error: question.error,
+                    outcome: match question.outcome {
+                        Outcome::Completed(report) => Outcome::Completed(events.finish(report)?),
+                        Outcome::Failed(error) => Outcome::Failed(error),
+                        Outcome::Unattempted => Outcome::Unattempted,
+                    },
                 })
             })
             .collect::<Result<Vec<_>, Error>>()?;
@@ -326,7 +355,7 @@ where
     for (index, (request, mut prepared)) in requests.iter().zip(prepared).enumerate() {
         // Cancellation wins over elapsed-time reporting, matching every other deadline gate.
         if stop || deadline.enforce().is_err() {
-            questions.push(Question::ended(request, QuestionStatus::Unattempted));
+            questions.push(Question::unattempted(request));
             continue;
         }
         // Pace across question boundaries too; a batch must not become an unpaced burst.
@@ -345,7 +374,7 @@ where
                     stop = true;
                     questions.push(match error {
                         Error::Cancelled(_) | Error::DurationLimit { .. } => {
-                            Question::ended(request, QuestionStatus::Unattempted)
+                            Question::unattempted(request)
                         }
                         error => Question::failed(request, error),
                     });
@@ -376,10 +405,7 @@ where
                 attempt: request.attempts,
             })?;
         match result {
-            Ok(()) => questions.push(Question {
-                result: Some(prepared.report),
-                ..Question::ended(request, QuestionStatus::Completed)
-            }),
+            Ok(()) => questions.push(Question::completed(request, prepared.report)),
             Err(error @ Error::Output { .. }) => return Err(error),
             Err(error) => {
                 stop = matches!(error, Error::Cancelled(_) | Error::DurationLimit { .. });

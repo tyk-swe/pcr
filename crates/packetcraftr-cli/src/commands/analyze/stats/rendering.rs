@@ -8,7 +8,7 @@ use packetcraftr_core::analysis;
 
 use super::output::Table;
 use crate::errors::CliError;
-use crate::rendering::{
+use crate::terminal::{
     duration_text, render_diagnostics_text, render_optional, write_stdout_line, write_summary_line,
 };
 
@@ -84,7 +84,7 @@ pub(super) fn render_text(
             }
         }
         Table::Endpoints => {
-            crate::rendering::table_row(
+            crate::terminal::table_row(
                 invocation,
                 &[
                     ("ADDRESS", 39),
@@ -95,7 +95,7 @@ pub(super) fn render_text(
                 ],
             )?;
             for row in &report.endpoints {
-                crate::rendering::table_row(
+                crate::terminal::table_row(
                     invocation,
                     &[
                         (&row.address.to_string(), 39),
@@ -108,7 +108,7 @@ pub(super) fn render_text(
             }
         }
         Table::Protocols => {
-            crate::rendering::table_row(
+            crate::terminal::table_row(
                 invocation,
                 &[
                     ("PROTOCOL", 16),
@@ -118,7 +118,7 @@ pub(super) fn render_text(
                 ],
             )?;
             for row in &report.protocols {
-                crate::rendering::table_row(
+                crate::terminal::table_row(
                     invocation,
                     &[
                         (&row.protocol.to_string(), 16),

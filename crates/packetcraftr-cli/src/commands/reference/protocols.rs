@@ -12,7 +12,7 @@ use packetcraftr_core::error::Kind;
 use packetcraftr_core::protocol::BuiltinProtocol;
 
 use crate::errors::CliError;
-use crate::rendering::emit_published;
+use crate::publication::emit_published;
 
 pub(crate) const AFTER_LONG_HELP: &str = r"Examples:
   packetcraftr reference protocols
@@ -63,7 +63,7 @@ fn list_protocols(
     format: Format,
 ) -> Result<(), CliError> {
     let result = output::ListResult::from(BuiltinProtocol::ALL);
-    crate::rendering::render_aggregate_rows(
+    crate::commands::aggregate::render_aggregate_rows(
         invocation,
         crate::output::contract::Command::Protocols,
         format,

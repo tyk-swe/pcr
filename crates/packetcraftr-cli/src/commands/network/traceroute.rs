@@ -140,7 +140,7 @@ pub(super) fn run(
             };
             invocation.check()?;
             if format == Format::Json {
-                crate::rendering::emit_published(
+                crate::publication::emit_published(
                     invocation,
                     crate::output::contract::Command::Traceroute,
                     crate::output::envelope::Published::<output::Report>::try_from(report)

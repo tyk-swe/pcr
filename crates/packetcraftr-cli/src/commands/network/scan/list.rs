@@ -9,8 +9,8 @@ use crate::errors::CliError;
 use crate::input::manifest::Declaration;
 use crate::invocation::StreamEncoder;
 use crate::output::{self, contract::Format};
-use crate::rendering::{write_stdout_line, write_summary_line};
 use crate::system::{Runtime, client};
+use crate::terminal::{write_stdout_line, write_summary_line};
 use packetcraftr::target::{Selection, plan};
 use packetcraftr_core::diagnostic::{Diagnostic, Severity};
 
@@ -68,12 +68,12 @@ pub(super) fn run(
                 ports.as_ref(),
                 ip_protocols.as_ref(),
             )?;
-            crate::rendering::render_diagnostics_text(invocation, &diagnostics)
+            crate::terminal::render_diagnostics_text(invocation, &diagnostics)
         }
         Format::Json => {
             let origins = published_origins(&origins);
             let published = super::output::list::Report::new(report, &origins, ports, ip_protocols);
-            crate::rendering::emit_published(
+            crate::publication::emit_published(
                 invocation,
                 output::contract::Command::Scan,
                 Published::new(published, diagnostics),

@@ -10,7 +10,7 @@ use packetcraftr_core::error::{Classification, Kind};
 use crate::commands::{Command, Generate};
 use crate::errors::CliError;
 use crate::output::contract::Format;
-use crate::rendering::emit_stdout_document;
+use crate::terminal::emit_stdout_document;
 
 pub(crate) const AFTER_LONG_HELP: &str = r"Without NAME, lists the topics. Topics print text only and need no capture, network, or privileges.
 

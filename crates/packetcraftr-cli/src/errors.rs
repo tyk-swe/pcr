@@ -59,6 +59,18 @@ impl CliError {
         )
     }
 
+    pub(crate) fn stdout(operation: &str, source: &std::io::Error) -> Self {
+        Self::from_classification(
+            Classification::new(
+                packetcraftr_core::error::Code::IoStdout,
+                Kind::Io,
+                Some("restore the stdout consumer or choose a writable output destination"),
+            ),
+            operation,
+            source_causes(source),
+        )
+    }
+
     pub(crate) fn from_classification(
         classification: Classification,
         message: impl Into<String>,

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::output::{contract::Format, stream::StreamRecord};
-use crate::{errors::CliError, rendering::bounded_json_len};
+use crate::{errors::CliError, publication::bounded_json_len};
 use packetcraftr_core::error::Kind;
 
 pub(crate) struct EventOutput<'a> {
@@ -35,7 +35,7 @@ impl<'a> EventOutput<'a> {
                     crate::output::stream::MeteredError::Limit => limit_error(),
                     crate::output::stream::MeteredError::Encode(error) => CliError::from(error),
                     crate::output::stream::MeteredError::Serialize(error) => {
-                        crate::rendering::serialization_error(error)
+                        crate::publication::serialization_error(error)
                     }
                 });
         }

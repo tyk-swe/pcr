@@ -76,7 +76,7 @@ impl Spec for Assessment {
                 &mut seen_sources,
                 std::iter::once(source(path, &bytes)).chain(result.sources),
             );
-            crate::rendering::bounded_json_len(
+            crate::publication::bounded_json_len(
                 &crate::commands::security::output::Report::from(&report),
                 self.bounds.max_result_bytes,
                 serde_json::ser::CompactFormatter,
@@ -86,7 +86,7 @@ impl Spec for Assessment {
         report
             .measurements
             .insert("html".into(), serde_json::json!(self.html));
-        crate::rendering::bounded_json_len(
+        crate::publication::bounded_json_len(
             &crate::commands::security::output::Report::from(&report),
             self.bounds.max_result_bytes,
             serde_json::ser::CompactFormatter,

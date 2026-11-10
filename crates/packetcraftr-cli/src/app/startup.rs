@@ -9,9 +9,10 @@ use super::cli::{self, Context, MachineFormat, Parsed};
 use crate::commands::Launch;
 use crate::errors::{CliError, exit_code_for};
 use crate::output;
-use crate::rendering::{
-    emit_json, emit_stderr_document, emit_stderr_error, emit_stdout_document,
-    report_structured_error, terminal_document, write_unattributed_error,
+use crate::publication::{emit_json, write_unattributed_error};
+use crate::terminal::{
+    emit_stderr_document, emit_stderr_error, emit_stdout_document, report_structured_error,
+    terminal_document,
 };
 
 #[must_use]

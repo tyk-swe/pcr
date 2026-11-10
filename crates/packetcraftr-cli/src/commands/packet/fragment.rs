@@ -8,8 +8,10 @@ use self::arguments::Args;
 use crate::output::contract::Format;
 use crate::output::envelope::Published;
 use crate::{
+    capture_output::write_capture_file,
     errors::CliError,
-    rendering::{emit_published, write_capture_file, write_hex_line, write_stdout_line},
+    publication::{emit_published, write_hex_line},
+    terminal::write_stdout_line,
 };
 use packetcraftr_core::{self as core, frame::Frame};
 
@@ -143,14 +145,14 @@ pub(crate) fn run(invocation: &crate::invocation::Invocation, args: Args) -> Res
             .complete_published(Published::new(summary, built.diagnostics))
             .map_err(Into::into),
         Format::Text => {
-            crate::rendering::write_summary_line(
+            crate::terminal::write_summary_line(
                 invocation,
                 format_args!(
                     "{} fragments, {} bytes, MTU {}",
                     summary.fragments, summary.bytes, summary.mtu
                 ),
             )?;
-            crate::rendering::render_diagnostics_text(invocation, &built.diagnostics)
+            crate::terminal::render_diagnostics_text(invocation, &built.diagnostics)
         }
         Format::Hex | Format::Pcap | Format::PcapNg => Ok(()),
         other => other.unreachable(),

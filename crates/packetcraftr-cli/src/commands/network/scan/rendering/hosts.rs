@@ -5,7 +5,7 @@
 
 use super::listed;
 use crate::errors::CliError;
-use crate::rendering::{render_optional, write_stdout_line};
+use crate::terminal::{render_optional, write_stdout_line};
 
 /// Host records, when discovery or a reverse lookup was requested; the plan
 /// line already says when neither was.

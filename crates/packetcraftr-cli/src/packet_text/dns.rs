@@ -8,8 +8,8 @@ use packetcraftr_core::protocol::BuiltinProtocol;
 
 use packetcraftr_core::{document::Packet, field};
 
-use super::write_stdout_line;
 use crate::errors::CliError;
+use crate::terminal::write_stdout_line;
 
 pub(crate) fn render_dns_question(
     invocation: &crate::invocation::Invocation,
@@ -38,7 +38,7 @@ pub(crate) fn render_dns_record(
     )
 }
 
-pub(crate) fn render_dns_records(
+pub(super) fn render_dns_records(
     invocation: &crate::invocation::Invocation,
     packet: &Packet,
 ) -> Result<(), CliError> {

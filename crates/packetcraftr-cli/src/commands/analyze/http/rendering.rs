@@ -3,7 +3,7 @@
 
 use super::output as wire;
 use crate::errors::CliError;
-use crate::rendering::{
+use crate::terminal::{
     comma_separated, escaped, render_optional, write_stdout_line, write_summary_line,
 };
 
@@ -58,7 +58,7 @@ pub(super) fn render_message(
             invocation,
             format_args!("  header bytes: {}", message.header_wire_hex),
         )?;
-        presentation.details(invocation, "Provenance", &message.sources)?;
+        crate::terminal::write_details(invocation, presentation, "Provenance", &message.sources)?;
     }
     if let Some(error) = &message.error {
         write_stdout_line(invocation, format_args!("  error: {error}"))?;

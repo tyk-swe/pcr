@@ -34,7 +34,7 @@ updateFindings();
 ";
 
 pub(crate) fn text(i: &Invocation, report: &Report<'_>) -> Result<(), CliError> {
-    crate::rendering::write_stdout_line(
+    crate::terminal::write_stdout_line(
         i,
         format_args!(
             "{}: {} finding(s); evidence {}",
@@ -62,11 +62,11 @@ pub(crate) fn text(i: &Invocation, report: &Report<'_>) -> Result<(), CliError> 
         "html",
     ] {
         if let Some(value) = report.measurements.get(key) {
-            crate::rendering::write_stdout_line(i, format_args!("  {key}: {value}"))?;
+            crate::terminal::write_stdout_line(i, format_args!("  {key}: {value}"))?;
         }
     }
     for f in &report.findings {
-        crate::rendering::write_stdout_line(
+        crate::terminal::write_stdout_line(
             i,
             format_args!(
                 "{:?} {} {}: {}",
@@ -83,11 +83,11 @@ pub(crate) fn text(i: &Invocation, report: &Report<'_>) -> Result<(), CliError> 
             "coefficient_of_variation",
         ] {
             if let Some(value) = f.evidence.get(key) {
-                crate::rendering::write_stdout_line(i, format_args!("  {key}: {value}"))?;
+                crate::terminal::write_stdout_line(i, format_args!("  {key}: {value}"))?;
             }
         }
         if i.output.presentation().verbose {
-            crate::rendering::write_stdout_line(
+            crate::terminal::write_stdout_line(
                 i,
                 format_args!(
                     "  frames: {:?}\n  evidence: {}\n  remediation: {}",
@@ -97,7 +97,7 @@ pub(crate) fn text(i: &Invocation, report: &Report<'_>) -> Result<(), CliError> 
         }
     }
     for reason in report.completeness.reasons {
-        crate::rendering::write_stdout_line(i, format_args!("  {reason}"))?;
+        crate::terminal::write_stdout_line(i, format_args!("  {reason}"))?;
     }
     Ok(())
 }

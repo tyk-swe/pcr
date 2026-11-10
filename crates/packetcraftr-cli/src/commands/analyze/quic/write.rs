@@ -88,7 +88,7 @@ impl Exporter {
                 })
                 .collect(),
         };
-        let length = crate::rendering::bounded_json_len(
+        let length = crate::publication::bounded_json_len(
             &exported,
             remaining,
             serde_json::ser::CompactFormatter,

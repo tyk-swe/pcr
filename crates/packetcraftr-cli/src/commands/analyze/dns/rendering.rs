@@ -9,9 +9,8 @@ use super::output::Latency;
 
 use super::output as wire;
 use crate::errors::CliError;
-use crate::rendering::{
-    comma_separated, render_dns_fields, render_optional, write_stdout_line, write_summary_line,
-};
+use crate::packet_text::render_dns_fields;
+use crate::terminal::{comma_separated, render_optional, write_stdout_line, write_summary_line};
 
 pub(super) fn render_message(
     invocation: &crate::invocation::Invocation,

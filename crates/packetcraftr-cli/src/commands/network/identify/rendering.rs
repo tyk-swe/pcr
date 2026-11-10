@@ -3,7 +3,7 @@
 
 use super::output::Report;
 use crate::errors::CliError;
-use crate::rendering::{duration_text, write_stdout_line};
+use crate::terminal::{duration_text, write_stdout_line};
 
 pub(super) fn render_text(
     invocation: &crate::invocation::Invocation,
@@ -46,7 +46,12 @@ pub(super) fn render_text(
                     format_args!("  warning: certificate evidence truncated"),
                 )?;
             }
-            presentation.details(invocation, "Probe evidence (unauthenticated)", probe)?;
+            crate::terminal::write_details(
+                invocation,
+                presentation,
+                "Probe evidence (unauthenticated)",
+                probe,
+            )?;
         }
         for candidate in &record.candidates {
             if !presentation.verbose {

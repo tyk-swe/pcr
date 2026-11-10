@@ -172,6 +172,197 @@ fn dns_capture_dissects_successfully() {
 }
 
 #[test]
+fn frame_text_shows_bytes_only_when_verbose_or_as_a_field_tree() {
+    let path = capture_path("dns-response.pcap");
+    let capture = path.to_string_lossy().into_owned();
+    let bytes = capture_frames(&path)
+        .first()
+        .expect("one captured frame")
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let read = |extra: &[&str]| {
+        let args = [&["files", "read", capture.as_str()], extra].concat();
+        assert_success(&run(&args), &args)
+    };
+
+    let summary = read(&[]);
+    assert!(!summary.contains(&bytes), "{summary}");
+    let verbose = read(&["-v"]);
+    assert_eq!(
+        verbose.trim_end(),
+        format!("{} {bytes}", summary.trim_end())
+    );
+
+    let decoded = read(&["--dissect"]);
+    assert!(decoded.contains("  dns answer: "), "{decoded}");
+    assert!(!decoded.contains(&bytes), "{decoded}");
+    assert!(!decoded.contains("Decoded fields:"), "{decoded}");
+
+    let decoded_verbose = read(&["--dissect", "-v"]);
+    assert!(decoded_verbose.contains(&bytes), "{decoded_verbose}");
+    assert!(
+        decoded_verbose.contains("  dns answer: "),
+        "{decoded_verbose}"
+    );
+    assert!(
+        decoded_verbose.contains("Decoded fields:"),
+        "{decoded_verbose}"
+    );
+
+    let tree = read(&["--dissect", "--tree"]);
+    assert!(tree.contains(&bytes), "{tree}");
+    assert!(!tree.contains("  dns answer: "), "{tree}");
+    assert!(!tree.contains("Decoded fields:"), "{tree}");
+}
+
+#[test]
+fn fragment_capture_output_holds_exactly_the_published_fragments() {
+    let packet = format!(
+        "ipv4(dst=192.0.2.1)/udp(sport=40000,dport=40001)/raw(text={})",
+        "a".repeat(200)
+    );
+    let fragment = |format: &'static str| {
+        let args = [
+            "--output",
+            format,
+            "packet",
+            "fragment",
+            "--packet",
+            packet.as_str(),
+            "--mtu",
+            "68",
+        ];
+        let output = run(&args);
+        assert!(
+            output.status.success(),
+            "{format}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output.stdout
+    };
+    let published: serde_json::Value =
+        serde_json::from_slice(&fragment("json")).expect("valid JSON");
+    let expected = published["result"]["fragments"]
+        .as_array()
+        .expect("published fragments")
+        .iter()
+        .map(|fragment| {
+            fragment["frame"]["bytes_hex"]
+                .as_str()
+                .expect("frame bytes")
+        })
+        .collect::<Vec<_>>();
+    assert!(expected.len() > 1, "{published}");
+
+    for format in ["pcap", "pcapng"] {
+        let capture = tempfile::NamedTempFile::new().expect("create capture file");
+        std::fs::write(capture.path(), fragment(format)).expect("write capture");
+        let written = capture_frames(capture.path())
+            .iter()
+            .map(|frame| frame.iter().map(|byte| format!("{byte:02x}")).collect())
+            .collect::<Vec<String>>();
+        assert_eq!(written, expected, "{format}");
+    }
+}
+
+#[test]
+fn text_diagnostics_repeat_the_published_severity_code_and_message() {
+    let frame = "4500001c0000000040018eaac0000201c63364020800f7ff00000000";
+    let dissect = |format: &'static str| {
+        let args = [
+            "--output",
+            format,
+            "packet",
+            "dissect",
+            "--link-type",
+            "1",
+            "--hex",
+            frame,
+        ];
+        assert_success(&run(&args), &args)
+    };
+    let published: serde_json::Value = serde_json::from_str(&dissect("json")).expect("valid JSON");
+    let diagnostics = published["diagnostics"].as_array().expect("diagnostics");
+    assert!(!diagnostics.is_empty(), "{published}");
+    let text = dissect("text");
+    for diagnostic in diagnostics {
+        let line = format!(
+            "{} {}: {}",
+            diagnostic["severity"].as_str().expect("severity"),
+            diagnostic["code"].as_str().expect("code"),
+            diagnostic["message"].as_str().expect("message")
+        );
+        assert!(text.lines().any(|printed| printed == line), "{text}");
+    }
+}
+
+#[test]
+fn forwarding_rule_warnings_are_printed_as_coded_warning_lines() {
+    let path = capture_path("http-stream.pcap");
+    let capture = path.to_string_lossy().into_owned();
+    let verify = |format: &'static str| {
+        let args = [
+            "--output",
+            format,
+            "analyze",
+            "verify-forwarding",
+            capture.as_str(),
+            capture.as_str(),
+            "--identity",
+            "ipv4.identification",
+        ];
+        assert_success(&run(&args), &args)
+    };
+    let published: serde_json::Value = serde_json::from_str(&verify("json")).expect("valid JSON");
+    let warnings = published["result"]["rules"]["warnings"]
+        .as_array()
+        .expect("rule warnings");
+    assert!(!warnings.is_empty(), "{published}");
+    let text = verify("text");
+    for warning in warnings {
+        let line = format!(
+            "warning {}: {}",
+            warning["code"].as_str().expect("code"),
+            warning["message"].as_str().expect("message")
+        );
+        assert!(text.lines().any(|printed| printed == line), "{text}");
+    }
+}
+
+#[test]
+fn http_text_prints_the_published_start_line_and_headers() {
+    let path = capture_path("http-stream.pcap");
+    let capture = path.to_string_lossy().into_owned();
+    let json = ["--output", "json", "analyze", "http", capture.as_str()];
+    let published: serde_json::Value =
+        serde_json::from_str(&assert_success(&run(&json), &json)).expect("valid JSON");
+    let request = &published["result"]["messages"][0];
+    let verbose = ["-v", "analyze", "http", capture.as_str()];
+    let text = assert_success(&run(&verbose), &verbose);
+    let start = format!(
+        " {} {} ",
+        request["start"]["method"].as_str().expect("method"),
+        request["start"]["target"].as_str().expect("target")
+    );
+    assert!(
+        text.lines().next().expect("first line").contains(&start),
+        "{text}"
+    );
+    let headers = request["headers"].as_array().expect("headers");
+    assert!(!headers.is_empty(), "{published}");
+    for header in headers {
+        let line = format!(
+            "  {}: {}",
+            header["name"].as_str().expect("name"),
+            header["value"].as_str().expect("value")
+        );
+        assert!(text.lines().any(|printed| printed == line), "{text}");
+    }
+}
+
+#[test]
 fn dns_capture_analysis_succeeds() {
     let capture = capture_path("dns-response.pcap");
     let capture = capture.to_string_lossy().into_owned();
@@ -308,6 +499,49 @@ fn projection_ndjson_budget_counts_row_payload_and_rejects_unpublished_rows() {
         assert_eq!(records.len(), 1);
         assert_eq!(records[0]["event"], "error");
         assert_eq!(records[0]["error"]["code"], "policy.projection_limit");
+    }
+}
+
+#[test]
+fn projection_json_budget_is_the_sum_of_every_retained_row() {
+    let path = capture_path("http-stream.pcap");
+    let capture = path.to_string_lossy().into_owned();
+    let base = [
+        "--output",
+        "json",
+        "files",
+        "read",
+        capture.as_str(),
+        "--field",
+        "frame.number",
+        "--filter",
+        "frame.number <= 2",
+    ];
+    let output = run(&base);
+    let document: serde_json::Value =
+        serde_json::from_str(&assert_success(&output, &base)).expect("valid JSON");
+    let rows = document["result"]["rows"].as_array().expect("rows");
+    assert_eq!(rows.len(), 2);
+    let row_bytes = rows
+        .iter()
+        .map(|row| serde_json::to_vec(row).unwrap().len())
+        .sum::<usize>();
+    for (maximum, succeeds) in [(row_bytes, true), (row_bytes - 1, false)] {
+        let maximum = maximum.to_string();
+        let args = base
+            .iter()
+            .copied()
+            .chain(["--max-projection-bytes", maximum.as_str()])
+            .collect::<Vec<_>>();
+        let output = run(&args);
+        let limited: serde_json::Value =
+            serde_json::from_slice(&output.stdout).expect("valid JSON");
+        assert_eq!(output.status.success(), succeeds, "{limited}");
+        if succeeds {
+            assert_eq!(limited["result"]["rows"], document["result"]["rows"]);
+            continue;
+        }
+        assert_eq!(limited["error"]["code"], "policy.projection_limit");
     }
 }
 

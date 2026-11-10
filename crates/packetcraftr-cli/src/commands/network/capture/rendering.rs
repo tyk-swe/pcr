@@ -7,9 +7,9 @@ use crate::output::{
     self,
     contract::{Command, Format},
 };
-use crate::rendering::{
-    document_spelling, emit_published, render_diagnostics_stderr, render_diagnostics_text,
-    write_stdout_line, write_summary_line,
+use crate::publication::emit_published;
+use crate::terminal::{
+    render_diagnostics_stderr, render_diagnostics_text, write_stdout_line, write_summary_line,
 };
 
 pub(super) fn render_complete(
@@ -70,7 +70,7 @@ pub(super) fn render_complete(
                     invocation,
                     format_args!(
                         "  retention={}, retired files={}, retired frames={}",
-                        document_spelling(&files.retention),
+                        files.retention.as_str(),
                         files.discarded_files,
                         files.discarded_frames
                     ),

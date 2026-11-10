@@ -12,7 +12,7 @@ use crate::{
     },
     errors::CliError,
     output::contract::{Command, Format},
-    rendering::write_stdout_line,
+    terminal::write_stdout_line,
 };
 use packetcraftr_core::{
     analysis::{

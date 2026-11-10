@@ -106,6 +106,16 @@ pub enum Retention {
     Ring,
 }
 
+impl Retention {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Stop => "stop",
+            Self::Ring => "ring",
+        }
+    }
+}
+
 published_enum! {
     pub enum OverflowPolicy from native::OverflowPolicy {
         Fail => "fail",

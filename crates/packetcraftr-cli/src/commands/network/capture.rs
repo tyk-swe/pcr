@@ -28,7 +28,7 @@ use self::files::Files;
 use self::frames::{Decoding, Destinations};
 use crate::command_options::Compression;
 use crate::output;
-use crate::rendering::FieldTree;
+use crate::packet_text::FieldTree;
 use packetcraftr::capture::{self as workflow, Control, Event};
 use packetcraftr::policy::{CaptureBudget, Policy};
 use packetcraftr_core::error::Classified;
@@ -125,7 +125,7 @@ pub(super) fn run(invocation: &crate::invocation::Invocation, args: Args) -> Res
     };
     native.validate(&limits).map_err(CliError::classified)?;
     let registry = args.decode.registry()?;
-    let projector = crate::rendering::Projector::prepare(
+    let projector = crate::field_projection::Projector::prepare(
         &args.fields,
         args.max_projection_bytes,
         &registry,
@@ -279,7 +279,7 @@ struct Output<'a> {
     compression: Compression,
     selector: Option<FrameSelector>,
     decoding: Option<Decoding>,
-    projector: Option<crate::rendering::Projector>,
+    projector: Option<crate::field_projection::Projector>,
     files: Option<Files>,
     stream: &'a StreamEncoder,
 }

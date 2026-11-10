@@ -130,7 +130,7 @@ fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<()
         let plan = output::PlanReport::from_summary(summary, &token, arguments.repeats);
         return match format {
             Format::Text => rendering::render_plan_text(invocation, &plan),
-            Format::Json => crate::rendering::emit_published(
+            Format::Json => crate::publication::emit_published(
                 invocation,
                 crate::output::contract::Command::Differential,
                 crate::output::envelope::Published::new(plan, Vec::new()),
@@ -160,7 +160,7 @@ fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<()
                     .map_err(CliError::classified)?;
             match format {
                 Format::Text => rendering::render_report_text(invocation, &published.result),
-                Format::Json => crate::rendering::emit_published(
+                Format::Json => crate::publication::emit_published(
                     invocation,
                     crate::output::contract::Command::Differential,
                     published,

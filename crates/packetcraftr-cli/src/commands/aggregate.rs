@@ -1,10 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::{emit_published, write_stdout_line};
 use crate::errors::CliError;
 use crate::output;
 use crate::output::envelope::Published;
+use crate::publication::emit_published;
+use crate::terminal::{write_stdout_line, write_summary_line};
 
 pub(crate) fn render_aggregate_rows<T, R: serde::Serialize>(
     invocation: &crate::invocation::Invocation,
@@ -19,7 +20,7 @@ pub(crate) fn render_aggregate_rows<T, R: serde::Serialize>(
             for row in rows {
                 write_stdout_line(invocation, format_args!("{}", line(row)))?;
             }
-            super::write_summary_line(
+            write_summary_line(
                 invocation,
                 format_args!("{} {} result(s)", rows.len(), command.as_str()),
             )

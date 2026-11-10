@@ -134,7 +134,7 @@ pub(super) fn run(
             )
             .map_err(CliError::classified)?;
             if format == Format::Json {
-                crate::rendering::emit_published(
+                crate::publication::emit_published(
                     invocation,
                     output::contract::Command::Scan,
                     published,

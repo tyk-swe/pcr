@@ -791,3 +791,70 @@ $ target/debug/packetcraftr network scan ::ffff:127.0.0.1 --connect --ports 5376
   inferred=open rule=tcp_connect.connected supporting=0 conflicting=- unanswered=- failed=- port-hint=-
 1 socket connections attempted; 1 succeeded; elapsed 1.316ms
 ```
+
+## CLI rendering folder, 2026-11-10
+
+Earlier passes moved published types next to their commands but never audited
+`crates/packetcraftr-cli/src/rendering/`. The folder was named after a layer
+and held six unrelated jobs behind one re-export list of about fifty names.
+The user asked for one area to be cleaned completely and approved this one,
+with piped output required to stay byte-identical.
+
+### Decisions and problems addressed
+
+- Replace `rendering/` with modules named after what they own.
+  - `terminal` owns sanitizing, styling, and human stdout and stderr.
+  - `publication` owns JSON, NDJSON, raw bytes, and bounded encoding.
+  - `capture_output` owns the capture-file spool and interface mapping.
+  - `packet_text` owns frame, field tree, and DNS text.
+  - `field_projection` owns `--field` rows.
+  - `commands::retained` and `commands::aggregate` sit beside their only users.
+  - Each module root exports only its own children, so the hex re-export
+    through `rendering` is gone and callers name `output::hex` directly.
+- Colour lines by typed severity.
+  - Styling used to search finished text for a leading `error`, `warning`, or
+    `info` word, so any line that happened to start that way was coloured.
+  - Hand-written warning lines now go through `write_warning`,
+    `write_coded_warning`, or `emit_stderr_warning`.
+- Recognise help headings by shape.
+  - A list of about twenty heading names had to match the names assigned in
+    the command registry and in topic text, and four topic headings were
+    missing from it.
+- Make the projection sink a sum type.
+  - One struct carried the output format, a row buffer, and a header flag,
+    although rows exist only for JSON and the header only for text.
+- Make frame text take its layer view as one value.
+  - Two callers repeated the same branch to pair a field tree with verbose
+    presentation, and the frame header format was spelled three times.
+  - Frame and `packet dissect` text now share one decoded-fields block.
+- Keep one bounded writer.
+  - JSON measuring and projection text each had their own, and the projection
+    one reported every serializer failure as a limit failure.
+- Give stdout writing one error type and no newline flags.
+  - Three functions forwarded to each other and passed a boolean that decided
+    whether a newline was appended.
+- Scope stdout batching to a closure.
+  - `files read` had to enable batching and remember to flush it afterwards.
+- Return the spooled capture before stdout is opened.
+  - The spool took an injected destination that only production used, and
+    two error helpers differed by one message.
+- Give capture retention its own spelling.
+  - A generic helper serialized the value and printed `unknown` on failure.
+
+### Requirements retained after inspection
+
+- DNS text still reads record fields by name, because the same renderer
+  serves decoded packets and analysis messages that share only those names.
+- `Format::unreachable()` stays, since it is the crate-wide idiom for formats
+  refused at argument parsing and belongs to a pass over `output::contract`.
+- `Invocation` still owns the pending stdout batch.
+- Two help footer lines are still dimmed by their opening words.
+- `network replay` reports a stdout write failure with the generic I/O code,
+  unlike every other stdout write. This is recorded and left unchanged.
+
+### Visible changes
+
+Piped and `--color never` output is unchanged. With colour enabled, topic
+headings such as `Values:` and `Operators:` are now styled like other
+headings, and plain lines that merely begin with `error`, `warning`, or
+`info` are no longer coloured.

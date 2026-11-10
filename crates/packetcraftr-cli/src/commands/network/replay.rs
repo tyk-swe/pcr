@@ -25,6 +25,7 @@ use packetcraftr_core::capture_file::{Limits, Reader, Writer, compression};
 use packetcraftr_core::error::{BoundaryError, Kind};
 
 use self::arguments::Args;
+use crate::capture_output::{SourceCaptureWriter, finish_compressed_output, stream_capture_error};
 use crate::command_options::{InterfaceSelector, OfflineCaptureLimitsArgs};
 use crate::errors::CliError;
 use crate::filtering;
@@ -32,10 +33,8 @@ use crate::input::open_capture_file;
 use crate::invocation::StreamEncoder;
 use crate::output::envelope::source_causes;
 use crate::output::{contract::Format, stream::EncodeError};
-use crate::rendering::{
-    HumanWriteError, SourceCaptureWriter, emit_published, finish_compressed_output,
-    stream_capture_error, write_stdout_line_with_interrupt,
-};
+use crate::publication::emit_published;
+use crate::terminal::{WriteError, try_write_stdout_line};
 use conversion::{max_gap, timing};
 
 struct ReplayRun {
@@ -270,7 +269,7 @@ fn replay_text<P: PacketProviders, K: Clock, R: Read>(
     let worker_invocation = invocation.clone();
     let report = drive(client, request, move |Event::Frame(evidence): Event| {
         text_record_with(evidence, presentation, |args| {
-            write_stdout_line_with_interrupt(&worker_invocation, args)
+            try_write_stdout_line(&worker_invocation, args)
         })
     })?;
     rendering::render_summary(invocation, &report, filtered)
@@ -444,7 +443,7 @@ fn output_frame(evidence: FrameEvidence) -> Result<output::Frame, BoundaryError>
 fn text_record_with(
     evidence: FrameEvidence,
     presentation: crate::invocation::Presentation,
-    write_line: impl FnOnce(std::fmt::Arguments<'_>) -> Result<(), HumanWriteError>,
+    write_line: impl FnOnce(std::fmt::Arguments<'_>) -> Result<(), WriteError>,
 ) -> Result<(), BoundaryError> {
     let result = output_frame(evidence)?;
     write_line(format_args!(
@@ -452,8 +451,8 @@ fn text_record_with(
         rendering::frame_line(&result, presentation)
     ))
     .map_err(|source| match source {
-        HumanWriteError::Interrupted(interrupted) => BoundaryError::from_error(interrupted),
-        HumanWriteError::Write(source) => output_failure("write stdout failed", source),
+        WriteError::Interrupted(interrupted) => BoundaryError::from_error(interrupted),
+        WriteError::Write(source) => output_failure("write stdout failed", source),
     })
 }
 

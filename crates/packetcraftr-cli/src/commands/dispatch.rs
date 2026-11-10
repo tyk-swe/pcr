@@ -14,8 +14,9 @@ use crate::errors::{CANCELLED_EXIT_CODE, CliError};
 use crate::invocation::{Invocation, StreamEncoder};
 use crate::output;
 use crate::output::contract::{Command, Format};
-use crate::rendering::{emit_json, emit_stderr_error, report_structured_error, stdout_stream};
+use crate::publication::{emit_json, stdout_stream};
 use crate::resources::Preset;
+use crate::terminal::{emit_stderr_error, report_structured_error};
 
 #[cfg(test)]
 mod tests;

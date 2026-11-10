@@ -171,7 +171,7 @@ impl crate::commands::Spec for Args {
         let report = output::Report::try_from(report).map_err(CliError::classified)?;
         match format {
             Format::Text => rendering::render_text(invocation, &report, stream.presentation())?,
-            Format::Json => crate::rendering::emit_published(
+            Format::Json => crate::publication::emit_published(
                 invocation,
                 crate::output::contract::Command::Identify,
                 Published::new(report, Vec::new()),

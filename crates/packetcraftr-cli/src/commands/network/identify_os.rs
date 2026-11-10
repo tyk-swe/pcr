@@ -12,8 +12,8 @@ use crate::{
     command_options::{Bounded, NumericPolicyArgs, RouteSelectionArgs, parse_target},
     errors::CliError,
     input::{InputKind, read_bounded_file},
-    rendering::write_stdout_line,
     system::{Runtime, prepare_workflow},
+    terminal::write_stdout_line,
 };
 
 #[derive(Debug, clap::Args)]
@@ -200,7 +200,7 @@ impl crate::commands::Spec for Args {
                 };
                 invocation.check()?;
                 if format == Format::Json {
-                    crate::rendering::emit_published(
+                    crate::publication::emit_published(
                         invocation,
                         crate::output::contract::Command::IdentifyOs,
                         crate::output::envelope::Published::<output::Report>::try_from(report)

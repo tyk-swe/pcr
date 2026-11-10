@@ -20,7 +20,7 @@ use self::output::Table;
 use crate::commands::offline_analysis::prepare;
 use crate::errors::CliError;
 use crate::input::open_capture;
-use crate::rendering::emit_published;
+use crate::publication::emit_published;
 
 use crate::output::contract::PublishedType;
 
@@ -144,7 +144,7 @@ pub(super) fn run(
             let result = output::Report::try_from((table, report, frames_read))
                 .map_err(CliError::classified)?;
             csv::render(invocation, &result)?;
-            crate::rendering::render_diagnostics_stderr(&diagnostics)
+            crate::terminal::render_diagnostics_stderr(&diagnostics)
         }
         other => other.unreachable(),
     }

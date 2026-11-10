@@ -10,7 +10,7 @@ use crate::protocol::network::{Ipv4, Ipv6};
 
 #[test]
 fn catalog_capabilities_come_from_their_own_facts() {
-    use BuiltinProtocol::{Dns, Dtls, Http, Mpls, Mqtt, Tcp, Tls, Udp};
+    use BuiltinProtocol::{Dns, Dtls, Ethernet, Http, Ipv4, Mpls, Mqtt, Raw, Tcp, Tls, Udp};
     assert!(Dtls.is_message_protocol());
     assert!(!Dns.is_message_protocol());
     assert!(Mqtt.stream_decode());
@@ -21,6 +21,10 @@ fn catalog_capabilities_come_from_their_own_facts() {
     assert!(Dns.supports_transport(Udp));
     assert!(Tls.supports_transport(Tcp));
     assert!(Mpls.supports_transport(Udp));
+    assert!(!Http.supports_transport(Udp));
+    assert!(!Udp.supports_transport(Tcp));
+    assert!(!Dns.supports_transport(Ipv4));
+    assert!(!Raw.supports_transport(Ethernet));
     let registry = super::registry();
     for protocol in BuiltinProtocol::ALL {
         for (parent, ports) in [
@@ -39,6 +43,61 @@ fn catalog_capabilities_come_from_their_own_facts() {
             }
         }
     }
+}
+
+#[test]
+fn filter_field_bindings_read_their_declared_fields() {
+    use crate::protocol::link::Ethernet;
+    use crate::protocol::network::Ipv4;
+    use crate::protocol::transport::Tcp;
+
+    let registry = super::registry();
+    let mut packet = crate::packet::Packet::default();
+    packet.push(Ethernet::default());
+    packet.push(Ipv4 {
+        source: "192.0.2.1".parse().unwrap(),
+        destination: "192.0.2.2".parse().unwrap(),
+        ..Default::default()
+    });
+    packet.push(Tcp {
+        source_port: 40000,
+        destination_port: 1883,
+        ..Default::default()
+    });
+    let built = crate::build::Builder::new(registry.clone())
+        .build(packet, Addresses::default(), Default::default())
+        .unwrap();
+    let decoded = crate::decode::Dissector::new(registry.clone())
+        .decode(
+            crate::frame::Frame::new(None, crate::frame::LinkType::ETHERNET, built.bytes).unwrap(),
+            Default::default(),
+        )
+        .unwrap();
+    let context = crate::filter::Context::frame(&decoded, 1);
+    for (source, expected) in [
+        ("ip.src == 192.0.2.1", true),
+        ("ip.dst == 192.0.2.2", true),
+        ("tcp.srcport == 40000", true),
+        ("tcp.dstport == 1883", true),
+        ("tcp.srcport == 1883", false),
+        ("tcp.dstport == 40000", false),
+    ] {
+        let filter = crate::filter::Filter::compile(source, &registry, Default::default())
+            .unwrap_or_else(|error| panic!("{source}: {error}"));
+        assert_eq!(filter.matches(&context).unwrap(), expected, "{source}");
+    }
+}
+
+#[test]
+fn filter_field_bindings_reject_incompatible_literals() {
+    let registry = super::registry();
+    let error =
+        crate::filter::Filter::compile("tcp.srcport == \"hello\"", &registry, Default::default())
+            .expect_err("a port cannot compare to text");
+    assert!(
+        matches!(error, crate::filter::Error::IncompatibleLiteral { .. }),
+        "{error:?}"
+    );
 }
 
 #[test]

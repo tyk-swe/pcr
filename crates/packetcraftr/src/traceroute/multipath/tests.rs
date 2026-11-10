@@ -4,6 +4,7 @@
 use super::*;
 use crate::{
     Stats,
+    clock::Clock,
     engine::execution::Grant,
     evidence::SentPacket,
     probe::{
@@ -12,6 +13,7 @@ use crate::{
     },
 };
 use packetcraftr_core::{
+    budget::Deadline,
     build::{Builder, BuiltPacket},
     decode::{DecodedPacket, Dissector},
     diagnostic::{Diagnostic, Severity},
@@ -25,9 +27,40 @@ use packetcraftr_core::{
     },
 };
 use std::{
+    convert::Infallible,
     net::IpAddr,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{Duration, Instant, SystemTime},
 };
+
+#[derive(Clone)]
+struct ExpiringClock {
+    expired: Arc<AtomicBool>,
+}
+
+impl Clock for ExpiringClock {
+    type Error = Infallible;
+
+    fn now(&self) -> Instant {
+        let now = Instant::now();
+        if self.expired.load(Ordering::SeqCst) {
+            now + Duration::from_secs(7200)
+        } else {
+            now
+        }
+    }
+
+    fn wall_now(&self) -> SystemTime {
+        SystemTime::now()
+    }
+
+    fn sleep(&self, _: Duration, _: &Deadline) -> Result<(), Self::Error> {
+        Ok(())
+    }
+}
 
 fn request(strategy: Transport, v6: bool) -> Request {
     Request {
@@ -730,6 +763,109 @@ fn authoritative_matching_rejects_stale_tuple_reply() {
             .unwrap();
         assert_eq!(captured.response_counts[0], usize::from(!strict));
     }
+}
+
+#[test]
+fn authoritative_matching_checks_freshness_for_every_request() {
+    let request = request(Transport::Udp, false);
+    let flow = packet::flows(&request, destination(false), 8)[0].clone();
+    let built = build(packet::Probe::new(&request, flow, destination(false), 8, 1, 1).packet);
+    let older = packetcraftr_netio::transmit::Submission::start()
+        .complete(built.bytes.len(), built.bytes.clone());
+    std::thread::sleep(Duration::from_millis(1));
+    let newer = packetcraftr_netio::transmit::Submission::start()
+        .complete(built.bytes.len(), built.bytes.clone());
+    let received_at = newer.timing().freshness_marker().monotonic() - Duration::from_nanos(1);
+    assert!(received_at >= older.timing().freshness_marker().monotonic());
+    let sent = vec![
+        Arc::new(SentPacket::try_new(built.clone(), materialized(false), newer).unwrap()),
+        Arc::new(SentPacket::try_new(built.clone(), materialized(false), older).unwrap()),
+    ];
+    let response = quote(&built, destination(false), false, usize::MAX - 40);
+    let registry = builtin::registry();
+    let dissector = Dissector::new(registry.clone());
+    let window =
+        crate::exchange::Window::open(&crate::clock::SystemClock, Duration::from_secs(10), None)
+            .unwrap();
+    let collection = crate::exchange::Collection::default();
+    let mut captured = crate::exchange::Accumulator::new(2);
+    captured.authoritative_matcher = true;
+    let mut matcher = |_: usize, request: &Packet, reply: &DecodedPacket| {
+        packet::classify(&registry, Transport::Udp, request, reply).is_some()
+    };
+    let outcome = captured
+        .process(
+            packetcraftr_netio::capture::Captured::new(response.frame.clone(), Some(received_at)),
+            crate::exchange::ProcessContext {
+                registry: &registry,
+                dissector: &dissector,
+                request_count: 2,
+                sent: &sent,
+                window: &window,
+                collection: &collection,
+            },
+            Some(&mut matcher),
+        )
+        .unwrap();
+    assert!(matches!(outcome, crate::exchange::ProcessOutcome::Continue));
+    assert_eq!(captured.response_counts, [0, 1]);
+}
+
+#[test]
+fn authoritative_matching_retains_capture_when_deadline_expires_mid_loop() {
+    let request = request(Transport::Udp, false);
+    let flow = packet::flows(&request, destination(false), 8)[0].clone();
+    let built = build(packet::Probe::new(&request, flow, destination(false), 8, 1, 1).packet);
+    let sent = (0..2)
+        .map(|_| {
+            let tx = packetcraftr_netio::transmit::Submission::start()
+                .complete(built.bytes.len(), built.bytes.clone());
+            Arc::new(SentPacket::try_new(built.clone(), materialized(false), tx).unwrap())
+        })
+        .collect::<Vec<_>>();
+    let response = quote(&built, destination(false), false, usize::MAX - 40);
+    let registry = builtin::registry();
+    let dissector = Dissector::new(registry.clone());
+    let clock = ExpiringClock {
+        expired: Arc::new(AtomicBool::new(false)),
+    };
+    let window = crate::exchange::Window::open(&clock, Duration::from_secs(10), None).unwrap();
+    let collection = crate::exchange::Collection::default();
+    let mut captured = crate::exchange::Accumulator::new(2);
+    captured.authoritative_matcher = true;
+    let mut matcher_calls = 0;
+    let expired = Arc::clone(&clock.expired);
+    let mut matcher = |_: usize, request: &Packet, reply: &DecodedPacket| {
+        matcher_calls += 1;
+        expired.store(true, Ordering::SeqCst);
+        packet::classify(&registry, Transport::Udp, request, reply).is_some()
+    };
+    let outcome = captured
+        .process(
+            packetcraftr_netio::capture::Captured::new(
+                response.frame.clone(),
+                Some(Instant::now()),
+            ),
+            crate::exchange::ProcessContext {
+                registry: &registry,
+                dissector: &dissector,
+                request_count: 2,
+                sent: &sent,
+                window: &window,
+                collection: &collection,
+            },
+            Some(&mut matcher),
+        )
+        .unwrap();
+    assert!(matches!(
+        outcome,
+        crate::exchange::ProcessOutcome::CorrelationDeadlineExpired
+    ));
+    assert_eq!(matcher_calls, 1);
+    assert_eq!(captured.response_counts, [0, 0]);
+    captured.finalize_unsolicited();
+    assert_eq!(captured.unsolicited_ingress.len(), 1);
+    assert!(captured.unsolicited_ingress[0].correlation_expired);
 }
 
 #[test]

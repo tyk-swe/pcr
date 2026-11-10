@@ -234,15 +234,119 @@ impl Policy {
 #[cfg(test)]
 mod tests {
     use std::error::Error as _;
-    use std::net::IpAddr;
+    use std::net::{IpAddr, Ipv4Addr};
     use std::time::Duration;
 
     use packetcraftr_core::budget::Deadline;
     use packetcraftr_core::error::Classified;
+    use packetcraftr_core::{
+        frame::LinkType,
+        packet::{MacAddress, Packet},
+        protocol::{link::Ethernet, network::Ipv4},
+    };
+    use packetcraftr_netio::{
+        interface::Id,
+        link::{Capability, Mode},
+        route::{Decision, Scope, SelectionReason},
+    };
 
     use super::Policy;
-    use crate::policy::{Error as PolicyError, ResolutionError};
+    use crate::policy::{
+        Error as PolicyError, MAX_DESTINATION_CONSTRAINTS, MAX_RESOLVED_ADDRESSES, ResolutionError,
+    };
+    use crate::route::Plan;
     use crate::target::{Error as TargetError, Hostname, Resolver, Target};
+
+    fn source_plan() -> Plan {
+        let source = "10.0.0.1".parse().unwrap();
+        let mac = MacAddress([2, 0, 0, 0, 0, 1]);
+        Plan {
+            decision: Decision {
+                interface: Id {
+                    index: 1,
+                    name: "test0".to_owned(),
+                },
+                source_mac: Some(mac),
+                selected_source: Some(source),
+                preferred_source: Some("10.0.0.2".parse().unwrap()),
+                next_hop: None,
+                selection_reason: SelectionReason::OnLink,
+                destination_scope: Scope::Private,
+                mtu: 1500,
+                capability: Capability::Layer2AndLayer3,
+                link_type: LinkType::ETHERNET,
+            },
+            mode: Mode::Layer2,
+            lookup_destination: None,
+            final_destination: None,
+            visited_destinations: Vec::new(),
+            packet_source: Some(source),
+            neighbor_source: None,
+            neighbor_target: None,
+            destination_mac: None,
+            source_mac: Some(mac),
+            neighbor_vlan_tags: Vec::new(),
+            synthesized_ethernet: false,
+        }
+    }
+
+    fn source_packet(source: Ipv4Addr, mac: [u8; 6]) -> Packet {
+        let mut packet = Packet::default();
+        packet.push(Ethernet {
+            source: mac,
+            ..Ethernet::default()
+        });
+        packet.push(Ipv4 {
+            source,
+            destination: Ipv4Addr::LOCALHOST,
+            ..Ipv4::default()
+        });
+        packet
+    }
+
+    #[test]
+    fn source_ownership_accepts_selected_preferred_and_planned_sources() {
+        let plan = source_plan();
+        let policy = Policy::default();
+        for source in ["10.0.0.1", "10.0.0.2", "0.0.0.0"] {
+            let packet = source_packet(source.parse().unwrap(), [2, 0, 0, 0, 0, 1]);
+            assert!(
+                policy.authorize_packet_sources(&packet, &plan).is_ok(),
+                "{source}"
+            );
+        }
+        let placeholder = source_packet(Ipv4Addr::UNSPECIFIED, [0; 6]);
+        assert!(policy.authorize_packet_sources(&placeholder, &plan).is_ok());
+        assert!(
+            policy
+                .authorize_packet_sources(&Packet::default(), &plan)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn foreign_packet_sources_require_explicit_spoofing_permission() {
+        let plan = source_plan();
+        let policy = Policy::default();
+        for (ip, mac, denied) in [
+            ("10.0.0.3", [2, 0, 0, 0, 0, 1], "10.0.0.3"),
+            ("10.0.0.1", [2, 0, 0, 0, 0, 3], "02:00:00:00:00:03"),
+        ] {
+            let packet = source_packet(ip.parse().unwrap(), mac);
+            assert!(matches!(policy.authorize_packet_sources(&packet, &plan),
+                Err(PolicyError::SourceNotInterfaceOwned { packet_source, interface })
+                    if packet_source == denied && interface == plan.decision.interface.name
+            ));
+            assert!(
+                Policy {
+                    allow_source_spoofing: true,
+                    ..policy.clone()
+                }
+                .authorize_packet_sources(&packet, &plan)
+                .is_ok()
+            );
+        }
+    }
 
     #[test]
     fn resolution_denial_preserves_error_details() {
@@ -414,5 +518,150 @@ mod tests {
             ..Policy::default()
         };
         assert!(permissive.authorize_destination(public_v4).is_ok());
+    }
+
+    #[test]
+    fn destination_scope_handles_address_families_and_documentation_boundaries() {
+        let policy = Policy::default();
+        for address in [
+            "0.0.0.0",
+            "10.0.0.1",
+            "127.0.0.1",
+            "169.254.0.1",
+            "172.16.0.1",
+            "192.168.0.1",
+            "192.0.2.1",
+            "198.51.100.1",
+            "203.0.113.1",
+            "::",
+            "::1",
+            "fc00::1",
+            "fdff::1",
+            "fe80::1",
+            "febf::1",
+            "2001:db8::1",
+            "3fff::1",
+            "3fff:fff:ffff::1",
+        ] {
+            let address: IpAddr = address.parse().unwrap();
+            assert!(policy.authorize_destination(address).is_ok(), "{address}");
+            if let IpAddr::V4(ipv4) = address {
+                assert!(
+                    policy
+                        .authorize_destination(ipv4.to_ipv6_mapped().into())
+                        .is_ok(),
+                    "mapped {address}"
+                );
+            }
+        }
+        for address in [
+            "1.2.3.4",
+            "224.0.0.1",
+            "255.255.255.255",
+            "2001:db7::1",
+            "2001:db9::1",
+            "2002:db8::1",
+            "3ffe::1",
+            "3fff:1000::1",
+            "4000::1",
+            "ff02::1",
+            "fec0::1",
+        ] {
+            let address: IpAddr = address.parse().unwrap();
+            assert!(
+                matches!(
+                    policy.authorize_destination(address),
+                    Err(PolicyError::PublicDestination { destination }) if destination == address
+                ),
+                "{address}"
+            );
+            if let IpAddr::V4(ipv4) = address {
+                assert!(
+                    matches!(
+                        policy.authorize_destination(ipv4.to_ipv6_mapped().into()),
+                        Err(PolicyError::PublicDestination { .. })
+                    ),
+                    "mapped {address}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn policy_validation_accepts_exact_limits_and_rejects_overflow() {
+        for value in [1, MAX_RESOLVED_ADDRESSES] {
+            assert!(
+                Policy {
+                    max_resolved_addresses: value,
+                    ..Policy::default()
+                }
+                .validate()
+                .is_ok()
+            );
+        }
+        for value in [0, MAX_RESOLVED_ADDRESSES + 1] {
+            assert!(matches!(
+                Policy { max_resolved_addresses: value, ..Policy::default() }.validate(),
+                Err(PolicyError::InvalidAddressLimit { value: actual, maximum })
+                    if actual == value && maximum == MAX_RESOLVED_ADDRESSES
+            ));
+        }
+        let constraint = "127.0.0.1".parse().unwrap();
+        for count in [
+            0,
+            MAX_DESTINATION_CONSTRAINTS,
+            MAX_DESTINATION_CONSTRAINTS + 1,
+        ] {
+            let policy = Policy {
+                allowed_destinations: vec![constraint; count],
+                ..Policy::default()
+            };
+            if count <= MAX_DESTINATION_CONSTRAINTS {
+                assert!(policy.validate().is_ok());
+            } else {
+                assert!(matches!(policy.validate(),
+                    Err(PolicyError::DestinationConstraintLimit { actual, maximum })
+                        if actual == count && maximum == MAX_DESTINATION_CONSTRAINTS
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn allowlist_matches_exact_mapped_and_network_addresses() {
+        let policy = Policy {
+            allowed_destinations: [
+                "10.0.0.1",
+                "::ffff:10.0.0.2",
+                "192.0.2.0/24",
+                "2001:db8::/32",
+            ]
+            .map(|entry| entry.parse().unwrap())
+            .into(),
+            ..Policy::default()
+        };
+        for address in [
+            "10.0.0.1",
+            "::ffff:10.0.0.1",
+            "10.0.0.2",
+            "::ffff:10.0.0.2",
+            "192.0.2.255",
+            "2001:db8:ffff::1",
+        ] {
+            assert!(
+                policy
+                    .authorize_destination(address.parse().unwrap())
+                    .is_ok(),
+                "{address}"
+            );
+        }
+        let destination = "10.0.0.3".parse().unwrap();
+        let error = policy.authorize_destination(destination).unwrap_err();
+        assert!(matches!(&error,
+            PolicyError::DestinationNotAllowed { destination: actual, constraints }
+                if *actual == destination && *constraints == policy.allowed_destinations.iter()
+                    .map(ToString::to_string).collect::<Vec<_>>().join(", ")
+        ));
+        assert!(error.to_string().contains(&destination.to_string()));
     }
 }

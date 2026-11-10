@@ -238,8 +238,10 @@ mod tests {
     use std::time::Duration;
 
     use packetcraftr_core::budget::Deadline;
-    use packetcraftr_core::error::Classified;
+    use packetcraftr_core::error::{Classified, Kind};
     use packetcraftr_core::{
+        build::{Builder, Options},
+        codec::{Addresses, Mode as BuildMode},
         frame::LinkType,
         packet::{MacAddress, Packet},
         protocol::{link::Ethernet, network::Ipv4},
@@ -252,7 +254,8 @@ mod tests {
 
     use super::Policy;
     use crate::policy::{
-        Error as PolicyError, MAX_DESTINATION_CONSTRAINTS, MAX_RESOLVED_ADDRESSES, ResolutionError,
+        DestinationConstraint, Error as PolicyError, MAX_DESTINATION_CONSTRAINTS,
+        MAX_RESOLVED_ADDRESSES, ResolutionError,
     };
     use crate::route::Plan;
     use crate::target::{Error as TargetError, Hostname, Resolver, Target};
@@ -349,6 +352,44 @@ mod tests {
     }
 
     #[test]
+    fn permissive_packets_require_both_policy_and_operation_approval() {
+        let builder = Builder::new(packetcraftr_core::protocol::builtin::registry());
+        let build = |mode: BuildMode| {
+            builder
+                .build(
+                    source_packet(Ipv4Addr::LOCALHOST, [2, 0, 0, 0, 0, 1]),
+                    Addresses::default(),
+                    Options {
+                        mode,
+                        ..Options::default()
+                    },
+                )
+                .unwrap()
+        };
+        let strict = build(BuildMode::Strict);
+        assert!(
+            Policy::default()
+                .authorize_built_packet(&strict, false)
+                .is_ok()
+        );
+        let permissive = build(BuildMode::Permissive);
+        for (policy_allowed, operation_allowed) in
+            [(false, false), (false, true), (true, false), (true, true)]
+        {
+            let result = Policy {
+                allow_permissive_packets: policy_allowed,
+                ..Policy::default()
+            }
+            .authorize_built_packet(&permissive, operation_allowed);
+            match (policy_allowed, operation_allowed) {
+                (_, false) => assert!(matches!(result, Err(PolicyError::PermissiveLiveOptIn))),
+                (false, true) => assert!(matches!(result, Err(PolicyError::PermissivePacket))),
+                (true, true) => assert!(result.is_ok()),
+            }
+        }
+    }
+
+    #[test]
     fn resolution_denial_preserves_error_details() {
         let policy = Policy::default();
         let target: Target = "example.test".parse().unwrap();
@@ -363,6 +404,7 @@ mod tests {
             panic!("expected policy hostname denial, got {error:?}");
         };
         assert_eq!(hostname, "example.test");
+        assert!(error.to_string().contains(hostname));
         let expected = PolicyError::HostnameResolution {
             hostname: hostname.clone(),
         };
@@ -600,9 +642,16 @@ mod tests {
             );
         }
         for value in [0, MAX_RESOLVED_ADDRESSES + 1] {
+            let error = Policy {
+                max_resolved_addresses: value,
+                ..Policy::default()
+            }
+            .validate()
+            .unwrap_err();
+            assert_eq!(error.classification().kind, Kind::Usage);
             assert!(matches!(
-                Policy { max_resolved_addresses: value, ..Policy::default() }.validate(),
-                Err(PolicyError::InvalidAddressLimit { value: actual, maximum })
+                error,
+                PolicyError::InvalidAddressLimit { value: actual, maximum }
                     if actual == value && maximum == MAX_RESOLVED_ADDRESSES
             ));
         }
@@ -629,15 +678,14 @@ mod tests {
 
     #[test]
     fn allowlist_matches_exact_mapped_and_network_addresses() {
+        let entries = [
+            "10.0.0.1",
+            "::ffff:10.0.0.2",
+            "192.0.2.0/24",
+            "2001:db8::/32",
+        ];
         let policy = Policy {
-            allowed_destinations: [
-                "10.0.0.1",
-                "::ffff:10.0.0.2",
-                "192.0.2.0/24",
-                "2001:db8::/32",
-            ]
-            .map(|entry| entry.parse().unwrap())
-            .into(),
+            allowed_destinations: entries.map(|entry| entry.parse().unwrap()).into(),
             ..Policy::default()
         };
         for address in [
@@ -658,10 +706,33 @@ mod tests {
         let destination = "10.0.0.3".parse().unwrap();
         let error = policy.authorize_destination(destination).unwrap_err();
         assert!(matches!(&error,
-            PolicyError::DestinationNotAllowed { destination: actual, constraints }
-                if *actual == destination && *constraints == policy.allowed_destinations.iter()
-                    .map(ToString::to_string).collect::<Vec<_>>().join(", ")
+            PolicyError::DestinationNotAllowed { destination: actual, .. }
+                if *actual == destination
         ));
         assert!(error.to_string().contains(&destination.to_string()));
+        for entry in entries {
+            assert!(
+                error.to_string().contains(entry),
+                "missing constraint {entry}"
+            );
+        }
+    }
+
+    #[test]
+    fn invalid_destination_constraints_report_the_input_as_a_usage_error() {
+        for input in [
+            "invalid",
+            "invalid/24",
+            "10.0.0.0/33",
+            "10.0.0.1/24",
+            "2001:db8::1/32",
+        ] {
+            let error = input.parse::<DestinationConstraint>().unwrap_err();
+            assert_eq!(error.classification().kind, Kind::Usage);
+            assert!(matches!(error,
+                PolicyError::InvalidDestinationConstraint { value, reason }
+                    if value == input && !reason.is_empty()
+            ));
+        }
     }
 }

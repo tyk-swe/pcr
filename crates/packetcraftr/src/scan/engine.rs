@@ -17,6 +17,7 @@ pub(crate) use self::adaptive_execution::adaptive_reservation;
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use packetcraftr_core::budget::Deadline;
 
@@ -26,7 +27,7 @@ use crate::engine::operation::{Workflow, WorkflowSetup};
 use crate::policy::Authorizer;
 use crate::probe::runner::BatchEvidence;
 use crate::providers::{PacketProviders, TargetProviders};
-use crate::target::ResolveTarget;
+use crate::target::{ResolveTarget, SelectedAddress};
 use crate::{Client, Sink};
 
 use super::Error;
@@ -41,6 +42,10 @@ use super::report::RttAccumulator;
 use super::{ClassificationCounts, Event, Report, Request, Scheduling};
 use crate::probe::Stage;
 use crate::probe::enforce_deadline;
+
+#[cfg(test)]
+#[path = "engine/tests.rs"]
+mod tests;
 
 impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
     /// Scans the request's authorized targets and publishes each probe's
@@ -117,11 +122,39 @@ impl Scheduler {
         }
     }
 
-    fn controller_mut(&mut self) -> Option<&mut Controller> {
+    fn is_adaptive(&self) -> bool {
+        matches!(self, Self::Adaptive(_))
+    }
+
+    fn host_index(&mut self, target: &SelectedAddress) -> Option<usize> {
         match self {
             Self::Fixed { .. } => None,
-            Self::Adaptive(adaptive) => Some(&mut adaptive.controller),
+            Self::Adaptive(adaptive) => Some(adaptive.controller.host_index(target)),
         }
+    }
+
+    fn host_started(&mut self, host: Option<usize>, now: Instant) {
+        if let (Self::Adaptive(adaptive), Some(host)) = (self, host) {
+            adaptive.controller.host_started(host, now);
+        }
+    }
+
+    fn host_expired(&mut self, host: Option<usize>, now: Instant) -> bool {
+        let (Self::Adaptive(adaptive), Some(host)) = (self, host) else {
+            return false;
+        };
+        if !adaptive.controller.host_expired(host, now) {
+            return false;
+        }
+        adaptive.controller.mark_incomplete(host);
+        true
+    }
+
+    fn host_remaining(&self, host: Option<usize>, now: Instant) -> Option<Duration> {
+        let (Self::Adaptive(adaptive), Some(host)) = (self, host) else {
+            return None;
+        };
+        Some(adaptive.controller.host_remaining(host, now))
     }
 
     fn execute_stage<E, C, F>(
@@ -259,9 +292,9 @@ where
             rtt: RttAccumulator::default(),
             discovery: Vec::new(),
             feedback: scheduler
-                .controller()
-                .map(|_| (Vec::new(), request.max_in_flight)),
-            adaptive_attempts: scheduler.controller().map(|_| request.attempts),
+                .is_adaptive()
+                .then(|| (Vec::new(), request.max_in_flight)),
+            adaptive_attempts: scheduler.is_adaptive().then_some(request.attempts),
         },
         &mut emit,
     );
@@ -293,7 +326,7 @@ where
                 &approved.targets,
                 sweep.composer_mut(),
                 &mut stats,
-                scheduler.controller_mut(),
+                &mut scheduler,
             )?;
         }
         if !options.probes.is_empty() {
@@ -301,13 +334,7 @@ where
                 if !sendable[index] {
                     continue;
                 }
-                match reach_next_hop(
-                    &mut prober,
-                    target,
-                    &mut stats,
-                    0,
-                    scheduler.controller_mut(),
-                )? {
+                match reach_next_hop(&mut prober, target, &mut stats, 0, &mut scheduler)? {
                     ReachOutcome::Resolved => {}
                     ReachOutcome::Silent(_) => {
                         sendable[index] = false;
@@ -334,7 +361,7 @@ where
             first_sequence: 0,
         };
         let discovery_probes = discovery.probes(request)?;
-        scan_sequence = if scheduler.controller().is_some() {
+        scan_sequence = if scheduler.is_adaptive() {
             probe_count(
                 approved.targets.len(),
                 options.probes.len(),
@@ -380,7 +407,7 @@ where
                 target,
                 &mut stats,
                 scan_sequence,
-                scheduler.controller_mut(),
+                &mut scheduler,
             )? {
                 ReachOutcome::Resolved | ReachOutcome::HostExpired => {}
                 ReachOutcome::Silent(source) => {

@@ -615,7 +615,9 @@
         "exact_round_trip": true,
         "matcher": false,
         "decode_only": false,
-        "transports": [],
+        "transports": [
+          "udp"
+        ],
         "stream_decode": false
       },
       {

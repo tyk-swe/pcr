@@ -20,7 +20,7 @@ fn catalog_capabilities_come_from_their_own_facts() {
     assert!(Dns.supports_transport(Tcp));
     assert!(Dns.supports_transport(Udp));
     assert!(Tls.supports_transport(Tcp));
-    assert!(!Mpls.supports_transport(Udp));
+    assert!(Mpls.supports_transport(Udp));
     let registry = super::registry();
     for protocol in BuiltinProtocol::ALL {
         for (parent, ports) in [

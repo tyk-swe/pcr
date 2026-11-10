@@ -12,6 +12,7 @@ use crate::client::admission::approve_operation;
 use crate::clock::Clock;
 use crate::engine::execution::Context;
 use crate::engine::execution::{Executor, publisher};
+use crate::engine::operation::{Workflow as OperationWorkflow, WorkflowSetup};
 use crate::evidence::retention::EvidenceState;
 use crate::exchange::WorkflowExecutor;
 use crate::policy::Authorizer;
@@ -28,6 +29,8 @@ use super::{Event, EventContext, Outcome, Report, Request, batch};
 
 mod attempts;
 mod tcp;
+#[cfg(test)]
+mod tests;
 
 use attempts::Retries;
 
@@ -52,25 +55,20 @@ impl<P: PacketProviders + TargetProviders + TcpProviders, K: Clock> Client<P, K>
     where
         S: Sink<Event, Ack = ()>,
     {
-        let policy = operation.policy(&self.policy);
-        let mut admission =
-            crate::client::admission::Admission::new(&policy, self.providers.resolver());
-        let mut deadline = operation.deadline(self, request.limits.max_duration);
+        let setup = WorkflowSetup::new(self, operation);
+        let mut workflow = setup.start(self, request.limits.max_duration);
         let publish = publisher(&operation.runtime, sink, Error::from, |source| {
             Error::Output { source }
         })?;
         run(
             &request,
-            &mut admission,
-            &operation.registry,
+            &mut workflow,
             &mut WorkflowExecutor::new(
                 self,
                 operation,
                 send_options(&request),
                 request.collection.clone(),
             ),
-            &mut self.clock.clone(),
-            &mut deadline,
             publish,
         )
     }
@@ -118,26 +116,30 @@ impl<P: PacketProviders + TargetProviders + TcpProviders, K: Clock> Client<P, K>
     where
         S: Sink<batch::Event, Ack = ()>,
     {
-        let policy = operation.policy(&self.policy);
-        let mut admission =
-            crate::client::admission::Admission::new(&policy, self.providers.resolver());
-        let mut deadline = operation.deadline(self, request.max_duration()?);
+        let setup = WorkflowSetup::new(self, operation);
+        let mut workflow = setup.start(self, request.max_duration()?);
         let publish = publisher(&operation.runtime, sink, Error::from, |source| {
             Error::Output { source }
         })?;
         let first = &request.questions[0];
+        let OperationWorkflow {
+            authorizer: admission,
+            registry,
+            clock,
+            deadline,
+        } = &mut workflow;
         batch::run(
             &request,
-            &mut admission,
-            &operation.registry,
+            admission,
+            registry,
             &mut WorkflowExecutor::new(
                 self,
                 operation,
                 send_options(first),
                 first.collection.clone(),
             ),
-            &mut self.clock.clone(),
-            &mut deadline,
+            clock,
+            deadline,
             publish,
         )
     }
@@ -152,11 +154,8 @@ fn send_options(request: &Request) -> crate::send::Options {
 
 pub(super) fn run<A, E, C, F>(
     request: &Request,
-    authorizer: &mut A,
-    registry: &Registry,
+    workflow: &mut OperationWorkflow<A, C>,
     executor: &mut E,
-    clock: &mut C,
-    deadline: &mut Deadline,
     emit: F,
 ) -> Result<Report, Error>
 where
@@ -165,6 +164,12 @@ where
     C: Clock,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
+    let OperationWorkflow {
+        authorizer,
+        registry,
+        clock,
+        deadline,
+    } = workflow;
     deadline.check_cancelled()?;
     let mut prepared = PreparedOperation::new(request)?;
     // Approved before server resolution, unlike `admit_operation`'s resolve-first order.

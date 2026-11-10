@@ -46,8 +46,10 @@ impl<P: TargetProviders + TcpProviders, K: Clock> Client<P, K> {
         S: Sink<Event, Ack = ()>,
     {
         let policy = operation.policy(&self.policy);
-        let mut admission =
-            crate::client::admission::Admission::new(&policy, self.providers.resolver());
+        let mut admission = crate::client::admission::Admission::new(
+            std::borrow::Cow::Owned(policy),
+            self.providers.resolver(),
+        );
         let started = self.now();
         let mut deadline = operation.deadline(self, request.limits.max_duration);
         let mut publish =

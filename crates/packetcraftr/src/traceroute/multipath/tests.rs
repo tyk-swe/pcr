@@ -12,7 +12,6 @@ use crate::{
     },
 };
 use packetcraftr_core::{
-    budget::Deadline,
     build::{Builder, BuiltPacket},
     decode::{DecodedPacket, Dissector},
     diagnostic::{Diagnostic, Severity},
@@ -504,23 +503,19 @@ impl engine::Runner for Lab {
     }
 }
 fn simulate(request: &Request, lab: &mut Lab) -> Aggregate {
-    let policy = crate::policy::Policy::default();
-    let resolver = crate::target::SystemResolver;
-    let mut admission = crate::client::admission::Admission::new(&policy, &resolver);
+    let client = crate::Client::new(
+        builtin::registry(),
+        crate::policy::Policy::default(),
+        crate::SystemProviders,
+    );
+    let operation = crate::engine::operation::Operation::new(&client, Duration::from_secs(10));
+    let mut workflow = crate::engine::operation::WorkflowSetup::new(&client, &operation)
+        .start(&client, Duration::from_secs(10));
     let mut collector = Collector::default();
-    let report = engine::run(
-        request,
-        &mut admission,
-        &builtin::registry(),
-        lab,
-        &mut crate::clock::SystemClock,
-        &mut Deadline::new(Duration::from_secs(10)),
-        8,
-        |event, _| {
-            crate::Sink::publish(&mut collector, event)
-                .map_err(|source| crate::traceroute::Error::Output { source })
-        },
-    )
+    let report = engine::run(request, &mut workflow, lab, 8, |event, _| {
+        crate::Sink::publish(&mut collector, event)
+            .map_err(|source| crate::traceroute::Error::Output { source })
+    })
     .unwrap();
     collector.finish(report).unwrap()
 }
@@ -741,19 +736,20 @@ fn authoritative_matching_rejects_stale_tuple_reply() {
 fn cancellation_and_output_failure_stop_batches() {
     for cancel in [false, true] {
         let mut lab = Lab::default();
-        let policy = crate::policy::Policy::default();
-        let resolver = crate::target::SystemResolver;
-        let mut admission = crate::client::admission::Admission::new(&policy, &resolver);
         let cancellation = packetcraftr_core::budget::Cancellation::default();
-        let mut deadline =
-            Deadline::new(Duration::from_secs(10)).with_cancellation(Some(cancellation.clone()));
+        let client = crate::Client::new(
+            builtin::registry(),
+            crate::policy::Policy::default(),
+            crate::SystemProviders,
+        )
+        .with_cancellation(cancellation.clone());
+        let operation = crate::engine::operation::Operation::new(&client, Duration::from_secs(10));
+        let mut workflow = crate::engine::operation::WorkflowSetup::new(&client, &operation)
+            .start(&client, Duration::from_secs(10));
         let result = engine::run(
             &request(Transport::Udp, false),
-            &mut admission,
-            &builtin::registry(),
+            &mut workflow,
             &mut lab,
-            &mut crate::clock::SystemClock,
-            &mut deadline,
             8,
             |event, _| {
                 if matches!(event, Event::Probe(_)) {

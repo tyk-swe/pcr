@@ -19,10 +19,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use packetcraftr_core::budget::Deadline;
-use packetcraftr_core::registry::Registry;
 
 use crate::clock::Clock;
 use crate::engine::execution::publisher;
+use crate::engine::operation::{Workflow, WorkflowSetup};
 use crate::policy::Authorizer;
 use crate::probe::runner::BatchEvidence;
 use crate::providers::{PacketProviders, TargetProviders};
@@ -64,22 +64,18 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
     where
         S: Sink<Event, Ack = ()>,
     {
-        let policy = operation.policy(&self.policy);
-        let mut admission =
-            crate::client::admission::Admission::new(&policy, self.providers.resolver());
+        let setup = WorkflowSetup::new(self, operation);
         let publish = publisher(
             &operation.runtime,
             sink,
             |error| duration_limit(0_u64, error),
             |source| Error::Output { source },
         )?;
+        let mut executor = ClientExecutor::new(self, &request, operation);
         run(
             &request,
-            &mut admission,
-            &operation.registry,
-            &mut ClientExecutor::new(self, &request, operation),
-            &mut self.clock.clone(),
-            &mut operation.deadline(self, request.limits.max_duration),
+            &mut setup.start(self, request.limits.max_duration),
+            &mut executor,
             publish,
         )
     }
@@ -177,11 +173,8 @@ impl Scheduler {
 
 pub(crate) fn run<A, E, C, F>(
     request: &Request,
-    authorizer: &mut A,
-    registry: &std::sync::Arc<Registry>,
+    workflow: &mut Workflow<A, C>,
     executor: &mut E,
-    clock: &mut C,
-    deadline: &mut Deadline,
     mut emit: F,
 ) -> Result<Report, Error>
 where
@@ -190,6 +183,12 @@ where
     C: Clock,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
+    let Workflow {
+        authorizer,
+        registry,
+        clock,
+        deadline,
+    } = workflow;
     enforce_deadline::<Error>(deadline)?;
     let approved = approve(request, authorizer, deadline)?;
     let options = &request.discovery;

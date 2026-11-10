@@ -8,7 +8,10 @@ use std::time::Duration;
 
 use packetcraftr_core::{budget::Deadline, registry::Registry};
 
-use crate::{Client, Stats, clock::Clock, neighbor, policy::Policy, runtime::Runtime};
+use crate::{
+    Client, Stats, client::admission::Admission, clock::Clock, neighbor, policy::Policy,
+    providers::TargetProviders, runtime::Runtime,
+};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum NeighborMode {
@@ -16,6 +19,55 @@ pub(crate) enum NeighborMode {
     Ordinary,
     Authorized,
     Cached,
+}
+
+pub(crate) struct WorkflowSetup<A, C> {
+    authorizer: A,
+    registry: Arc<Registry>,
+    parent: Arc<Deadline>,
+    clock: C,
+}
+
+pub(crate) struct Workflow<A, C> {
+    pub(crate) authorizer: A,
+    pub(crate) registry: Arc<Registry>,
+    pub(crate) clock: C,
+    pub(crate) deadline: Deadline,
+}
+
+impl<'c, C: Clock> WorkflowSetup<Admission<'c>, C> {
+    pub(crate) fn new<P: TargetProviders>(client: &'c Client<P, C>, operation: &Operation) -> Self {
+        let policy = operation.policy(&client.policy);
+        Self::with_authorizer(
+            client,
+            operation,
+            Admission::new(std::borrow::Cow::Owned(policy), client.providers.resolver()),
+        )
+    }
+}
+
+impl<A, C: Clock> WorkflowSetup<A, C> {
+    pub(crate) fn with_authorizer<P>(
+        client: &Client<P, C>,
+        operation: &Operation,
+        authorizer: A,
+    ) -> Self {
+        Self {
+            authorizer,
+            registry: Arc::clone(&operation.registry),
+            parent: Arc::clone(&operation.deadline),
+            clock: client.clock.clone(),
+        }
+    }
+
+    pub(crate) fn start<P>(self, client: &Client<P, C>, limit: Duration) -> Workflow<A, C> {
+        Workflow {
+            authorizer: self.authorizer,
+            registry: self.registry,
+            clock: self.clock,
+            deadline: client.deadline(limit).with_parent(Some(self.parent)),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -112,5 +164,7 @@ impl Operation {
     }
 }
 
+#[cfg(test)]
+pub(crate) mod testing;
 #[cfg(test)]
 mod tests;

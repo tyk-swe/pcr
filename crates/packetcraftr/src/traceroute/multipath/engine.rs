@@ -9,11 +9,11 @@ use crate::error::FromFailure as _;
 use crate::traceroute::{Error, MAX_PROBE_BYTES, ResponseKind, Termination};
 use crate::{
     Client, Sink, Stats,
-    client::admission::{Admission, FamilyGate, admit_operation, wire_limits},
+    client::admission::{FamilyGate, admit_operation, wire_limits},
     clock::Clock,
     engine::{
         execution::{Context, Grant, publisher, rate_delay},
-        operation::Operation,
+        operation::{Operation, Workflow, WorkflowSetup},
     },
     error::Failure,
     evidence::{Limits, RetentionBudget},
@@ -58,8 +58,7 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
         sink: S,
     ) -> Result<Report, Error> {
         let operation = Operation::new(self, request.trace.limits.max_duration);
-        let policy = operation.policy(&self.policy);
-        let mut admission = Admission::new(&policy, self.providers.resolver());
+        let setup = WorkflowSetup::new(self, &operation);
         let emit = publisher(
             &operation.runtime,
             sink,
@@ -67,30 +66,30 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
             |source| Error::Output { source },
         )?;
         let nonce = nonce()?;
+        let mut runner = super::executor::ClientRunner::new(self, &operation, &request.trace);
         run(
             &request,
-            &mut admission,
-            &operation.registry,
-            &mut super::executor::ClientRunner::new(self, &operation, &request.trace),
-            &mut self.clock.clone(),
-            &mut operation.deadline(self, request.trace.limits.max_duration),
+            &mut setup.start(self, request.trace.limits.max_duration),
+            &mut runner,
             nonce,
             emit,
         )
     }
 }
 
-#[expect(clippy::too_many_arguments)]
 pub(super) fn run<A: Authorizer + ResolveTarget, R: Runner, C: Clock>(
     request: &Request,
-    authorizer: &mut A,
-    registry: &Registry,
+    workflow: &mut Workflow<A, C>,
     runner: &mut R,
-    clock: &mut C,
-    deadline: &mut Deadline,
     nonce: u64,
     mut emit: impl FnMut(Event, &Deadline) -> Result<(), Error>,
 ) -> Result<Report, Error> {
+    let Workflow {
+        authorizer,
+        registry,
+        clock,
+        deadline,
+    } = workflow;
     request.validate()?;
     let trace = &request.trace;
     let approved = approve(request, authorizer, deadline)?;

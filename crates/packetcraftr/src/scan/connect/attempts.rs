@@ -72,7 +72,9 @@ where
             Operation::Socket(operation),
             self.deadline,
         )?;
-        let timeout = self.deadline.bounded_timeout(self.request.timeout)?;
+        let timeout = self
+            .deadline
+            .bounded_timeout(self.request.schedule().timeout)?;
         let admitted = self.clock.now();
         let scheduled_at = self.clock.wall_now();
         let pending = match self.budget.start(

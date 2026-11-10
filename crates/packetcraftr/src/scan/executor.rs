@@ -80,12 +80,12 @@ pub(crate) struct NeighborBounds {
 impl NeighborBounds {
     pub(crate) fn of(request: &Request) -> Self {
         Self {
-            resolves: request.route.link_mode != Mode::Layer3,
-            attempt_timeout: request.timeout,
-            max_frames: request.limits.evidence.max_frames,
-            max_bytes: request.limits.evidence.max_bytes,
-            snap_length: request.collection.capture.snap_length,
-            max_neighbors: request.limits.max_targets,
+            resolves: request.route().link_mode != Mode::Layer3,
+            attempt_timeout: request.schedule().timeout,
+            max_frames: request.limits().evidence.max_frames,
+            max_bytes: request.limits().evidence.max_bytes,
+            snap_length: request.collection().capture.snap_length,
+            max_neighbors: request.limits().max_targets,
         }
     }
 
@@ -117,7 +117,8 @@ impl NeighborBounds {
         request: &Request,
         operation: crate::engine::operation::Operation,
     ) -> Result<crate::engine::operation::Operation, crate::neighbor::Error> {
-        let pause = crate::clock::rate_delay(1, request.probes_per_second).unwrap_or_default();
+        let pause =
+            crate::clock::rate_delay(1, request.schedule().probes_per_second).unwrap_or_default();
         let narrowed = Self::of(request).narrow(&operation.neighbors)?;
         Ok(operation
             .with_neighbors(narrowed)
@@ -140,11 +141,11 @@ impl<'c, P: PacketProviders, K: Clock> ClientExecutor<'c, P, K> {
             configured: None,
             send: crate::send::Options {
                 destination: None,
-                plan: request.route.clone(),
+                plan: request.route().clone(),
                 build: packetcraftr_core::build::Options::default(),
                 allow_permissive_live: false,
             },
-            collection: request.collection.clone(),
+            collection: request.collection().clone(),
             neighbors: NeighborBounds::of(request),
             routed: None,
             requested: HashSet::new(),
@@ -591,5 +592,181 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
 
     fn resolves_neighbors(&mut self, resolves: bool) {
         self.neighbors.resolves &= resolves;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::operation::Operation;
+    use crate::scan::{
+        Base, DiscoverySelection, EndpointSelection, IpProtocolSelection, Limits, Schedule,
+        Selection, Targets, Udp,
+    };
+
+    #[test]
+    fn checked_protocol_requests_retain_distinct_reply_history() {
+        let client = crate::engine::preparation::tests::client_for_plan();
+        let operation = Operation::new(&client, Duration::from_secs(2));
+        let probes = crate::scan::Probes::new(
+            vec![crate::scan::DiscoveryProbe::Ip],
+            None,
+            Some(IpProtocolSelection {
+                include: vec![crate::scan::IpProtocolSpec::Single(253)],
+                exclude: Vec::new(),
+            }),
+        )
+        .unwrap();
+        let discovery = DiscoverySelection::Before {
+            probes,
+            unresponsive: Default::default(),
+        };
+        let selection = Selection::new(Some(EndpointSelection::Icmp), discovery)
+            .prepare(
+                crate::scan::catalog::bundled(),
+                crate::scan::DEFAULT_MAX_PORTS,
+                Default::default(),
+                Default::default(),
+                false,
+            )
+            .unwrap();
+        let request = Request::new(
+            Base {
+                selection,
+                targets: Targets {
+                    selection: "192.0.2.1".parse::<crate::target::Target>().unwrap().into(),
+                    sources: Vec::new(),
+                    family: crate::target::Family::Any,
+                },
+                udp: Udp {
+                    payload: bytes::Bytes::new(),
+                    profiles: Default::default(),
+                },
+                schedule: Schedule {
+                    max_in_flight: 1,
+                    attempts: 1,
+                    adaptive: None,
+                    timeout: Duration::from_millis(100),
+                    probes_per_second: None,
+                },
+                limits: Limits::default(),
+            },
+            Default::default(),
+            Default::default(),
+        )
+        .unwrap();
+        let mut executor = ClientExecutor::new(&client, &request, &operation);
+        let probe = |sequence, protocol| Probe {
+            sequence,
+            stage: crate::probe::Stage::Scan,
+            address: "192.0.2.1".parse().unwrap(),
+            scope: None,
+            endpoint: crate::probe::Endpoint::Ip { protocol },
+            tcp_scan: Default::default(),
+            sctp_scan: Default::default(),
+            attempt: 1,
+            udp_payload: Default::default(),
+            udp_profile: None,
+        };
+        let first = probe(1, 1);
+        let second = probe(2, 17);
+        let packet = |probe: &Probe| {
+            let mut packet = probe.packet(client.registry());
+            packet
+                .iter_of_mut::<packetcraftr_core::protocol::network::Ipv4>()
+                .next()
+                .unwrap()
+                .source = "192.0.2.2".parse().unwrap();
+            packet
+        };
+        let first_packet = packet(&first);
+        let second_packet = packet(&second);
+        let mut response = first_packet.clone();
+        let ip = response
+            .iter_of_mut::<packetcraftr_core::protocol::network::Ipv4>()
+            .next()
+            .unwrap();
+        ip.source = "192.0.2.1".parse().unwrap();
+        ip.destination = "192.0.2.2".parse().unwrap();
+        let interface = packetcraftr_netio::interface::Id {
+            index: 1,
+            name: "test0".to_owned(),
+        };
+        executor
+            .reply_history
+            .sent(&first, &first_packet, &interface);
+        executor
+            .reply_history
+            .sent(&second, &second_packet, &interface);
+        assert!(
+            executor
+                .reply_history
+                .ambiguous(&second, &response, &interface)
+        );
+        assert!(
+            !executor
+                .reply_history
+                .ambiguous(&first, &response, &interface)
+        );
+        let tcp = crate::engine::preparation::tests::client_for_plan();
+        let operation = Operation::new(&tcp, Duration::from_secs(2));
+        let selection = Selection::new(
+            Some(EndpointSelection::Ports(
+                crate::scan::PortSelection::new(
+                    vec![crate::scan::PortTransport::Tcp],
+                    vec![crate::scan::Term {
+                        transport: None,
+                        selector: crate::scan::Selector::Ports(crate::scan::PortSpec::Single(80)),
+                    }],
+                    Vec::new(),
+                )
+                .unwrap(),
+            )),
+            DiscoverySelection::Omitted,
+        )
+        .prepare(
+            crate::scan::catalog::bundled(),
+            crate::scan::DEFAULT_MAX_PORTS,
+            Default::default(),
+            Default::default(),
+            false,
+        )
+        .unwrap();
+        let request = Request::new(
+            Base {
+                selection,
+                targets: Targets {
+                    selection: "192.0.2.1".parse::<crate::target::Target>().unwrap().into(),
+                    sources: Vec::new(),
+                    family: crate::target::Family::Any,
+                },
+                udp: Udp {
+                    payload: bytes::Bytes::new(),
+                    profiles: Default::default(),
+                },
+                schedule: Schedule {
+                    max_in_flight: 1,
+                    attempts: 1,
+                    adaptive: None,
+                    timeout: Duration::from_millis(100),
+                    probes_per_second: None,
+                },
+                limits: Limits::default(),
+            },
+            Default::default(),
+            Default::default(),
+        )
+        .unwrap();
+        let executor = ClientExecutor::new(&tcp, &request, &operation);
+        let tcp_probe = Probe {
+            endpoint: crate::probe::Endpoint::Tcp { port: 80 },
+            ..probe(4, 253)
+        };
+        let next_hop_probe = probe(1, 0);
+        assert!(!executor.reply_history.ambiguous(
+            &tcp_probe,
+            &packet(&next_hop_probe),
+            &interface
+        ));
     }
 }

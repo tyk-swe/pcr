@@ -41,13 +41,16 @@ pub(super) fn run(
         reverse_dns,
         reverse_dns_port,
     } = run;
-    let workflow = prepare_workflow(&route, policy.into_policy(), request.timeout, queue_limits)?;
+    let workflow = prepare_workflow(
+        &route,
+        policy.into_policy(),
+        request.schedule().timeout,
+        queue_limits,
+    )?;
     let client = workflow.client(invocation, Runtime::Workflow);
-    let request = packetcraftr::scan::Request {
-        route: workflow.route,
-        collection: workflow.collection,
-        ..request
-    };
+    let request = request
+        .with_workflow(workflow.route, workflow.collection)
+        .map_err(CliError::classified)?;
     // The finalized template is validated again before the scan runs, so a
     // queue configuration the trace stage cannot use fails before any probe.
     if let Some(stage) = &trace_stage {

@@ -100,7 +100,7 @@ pub(super) fn build_batches<'a>(
     targets
         .iter()
         .flat_map(move |target| {
-            (1..=request.attempts).flat_map(move |attempt| {
+            (1..=request.schedule().attempts).flat_map(move |attempt| {
                 endpoints
                     .iter()
                     .map(move |endpoint| (target, attempt, *endpoint))
@@ -110,7 +110,7 @@ pub(super) fn build_batches<'a>(
         .map(move |((target, attempt, endpoint), sequence)| {
             Batch::single(
                 planned_probe(request, sequence, stage, target, endpoint, attempt),
-                request.timeout,
+                request.schedule().timeout,
             )
         })
 }
@@ -127,9 +127,9 @@ pub(super) fn planned_probe(
     // port number must not inherit them.
     let (udp_profile, udp_payload) = match endpoint {
         probe::Endpoint::Udp { port } => {
-            let profile = request.udp_profiles.get(&port);
+            let profile = request.udp_profiles().get(&port);
             let payload = profile.map_or_else(
-                || request.udp_payload.clone(),
+                || request.udp_payload().clone(),
                 |profile| profile.payload(sequence),
             );
             (profile.cloned(), payload)
@@ -143,12 +143,12 @@ pub(super) fn planned_probe(
         | probe::Endpoint::Ip { .. } => (None, bytes::Bytes::new()),
     };
     let tcp_scan = match (stage, endpoint) {
-        (Stage::Scan, probe::Endpoint::Tcp { .. }) => request.tcp_scan,
+        (Stage::Scan, probe::Endpoint::Tcp { .. }) => request.tcp_scan(),
         (Stage::Discovery, probe::Endpoint::TcpAck { .. }) => super::TcpScan::Ack,
         _ => super::TcpScan::default(),
     };
     let sctp_scan = match (stage, endpoint) {
-        (Stage::Scan, probe::Endpoint::Sctp { .. }) => request.sctp_scan,
+        (Stage::Scan, probe::Endpoint::Sctp { .. }) => request.sctp_scan(),
         _ => super::SctpScan::default(),
     };
     Probe {
@@ -168,7 +168,7 @@ pub(super) fn planned_probe(
 fn overflow(request: &Request) -> Error {
     Error::DurationLimit {
         actual: Duration::MAX,
-        limit: request.limits.max_duration,
+        limit: request.limits().max_duration,
     }
 }
 
@@ -177,10 +177,10 @@ pub(super) fn worst_case_duration(
     batch_count: usize,
 ) -> Result<Duration, Error> {
     let batch_count_u32 = u32::try_from(batch_count).map_err(|_| overflow(request))?;
-    let windows = if request.max_in_flight == 1 {
+    let windows = if request.schedule().max_in_flight == 1 {
         batch_count_u32
     } else {
-        batch_count_u32.div_ceil(request.max_in_flight as u32)
+        batch_count_u32.div_ceil(request.schedule().max_in_flight as u32)
     };
     duration_with_windows(request, batch_count_u32, windows)
 }
@@ -197,8 +197,8 @@ pub(super) fn ip_worst_case_duration(
         return Ok(Duration::ZERO);
     }
     let count = u32::try_from(batch_count).map_err(|_| overflow(request))?;
-    let parallel = batch_count.div_ceil(request.max_in_flight.max(1));
-    let extra = reply_identity::overlap_waits(targets, endpoints, request.attempts)
+    let parallel = batch_count.div_ceil(request.schedule().max_in_flight.max(1));
+    let extra = reply_identity::overlap_waits(targets, endpoints, request.schedule().attempts)
         .ok_or_else(|| overflow(request))?;
     let windows = parallel
         .checked_add(extra)
@@ -215,7 +215,7 @@ fn pacing_delay(request: &Request, delay_count: u32) -> Result<Duration, Error> 
     if delay_count == 0 {
         return Ok(Duration::ZERO);
     }
-    rate_delay::<Error>("probes_per_second", 1, request.probes_per_second)?
+    rate_delay::<Error>("probes_per_second", 1, request.schedule().probes_per_second)?
         .checked_mul(delay_count)
         .ok_or_else(|| overflow(request))
 }
@@ -226,6 +226,7 @@ fn duration_with_windows(
     windows: u32,
 ) -> Result<Duration, Error> {
     let exchange_time = request
+        .schedule()
         .timeout
         .checked_mul(windows)
         .ok_or_else(|| overflow(request))?;
@@ -257,10 +258,10 @@ pub(super) fn adaptive_worst_case_duration(
     let delay_count = batch_count_u32.saturating_sub(1);
     let delay = pacing_delay(request, delay_count)?;
     let distinct = batch_count_u32
-        .checked_div(request.attempts.max(1))
+        .checked_div(request.schedule().attempts.max(1))
         .unwrap_or(1);
     let mut retry_gaps = Duration::ZERO;
-    for attempt in 2..=request.attempts.max(1) {
+    for attempt in 2..=request.schedule().attempts.max(1) {
         let gap = adaptive.retry_delay(attempt);
         retry_gaps = retry_gaps
             .checked_add(gap)

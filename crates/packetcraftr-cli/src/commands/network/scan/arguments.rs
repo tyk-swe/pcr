@@ -62,9 +62,9 @@ impl FromStr for PortTerm {
 
     fn from_str(token: &str) -> Result<Self, Self::Err> {
         let (transport, selector) = match token.split_once(':') {
-            Some(("tcp", selector)) => (Some(packetcraftr::probe::Transport::Tcp), selector),
-            Some(("udp", selector)) => (Some(packetcraftr::probe::Transport::Udp), selector),
-            Some(("sctp", selector)) => (Some(packetcraftr::probe::Transport::Sctp), selector),
+            Some(("tcp", selector)) => (Some(packetcraftr::scan::PortTransport::Tcp), selector),
+            Some(("udp", selector)) => (Some(packetcraftr::scan::PortTransport::Udp), selector),
+            Some(("sctp", selector)) => (Some(packetcraftr::scan::PortTransport::Sctp), selector),
             Some((prefix, _)) => {
                 return Err(format!(
                     "invalid port term `{token}`: transport prefix `{prefix}` is not tcp or udp (or sctp)"
@@ -127,10 +127,10 @@ impl FromStr for PortSpec {
                 "invalid port spec `{token}`: range end {end} precedes start {start}"
             ));
         }
-        Ok(Self(packetcraftr::scan::PortSpec::RangeInclusive {
-            start,
-            end,
-        }))
+        let spec = packetcraftr::scan::PortSpec::new(start, end).map_err(|_| {
+            format!("invalid port spec `{token}`: range end {end} precedes start {start}")
+        })?;
+        Ok(Self(spec))
     }
 }
 
@@ -165,10 +165,10 @@ impl FromStr for IpProtocolTerm {
                 "invalid IP protocol spec `{token}`: range end {end} precedes start {start}"
             ));
         }
-        Ok(Self(packetcraftr::scan::IpProtocolSpec::RangeInclusive {
-            start,
-            end,
-        }))
+        let spec = packetcraftr::scan::IpProtocolSpec::new(start, end).map_err(|_| {
+            format!("invalid IP protocol spec `{token}`: range end {end} precedes start {start}")
+        })?;
+        Ok(Self(spec))
     }
 }
 

@@ -85,11 +85,11 @@ impl Stage {
             .into());
         }
         let template = hosts::Request {
-            targets: scan.targets.clone(),
-            max_targets: scan.limits.max_targets,
+            targets: scan.targets().clone(),
+            max_targets: scan.limits().max_targets,
             first_sequence: 0,
             resolved_targets: None,
-            address_family: scan.address_family,
+            address_family: scan.address_family(),
             strategy: trace.strategy,
             observed: Vec::new(),
             source_port: None,
@@ -99,17 +99,17 @@ impl Stage {
             first_hop: trace.first_hop,
             max_hops: trace.max_hops,
             probes_per_hop: trace.attempts,
-            timeout: scan.timeout,
-            probes_per_second: scan.probes_per_second,
+            timeout: scan.schedule().timeout,
+            probes_per_second: scan.schedule().probes_per_second,
             paced_after: None,
             reuse: trace.reuse,
             limits: traceroute::Limits {
                 max_probes: trace.max_probes,
-                max_duration: scan.limits.max_duration,
-                evidence: scan.limits.evidence,
+                max_duration: scan.limits().max_duration,
+                evidence: scan.limits().evidence,
             },
-            route: scan.route.clone(),
-            collection: scan.collection.clone(),
+            route: scan.route().clone(),
+            collection: scan.collection().clone(),
         };
         template.validate()?;
         Ok(Self { template })

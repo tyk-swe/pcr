@@ -51,7 +51,8 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
     where
         S: Sink<Event, Ack = ()>,
     {
-        let operation = crate::engine::operation::Operation::new(self, request.limits.max_duration);
+        let operation =
+            crate::engine::operation::Operation::new(self, request.limits().max_duration);
         self.scan_in(request, sink, &operation)
     }
 
@@ -79,7 +80,7 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
             &operation.registry,
             &mut ClientExecutor::new(self, &request, operation),
             &mut self.clock.clone(),
-            &mut operation.deadline(self, request.limits.max_duration),
+            &mut operation.deadline(self, request.limits().max_duration),
             publish,
         )
     }
@@ -192,16 +193,20 @@ where
 {
     enforce_deadline::<Error>(deadline)?;
     let approved = approve(request, authorizer, deadline)?;
-    let options = &request.discovery;
+    let options = &request.discovery();
     executor.resolves_neighbors(approved.resolves_neighbors);
     enforce_deadline::<Error>(deadline)?;
-    let mut scheduler = match request.adaptive {
+    let mut scheduler = match request.schedule().adaptive {
         Some(config) => {
-            let mut controller = Controller::new(config, request.timeout, request.max_in_flight);
+            let mut controller = Controller::new(
+                config,
+                request.schedule().timeout,
+                request.schedule().max_in_flight,
+            );
             let reservation = adaptive_reservation(
                 request,
                 &approved.targets,
-                options.probes.len().max(approved.endpoints.len()),
+                options.probes().len().max(approved.endpoints.len()),
             );
             let admissions = admit_adaptive(request, executor, deadline, &approved, reservation)?;
             for target in &approved.targets {
@@ -214,14 +219,14 @@ where
             }))
         }
         None => {
-            if request.max_in_flight > 1 || request.has_ip_probes() {
+            if request.schedule().max_in_flight > 1 || request.has_ip_probes() {
                 // Each stage is admitted for every target before any neighbor request
                 // or probe, though discovery may leave the scan fewer.
                 let mut first_sequence = 0;
-                if request.discovery.runs() {
+                if request.discovery().runs() {
                     let discovery = StagePlan {
                         targets: &approved.targets,
-                        endpoints: &request.discovery.probes,
+                        endpoints: request.discovery().probes(),
                         stage: Stage::Discovery,
                         first_sequence,
                     };
@@ -250,8 +255,8 @@ where
     };
     let mut evidence = BatchEvidence::new_with_retention_limits(
         WORKFLOW,
-        request.limits.evidence,
-        request.limits.evidence,
+        request.limits().evidence,
+        request.limits().evidence,
         ProbeClassifier {
             observation_quality: None,
             registry,
@@ -261,14 +266,14 @@ where
             discovery: Vec::new(),
             feedback: scheduler
                 .controller()
-                .map(|_| (Vec::new(), request.max_in_flight)),
-            adaptive_attempts: scheduler.controller().map(|_| request.attempts),
+                .map(|_| (Vec::new(), request.schedule().max_in_flight)),
+            adaptive_attempts: scheduler.controller().map(|_| request.schedule().attempts),
         },
         &mut emit,
     );
     evidence.reserve_responses(
         approved.total_probes,
-        request.collection.capture.snap_length,
+        request.collection().capture.snap_length,
     );
     for duplicate in &approved.duplicates {
         evidence.emit(
@@ -276,7 +281,7 @@ where
             deadline,
         )?;
     }
-    let mut composer = Composer::new(&approved.targets, options.mode, options.unresponsive);
+    let mut composer = Composer::new(&approved.targets, options.mode(), options.unresponsive());
     let mut stats = crate::Stats::default();
     let mut prober = Prober {
         request,
@@ -288,7 +293,7 @@ where
     let mut scan_sequence = 0;
     if options.runs() {
         let mut sendable = vec![true; approved.targets.len()];
-        if options.neighbor {
+        if options.neighbor() {
             sendable = discover_neighbors(
                 &mut prober,
                 &approved.targets,
@@ -297,7 +302,7 @@ where
                 scheduler.controller_mut(),
             )?;
         }
-        if !options.probes.is_empty() {
+        if !options.probes().is_empty() {
             for (index, target) in approved.targets.iter().enumerate() {
                 if !sendable[index] {
                     continue;
@@ -330,7 +335,7 @@ where
             .collect();
         let discovery = StagePlan {
             targets: &probe_targets,
-            endpoints: &options.probes,
+            endpoints: options.probes(),
             stage: Stage::Discovery,
             first_sequence: 0,
         };
@@ -338,8 +343,8 @@ where
         scan_sequence = if scheduler.controller().is_some() {
             probe_count(
                 approved.targets.len(),
-                options.probes.len(),
-                request.attempts,
+                options.probes().len(),
+                request.schedule().attempts,
             )? as u64
         } else {
             discovery_probes
@@ -350,15 +355,15 @@ where
         let scan_probes = probe_count(
             probe_targets.len(),
             approved.endpoints.len(),
-            request.attempts,
+            request.schedule().attempts,
         )?;
         evidence.reserve_responses(
             usize::try_from(discovery_probes)
                 .unwrap_or(usize::MAX)
                 .saturating_add(scan_probes),
-            request.collection.capture.snap_length,
+            request.collection().capture.snap_length,
         );
-        if !probe_targets.is_empty() && !options.probes.is_empty() {
+        if !probe_targets.is_empty() && !options.probes().is_empty() {
             prober.settle(&mut stats)?;
         }
         let discovered = scheduler.execute_stage(&mut prober, &mut evidence, &discovery, &stats)?;
@@ -409,7 +414,7 @@ where
     // probes are the only outstanding ones left.
     evidence.reserve_responses(
         usize::try_from(scan_probes).unwrap_or(usize::MAX),
-        request.collection.capture.snap_length,
+        request.collection().capture.snap_length,
     );
     if !scanned.is_empty() && !approved.endpoints.is_empty() {
         prober.settle(&mut stats)?;

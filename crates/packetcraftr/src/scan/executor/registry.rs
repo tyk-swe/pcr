@@ -12,11 +12,11 @@ use std::sync::Arc;
 
 pub(super) fn bindings(request: &Request) -> Vec<(u16, Id)> {
     request
-        .udp_profiles
+        .udp_profiles()
         .iter()
         .filter(|(port, _)| {
             request
-                .endpoints
+                .endpoints()
                 .contains(&probe::Endpoint::Udp { port: **port })
         })
         .map(|(port, profile)| {

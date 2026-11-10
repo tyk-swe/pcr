@@ -17,14 +17,11 @@ use packetcraftr_core::error::Kind;
 
 use super::arguments::{self, Args};
 use super::inputs::ingest_targets;
-use super::selection::{EndpointRequest, transports};
+use super::selection::{self, Inputs as SelectionInputs};
 use super::{connect, list, raw, traceroute};
 use crate::errors::CliError;
 use crate::input::manifest;
-use request::{
-    DiscoveryInputs, EndpointInputs, LimitInputs, RequestInputs, ScheduleInputs, UdpInputs,
-    build_request,
-};
+use request::{LimitInputs, RequestInputs, ScheduleInputs, UdpInputs, build_request};
 
 pub(super) enum Planned {
     List(list::Request),
@@ -95,7 +92,6 @@ pub(super) fn prepare(
     } else {
         method.into()
     };
-    let transports = transports(&transport)?;
     let tcp_scan = tcp_scan.resolve(tcp_flags)?;
     tcp_scan.validate().map_err(CliError::classified)?;
     let sctp_scan: packetcraftr::scan::SctpScan = sctp_scan.into();
@@ -117,10 +113,27 @@ pub(super) fn prepare(
     ingested.targets.validate().map_err(CliError::classified)?;
     let targets = ingested.targets;
     let origins = ingested.origins;
+    validate_list_options(list, discovery, &reverse_dns, traceroute)?;
+    let selection = selection::prepare(
+        SelectionInputs {
+            transports: transport,
+            ports,
+            exclude_ports,
+            ip_protocols,
+            exclude_ip_protocols,
+            discovery,
+            discovery_probes,
+            discovery_ports,
+            discovery_ip_protocols,
+            unresponsive: unresponsive_hosts,
+            max_ports,
+            tcp_scan,
+            sctp_scan,
+        },
+        list,
+    )?;
 
     if list {
-        validate_list_options(list, discovery, &reverse_dns, traceroute)?;
-
         let diagnostic = !tcp_scan.is_syn();
         if diagnostic && requested == method::Requested::Connect {
             return Err(CliError::new(
@@ -135,52 +148,32 @@ pub(super) fn prepare(
                 "--sctp-scan other than init needs the raw method; drop --connect and --method tcp-connect",
             ));
         }
-        let ip_only = transports == [Transport::Ip];
-        if ip_only && requested == method::Requested::Connect {
+        if selection.endpoints().iter().any(|endpoint| {
+            endpoint.transport() != packetcraftr::probe::Transport::Tcp
+                || endpoint.port() == Some(0)
+        }) && requested == method::Requested::Connect
+        {
             return Err(CliError::new(
                 Kind::Usage,
-                "--transport ip needs the raw method; drop --connect and --method tcp-connect",
+                "TCP connect supports only nonzero TCP endpoints; use the raw method for other probes",
             ));
         }
-        let selected = EndpointRequest {
-            transports,
-            ports,
-            exclude_ports,
-            ip_protocols,
-            exclude_ip_protocols,
-            max_ports,
-        }
-        .select_if_requested()?;
-        let (ports, ip_protocols) = if ip_only {
-            (
-                None,
-                selected
-                    .as_ref()
-                    .map(super::output::plan::IpProtocols::from),
-            )
-        } else {
-            let ports = selected.as_ref().map(|selected| {
-                let ports = super::output::plan::Ports::from(selected);
-                if requested == method::Requested::Connect {
-                    ports
-                } else {
-                    ports.with_tcp_scan(tcp_scan).with_sctp_scan(sctp_scan)
+        let selected = selection.publish_scan().then(|| selection.scan()).flatten();
+        let (ports, ip_protocols) =
+            selected.map_or((None, None), |selected| match selected.kind() {
+                packetcraftr::scan::ScanKind::IpProtocols => {
+                    (None, Some(super::output::plan::IpProtocols::from(selected)))
+                }
+                _ => {
+                    let ports = super::output::plan::Ports::from(selected);
+                    let ports = if requested == method::Requested::Connect {
+                        ports
+                    } else {
+                        ports.with_tcp_scan(tcp_scan).with_sctp_scan(sctp_scan)
+                    };
+                    (Some(ports), None)
                 }
             });
-            (ports, None)
-        };
-        if diagnostic && ports.as_ref().is_none_or(|ports| ports.tcp_scan.is_none()) {
-            return Err(CliError::new(
-                Kind::Usage,
-                "--tcp-scan other than syn requires at least one TCP port endpoint",
-            ));
-        }
-        if sctp_diagnostic && ports.as_ref().is_none_or(|ports| ports.sctp_scan.is_none()) {
-            return Err(CliError::new(
-                Kind::Usage,
-                "--sctp-scan other than init requires at least one SCTP port endpoint",
-            ));
-        }
         return Ok(Planned::List(list::Request {
             selection: targets,
             origins,
@@ -194,22 +187,7 @@ pub(super) fn prepare(
     }
 
     let inputs = RequestInputs {
-        endpoints: EndpointInputs {
-            transports,
-            tcp_scan,
-            sctp_scan,
-            ports,
-            exclude_ports,
-            ip_protocols,
-            exclude_ip_protocols,
-        },
-        discovery: DiscoveryInputs {
-            mode: discovery,
-            probes: discovery_probes,
-            ports: discovery_ports,
-            ip_protocols: discovery_ip_protocols,
-            unresponsive: unresponsive_hosts,
-        },
+        selection,
         udp: UdpInputs {
             payload_hex: udp_payload_hex,
             payload_file: udp_payload_file,
@@ -276,9 +254,9 @@ pub(super) fn prepare(
     let plan = publication_plan(
         selection,
         &built.request,
-        built.excluded_endpoints,
+        built.request.selection_excluded_endpoints(),
         built.curated,
-        built.discovery_excluded,
+        built.request.discovery_excluded(),
         &reverse_dns,
         reverse_dns_port,
     );
@@ -369,22 +347,22 @@ fn publication_plan(
     super::output::plan::Plan {
         tcp_scan: (selected_method == method::Method::Raw
             && request
-                .endpoints
+                .endpoints()
                 .iter()
                 .any(|endpoint| endpoint.transport() == Transport::Tcp))
-        .then(|| super::output::plan::TcpScan::from(request.tcp_scan)),
+        .then(|| super::output::plan::TcpScan::from(request.tcp_scan())),
         sctp_scan: (selected_method == method::Method::Raw
             && request
-                .endpoints
+                .endpoints()
                 .iter()
                 .any(|endpoint| endpoint.transport() == Transport::Sctp))
-        .then(|| super::output::plan::SctpScan::from(request.sctp_scan)),
+        .then(|| super::output::plan::SctpScan::from(request.sctp_scan())),
         method: selection.into(),
         port_catalog: packetcraftr::scan::catalog::data_set().into(),
         excluded_endpoints,
         curated_udp_payloads: curated,
         discovery: super::output::plan::Discovery::new(
-            &request.discovery,
+            request.discovery(),
             discovery_excluded,
             reverse_dns
                 .as_ref()

@@ -30,15 +30,19 @@ pub(super) struct StagePlan<'a> {
 
 impl StagePlan<'_> {
     fn uses_pipeline(&self, request: &Request) -> bool {
-        request.max_in_flight > 1
+        request.schedule().max_in_flight > 1
             || self
                 .endpoints
                 .iter()
                 .any(|endpoint| matches!(endpoint, probe::Endpoint::Ip { .. }))
     }
     pub(super) fn probes(&self, request: &Request) -> Result<u64, Error> {
-        probe_count(self.targets.len(), self.endpoints.len(), request.attempts)
-            .map(|count| count as u64)
+        probe_count(
+            self.targets.len(),
+            self.endpoints.len(),
+            request.schedule().attempts,
+        )
+        .map(|count| count as u64)
     }
 
     pub(super) fn batches<'r>(
@@ -78,7 +82,7 @@ where
     if !plan.uses_pipeline(request) {
         let probes = run_batches(
             plan.batches(request),
-            request.probes_per_second,
+            request.schedule().probes_per_second,
             prober.deadline,
             prober.clock,
             prober.executor,
@@ -144,14 +148,14 @@ pub(super) fn pipeline_options(
 ) -> Result<PipelineOptions, Error> {
     Ok(PipelineOptions {
         control: deadline.clone(),
-        max_in_flight: request.max_in_flight,
-        probes_per_second: request.probes_per_second,
+        max_in_flight: request.schedule().max_in_flight,
+        probes_per_second: request.schedule().probes_per_second,
         max_duration: deadline
             .remaining()
             .map_err(|error| duration_limit(0_u64, error))?,
-        max_prepared_bytes: request.limits.max_prepared_bytes.saturating_sub(reserved),
-        max_evidence_frames: request.limits.evidence.max_frames,
-        max_evidence_bytes: request.limits.evidence.max_bytes,
+        max_prepared_bytes: request.limits().max_prepared_bytes.saturating_sub(reserved),
+        max_evidence_frames: request.limits().evidence.max_frames,
+        max_evidence_bytes: request.limits().evidence.max_bytes,
         preceding,
     })
 }
@@ -160,7 +164,7 @@ pub(super) fn prepared_limit(request: &Request) -> Error {
     Error::PipelineExecution {
         source: crate::scan::executor::limit(
             "prepared descriptions",
-            request.limits.max_prepared_bytes,
+            request.limits().max_prepared_bytes,
         ),
     }
 }
@@ -172,7 +176,9 @@ pub(super) fn check_prepared_descriptions(
     targets: &[SelectedAddress],
     endpoints: &[probe::Endpoint],
 ) -> Result<(), Error> {
-    let probes_per_target = endpoints.len().saturating_mul(request.attempts as usize);
+    let probes_per_target = endpoints
+        .len()
+        .saturating_mul(request.schedule().attempts as usize);
     let batch_bytes = targets.iter().fold(0usize, |bytes, target| {
         bytes.saturating_add(
             (std::mem::size_of::<Batch<Probe>>() + std::mem::size_of::<Probe>())
@@ -180,7 +186,7 @@ pub(super) fn check_prepared_descriptions(
                 .saturating_mul(probes_per_target),
         )
     });
-    if batch_bytes > request.limits.max_prepared_bytes {
+    if batch_bytes > request.limits().max_prepared_bytes {
         return Err(prepared_limit(request));
     }
     Ok(())

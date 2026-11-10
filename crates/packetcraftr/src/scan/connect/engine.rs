@@ -32,7 +32,8 @@ impl<P: TargetProviders + TcpProviders, K: Clock> Client<P, K> {
     where
         S: Sink<Event, Ack = ()>,
     {
-        let operation = crate::engine::operation::Operation::new(self, request.limits.max_duration);
+        let operation =
+            crate::engine::operation::Operation::new(self, request.limits().max_duration);
         self.scan_connect_in(request, sink, &operation)
     }
 
@@ -49,7 +50,7 @@ impl<P: TargetProviders + TcpProviders, K: Clock> Client<P, K> {
         let mut admission =
             crate::client::admission::Admission::new(&policy, self.providers.resolver());
         let started = self.now();
-        let mut deadline = operation.deadline(self, request.limits.max_duration);
+        let mut deadline = operation.deadline(self, request.limits().max_duration);
         let mut publish =
             crate::engine::execution::publisher(&operation.runtime, sink, Error::from, |source| {
                 Error::Output { source }
@@ -89,7 +90,7 @@ where
         deadline,
         std::mem::size_of::<Active<Q::Stream>>(),
     )?;
-    let budget = tcp::ConnectBudget::new(request.max_in_flight);
+    let budget = tcp::ConnectBudget::new(request.schedule().max_in_flight);
     let mut connector = Connector {
         request,
         authorizer,
@@ -98,8 +99,12 @@ where
         clock,
         deadline,
     };
-    let mut controller = request.adaptive.map(|config| {
-        super::super::adaptive::Controller::new(config, request.timeout, request.max_in_flight)
+    let mut controller = request.schedule().adaptive.map(|config| {
+        super::super::adaptive::Controller::new(
+            config,
+            request.schedule().timeout,
+            request.schedule().max_in_flight,
+        )
     });
     let mut progress = Progress {
         stats: Stats::default(),
@@ -110,8 +115,8 @@ where
         retries: 0,
         discovery: Vec::new(),
     };
-    let options = &request.discovery;
-    let mut composer = Composer::new(&targets, options.mode, options.unresponsive);
+    let options = &request.discovery();
+    let mut composer = Composer::new(&targets, options.mode(), options.unresponsive());
     let discovery = StagePlan::new(request, &planned, Stage::Discovery, &targets, 0)?;
     let scan_sequence = discovery.count as u64;
     run_stage(
@@ -163,7 +168,7 @@ where
         None => super::super::adaptive::fixed_scheduling(ceilings, peak, retries),
     };
     Ok(Report {
-        target: request.targets.to_string(),
+        target: request.targets().to_string(),
         resolved_addresses: targets.iter().map(|target| target.address).collect(),
         hosts,
         diagnostics: planned.diagnostics,
@@ -193,7 +198,10 @@ where
     let request = connector.request;
     let clock = connector.clock;
     let mut active: Vec<Active<Q::Stream>> = Vec::new();
-    let effective = request.max_in_flight.min(tcp::MAX_PENDING_CONNECTIONS);
+    let effective = request
+        .schedule()
+        .max_in_flight
+        .min(tcp::MAX_PENDING_CONNECTIONS);
     let mut next = 0usize;
     while next < stage.count || !active.is_empty() {
         enforce_deadline::<Error>(connector.deadline)?;
@@ -266,7 +274,7 @@ where
     let mut work = controller.open_stage(
         stage.targets,
         stage.ports.len(),
-        request.attempts,
+        request.schedule().attempts,
         stage.first_sequence,
         clock.now(),
     );
@@ -308,7 +316,12 @@ where
             .ok_or_else(|| invalid("rate", 0, "pacing deadline overflow"))?;
         let capacity = controller
             .window()
-            .min(request.max_in_flight.min(tcp::MAX_PENDING_CONNECTIONS))
+            .min(
+                request
+                    .schedule()
+                    .max_in_flight
+                    .min(tcp::MAX_PENDING_CONNECTIONS),
+            )
             .saturating_sub(active.len());
         let wave = controller.select(&mut work, now, operation_end, capacity);
         let mut admission_held = false;

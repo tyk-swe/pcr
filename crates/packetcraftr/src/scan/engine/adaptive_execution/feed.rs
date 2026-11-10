@@ -71,7 +71,7 @@ where
         let work = controller.open_stage(
             targets,
             endpoints.len(),
-            request.attempts,
+            request.schedule().attempts,
             first_sequence,
             clock.now(),
         );

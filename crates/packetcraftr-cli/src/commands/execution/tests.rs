@@ -60,31 +60,59 @@ impl packetcraftr_netio::tcp::Provider for Refused {
 }
 
 fn request() -> scan::Request {
-    scan::Request {
-        tcp_scan: Default::default(),
-        sctp_scan: Default::default(),
-        target_sources: Vec::new(),
-        max_in_flight: 1,
-        targets: "192.0.2.11"
-            .parse::<packetcraftr::target::Target>()
-            .unwrap()
-            .into(),
-        udp_payload: Default::default(),
-        udp_profiles: Default::default(),
-        address_family: packetcraftr::target::Family::Any,
-        endpoints: vec![packetcraftr::probe::Endpoint::Tcp { port: 80 }],
-        discovery: Default::default(),
-        attempts: 1,
-        adaptive: None,
-        timeout: Duration::from_secs(2),
-        probes_per_second: None,
-        limits: scan::Limits {
-            max_duration: Duration::from_secs(5),
-            ..Default::default()
+    let selection = scan::Selection::new(
+        Some(scan::EndpointSelection::Ports(
+            scan::PortSelection::new(
+                vec![scan::PortTransport::Tcp],
+                vec![scan::Term {
+                    transport: None,
+                    selector: scan::Selector::Ports(scan::PortSpec::Single(80)),
+                }],
+                Vec::new(),
+            )
+            .unwrap(),
+        )),
+        scan::DiscoverySelection::Omitted,
+    )
+    .prepare(
+        scan::catalog::bundled(),
+        1024,
+        Default::default(),
+        Default::default(),
+        false,
+    )
+    .unwrap();
+    scan::Request::new(
+        scan::Base {
+            selection,
+            targets: scan::Targets {
+                sources: Vec::new(),
+                selection: "192.0.2.11"
+                    .parse::<packetcraftr::target::Target>()
+                    .unwrap()
+                    .into(),
+                family: packetcraftr::target::Family::Any,
+            },
+            udp: scan::Udp {
+                payload: Default::default(),
+                profiles: Default::default(),
+            },
+            schedule: scan::Schedule {
+                max_in_flight: 1,
+                attempts: 1,
+                adaptive: None,
+                timeout: Duration::from_secs(2),
+                probes_per_second: None,
+            },
+            limits: scan::Limits {
+                max_duration: Duration::from_secs(5),
+                ..Default::default()
+            },
         },
-        route: Default::default(),
-        collection: Default::default(),
-    }
+        Default::default(),
+        Default::default(),
+    )
+    .unwrap()
 }
 
 struct Counted<T> {

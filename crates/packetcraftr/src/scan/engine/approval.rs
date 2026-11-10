@@ -53,10 +53,10 @@ pub(super) fn approve<A: Authorizer + ResolveTarget>(
     authorizer: &mut A,
     deadline: &Deadline,
 ) -> Result<Approved, Error> {
-    let endpoints = request.planned_endpoints()?.to_vec();
+    let endpoints = request.endpoints().to_vec();
     // Only the serial path reuses `collection` to retain each exchange's frames.
-    if request.max_in_flight == 1 {
-        check_collection_evidence::<Error>(&request.collection, request.limits.evidence)?;
+    if request.schedule().max_in_flight == 1 {
+        check_collection_evidence::<Error>(request.collection(), request.limits().evidence)?;
     }
     // Implementations must authorize the declared target before DNS and every
     // answer before anything below constructs a probe; `admit_selection` owns
@@ -65,9 +65,9 @@ pub(super) fn approve<A: Authorizer + ResolveTarget>(
         authorizer,
         deadline,
         DeclaredTargets {
-            selection: &request.targets,
-            family: FamilyGate::new(request.address_family, Error::family),
-            max_targets: request.limits.max_targets,
+            selection: request.targets(),
+            family: FamilyGate::new(request.address_family(), Error::family),
+            max_targets: request.limits().max_targets,
             resolved: None,
         },
         Error::TargetSelection,
@@ -80,7 +80,7 @@ pub(super) fn approve<A: Authorizer + ResolveTarget>(
             ))
         },
     )?;
-    if request.route.interface.is_some()
+    if request.route().interface.is_some()
         && selected.targets.iter().any(|target| target.scope.is_some())
     {
         return Err(Error::InvalidLimit {
@@ -89,8 +89,8 @@ pub(super) fn approve<A: Authorizer + ResolveTarget>(
             reason: "scoped targets cannot combine with an explicit --interface".to_owned(),
         });
     }
-    if request.discovery.runs()
-        && request.discovery.probes.iter().any(|probe| {
+    if request.discovery().runs()
+        && request.discovery().probes().iter().any(|probe| {
             matches!(
                 probe,
                 probe::Endpoint::IcmpTimestamp | probe::Endpoint::IcmpNetmask
@@ -130,21 +130,21 @@ pub(super) fn plan(
         value: u64::MAX,
         reason: "probe-count arithmetic overflowed".to_owned(),
     };
-    let discovery = &request.discovery;
+    let discovery = &request.discovery();
     let probes = if discovery.runs() {
-        discovery.probes.as_slice()
+        discovery.probes()
     } else {
         &[]
     };
-    let discovery_probes = probe_count(targets.len(), probes.len(), request.attempts)?;
+    let discovery_probes = probe_count(targets.len(), probes.len(), request.schedule().attempts)?;
     // A multicast or limited-broadcast target's link address follows from its
     // own, so neither discovery nor a stage asks for its neighbor.
     let resolvable: Vec<&SelectedAddress> = targets
         .iter()
         .filter(|target| needs_resolution(target.address))
         .collect();
-    let explicit_requests = if discovery.runs() && discovery.neighbor {
-        probe_count(resolvable.len(), 1, request.attempts)?
+    let explicit_requests = if discovery.runs() && discovery.neighbor() {
+        probe_count(resolvable.len(), 1, request.schedule().attempts)?
     } else {
         0
     };
@@ -152,10 +152,10 @@ pub(super) fn plan(
         // Each attempt is one resolver request bounded like a probe.
         crate::neighbor::Options::default()
             .single_attempt(
-                request.timeout,
-                request.limits.evidence.max_frames,
-                request.limits.evidence.max_bytes,
-                request.collection.capture.snap_length,
+                request.schedule().timeout,
+                request.limits().evidence.max_frames,
+                request.limits().evidence.max_bytes,
+                request.collection().capture.snap_length,
             )
             .validate()
             .map_err(|source| Error::InvalidDiscovery {
@@ -164,7 +164,7 @@ pub(super) fn plan(
                 ),
             })?;
     }
-    let scan_probes = probe_count(targets.len(), endpoints.len(), request.attempts)?;
+    let scan_probes = probe_count(targets.len(), endpoints.len(), request.schedule().attempts)?;
     let total_probes = discovery_probes
         .checked_add(scan_probes)
         .ok_or_else(overflow)?;
@@ -172,7 +172,7 @@ pub(super) fn plan(
     // them: a fresh resolution asks for the target's neighbor, or its
     // gateway's, with at most one request each.
     let resolves_next_hops =
-        total_probes > 0 && request.route.link_mode != Mode::Layer3 && !resolvable.is_empty();
+        total_probes > 0 && request.route().link_mode != Mode::Layer3 && !resolvable.is_empty();
     // Explicit neighbor discovery runs first and covers those requests: an
     // answer stays in the operation's cache, a silent target is sent nothing
     // more, and a routed target, which it sends nothing, needs at most one
@@ -186,17 +186,17 @@ pub(super) fn plan(
         // Those requests capture within the evidence limits and snap length,
         // which must hold a decodable reply just as explicit neighbor
         // discovery requires.
-        let snap_length = request.collection.capture.snap_length;
-        let (field, value) = if snap_length < request.limits.evidence.max_bytes {
+        let snap_length = request.collection().capture.snap_length;
+        let (field, value) = if snap_length < request.limits().evidence.max_bytes {
             ("snap_length", snap_length)
         } else {
-            ("max_evidence_bytes", request.limits.evidence.max_bytes)
+            ("max_evidence_bytes", request.limits().evidence.max_bytes)
         };
         crate::neighbor::Options::default()
             .one_attempt(
-                request.timeout,
-                request.limits.evidence.max_frames,
-                request.limits.evidence.max_bytes,
+                request.schedule().timeout,
+                request.limits().evidence.max_frames,
+                request.limits().evidence.max_bytes,
                 snap_length,
             )
             .validate()
@@ -213,7 +213,7 @@ pub(super) fn plan(
         total_probes
             .checked_add(neighbor_requests)
             .ok_or_else(overflow)?,
-        request.limits.max_probes,
+        request.limits().max_probes,
     )?;
     let neighbor_frames = resolvable.iter().try_fold(0u64, |total, target| {
         total.checked_add(request_wire_bytes(target.address))
@@ -225,7 +225,7 @@ pub(super) fn plan(
             let explicit = if explicit_requests == 0 {
                 Some(0)
             } else {
-                per_target.checked_mul(u64::from(request.attempts))
+                per_target.checked_mul(u64::from(request.schedule().attempts))
             }?;
             explicit.checked_add(if implicit_requests == 0 {
                 0
@@ -240,9 +240,9 @@ pub(super) fn plan(
         .ok_or_else(overflow)?;
     let too_long = || Error::DurationLimit {
         actual: Duration::MAX,
-        limit: request.limits.max_duration,
+        limit: request.limits().max_duration,
     };
-    let pause = rate_delay::<Error>("probes_per_second", 1, request.probes_per_second)?;
+    let pause = rate_delay::<Error>("probes_per_second", 1, request.schedule().probes_per_second)?;
     // Every neighbor request waits its attempt timeout and paces like a probe,
     // except a last request no probe follows; a paced request's wait counts
     // toward its pause, so it holds the next transmission back by the longer.
@@ -256,11 +256,11 @@ pub(super) fn plan(
     };
     let neighbor_duration = u32::try_from(neighbor_requests - neighbor_pauses)
         .ok()
-        .and_then(|unpaced| request.timeout.checked_mul(unpaced))
+        .and_then(|unpaced| request.schedule().timeout.checked_mul(unpaced))
         .and_then(|waits| {
             u32::try_from(neighbor_pauses)
                 .ok()
-                .and_then(|paced| request.timeout.max(pause).checked_mul(paced))
+                .and_then(|paced| request.schedule().timeout.max(pause).checked_mul(paced))
                 .and_then(|paced| paced.checked_add(waits))
         })
         .ok_or_else(too_long)?;
@@ -270,7 +270,7 @@ pub(super) fn plan(
         Duration::ZERO
     };
     let stage_duration = |count, stage_endpoints: &[probe::Endpoint]| {
-        request.adaptive.map_or_else(
+        request.schedule().adaptive.map_or_else(
             || ip_worst_case_duration(request, count, targets, stage_endpoints),
             |adaptive| adaptive_worst_case_duration(request, &adaptive, count),
         )
@@ -284,7 +284,7 @@ pub(super) fn plan(
     .into_iter()
     .try_fold(Duration::ZERO, Duration::checked_add)
     .ok_or_else(too_long)?;
-    check_probe_duration::<Error>(worst_case, request.limits.max_duration)?;
+    check_probe_duration::<Error>(worst_case, request.limits().max_duration)?;
     Ok(Plan {
         total_probes,
         resolves_neighbors: resolves_next_hops || explicit_requests > 0,
@@ -305,7 +305,7 @@ pub(super) fn maximum_wire_bytes(
         value: u64::MAX,
         reason: "scan payload accounting overflowed".to_owned(),
     };
-    let sctp_init_extra = if !scan_stage || request.sctp_scan.is_init() {
+    let sctp_init_extra = if !scan_stage || request.sctp_scan().is_init() {
         12_u64
     } else {
         0_u64
@@ -313,9 +313,9 @@ pub(super) fn maximum_wire_bytes(
     let payload = endpoints.iter().try_fold(0u64, |total, endpoint| {
         let extra = match endpoint {
             probe::Endpoint::Udp { port } => request
-                .udp_profiles
+                .udp_profiles()
                 .get(port)
-                .map_or(request.udp_payload.len(), |profile| {
+                .map_or(request.udp_payload().len(), |profile| {
                     profile.payload_length()
                 }) as u64,
             probe::Endpoint::Sctp { .. } => sctp_init_extra,
@@ -338,7 +338,7 @@ pub(super) fn maximum_wire_bytes(
         let bytes = header
             .checked_mul(endpoints)
             .and_then(|bytes| bytes.checked_add(payload))
-            .and_then(|bytes| bytes.checked_mul(u64::from(request.attempts)))
+            .and_then(|bytes| bytes.checked_mul(u64::from(request.schedule().attempts)))
             .ok_or_else(overflow)?;
         total.checked_add(bytes).ok_or_else(overflow)
     })

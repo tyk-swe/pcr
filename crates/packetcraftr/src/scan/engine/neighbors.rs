@@ -95,10 +95,15 @@ pub(super) fn discover_neighbors<E: Pipelined, C: Clock>(
             if host_expired(&mut controller, host, prober.clock.now()) {
                 break last;
             }
-            let timeout = host.map_or(request.timeout, |h| {
-                controller.as_deref().map_or(request.timeout, |c| {
-                    request.timeout.min(c.host_remaining(h, prober.clock.now()))
-                })
+            let timeout = host.map_or(request.schedule().timeout, |h| {
+                controller
+                    .as_deref()
+                    .map_or(request.schedule().timeout, |c| {
+                        request
+                            .schedule()
+                            .timeout
+                            .min(c.host_remaining(h, prober.clock.now()))
+                    })
             });
             let began = prober.clock.now();
             let resolved = prober
@@ -140,7 +145,7 @@ pub(super) fn discover_neighbors<E: Pipelined, C: Clock>(
                 attempts,
                 ..neighbor
             };
-            if !silent || !sent || attempts >= request.attempts {
+            if !silent || !sent || attempts >= request.schedule().attempts {
                 break Some(neighbor);
             }
             last = Some(neighbor);

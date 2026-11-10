@@ -236,7 +236,7 @@ fn execute_offline(
             };
             invocation.check()?;
             if format == Format::Json {
-                crate::rendering::emit_published(
+                crate::publication::emit_published(
                     invocation,
                     crate::output::contract::Command::Fuzz,
                     crate::output::envelope::Published::<output::Report>::try_from(report)
@@ -291,7 +291,7 @@ fn execute_live(
             };
             invocation.check()?;
             if format == Format::Json {
-                crate::rendering::emit_published(
+                crate::publication::emit_published(
                     invocation,
                     crate::output::contract::Command::Fuzz,
                     crate::output::envelope::Published::<output::Report>::try_from(report)

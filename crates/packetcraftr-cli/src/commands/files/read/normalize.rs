@@ -10,9 +10,9 @@ use packetcraftr_core::error::Classification;
 use packetcraftr_core::error::Kind;
 
 use super::selection::{Selection, account_frame};
+use crate::capture_output::SourceCaptureWriter;
 use crate::command_options::OfflineCaptureLimits;
 use crate::errors::CliError;
-use crate::rendering::SourceCaptureWriter;
 
 pub(super) fn run(
     invocation: &crate::invocation::Invocation,

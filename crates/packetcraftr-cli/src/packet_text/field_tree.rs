@@ -1,7 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::fmt;
 use std::sync::Arc;
 
 use packetcraftr_core::document;
@@ -11,71 +10,11 @@ use packetcraftr_core::layer::FieldSchema;
 use packetcraftr_core::registry::Registry;
 
 use crate::errors::CliError;
-use crate::output;
 
-use super::style::terminal_safe;
-use super::{
-    SpacedHex, push_stdout_line, render_diagnostics_text, render_dns_records, write_stdout_block,
-    write_stdout_line,
-};
+use crate::terminal::{push_stdout_line, terminal_safe, write_stdout_block};
 
 /// Registered decoders nest far less; this is the document nesting ceiling.
 const MAX_TREE_DEPTH: usize = document::MAX_DOCUMENT_NESTING;
-
-pub(crate) fn render_frame(
-    invocation: &crate::invocation::Invocation,
-    source_frame: output::frame::SourceFrame,
-    frame: &output::frame::Captured,
-    decoded: Option<&output::frame::Stack>,
-    tree: Option<&mut FieldTree>,
-    presentation: crate::invocation::Presentation,
-) -> Result<(), CliError> {
-    match decoded {
-        None => write_stdout_line(
-            invocation,
-            format_args!("{source_frame}: {}", frame_summary(frame, presentation)),
-        ),
-        Some(decoded) => {
-            write_stdout_line(
-                invocation,
-                format_args!(
-                    "{source_frame}: dlt={} caplen={} wirelen={} layers={} {}",
-                    frame.link_type,
-                    frame.captured_length,
-                    frame.original_length,
-                    decoded
-                        .packet
-                        .layers
-                        .iter()
-                        .map(|layer| layer.protocol.as_str())
-                        .collect::<Vec<_>>()
-                        .join("/"),
-                    if presentation.verbose {
-                        format!("{}", SpacedHex(frame.bytes()))
-                    } else {
-                        String::new()
-                    }
-                ),
-            )?;
-            match tree {
-                Some(tree) => {
-                    tree.render_layers(invocation, &decoded.packet, |index, protocol| {
-                        format!("{source_frame}: {index}: {protocol}")
-                    })?;
-                }
-                None => {
-                    render_dns_records(invocation, &decoded.packet)?;
-                    presentation.details(invocation, "Decoded fields", &decoded.packet)?;
-                }
-            }
-            if !decoded.diagnostics.is_empty() {
-                write_stdout_line(invocation, format_args!("{source_frame}: diagnostics:"))?;
-                render_diagnostics_text(invocation, &decoded.diagnostics)?;
-            }
-            Ok(())
-        }
-    }
-}
 
 /// Streams each layer's fields as an indented tree while charging every line to a byte budget.
 pub(crate) struct FieldTree {
@@ -113,7 +52,7 @@ impl FieldTree {
         // One write per packet; lines rendered before a failure are still written.
         let mut block = String::new();
         let walked = self.walk(packet, &header, &mut |line| {
-            push_stdout_line(&mut block, format_args!("{line}"));
+            push_stdout_line(&mut block, line);
             Ok(())
         });
         write_stdout_block(invocation, &block)?;
@@ -266,54 +205,5 @@ fn scalar_text(value: &field::Value) -> String {
         field::Value::Object(_) => "{}".to_owned(),
         // `field::Value` is non-exhaustive; a future kind must not print as nothing.
         _ => "<unprintable>".to_owned(),
-    }
-}
-
-pub(crate) fn render_undecoded<'a>(
-    invocation: &crate::invocation::Invocation,
-    rows: impl IntoIterator<Item = (Option<String>, &'a output::frame::Captured)>,
-) -> Result<(), CliError> {
-    for (label, frame) in rows {
-        match label {
-            Some(label) => write_stdout_line(
-                invocation,
-                format_args!("undecoded {label} {}", CapturedFrameText(frame)),
-            )?,
-            None => write_stdout_line(
-                invocation,
-                format_args!("undecoded {}", CapturedFrameText(frame)),
-            )?,
-        }
-    }
-    Ok(())
-}
-
-pub(crate) struct CapturedFrameText<'a>(pub(crate) &'a output::frame::Captured);
-
-impl fmt::Display for CapturedFrameText<'_> {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let frame = self.0;
-        write!(
-            formatter,
-            "dlt={} caplen={} wirelen={} {}",
-            frame.link_type,
-            frame.captured_length,
-            frame.original_length,
-            SpacedHex(frame.bytes())
-        )
-    }
-}
-
-fn frame_summary(
-    frame: &output::frame::Captured,
-    presentation: crate::invocation::Presentation,
-) -> String {
-    if presentation.verbose {
-        CapturedFrameText(frame).to_string()
-    } else {
-        format!(
-            "dlt={} caplen={} wirelen={}",
-            frame.link_type, frame.captured_length, frame.original_length
-        )
     }
 }

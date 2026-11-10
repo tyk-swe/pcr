@@ -21,9 +21,10 @@ use crate::filtering::{self, Capabilities};
 use crate::input::{
     InputKind, hex_text_limit, missing_input_error, read_bounded_file, read_stdin_bounded,
 };
-use crate::rendering::{
-    FieldTree, emit_published, emit_stderr_message, render_diagnostics_text, render_dns_records,
-    write_hex_line, write_raw, write_stdout_line, write_summary_line,
+use crate::packet_text::{FieldTree, render_fields};
+use crate::publication::{emit_published, write_hex_line, write_raw};
+use crate::terminal::{
+    emit_stderr_message, render_diagnostics_text, write_stdout_line, write_summary_line,
 };
 
 use crate::output::contract::PublishedType;
@@ -87,9 +88,9 @@ pub(super) fn run(
     arguments.tree.validate_format(format)?;
     let registry = arguments.decode.registry()?;
     if arguments.fields.is_empty() && matches!(format, Format::Ndjson) {
-        return Err(crate::rendering::missing_fields_error());
+        return Err(crate::field_projection::missing_fields_error());
     }
-    let projector = crate::rendering::Projector::prepare(
+    let projector = crate::field_projection::Projector::prepare(
         &arguments.fields,
         arguments.max_projection_bytes,
         &registry,
@@ -208,8 +209,7 @@ fn render_text(
             for (index, layer) in decoded.packet.iter().enumerate() {
                 write_stdout_line(invocation, format_args!("{index}: {}", layer.protocol_id()))?;
             }
-            render_dns_records(invocation, &packet)?;
-            presentation.details(invocation, "Decoded fields", &packet)?;
+            render_fields(invocation, &packet, presentation)?;
         }
     }
     render_diagnostics_text(invocation, &decoded.diagnostics)

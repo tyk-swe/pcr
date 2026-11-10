@@ -7,7 +7,8 @@ use crate::{
     errors::CliError,
     invocation::{Invocation, StreamEncoder},
     output::{contract::Format, envelope::Published, hex::compact_hex},
-    rendering::{bounded_json_len, write_stdout_line},
+    publication::bounded_json_len,
+    terminal::write_stdout_line,
 };
 use packetcraftr_core::{analysis::quic, error::Kind};
 

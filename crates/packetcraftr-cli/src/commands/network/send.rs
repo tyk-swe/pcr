@@ -10,12 +10,11 @@ use packetcraftr_core as core;
 use packetcraftr_core::capture_file as capture;
 
 use self::arguments::Args;
+use crate::capture_output::write_capture_file;
 use crate::errors::CliError;
-use crate::rendering::{
-    emit_published, render_diagnostics_text, write_capture_file, write_hex_line, write_raw,
-    write_summary_line,
-};
+use crate::publication::{emit_published, write_hex_line, write_raw};
 use crate::system::{LiveDraft, Prepared, prepare_live};
+use crate::terminal::{render_diagnostics_text, write_summary_line};
 
 fn prepare(
     invocation: &crate::invocation::Invocation,
@@ -111,9 +110,9 @@ fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<()
                             if let Some(neighbor) = &route.neighbor_resolution
                                 && neighbor.evidence_truncated
                             {
-                                crate::rendering::write_stdout_line(
+                                crate::terminal::write_warning(
                                     invocation,
-                                    format_args!("warning: neighbor evidence truncated"),
+                                    format_args!("neighbor evidence truncated"),
                                 )?;
                             }
                             if presentation.verbose {
@@ -121,16 +120,17 @@ fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<()
                                     route.clone(),
                                 )
                                 .map_err(CliError::classified)?;
-                                presentation.details(
+                                crate::terminal::write_details(
                                     invocation,
+                                    presentation,
                                     "Route and neighbor evidence",
                                     &route,
                                 )?;
-                                crate::rendering::write_stdout_line(
+                                crate::terminal::write_stdout_line(
                                     invocation,
                                     format_args!(
                                         "bytes: {}",
-                                        crate::rendering::SpacedHex(frame.packet.wire_bytes())
+                                        crate::output::hex::SpacedHex(frame.packet.wire_bytes())
                                     ),
                                 )?;
                             }

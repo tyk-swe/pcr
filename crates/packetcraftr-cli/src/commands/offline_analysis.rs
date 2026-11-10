@@ -25,7 +25,7 @@ use crate::command_options::{DecodeArgs, OfflineLimitsArgs, Selector};
 use crate::errors::CliError;
 use crate::filtering::{self, Capabilities};
 use crate::output::contract::{Command, Format};
-use crate::rendering::emit_published;
+use crate::publication::emit_published;
 
 pub(super) struct AnalysisSetup {
     pub(super) capture_limits: crate::command_options::OfflineCaptureLimits,

@@ -55,7 +55,7 @@ fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<()
         .map_err(CliError::classified)?;
     match invocation.format {
         Format::Text => rendering::render_report_text(invocation, &published.result),
-        Format::Json => crate::rendering::emit_published(
+        Format::Json => crate::publication::emit_published(
             invocation,
             output::contract::Command::DifferentialJoin,
             published,

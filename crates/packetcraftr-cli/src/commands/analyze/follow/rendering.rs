@@ -10,10 +10,11 @@ use packetcraftr_core::analysis;
 
 use crate::output;
 
+use crate::commands::retained::{Retained, omitted_diagnostic};
 use crate::errors::CliError;
 use crate::invocation::StreamEncoder;
-use crate::rendering::{Retained, omitted_diagnostic};
-use crate::rendering::{emit_published, emit_stderr_message, write_raw, write_stdout_line};
+use crate::publication::{emit_published, write_raw};
+use crate::terminal::{emit_stderr_message, write_stdout_line};
 
 use analysis::StreamRef;
 use analysis::follow::{Chunk, Summary};
@@ -179,8 +180,8 @@ pub(super) fn render_payload_warning(summary: &Summary) -> Result<(), CliError> 
     if summary.undelivered_bytes == 0 {
         return Ok(());
     }
-    emit_stderr_message(&format!(
-        "warning: {} byte(s) were captured but stranded behind missing segments and are not part of this output",
+    crate::terminal::emit_stderr_warning(&format!(
+        "{} byte(s) were captured but stranded behind missing segments and are not part of this output",
         summary.undelivered_bytes
     ))
 }

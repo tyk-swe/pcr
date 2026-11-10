@@ -12,12 +12,11 @@ use packetcraftr_core::protocol::BuiltinProtocol;
 
 use crate::output;
 
+use crate::commands::retained::Retained;
 use crate::errors::CliError;
 use crate::invocation::StreamEncoder;
-use crate::rendering::Retained;
-use crate::rendering::{
-    comma_separated, duration_text, emit_published, render_optional, write_stdout_line,
-};
+use crate::publication::emit_published;
+use crate::terminal::{comma_separated, duration_text, render_optional, write_stdout_line};
 
 use super::output::{Client, Server, Session, Summary};
 use analysis::tls::{ALERT_LEVEL_FATAL, ALERT_LEVEL_WARNING};

@@ -191,7 +191,7 @@ fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<()
                 output::envelope::Published::<super::output::ResponderReport>::from(aggregate);
             rendering::render_responder_text(invocation, &published.result)
         }
-        Format::Json => crate::rendering::emit_published(
+        Format::Json => crate::publication::emit_published(
             invocation,
             output::contract::Command::DifferentialResponder,
             output::envelope::Published::<super::output::ResponderReport>::from(aggregate),

@@ -6,7 +6,7 @@ pub(in crate::commands) mod output;
 use packetcraftr_netio as net;
 
 use crate::errors::CliError;
-use crate::rendering::render_optional;
+use crate::terminal::render_optional;
 
 pub(crate) const AFTER_LONG_HELP: &str = r"Examples:
   packetcraftr network routes
@@ -58,7 +58,7 @@ pub(super) fn run(
         |interfaces| crate::system::interface_routes(invocation, interfaces),
     )?;
     let result = output::Report::from(routes);
-    crate::rendering::render_aggregate_rows(
+    crate::commands::aggregate::render_aggregate_rows(
         invocation,
         crate::output::contract::Command::Routes,
         format,

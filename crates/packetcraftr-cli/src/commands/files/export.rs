@@ -6,7 +6,7 @@ pub(in crate::commands) mod output;
 
 use self::arguments::Args;
 use crate::output::contract::Command;
-use crate::{errors::CliError, rendering::write_summary_line};
+use crate::{errors::CliError, terminal::write_summary_line};
 use packetcraftr_core::{analysis, capture_file};
 
 use crate::output::contract::PublishedType;
@@ -118,7 +118,7 @@ pub(crate) fn run(invocation: &crate::invocation::Invocation, args: Args) -> Res
         |report| report,
         |invocation, report| {
             for selected in &report.matched_streams {
-                crate::rendering::write_stdout_line(
+                crate::terminal::write_stdout_line(
                     invocation,
                     format_args!(
                         "exported stream: {}:{}",
@@ -128,7 +128,7 @@ pub(crate) fn run(invocation: &crate::invocation::Invocation, args: Args) -> Res
                 )?;
             }
             for missing in &report.unmatched_streams {
-                crate::rendering::write_stdout_line(
+                crate::terminal::write_stdout_line(
                     invocation,
                     format_args!(
                         "warning: unmatched stream {}:{}",
@@ -138,27 +138,29 @@ pub(crate) fn run(invocation: &crate::invocation::Invocation, args: Args) -> Res
                 )?;
             }
             for missing in &report.unmatched_datagram_frames {
-                crate::rendering::write_stdout_line(
+                crate::terminal::write_warning(
                     invocation,
-                    format_args!("warning: unmatched datagram frame {missing}"),
+                    format_args!("unmatched datagram frame {missing}"),
                 )?;
             }
             for incomplete in &report.selected_incomplete_datagrams {
-                crate::rendering::write_stdout_line(
+                crate::terminal::write_warning(
                     invocation,
-                    format_args!("warning: incomplete datagram {:?}", incomplete.key),
+                    format_args!("incomplete datagram {:?}", incomplete.key),
                 )?;
             }
             if report.source_outcomes_omitted > 0 {
-                crate::rendering::write_stdout_line(
+                crate::terminal::write_stdout_line(
                     invocation,
                     format_args!("{} source outcomes omitted", report.source_outcomes_omitted),
                 )?;
             }
-            invocation
-                .output
-                .presentation()
-                .details(invocation, "Export sources", report)?;
+            crate::terminal::write_details(
+                invocation,
+                invocation.output.presentation(),
+                "Export sources",
+                report,
+            )?;
             write_summary_line(
                 invocation,
                 format_args!(

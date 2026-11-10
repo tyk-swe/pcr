@@ -19,9 +19,11 @@ use packetcraftr_core::error::Classified as _;
 use packetcraftr_core::error::Kind;
 
 use self::arguments::Args;
+use crate::capture_output::stream_capture_error;
+use crate::capture_output::stream_limits;
 use crate::errors::CliError;
 use crate::input::{apply_overrides, read_recipe};
-use crate::rendering::{render_diagnostics_stderr, stream_capture_error, stream_limits};
+use crate::terminal::render_diagnostics_stderr;
 
 use crate::output::contract::PublishedType;
 

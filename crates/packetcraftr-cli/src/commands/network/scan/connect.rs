@@ -74,14 +74,14 @@ pub(super) fn run(
             let report = super::output::connect::Report::publish(aggregate, plan, names, lookups)
                 .map_err(CliError::classified)?;
             if format == Format::Json {
-                crate::rendering::emit_published(
+                crate::publication::emit_published(
                     invocation,
                     output::contract::Command::Scan,
                     output::envelope::Published::new(report, diagnostics),
                 )
             } else {
                 super::rendering::render_connect_text(invocation, &report, stream.presentation())?;
-                crate::rendering::render_diagnostics_text(invocation, &diagnostics)
+                crate::terminal::render_diagnostics_text(invocation, &diagnostics)
             }
         }
     }

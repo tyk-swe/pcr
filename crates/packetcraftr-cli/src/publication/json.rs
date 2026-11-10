@@ -5,68 +5,13 @@ use packetcraftr_core::error::Kind;
 
 use std::io::{self, Write};
 
-use super::stdout::stdout_error;
 use crate::output;
 use serde::Serialize;
 
 use crate::errors::CliError;
 
-#[derive(Debug)]
-pub(crate) enum BoundedJsonError {
-    Limit,
-    Serialize(serde_json::Error),
-}
-
-impl BoundedJsonError {
-    pub(crate) fn into_cli_error(self, limit: impl FnOnce() -> CliError) -> CliError {
-        match self {
-            Self::Limit => limit(),
-            Self::Serialize(source) => serialization_error(source),
-        }
-    }
-}
-
 pub(crate) fn serialization_error(source: serde_json::Error) -> CliError {
     CliError::wrapping(Kind::Internal, "serialize output failed", &source)
-}
-
-pub(crate) fn bounded_json_len(
-    value: &impl Serialize,
-    limit: usize,
-    formatter: impl serde_json::ser::Formatter,
-) -> Result<usize, BoundedJsonError> {
-    struct Counter {
-        remaining: usize,
-        exceeded: bool,
-    }
-
-    impl Write for Counter {
-        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-            if bytes.len() > self.remaining {
-                self.exceeded = true;
-                return Err(io::Error::other("JSON output limit"));
-            }
-            self.remaining -= bytes.len();
-            Ok(bytes.len())
-        }
-
-        fn flush(&mut self) -> io::Result<()> {
-            Ok(())
-        }
-    }
-
-    let mut counter = Counter {
-        remaining: limit,
-        exceeded: false,
-    };
-    match value.serialize(&mut serde_json::Serializer::with_formatter(
-        &mut counter,
-        formatter,
-    )) {
-        Ok(()) => Ok(limit - counter.remaining),
-        Err(_) if counter.exceeded => Err(BoundedJsonError::Limit),
-        Err(source) => Err(BoundedJsonError::Serialize(source)),
-    }
 }
 
 pub(crate) fn emit_json(
@@ -96,12 +41,12 @@ fn write_json(writer: &mut impl Write, value: &impl Serialize) -> Result<(), Cli
     writer
         .write_all(b"\n")
         .and_then(|()| writer.flush())
-        .map_err(|source| stdout_error("write stdout failed", source))
+        .map_err(|source| CliError::stdout("write stdout failed", &source))
 }
 
 fn json_error(source: serde_json::Error) -> CliError {
     if source.is_io() {
-        stdout_error("write stdout failed", io::Error::from(source))
+        CliError::stdout("write stdout failed", &io::Error::from(source))
     } else {
         serialization_error(source)
     }

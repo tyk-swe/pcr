@@ -8,10 +8,11 @@ use packetcraftr_core::analysis;
 
 use crate::output;
 
+use crate::commands::retained::{Retained, omitted_diagnostic};
 use crate::errors::CliError;
 use crate::invocation::StreamEncoder;
-use crate::rendering::{Retained, omitted_diagnostic};
-use crate::rendering::{emit_published, write_stdout_line};
+use crate::publication::emit_published;
+use crate::terminal::write_stdout_line;
 
 pub(super) struct State {
     selected: analysis::expert::Summary,

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::errors::CliError;
-use crate::rendering::write_stdout_line;
+use crate::terminal::write_stdout_line;
 
 pub(super) fn protocol_line(protocol: &super::output::Summary) -> String {
     format!(

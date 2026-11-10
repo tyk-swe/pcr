@@ -4,9 +4,9 @@
 //! Text rendering for a scan’s traceroute follow-up.
 
 use crate::errors::CliError;
-use crate::rendering::{
-    comma_separated, duration_text, render_optional, render_undecoded, write_stdout_line,
-    write_summary_line,
+use crate::packet_text::render_undecoded;
+use crate::terminal::{
+    comma_separated, duration_text, render_optional, write_stdout_line, write_summary_line,
 };
 
 /// The trace stage: one line per host, then its hops in hop order. A reused

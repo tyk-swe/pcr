@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::errors::CliError;
-use crate::rendering::{SpacedHex, duration_text, write_summary_line};
+use crate::output::hex::SpacedHex;
+use crate::terminal::{duration_text, write_summary_line};
 
 pub(super) fn frame_line(
     frame: &super::output::Frame,

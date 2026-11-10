@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 
 use packetcraftr_core::capture_file::{
@@ -9,8 +10,7 @@ use packetcraftr_core::capture_file::{
 use packetcraftr_core::error::{Classification, Kind};
 use packetcraftr_core::frame::Frame;
 
-use super::LinkCaptureWriter;
-use super::stdout::stdout_error;
+use super::writer::LinkCaptureWriter;
 use crate::errors::CliError;
 use crate::output::envelope::source_causes;
 
@@ -21,21 +21,19 @@ pub(crate) fn write_capture_file(
     frames: impl IntoIterator<Item = Frame>,
     compression: crate::command_options::Compression,
 ) -> Result<(), CliError> {
-    let stdout = write_capture_file_with(format, frames, tempfile::tempfile, || {
-        compression.writer(io::stdout().lock())
-    })?;
+    let mut spool = spool_capture(format, frames)?;
+    let mut stdout = compression.writer(io::stdout().lock())?;
+    copy_to_stdout(&mut spool, &mut stdout)?;
     drop(stdout.finish().map_err(CliError::classified)?);
     Ok(())
 }
 
-/// Encodes every frame into a spool and opens the destination only once the
-/// whole capture has encoded, so a failure leaves the destination untouched.
-fn write_capture_file_with<S: Read + Write + Seek, D: Write>(
+/// Encodes every frame into a rewound temporary file, so stdout is opened only
+/// once the whole capture has encoded and a failure leaves it untouched.
+fn spool_capture(
     format: Format,
     frames: impl IntoIterator<Item = Frame>,
-    create_spool: impl FnOnce() -> io::Result<S>,
-    open_destination: impl FnOnce() -> Result<D, CliError>,
-) -> Result<D, CliError> {
+) -> Result<File, CliError> {
     let frames = frames.into_iter().collect::<Vec<_>>();
     let Some(first) = frames.first() else {
         return Err(CliError::new(
@@ -50,8 +48,8 @@ fn write_capture_file_with<S: Read + Write + Seek, D: Write>(
             total.saturating_add(u64::from(frame.captured_length()))
         }),
     );
-    let spool = create_spool()
-        .map_err(|source| capture_io_error("create temporary capture output failed", source))?;
+    let spool = tempfile::tempfile()
+        .map_err(|source| spool_io_error("create temporary capture output failed", source))?;
     let writer = match format {
         Format::Pcap => Writer::pcap_with_options(
             spool,
@@ -69,20 +67,22 @@ fn write_capture_file_with<S: Read + Write + Seek, D: Write>(
             },
         ),
     }
-    .map_err(initialize_error)?;
+    .map_err(spool_error("initialize temporary capture output failed"))?;
     let mut output = LinkCaptureWriter::new(writer);
     for frame in frames {
-        output.write_link_mapped(frame).map_err(write_error)?;
+        output
+            .write_link_mapped(frame)
+            .map_err(spool_error("write temporary capture output failed"))?;
     }
-    output.flush().map_err(write_error)?;
+    output
+        .flush()
+        .map_err(spool_error("write temporary capture output failed"))?;
 
     let mut spool = output.into_inner();
     spool
         .seek(SeekFrom::Start(0))
-        .map_err(|source| capture_io_error("rewind temporary capture output failed", source))?;
-    let mut destination = open_destination()?;
-    copy_spool(&mut spool, &mut destination)?;
-    Ok(destination)
+        .map_err(|source| spool_io_error("rewind temporary capture output failed", source))?;
+    Ok(spool)
 }
 
 /// Stream limits for a capture whose frame set the caller's own budgets have
@@ -95,43 +95,32 @@ pub(crate) fn stream_limits(max_frames: u64, max_bytes: u64) -> Limits {
     }
 }
 
-fn copy_spool(spool: &mut dyn Read, destination: &mut dyn Write) -> Result<(), CliError> {
+fn copy_to_stdout(spool: &mut File, stdout: &mut impl Write) -> Result<(), CliError> {
     let mut buffer = [0_u8; COPY_BUFFER_BYTES];
     loop {
         let read = spool
             .read(&mut buffer)
-            .map_err(|source| capture_io_error("read temporary capture output failed", source))?;
+            .map_err(|source| spool_io_error("read temporary capture output failed", source))?;
         if read == 0 {
             break;
         }
-        destination
+        stdout
             .write_all(&buffer[..read])
-            .map_err(|source| stdout_error("write stdout failed", source))?;
+            .map_err(|source| CliError::stdout("write stdout failed", &source))?;
     }
-    destination
+    stdout
         .flush()
-        .map_err(|source| stdout_error("flush stdout failed", source))
+        .map_err(|source| CliError::stdout("flush stdout failed", &source))
 }
 
-fn initialize_error(source: CaptureError) -> CliError {
-    match source {
-        CaptureError::Io(source) => {
-            capture_io_error("initialize temporary capture output failed", source)
-        }
+fn spool_error(operation: &'static str) -> impl Fn(CaptureError) -> CliError {
+    move |source| match source {
+        CaptureError::Io(source) => spool_io_error(operation, source),
         source => CliError::classified(source),
     }
 }
 
-fn write_error(source: CaptureError) -> CliError {
-    match source {
-        CaptureError::Io(source) => {
-            capture_io_error("write temporary capture output failed", source)
-        }
-        source => CliError::classified(source),
-    }
-}
-
-fn capture_io_error(operation: &str, source: io::Error) -> CliError {
+fn spool_io_error(operation: &str, source: io::Error) -> CliError {
     CliError::from_classification(
         Classification::new(
             packetcraftr_core::error::Code::IoCaptureFile,
@@ -145,7 +134,7 @@ fn capture_io_error(operation: &str, source: io::Error) -> CliError {
 
 pub(crate) fn stream_capture_error(operation: &str, source: CaptureError) -> CliError {
     match source {
-        CaptureError::Io(source) => stdout_error(operation, source),
+        CaptureError::Io(source) => CliError::stdout(operation, &source),
         source => CliError::classified(source),
     }
 }

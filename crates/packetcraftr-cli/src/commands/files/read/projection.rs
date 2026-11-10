@@ -5,8 +5,8 @@ use packetcraftr_core as core;
 
 use super::arguments::Args;
 use crate::errors::CliError;
+use crate::field_projection::Projector;
 use crate::output::contract::Command;
-use crate::rendering::Projector;
 
 pub(super) fn run(invocation: &crate::invocation::Invocation, args: Args) -> Result<(), CliError> {
     let format = invocation.format;

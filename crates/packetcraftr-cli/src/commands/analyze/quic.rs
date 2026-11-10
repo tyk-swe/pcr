@@ -6,7 +6,8 @@ mod rendering;
 mod write;
 
 use crate::command_options::{AnalysisStages, Bounded as _};
-use crate::rendering::{emit_published, write_stdout_line};
+use crate::publication::emit_published;
+use crate::terminal::write_stdout_line;
 use crate::{
     commands,
     errors::CliError,

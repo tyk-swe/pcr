@@ -17,6 +17,7 @@ pub(crate) use dispatch::Launch;
 pub use registry::Command;
 pub(crate) use registry::CommandLine;
 
+mod aggregate;
 mod analyze;
 mod dispatch;
 pub(crate) mod execution;
@@ -26,6 +27,7 @@ mod offline_analysis;
 mod packet;
 mod reference;
 pub(crate) mod registry;
+mod retained;
 mod security;
 
 pub(crate) trait Spec: Sized {

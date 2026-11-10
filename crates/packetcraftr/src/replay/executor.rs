@@ -20,24 +20,6 @@ use crate::route::{Interface, Materialized as MaterializedRoute};
 
 use super::evidence::network_envelope;
 
-pub(crate) trait Executor {
-    /// Resolve and validate the concrete interface, then passively select and
-    /// materialize the final route, before any intentional delay.
-    fn plan_frame(
-        &mut self,
-        interface: &Interface,
-        mode: LinkMode,
-        frame: &Frame,
-        deadline: &Deadline,
-    ) -> Result<MaterializedRoute, LiveIoError>;
-
-    fn transmit(
-        &mut self,
-        route: &MaterializedRoute,
-        frame: &Frame,
-    ) -> Result<IoSendReport, LiveIoError>;
-}
-
 pub(super) fn map_route_error<E: Classified + Send + Sync + 'static>(source: E) -> LiveIoError {
     let classification = source.classification();
     let source = packetcraftr_core::error::Source::new(source);
@@ -185,8 +167,10 @@ fn interface_owned_packet_source(
     .then_some(source)
 }
 
-impl<P: PacketProviders> Executor for ProviderExecutor<'_, P> {
-    fn plan_frame(
+impl<P: PacketProviders> ProviderExecutor<'_, P> {
+    /// Resolve and validate the concrete interface, then passively select and
+    /// materialize the final route, before any intentional delay.
+    pub(super) fn plan_frame(
         &mut self,
         requested: &Interface,
         mode: LinkMode,
@@ -254,7 +238,7 @@ impl<P: PacketProviders> Executor for ProviderExecutor<'_, P> {
         )
     }
 
-    fn transmit(
+    pub(super) fn transmit(
         &mut self,
         route: &MaterializedRoute,
         frame: &Frame,

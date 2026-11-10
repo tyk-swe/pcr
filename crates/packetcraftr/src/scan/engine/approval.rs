@@ -18,6 +18,7 @@ use crate::neighbor::{needs_resolution, request_wire_bytes};
 use crate::probe;
 use crate::scan::Error;
 use crate::scan::Request;
+use crate::scan::executor::neighbor_bounds;
 use crate::scan::plan::{adaptive_worst_case_duration, ip_worst_case_duration, probe_count};
 use crate::scan::{IPV4_PROBE_BYTES, IPV6_PROBE_BYTES};
 
@@ -148,15 +149,11 @@ pub(super) fn plan(
     } else {
         0
     };
+    let bounds = neighbor_bounds(request);
     if explicit_requests > 0 {
         // Each attempt is one resolver request bounded like a probe.
         crate::neighbor::Options::default()
-            .single_attempt(
-                request.timeout,
-                request.limits.evidence.max_frames,
-                request.limits.evidence.max_bytes,
-                request.collection.capture.snap_length,
-            )
+            .single_attempt(bounds)
             .validate()
             .map_err(|source| Error::InvalidDiscovery {
                 message: format!(
@@ -193,12 +190,7 @@ pub(super) fn plan(
             ("max_evidence_bytes", request.limits.evidence.max_bytes)
         };
         crate::neighbor::Options::default()
-            .one_attempt(
-                request.timeout,
-                request.limits.evidence.max_frames,
-                request.limits.evidence.max_bytes,
-                snap_length,
-            )
+            .one_attempt(bounds)
             .validate()
             .map_err(|source| Error::InvalidLimit {
                 field,

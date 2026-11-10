@@ -69,10 +69,12 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
             let narrowed = operation
                 .neighbors
                 .one_attempt(
-                    request.timeout,
-                    request.limits.evidence.max_frames,
-                    request.limits.evidence.max_bytes,
-                    request.collection.capture.snap_length,
+                    crate::neighbor::Bounds {
+                        attempt_timeout: request.timeout,
+                        max_frames: request.limits.evidence.max_frames,
+                        max_bytes: request.limits.evidence.max_bytes,
+                        snap_length: request.collection.capture.snap_length,
+                    },
                     request.limits.max_probes,
                 )
                 .map_err(|source| Error::Collection(BoundaryError::from_error(source)))?;

@@ -23,6 +23,7 @@ use packetcraftr_core::registry::Registry;
 use crate::clock::Clock;
 use crate::engine::execution::{Executor, ExecutorFault};
 use crate::exchange::{WorkflowExecutor, WorkflowOverrides};
+use crate::neighbor::Bounds;
 use crate::probe::{Batch, Evidence};
 use crate::providers::PacketProviders;
 use crate::{Client, Stats};
@@ -66,25 +67,27 @@ pub(crate) struct ClientExecutor<'c, P, K> {
 pub(crate) struct NeighborBounds {
     /// Whether any probe resolves a neighbor; a layer-3 route never does.
     resolves: bool,
-    /// The wait one resolution gets per fresh answer.
-    attempt_timeout: Duration,
-    /// Neighbor captures buffer no more than the scan's evidence bounds.
-    max_frames: usize,
-    max_bytes: usize,
-    /// Nor does any captured frame exceed the scan's snap length.
-    snap_length: usize,
+    /// The wait and capture bounds one resolution gets per fresh answer.
+    bounds: Bounds,
     /// Each admitted target has at most one neighbor the operation resolves.
     max_neighbors: usize,
+}
+
+/// The neighbor bounds a scan request gives every resolution.
+pub(crate) fn neighbor_bounds(request: &Request) -> Bounds {
+    Bounds {
+        attempt_timeout: request.timeout,
+        max_frames: request.limits.evidence.max_frames,
+        max_bytes: request.limits.evidence.max_bytes,
+        snap_length: request.collection.capture.snap_length,
+    }
 }
 
 impl NeighborBounds {
     pub(crate) fn of(request: &Request) -> Self {
         Self {
             resolves: request.route.link_mode != Mode::Layer3,
-            attempt_timeout: request.timeout,
-            max_frames: request.limits.evidence.max_frames,
-            max_bytes: request.limits.evidence.max_bytes,
-            snap_length: request.collection.capture.snap_length,
+            bounds: neighbor_bounds(request),
             max_neighbors: request.limits.max_targets,
         }
     }
@@ -102,13 +105,7 @@ impl NeighborBounds {
         if !self.resolves {
             return Ok(neighbors.clone());
         }
-        neighbors.one_attempt(
-            self.attempt_timeout,
-            self.max_frames,
-            self.max_bytes,
-            self.snap_length,
-            self.max_neighbors,
-        )
+        neighbors.one_attempt(self.bounds, self.max_neighbors)
     }
 
     /// Bounds `operation`'s neighbor resolution for the scan `request` and
@@ -299,14 +296,9 @@ impl<'c, P: PacketProviders, K: Clock> ClientExecutor<'c, P, K> {
         )
         .map_err(BoundaryError::from_error)?;
         let state = match state {
-            NeighborState::SingleAttempt {
-                timeout,
-                max_frames,
-                max_bytes,
-                snap_length,
-            } => client
+            NeighborState::SingleAttempt(bounds) => client
                 .neighbors
-                .single_attempt(timeout, max_frames, max_bytes, snap_length)
+                .single_attempt(bounds)
                 .map_err(BoundaryError::from_error)?,
             NeighborState::Shared => client.neighbors.clone(),
         };
@@ -356,12 +348,7 @@ enum Pending {
 }
 
 enum NeighborState {
-    SingleAttempt {
-        timeout: Duration,
-        max_frames: usize,
-        max_bytes: usize,
-        snap_length: usize,
-    },
+    SingleAttempt(Bounds),
     Shared,
 }
 
@@ -499,22 +486,15 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
                 return Ok((neighbor, Stats::default()));
             }
         };
-        let NeighborBounds {
-            max_frames,
-            max_bytes,
-            snap_length,
-            ..
-        } = self.neighbors;
+        let bounds = Bounds {
+            attempt_timeout: timeout,
+            ..self.neighbors.bounds
+        };
         let exchange = self.exchange_neighbor(
             target,
             request,
             &plan,
-            NeighborState::SingleAttempt {
-                timeout,
-                max_frames,
-                max_bytes,
-                snap_length,
-            },
+            NeighborState::SingleAttempt(bounds),
             deadline,
         )?;
         let (link, observed_at) = match &exchange.outcome {

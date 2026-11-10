@@ -17,7 +17,7 @@ use packetcraftr_core::document::udp_profiles::{self, MAX_PROFILE_BYTES};
 use packetcraftr_core::error::{Classified, Kind};
 
 use crate::errors::CliError;
-use crate::input::{InputKind, manifest, read_bounded_file_allow_empty};
+use crate::input::{InputKind, manifest, read_document, read_document_allow_empty};
 use crate::invocation::Invocation;
 
 pub(super) fn read_udp_payload(
@@ -54,15 +54,7 @@ pub(super) fn read_udp_payload(
             .map_err(|source| CliError::caused(Kind::Usage, &source));
     }
     if let Some(path) = path {
-        if manifest::is_stdin(path) {
-            return crate::input::read_stdin_bounded_allow_empty(
-                &invocation.control,
-                MAX_UDP_PAYLOAD_BYTES,
-                InputKind::Payload,
-            )
-            .map(Bytes::from);
-        }
-        return read_bounded_file_allow_empty(
+        return read_document_allow_empty(
             &invocation.control,
             path,
             MAX_UDP_PAYLOAD_BYTES,
@@ -87,15 +79,12 @@ pub(super) fn load_udp_profiles(
             "--udp-profiles requires --transport udp",
         ));
     }
-    let document = if manifest::is_stdin(path) {
-        crate::input::read_stdin_bounded(
-            &invocation.control,
-            MAX_PROFILE_BYTES,
-            InputKind::UdpProfiles,
-        )?
-    } else {
-        crate::input::read_bounded_json_document(&invocation.control, path, MAX_PROFILE_BYTES)?
-    };
+    let document = read_document(
+        &invocation.control,
+        path,
+        MAX_PROFILE_BYTES,
+        InputKind::UdpProfiles,
+    )?;
     let assignments = udp_profiles::parse(&document).map_err(CliError::classified)?;
     profile::compile(assignments).map_err(CliError::classified)
 }

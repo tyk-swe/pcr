@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use packetcraftr_core as core;
 use packetcraftr_core::error::{Classification, Classified, Kind};
 
+use super::manifest;
 use super::source::{self, Source, interrupted_or};
 use crate::errors::CliError;
 use crate::invocation::Control;
@@ -230,7 +231,7 @@ pub(crate) fn read_stdin_bounded(
     )
 }
 
-pub(crate) fn read_stdin_bounded_allow_empty(
+fn read_stdin_bounded_allow_empty(
     control: &Control,
     max_bytes: usize,
     kind: InputKind,
@@ -240,6 +241,32 @@ pub(crate) fn read_stdin_bounded_allow_empty(
         max_bytes,
         kind,
     )
+}
+
+pub(crate) fn read_document(
+    control: &Control,
+    path: &Path,
+    max_bytes: usize,
+    kind: InputKind,
+) -> Result<Vec<u8>, CliError> {
+    if manifest::is_stdin(path) {
+        read_stdin_bounded(control, max_bytes, kind)
+    } else {
+        read_bounded_file(control, path, max_bytes, kind)
+    }
+}
+
+pub(crate) fn read_document_allow_empty(
+    control: &Control,
+    path: &Path,
+    max_bytes: usize,
+    kind: InputKind,
+) -> Result<Vec<u8>, CliError> {
+    if manifest::is_stdin(path) {
+        read_stdin_bounded_allow_empty(control, max_bytes, kind)
+    } else {
+        read_bounded_file_allow_empty(control, path, max_bytes, kind)
+    }
 }
 
 fn require_non_empty(bytes: Vec<u8>, kind: InputKind) -> Result<Vec<u8>, CliError> {
@@ -366,6 +393,31 @@ mod tests {
         assert!(error.message.contains(&path.display().to_string()));
     }
 
+    #[test]
+    fn empty_document_is_rejected_from_a_file() {
+        let control = &source::test_control(None, Default::default());
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("empty.json");
+        std::fs::write(&path, b"").unwrap();
+
+        let error = read_document(control, &path, 16, InputKind::SecurityDocument).unwrap_err();
+        assert_eq!(error.classification.code.as_str(), "cli.input_source");
+        assert!(
+            error
+                .message
+                .contains("security JSON document input is required"),
+            "{}",
+            error.message
+        );
+        assert!(error.message.contains(&path.display().to_string()));
+
+        assert!(
+            read_document_allow_empty(control, &path, 16, InputKind::Payload)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
     #[cfg(any(target_os = "linux", target_os = "android"))]
     #[test]
     fn stalled_fifo_reports_invocation_deadline() {
@@ -381,7 +433,7 @@ mod tests {
             Default::default(),
         );
 
-        let error = read_bounded_json_document(&control, &fifo, 16).unwrap_err();
+        let error = read_document(&control, &fifo, 16, InputKind::SecurityDocument).unwrap_err();
 
         let expected = control.check().unwrap_err();
         assert_eq!(error.classification, expected.classification);

@@ -418,6 +418,47 @@ mod tests {
         );
     }
 
+    #[test]
+    fn documents_return_exact_bytes_and_reject_oversized_files() {
+        let control = &source::test_control(None, Default::default());
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("document.json");
+        std::fs::write(&path, b"{\"a\":1}").unwrap();
+
+        assert_eq!(
+            read_document(control, &path, 16, InputKind::SecurityDocument).unwrap(),
+            b"{\"a\":1}"
+        );
+        assert_eq!(
+            read_document_allow_empty(control, &path, 16, InputKind::Payload).unwrap(),
+            b"{\"a\":1}"
+        );
+
+        std::fs::write(&path, b"0123456789abcdefg").unwrap();
+
+        let error = read_document(control, &path, 16, InputKind::SecurityDocument).unwrap_err();
+        assert_eq!(error.classification.kind, Kind::Usage);
+        assert!(
+            error
+                .message
+                .contains("security JSON document input exceeds 16 byte limit"),
+            "{}",
+            error.message
+        );
+        assert!(error.message.contains(&path.display().to_string()));
+
+        let error = read_document_allow_empty(control, &path, 16, InputKind::Payload).unwrap_err();
+        assert_eq!(error.classification.kind, Kind::Usage);
+        assert!(
+            error
+                .message
+                .contains("UDP payload input exceeds 16 byte limit"),
+            "{}",
+            error.message
+        );
+        assert!(error.message.contains(&path.display().to_string()));
+    }
+
     #[cfg(any(target_os = "linux", target_os = "android"))]
     #[test]
     fn stalled_fifo_reports_invocation_deadline() {

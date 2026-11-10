@@ -73,6 +73,7 @@ impl Packet {
 fn yaml_config(limits: &DocumentLimits) -> noyalib::ParserConfig {
     let envelope = limits.max_input_bytes.max(1);
     noyalib::ParserConfig::new()
+        .lossless_u64_integers(true)
         .max_depth(document_container_depth(limits.max_nesting))
         .max_document_length(limits.max_input_bytes)
         .max_alias_expansions(0)

@@ -45,7 +45,7 @@ clap_lex = "1.1.1"
 clap_complete = "4.6.11"
 clap_mangen = "0.3.3"
 ctrlc = { version = "3.5.2", features = ["termination"] }
-noyalib = { version = "0.0.58", default-features = false, features = ["std", "fast-int", "fast-float"] }
+noyalib = { version = "0.0.58", default-features = false, features = ["std", "fast-int", "fast-float", "lossless-u64"] }
 # RustCrypto hashes for TLS client fingerprints: MD5 for JA3, SHA-256 for JA4.
 md5 = { package = "md-5", version = "0.11.0", default-features = false }
 sha2 = { version = "0.11.1", default-features = false }

@@ -100,17 +100,8 @@ impl Capture {
             self.filter.as_deref(),
             &self.decode,
         )?;
-        let session = packetcraftr_core::analysis::Session::new(
-            prepared.registry.clone(),
-            prepared.session_options(invocation),
-            collector,
-        );
-        let mut reader = crate::input::open_capture(
-            &invocation.control,
-            &invocation.output,
-            &self.path,
-            prepared.capture_limits,
-        )?;
+        let session = prepared.session(invocation, collector, None);
+        let mut reader = prepared.open(invocation, &self.path)?;
         let mut report = session
             .run(&mut reader, |_| Ok(()), |_| Ok(()))
             .map_err(CliError::classified)?

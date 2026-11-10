@@ -100,12 +100,7 @@ fn run(args: Args, invocation: &Invocation) -> Result<(), CliError> {
     secrets.poll(&mut collector, invocation, args.path.is_some())?;
     let encoder = &invocation.output;
     let (run, capture, collector, secrets, state) = if let Some(path) = &args.path {
-        let mut reader = crate::input::open_capture(
-            &invocation.control,
-            &invocation.output,
-            path,
-            setup.capture_limits,
-        )?;
+        let mut reader = setup.open(invocation, path)?;
         let mut options = setup.options(invocation);
         options.track_sources = true;
         let run = analysis::run(&mut reader, setup.registry.clone(), &options, |record| {

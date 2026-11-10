@@ -31,13 +31,7 @@ impl<'a> EventOutput<'a> {
                 .invocation
                 .output
                 .emit_data_counted(value, Vec::new(), &mut self.remaining)
-                .map_err(|error| match error {
-                    crate::output::stream::MeteredError::Limit => limit_error(),
-                    crate::output::stream::MeteredError::Encode(error) => CliError::from(error),
-                    crate::output::stream::MeteredError::Serialize(error) => {
-                        crate::publication::serialization_error(error)
-                    }
-                });
+                .map_err(|error| crate::publication::metered_error(error, limit_error));
         }
         let bytes = bounded_json_len(&value, self.remaining, serde_json::ser::CompactFormatter)
             .map_err(|error| error.into_cli_error(limit_error))?;

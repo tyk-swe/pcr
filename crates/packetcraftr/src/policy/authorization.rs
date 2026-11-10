@@ -365,7 +365,7 @@ mod tests {
     }
 
     #[test]
-    fn permissive_packets_require_both_policy_and_operation_approval() {
+    fn exceptional_packets_require_both_policy_and_operation_approval() {
         let packet = source_packet(Ipv4Addr::LOCALHOST, [2, 0, 0, 0, 0, 1]);
         let strict = build_packet(packet.clone(), BuildMode::Strict);
         assert!(
@@ -373,19 +373,25 @@ mod tests {
                 .authorize_built_packet(&strict, false)
                 .is_ok()
         );
-        let permissive = build_packet(packet, BuildMode::Permissive);
-        for (policy_allowed, operation_allowed) in
-            [(false, false), (false, true), (true, false), (true, true)]
-        {
-            let result = Policy {
-                allow_permissive_packets: policy_allowed,
-                ..Policy::default()
-            }
-            .authorize_built_packet(&permissive, operation_allowed);
-            match (policy_allowed, operation_allowed) {
-                (_, false) => assert!(matches!(result, Err(PolicyError::PermissiveLiveOptIn))),
-                (false, true) => assert!(matches!(result, Err(PolicyError::PermissivePacket))),
-                (true, true) => assert!(result.is_ok()),
+        let mut with_trailer = packet.clone();
+        with_trailer.push(packetcraftr_core::layer::Padding::after_layer(vec![1], 1));
+        for built in [
+            build_packet(packet, BuildMode::Permissive),
+            build_packet(with_trailer, BuildMode::Strict),
+        ] {
+            for (policy_allowed, operation_allowed) in
+                [(false, false), (false, true), (true, false), (true, true)]
+            {
+                let result = Policy {
+                    allow_permissive_packets: policy_allowed,
+                    ..Policy::default()
+                }
+                .authorize_built_packet(&built, operation_allowed);
+                match (policy_allowed, operation_allowed) {
+                    (_, false) => assert!(matches!(result, Err(PolicyError::PermissiveLiveOptIn))),
+                    (false, true) => assert!(matches!(result, Err(PolicyError::PermissivePacket))),
+                    (true, true) => assert!(result.is_ok()),
+                }
             }
         }
     }

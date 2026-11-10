@@ -5,7 +5,7 @@ mod transactions;
 
 use super::{
     FrameRecord, ScopedFlowKey, StreamTransport, Summary as RunSummary,
-    application::{self, Error, Limits, TcpSources},
+    application::{self, Error, Limits, Retained, TcpSources},
     provenance::{Accumulator, SourceSet},
     scope::Definition,
     session::{self, CollectorNeeds},
@@ -108,7 +108,7 @@ pub struct Collector {
     directions: BTreeMap<ScopedFlowKey, Direction>,
     scopes: BTreeMap<u32, Definition>,
     buffered: usize,
-    retained: usize,
+    retained: Retained,
     transactions: transactions::Tracker,
     summary: Summary,
 }
@@ -124,8 +124,8 @@ impl Collector {
             directions: BTreeMap::new(),
             scopes: BTreeMap::new(),
             buffered: 0,
-            retained: 0,
-            transactions: transactions::Tracker::new(limits),
+            retained: Retained::new(limits),
+            transactions: transactions::Tracker::new(),
             summary: Summary::default(),
         })
     }
@@ -139,8 +139,7 @@ impl Collector {
     pub fn scopes(&self) -> impl Iterator<Item = &Definition> {
         self.scopes.values().chain(
             self.tcp
-                .scopes
-                .values()
+                .scopes()
                 .filter(|scope| !self.scopes.contains_key(&scope.id.get())),
         )
     }
@@ -419,10 +418,7 @@ impl Collector {
     }
     fn emit(&mut self, mut message: Message, events: &mut Vec<Event>) -> Result<(), Error> {
         self.limits.check_messages(self.summary.messages as usize)?;
-        self.retained = self
-            .retained
-            .saturating_add(Limits::decoded_charge(message.wire.len()));
-        self.limits.check_retained(self.retained)?;
+        self.retained.charge(message.wire.len())?;
         self.summary.messages += 1;
         message.index = self.summary.messages;
         if message.status == Status::Complete {

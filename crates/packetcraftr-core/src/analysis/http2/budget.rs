@@ -5,7 +5,7 @@
 
 use super::model::{Connection, Event, Frame, Issue, Message, Startup, Status, Summary};
 use super::{Error, Limits};
-use crate::analysis::application;
+use crate::analysis::application::{self, Retained};
 use crate::analysis::provenance::SourceSet;
 use crate::budget::Deadline;
 
@@ -42,10 +42,9 @@ impl Charge {
     }
 }
 
-#[derive(Default)]
 pub(crate) struct Budget {
     live: usize,
-    retained: usize,
+    retained: Retained,
     spans: usize,
     frames: u64,
     streams: u64,
@@ -54,6 +53,18 @@ pub(crate) struct Budget {
 }
 
 impl Budget {
+    pub(crate) fn new(limits: application::Limits) -> Self {
+        Self {
+            live: 0,
+            retained: Retained::new(limits),
+            spans: 0,
+            frames: 0,
+            streams: 0,
+            messages: 0,
+            summary: Summary::default(),
+        }
+    }
+
     #[cfg(test)]
     pub(super) fn live(&self) -> usize {
         self.live
@@ -104,16 +115,7 @@ impl Context<'_> {
     }
 
     pub(crate) fn charge_retained(&mut self, bytes: usize) -> Result<(), Error> {
-        let next = self
-            .budget
-            .retained
-            .checked_add(application::Limits::decoded_charge(bytes))
-            .ok_or(Error::Application(application::Error::Limit {
-                field: "max_retained_bytes",
-                limit: self.app.max_retained_bytes,
-            }))?;
-        self.app.check_retained(next)?;
-        self.budget.retained = next;
+        self.budget.retained.charge(bytes)?;
         Ok(())
     }
 

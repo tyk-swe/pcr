@@ -104,7 +104,7 @@ impl Collector {
                 app_limits: application,
                 limits,
                 deadline: None,
-                budget: Budget::default(),
+                budget: Budget::new(application),
             },
             tcp: TcpSources::new(ports, application),
             connections: BTreeMap::new(),
@@ -121,7 +121,7 @@ impl Collector {
     }
 
     pub fn scopes(&self) -> impl Iterator<Item = &Definition> {
-        self.tcp.scopes.values()
+        self.tcp.scopes()
     }
 
     pub fn observe(&mut self, record: &FrameRecord<'_>) -> Result<Vec<Event>, Error> {

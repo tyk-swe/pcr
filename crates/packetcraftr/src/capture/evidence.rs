@@ -6,22 +6,12 @@ use packetcraftr_core::{
     diagnostic::{Diagnostic, Severity},
     frame::Frame,
 };
-use packetcraftr_netio::capture::{self as native, Limits, Metadata};
+use packetcraftr_netio::capture as native;
 use std::time::Duration;
 
 #[derive(Clone, Debug)]
 pub struct Source {
-    /// The capture-local source number frames carry as their interface.
-    pub index: usize,
-    pub metadata: Metadata,
-    pub limits: Limits,
-    pub metadata_valid: bool,
-    pub ready: bool,
-    pub shutdown_confirmed: bool,
-    pub statistics_valid: bool,
-    pub statistics: native::Stats,
-    pub delivered_frames: u64,
-    pub delivered_bytes: u64,
+    pub native: native::Source,
     pub admitted_frames: u64,
     pub matched_frames: u64,
     pub emitted_frames: u64,
@@ -32,16 +22,7 @@ pub struct Source {
 impl Source {
     pub(super) fn armed(source: &native::Source) -> Self {
         Self {
-            index: source.index,
-            metadata: source.metadata.clone(),
-            limits: source.limits,
-            metadata_valid: source.metadata_valid,
-            ready: source.ready,
-            shutdown_confirmed: source.shutdown_confirmed,
-            statistics_valid: source.statistics_valid,
-            statistics: source.statistics,
-            delivered_frames: source.delivered_frames,
-            delivered_bytes: source.delivered_bytes,
+            native: source.clone(),
             admitted_frames: 0,
             matched_frames: 0,
             emitted_frames: 0,
@@ -50,15 +31,7 @@ impl Source {
     }
 
     pub(super) fn update(&mut self, source: &native::Source) {
-        self.metadata.clone_from(&source.metadata);
-        self.limits = source.limits;
-        self.metadata_valid = source.metadata_valid;
-        self.ready = source.ready;
-        self.shutdown_confirmed = source.shutdown_confirmed;
-        self.statistics_valid = source.statistics_valid;
-        self.statistics = source.statistics;
-        self.delivered_frames = source.delivered_frames;
-        self.delivered_bytes = source.delivered_bytes;
+        self.native = source.clone();
     }
 }
 
@@ -97,8 +70,10 @@ pub(super) fn finish_stats(report: &mut Report, elapsed: Duration) -> bool {
     let mut capture = native::Stats::default();
     let mut complete = report.sources.len() == report.requested_interfaces.len();
     for source in &report.sources {
-        complete &= source.metadata_valid && source.shutdown_confirmed && source.statistics_valid;
-        if let Some(sum) = capture.checked_add(source.statistics) {
+        complete &= source.native.metadata_valid
+            && source.native.shutdown_confirmed
+            && source.native.statistics_valid;
+        if let Some(sum) = capture.checked_add(source.native.statistics) {
             capture = sum;
         } else {
             report.capture_statistics_complete = false;
@@ -112,10 +87,10 @@ pub(super) fn finish_stats(report: &mut Report, elapsed: Duration) -> bool {
 
 pub(super) fn evidence_loss(report: &mut Report) -> Option<Cause> {
     for source in &report.sources {
-        if let Some(error) = source.statistics.evidence_loss_error() {
-            if source.limits.overflow_policy == native::OverflowPolicy::Fail {
+        if let Some(error) = source.native.statistics.evidence_loss_error() {
+            if source.native.limits.overflow_policy == native::OverflowPolicy::Fail {
                 return Some(Cause::Loss {
-                    source_index: source.index,
+                    source_index: source.native.index,
                     error,
                 });
             }
@@ -124,7 +99,7 @@ pub(super) fn evidence_loss(report: &mut Report) -> Option<Cause> {
                 packetcraftr_core::error::Code::CaptureEvidenceIncomplete.as_str(),
                 format!(
                     "source {} ({}): {error}",
-                    source.index, source.metadata.interface.name
+                    source.native.index, source.native.metadata.interface.name
                 ),
             ));
         }

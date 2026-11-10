@@ -285,13 +285,7 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
             descriptions,
             streaming,
         } = initial;
-        let request = GroupRequest {
-            interfaces: plan.interfaces.clone(),
-            limits: executor.collection.capture,
-            filter: None,
-            promiscuous: false,
-            native: Default::default(),
-        };
+        let request = GroupRequest::new(plan.interfaces.clone(), executor.collection.capture);
         let mut group = Group::new(&request).map_err(BoundaryError::from_error)?;
         let armed = group.arm(
             executor.client.providers.capture(),

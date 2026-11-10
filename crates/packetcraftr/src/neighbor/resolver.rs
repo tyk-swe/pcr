@@ -231,13 +231,10 @@ where
 
         let request_bytes = build_request_frame(request)?;
         let decision = discovery_decision(request);
-        let capture_request = capture::Request {
-            interface: request.interface.clone(),
-            limits: self.state.options.capture_limits(),
-            filter: None,
-            promiscuous: false,
-            native: Default::default(),
-        };
+        let capture_request = capture::Request::new(
+            request.interface.clone(),
+            self.state.options.capture_limits(),
+        );
         capture_request
             .validate()
             .map_err(|error| map_io_error(request, "validating capture request", error))?;

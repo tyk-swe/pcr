@@ -34,6 +34,16 @@ pub struct GroupRequest {
 }
 
 impl GroupRequest {
+    pub fn new(interfaces: Vec<Id>, limits: Limits) -> Self {
+        Self {
+            interfaces,
+            limits,
+            filter: None,
+            promiscuous: false,
+            native: NativeSettings::default(),
+        }
+    }
+
     pub fn validate(&self) -> Result<(), Error> {
         super::validate_filter_length(self.filter.as_deref())?;
         let count = self.interfaces.len();

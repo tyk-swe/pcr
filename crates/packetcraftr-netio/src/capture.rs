@@ -164,6 +164,16 @@ pub struct Request {
 }
 
 impl Request {
+    pub fn new(interface: InterfaceId, limits: Limits) -> Self {
+        Self {
+            interface,
+            limits,
+            filter: None,
+            promiscuous: false,
+            native: NativeSettings::default(),
+        }
+    }
+
     pub fn validate(&self) -> Result<(), Error> {
         validate_filter_length(self.filter.as_deref())?;
         if !self.interface.is_complete() {
@@ -277,16 +287,13 @@ impl Provider for SystemProvider {
 mod tests {
     use super::*;
     fn request() -> Request {
-        Request {
-            interface: InterfaceId {
+        Request::new(
+            InterfaceId {
                 name: "test0".into(),
                 index: 1,
             },
-            limits: Limits::default(),
-            filter: None,
-            promiscuous: false,
-            native: Default::default(),
-        }
+            Limits::default(),
+        )
     }
     #[test]
     fn invalid_group_skips_capture_provider() {
@@ -313,13 +320,7 @@ mod tests {
         ] {
             let provider = RefuseCalls(std::sync::atomic::AtomicUsize::new(0));
             let request = request();
-            let group = GroupRequest {
-                interfaces: vec![identity],
-                limits: request.limits,
-                filter: None,
-                promiscuous: false,
-                native: Default::default(),
-            };
+            let group = GroupRequest::new(vec![identity], request.limits);
             let result = Group::new(&group).and_then(|mut group| {
                 group.arm(&provider, &Deadline::new(std::time::Duration::from_secs(1)))
             });
@@ -342,13 +343,7 @@ mod tests {
             let mut request = request();
             request.interface = id.clone();
             assert!(matches!(request.validate(), Err(Error::Device { .. })));
-            let group = GroupRequest {
-                interfaces: vec![id],
-                limits: request.limits,
-                filter: None,
-                promiscuous: false,
-                native: Default::default(),
-            };
+            let group = GroupRequest::new(vec![id], request.limits);
             assert!(matches!(
                 Group::<Box<dyn Session>>::new(&group),
                 Err(Error::InvalidCaptureGroup { .. })
@@ -361,11 +356,8 @@ mod tests {
             Err(Error::InvalidCaptureFilter { .. })
         ));
         let group = GroupRequest {
-            interfaces: vec![request.interface],
-            limits: request.limits,
             filter: request.filter,
-            promiscuous: false,
-            native: Default::default(),
+            ..GroupRequest::new(vec![request.interface], request.limits)
         };
         assert!(matches!(
             Group::<Box<dyn Session>>::new(&group),

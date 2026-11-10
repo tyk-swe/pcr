@@ -53,13 +53,7 @@ impl<P: PacketProviders, K: Clock> Pipeline<'_, P, K> {
                 interfaces.push(route.interface().clone());
             }
         }
-        let request = GroupRequest {
-            interfaces: interfaces.clone(),
-            limits: self.executor.collection.capture,
-            filter: None,
-            promiscuous: false,
-            native: Default::default(),
-        };
+        let request = GroupRequest::new(interfaces.clone(), self.executor.collection.capture);
         let group = Group::new(&request).map_err(BoundaryError::from_error)?;
         self.plan.interfaces = interfaces;
         self.group = group;

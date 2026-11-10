@@ -109,21 +109,18 @@ fn dropped_readers_remain_charged_until_release() {
     for count in [1, 4, 15] {
         let pool = Arc::new(Pool::new(count + 1));
         let gate = Arc::new(Gate::default());
-        let mut group = Group::new(&GroupRequest {
-            interfaces: (1..=count)
+        let mut group = Group::new(&GroupRequest::new(
+            (1..=count)
                 .map(|index| Id {
                     index: index as u32,
                     name: format!("test{index}"),
                 })
                 .collect(),
-            limits: capture::Limits {
+            capture::Limits {
                 snap_length: 64,
                 ..Default::default()
             },
-            filter: None,
-            promiscuous: false,
-            native: Default::default(),
-        })
+        ))
         .unwrap();
         group
             .arm(
@@ -167,19 +164,16 @@ fn elapsed_capture_wait(readiness: bool) {
         gate: Arc::clone(&gate),
     }
     .arm_capture(
-        &capture::Request {
-            interface: Id {
+        &capture::Request::new(
+            Id {
                 index: 1,
                 name: "controlled".into(),
             },
-            limits: capture::Limits {
+            capture::Limits {
                 snap_length: 64,
                 ..Default::default()
             },
-            filter: None,
-            promiscuous: false,
-            native: Default::default(),
-        },
+        ),
         &Deadline::new(Duration::from_secs(5)),
     )
     .unwrap();
@@ -252,19 +246,16 @@ fn zero_duration_poll_respects_cancellation() {
         gate: Arc::clone(&gate),
     }
     .arm_capture(
-        &capture::Request {
-            interface: Id {
+        &capture::Request::new(
+            Id {
                 index: 1,
                 name: "controlled".into(),
             },
-            limits: capture::Limits {
+            capture::Limits {
                 snap_length: 64,
                 ..Default::default()
             },
-            filter: None,
-            promiscuous: false,
-            native: Default::default(),
-        },
+        ),
         &Deadline::new(Duration::from_secs(5)),
     )
     .unwrap();

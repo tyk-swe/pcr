@@ -102,12 +102,7 @@ impl<P: PacketProviders, K: Clock> Native<'_, P, K> {
         if resolution.evidence_truncated {
             return Err(FAULT.internal("neighbor evidence was truncated"));
         }
-        let stats = crate::neighbor::stats(
-            resolution.attempts,
-            bytes.len(),
-            self.client.now().saturating_duration_since(started),
-            resolution.capture_statistics,
-        );
+        let stats = resolution.stats(self.client.now().saturating_duration_since(started));
         self.operation
             .spent
             .checked_add_assign(&stats)

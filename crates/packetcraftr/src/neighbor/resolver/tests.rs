@@ -324,6 +324,92 @@ fn dequeued_frame_survives_wait_interruption() {
     assert!(!outcome.evidence_truncated);
 }
 
+struct SilentSession {
+    metadata: capture::Metadata,
+}
+
+impl capture::Session for SilentSession {
+    fn metadata(&self) -> &capture::Metadata {
+        &self.metadata
+    }
+
+    fn wait_ready(&mut self, _: &Deadline) -> Result<(), packetcraftr_netio::Error> {
+        Ok(())
+    }
+
+    fn next_captured_frame(
+        &mut self,
+        _: &Deadline,
+    ) -> Result<Option<capture::Captured>, packetcraftr_netio::Error> {
+        Ok(None)
+    }
+
+    fn shutdown(&mut self) -> Result<(), packetcraftr_netio::Error> {
+        Ok(())
+    }
+
+    fn stats(&self) -> capture::Stats {
+        Default::default()
+    }
+}
+
+struct SilentCapture(capture::Metadata);
+
+impl capture::Provider for SilentCapture {
+    type Capture = SilentSession;
+
+    fn arm_capture(
+        &self,
+        _: &capture::Request,
+        _: &Deadline,
+    ) -> Result<SilentSession, packetcraftr_netio::Error> {
+        Ok(SilentSession {
+            metadata: self.0.clone(),
+        })
+    }
+}
+
+#[test]
+fn not_found_stats_count_every_request_frame() {
+    let request = Request {
+        interface: packetcraftr_netio::interface::Id {
+            name: "test0".into(),
+            index: 1,
+        },
+        interface_source: "192.168.1.1".parse().unwrap(),
+        interface_mac: MacAddress([2, 0, 0, 0, 0, 1]),
+        target: "192.168.1.2".parse().unwrap(),
+        vlan_tags: vec![],
+        mtu: 1500,
+        link_type: packetcraftr_core::frame::LinkType::ETHERNET,
+    };
+    let capture = SilentCapture(capture::Metadata {
+        interface: request.interface.clone(),
+        link_type: request.link_type,
+        snap_length: 1500,
+        native: Default::default(),
+    });
+    let transmitter = Transmitter(AtomicUsize::new(0));
+    let error = State::default()
+        .over(&transmitter, &capture)
+        .resolve(&request, &Deadline::new(Duration::from_secs(1)))
+        .unwrap_err();
+    let Error::NotFound {
+        attempts,
+        request_bytes,
+        ..
+    } = &error
+    else {
+        panic!("expected an unanswered neighbor resolution");
+    };
+    let frame_bytes = build_request_frame(&request).unwrap().len();
+    assert_eq!(*request_bytes, frame_bytes);
+    assert!(*attempts > 0);
+    let stats = error.exchange_stats(Duration::ZERO).unwrap();
+    assert_eq!(stats.packets_attempted, u64::from(*attempts));
+    assert_eq!(stats.bytes, u64::from(*attempts) * frame_bytes as u64);
+}
+
 fn cache_key(index: u16) -> NeighborCacheKey {
     let [high, low] = index.to_be_bytes();
     NeighborCacheKey::from(&Request {

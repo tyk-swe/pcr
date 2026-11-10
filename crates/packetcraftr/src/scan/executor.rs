@@ -281,6 +281,69 @@ impl<'c, P: PacketProviders, K: Clock> ClientExecutor<'c, P, K> {
         }
         Ok(Pending::Request(request, Box::new(plan.clone())))
     }
+
+    fn exchange_neighbor(
+        &mut self,
+        target: &SelectedAddress,
+        request: crate::neighbor::Request,
+        plan: &crate::route::Plan,
+        state: NeighborState,
+        deadline: &Deadline,
+    ) -> Result<NeighborExchange, BoundaryError> {
+        let services = self.client;
+        let client = self.configured()?;
+        crate::engine::preparation::authorize_neighbor_request(
+            &client.policy(&services.policy),
+            &request,
+            plan,
+        )
+        .map_err(BoundaryError::from_error)?;
+        let state = match state {
+            NeighborState::SingleAttempt {
+                timeout,
+                max_frames,
+                max_bytes,
+                snap_length,
+            } => client
+                .neighbors
+                .single_attempt(timeout, max_frames, max_bytes, snap_length)
+                .map_err(BoundaryError::from_error)?,
+            NeighborState::Shared => client.neighbors.clone(),
+        };
+        let providers = &services.providers;
+        let started = services.now();
+        let resolved = state
+            .over(providers.transmit(), providers.capture())
+            .resolve(&request, deadline);
+        let elapsed = services.now().saturating_duration_since(started);
+        let (attempts, stats, outcome) = match resolved {
+            Ok(resolution) => {
+                let stats = resolution.stats(elapsed);
+                (
+                    resolution.attempts,
+                    stats,
+                    ExchangeOutcome::Resolved(resolution),
+                )
+            }
+            Err(error) => {
+                let crate::neighbor::Error::NotFound { attempts, .. } = &error else {
+                    return Err(BoundaryError::from_error(error));
+                };
+                let attempts = *attempts;
+                let stats = error.exchange_stats(elapsed).unwrap_or_default();
+                (attempts, stats, ExchangeOutcome::Silent(error))
+            }
+        };
+        if attempts > 0 {
+            self.requested.insert(target.key());
+        }
+        Ok(NeighborExchange {
+            request,
+            attempts,
+            stats,
+            outcome,
+        })
+    }
 }
 
 /// Where a target's neighbor resolution stands once its route is known.
@@ -290,6 +353,28 @@ enum Pending {
     Unsent(NeighborOutcome, interface::Id),
     /// This request would be sent over this plan, unless already answered.
     Request(crate::neighbor::Request, Box<crate::route::Plan>),
+}
+
+enum NeighborState {
+    SingleAttempt {
+        timeout: Duration,
+        max_frames: usize,
+        max_bytes: usize,
+        snap_length: usize,
+    },
+    Shared,
+}
+
+struct NeighborExchange {
+    request: crate::neighbor::Request,
+    attempts: u32,
+    stats: Stats,
+    outcome: ExchangeOutcome,
+}
+
+enum ExchangeOutcome {
+    Resolved(crate::neighbor::Resolution),
+    Silent(crate::neighbor::Error),
 }
 
 /// A probe that routes like any of `target`'s, for finding its neighbor.
@@ -414,80 +499,52 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
                 return Ok((neighbor, Stats::default()));
             }
         };
-        let plan = &*plan;
         let NeighborBounds {
             max_frames,
             max_bytes,
             snap_length,
             ..
         } = self.neighbors;
-        // The operation's client keeps every answer for its probes.
-        let services = self.client;
-        let client = self.configured()?;
-        // The resolver sends exactly this frame, so its final bytes are checked
-        // like a prepared packet's.
-        crate::engine::preparation::authorize_neighbor_request(
-            &client.policy(&services.policy),
-            &request,
-            plan,
-        )
-        .map_err(BoundaryError::from_error)?;
-        let frame = crate::neighbor::request_frame(&request).map_err(BoundaryError::from_error)?;
-        let state = client
-            .neighbors
-            .single_attempt(timeout, max_frames, max_bytes, snap_length)
-            .map_err(BoundaryError::from_error)?;
-        let providers = &services.providers;
-        let started = services.now();
-        let resolved = state
-            .over(providers.transmit(), providers.capture())
-            .resolve(&request, deadline);
-        let elapsed = services.now().saturating_duration_since(started);
-        let (link, attempts, capture, observed_at) = match resolved {
-            Ok(resolution) => {
+        let exchange = self.exchange_neighbor(
+            target,
+            request,
+            &plan,
+            NeighborState::SingleAttempt {
+                timeout,
+                max_frames,
+                max_bytes,
+                snap_length,
+            },
+            deadline,
+        )?;
+        let (link, observed_at) = match &exchange.outcome {
+            ExchangeOutcome::Resolved(resolution) => {
                 // A fresh reply was observed when it was captured, which a
                 // capture without wall-clock time leaves unknown. The
                 // resolver retains the matching reply last whenever it
                 // retains it at all.
                 let observed_at = if resolution.cache_hit {
-                    Some(services.wall_now())
+                    Some(self.client.wall_now())
                 } else {
                     resolution.captured.last().and_then(|frame| frame.timestamp)
                 };
-                let link = Link {
-                    address: resolution.mac_address,
-                    cached: resolution.cache_hit,
-                };
                 (
-                    Some(link),
-                    resolution.attempts,
-                    resolution.capture_statistics,
+                    Some(Link {
+                        address: resolution.mac_address,
+                        cached: resolution.cache_hit,
+                    }),
                     observed_at,
                 )
             }
-            Err(crate::neighbor::Error::NotFound {
-                attempts,
-                capture_statistics,
-                ..
-            }) => (
-                None,
-                attempts,
-                capture_statistics,
-                Some(services.wall_now()),
-            ),
-            Err(error) => return Err(BoundaryError::from_error(error)),
+            ExchangeOutcome::Silent(_) => (None, Some(self.client.wall_now())),
         };
-        if attempts > 0 {
-            self.requested.insert(target.key());
-        }
-        let stats = crate::neighbor::stats(attempts, frame.len(), elapsed, capture);
         let neighbor = Neighbor {
             outcome: link.map_or(NeighborOutcome::Silent, NeighborOutcome::Resolved),
-            interface: request.interface.clone(),
-            attempts,
+            interface: exchange.request.interface.clone(),
+            attempts: exchange.attempts,
             observed_at,
         };
-        Ok((neighbor, stats))
+        Ok((neighbor, exchange.stats))
     }
 
     fn resolve_next_hop(
@@ -501,10 +558,8 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
         let Pending::Request(request, plan) = self.pending(target, false, deadline)? else {
             return Ok(NextHopResolution::default());
         };
-        let plan = &*plan;
-        let _services = self.client;
-        let client = self.configured()?;
-        if client
+        if self
+            .configured()?
             .neighbors
             .cached(&request)
             .map_err(BoundaryError::from_error)?
@@ -520,42 +575,14 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
                 },
             ));
         }
-        let services = self.client;
-        let client = self.configured()?;
-        crate::engine::preparation::authorize_neighbor_request(
-            &client.policy(&services.policy),
-            &request,
-            plan,
-        )
-        .map_err(BoundaryError::from_error)?;
-        let frame = crate::neighbor::request_frame(&request).map_err(BoundaryError::from_error)?;
-        let providers = &services.providers;
-        let started = services.now();
-        let resolved = client
-            .neighbors
-            .over(providers.transmit(), providers.capture())
-            .resolve(&request, deadline);
-        let elapsed = services.now().saturating_duration_since(started);
-        let (attempts, capture, silence) = match resolved {
-            Ok(resolution) => (resolution.attempts, resolution.capture_statistics, None),
-            Err(error) => {
-                let crate::neighbor::Error::NotFound {
-                    attempts,
-                    capture_statistics,
-                    ..
-                } = &error
-                else {
-                    return Err(BoundaryError::from_error(error));
-                };
-                let (attempts, capture) = (*attempts, *capture_statistics);
-                (attempts, capture, Some(BoundaryError::from_error(error)))
-            }
+        let exchange =
+            self.exchange_neighbor(target, request, &plan, NeighborState::Shared, deadline)?;
+        let silence = match exchange.outcome {
+            ExchangeOutcome::Resolved(_) => None,
+            ExchangeOutcome::Silent(error) => Some(BoundaryError::from_error(error)),
         };
-        if attempts > 0 {
-            self.requested.insert(target.key());
-        }
         Ok(NextHopResolution {
-            stats: crate::neighbor::stats(attempts, frame.len(), elapsed, capture),
+            stats: exchange.stats,
             silence,
         })
     }

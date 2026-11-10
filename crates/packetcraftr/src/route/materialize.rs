@@ -76,17 +76,7 @@ impl Materialized {
         let Some(resolution) = &self.neighbor_resolution else {
             return Ok(crate::Stats::default());
         };
-        let frame_bytes = if resolution.attempts == 0 {
-            0
-        } else {
-            neighbor::request_frame(&neighbor_request(&self.plan)?)?.len()
-        };
-        Ok(neighbor::stats(
-            resolution.attempts,
-            frame_bytes,
-            std::time::Duration::ZERO,
-            resolution.capture_statistics,
-        ))
+        Ok(resolution.stats(std::time::Duration::ZERO))
     }
 
     pub fn transmit_route(&self) -> transmit::Route<'_> {

@@ -221,6 +221,7 @@ where
             return Ok(Resolution {
                 mac_address,
                 attempts: 0,
+                request_bytes: 0,
                 cache_hit: true,
                 captured: Vec::new(),
                 evidence_truncated: false,
@@ -294,6 +295,7 @@ where
                 interface: request.interface.name.clone(),
                 target: request.target,
                 attempts: outcome.attempts,
+                request_bytes: request_bytes.len(),
                 captured: outcome.captured,
                 evidence_truncated: outcome.evidence_truncated,
                 capture_statistics: statistics,
@@ -303,6 +305,7 @@ where
         Ok(Resolution {
             mac_address,
             attempts: outcome.attempts,
+            request_bytes: request_bytes.len(),
             cache_hit: false,
             captured: outcome.captured,
             evidence_truncated: outcome.evidence_truncated,

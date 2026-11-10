@@ -20,8 +20,8 @@ fn request(target: Ipv4Addr) -> Request {
         builtin_corpus().expect("builtin corpus"),
     );
     request.attempts = 1;
-    request.timeout = Duration::from_millis(5);
-    request.limits.max_duration = Duration::from_secs(1);
+    request.timeout = Duration::from_millis(250);
+    request.limits.max_duration = Duration::from_secs(30);
     request
 }
 

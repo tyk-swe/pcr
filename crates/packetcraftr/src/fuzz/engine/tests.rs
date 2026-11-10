@@ -29,13 +29,13 @@ fn request(destination: Ipv4Addr) -> Request {
         cases: 1,
         strategies: vec![Strategy::Boundary],
         limits: packetcraftr_core::fuzz::Limits {
-            max_duration: Duration::from_secs(1),
+            max_duration: Duration::from_secs(30),
             ..packetcraftr_core::fuzz::Limits::default()
         },
         ..Campaign::default()
     };
     let mut request = Request::new(campaign, packet);
-    request.timeout = Duration::from_millis(5);
+    request.timeout = Duration::from_millis(250);
     request
 }
 

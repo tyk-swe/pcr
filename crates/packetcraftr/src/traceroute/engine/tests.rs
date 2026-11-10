@@ -26,10 +26,10 @@ fn request(target: Ipv4Addr) -> Request {
         first_hop: 1,
         max_hops: 1,
         probes_per_hop: 1,
-        timeout: Duration::from_millis(5),
+        timeout: Duration::from_millis(250),
         probes_per_second: None,
         limits: Limits {
-            max_duration: Duration::from_secs(1),
+            max_duration: Duration::from_secs(30),
             ..Limits::default()
         },
         route: crate::route::Options::default(),

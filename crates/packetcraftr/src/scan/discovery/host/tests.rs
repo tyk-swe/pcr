@@ -63,6 +63,21 @@ fn discovery_incomplete_and_unresponsive_skip_control_scan_targets() {
 }
 
 #[test]
+fn unreachable_target_is_skipped_and_keeps_its_no_response_record() {
+    let targets = targets(2);
+    let mut sweep = Sweep::new(&targets, Mode::Before, Unresponsive::Scan);
+    sweep.unreachable(0);
+    let discovered = sweep.finish_discovery(None);
+    assert_eq!(discovered.scan_targets(), vec![targets[1].clone()]);
+    let hosts = discovered.finish_scan(None);
+
+    assert_eq!(hosts[0].state, State::NoResponse);
+    assert_eq!(hosts[0].scan, Scan::Skipped);
+    assert_eq!(hosts[1].state, State::NoResponse);
+    assert_eq!(hosts[1].scan, Scan::Scanned);
+}
+
+#[test]
 fn unresponsive_scan_and_incomplete_scan_set_final_dispositions() {
     let targets = targets(2);
     let mut sweep = Sweep::new(&targets, Mode::Before, Unresponsive::Scan);

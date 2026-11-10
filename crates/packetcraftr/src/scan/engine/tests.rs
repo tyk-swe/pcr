@@ -44,6 +44,27 @@ fn host_expiry_during_neighbor_discovery_marks_it_incomplete() {
 }
 
 #[test]
+fn adaptive_scheduler_reports_the_started_hosts_remaining_time() {
+    let now = Instant::now();
+    let target = target();
+    let mut scheduler = adaptive_scheduler(Duration::from_secs(1));
+    let host = scheduler.host_index(&target);
+    scheduler.host_started(host, now);
+    assert_eq!(
+        scheduler.host_remaining(host, now),
+        Some(Duration::from_secs(1))
+    );
+    assert_eq!(
+        scheduler.host_remaining(host, now + Duration::from_millis(400)),
+        Some(Duration::from_millis(600))
+    );
+    assert_eq!(
+        scheduler.host_remaining(host, now + Duration::from_secs(2)),
+        Some(Duration::ZERO)
+    );
+}
+
+#[test]
 fn fixed_scheduler_has_no_host_deadline() {
     let now = Instant::now();
     let mut scheduler = Scheduler::Fixed { peak: 0 };

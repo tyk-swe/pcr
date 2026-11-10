@@ -87,3 +87,6 @@ impl Materialized {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

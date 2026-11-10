@@ -576,3 +576,6 @@ pub(super) fn last_transmission(
 ) -> Option<Instant> {
     attempted.then(|| sent.into_iter().max().unwrap_or(now))
 }
+
+#[cfg(test)]
+mod tests;

@@ -232,21 +232,6 @@ pub struct Report {
     pub stats: Stats,
 }
 
-impl Report {
-    /// Counts questions by status as `(completed, failed, unattempted)`.
-    pub fn status_counts(&self) -> (usize, usize, usize) {
-        let mut counts = (0, 0, 0);
-        for question in &self.questions {
-            match question.outcome.status() {
-                QuestionStatus::Completed => counts.0 += 1,
-                QuestionStatus::Failed => counts.1 += 1,
-                QuestionStatus::Unattempted => counts.2 += 1,
-            }
-        }
-        counts
-    }
-}
-
 #[derive(Debug)]
 pub struct Aggregate {
     pub server: String,

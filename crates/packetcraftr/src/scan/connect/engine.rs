@@ -8,7 +8,7 @@ use packetcraftr_core::budget::Deadline;
 use packetcraftr_netio::tcp::{self, Provider};
 
 use super::super::adaptive::Ceilings;
-use super::super::discovery::{Composer, Scan, scanned};
+use super::super::discovery::Sweep;
 use super::super::error::duration_limit;
 use super::super::report::RttAccumulator;
 use super::super::{Error, Request, Stage};
@@ -111,7 +111,7 @@ where
         discovery: Vec::new(),
     };
     let options = &request.discovery;
-    let mut composer = Composer::new(&targets, options.mode, options.unresponsive);
+    let mut sweep = Sweep::new(&targets, options.mode, options.unresponsive);
     let discovery = StagePlan::new(request, &planned, Stage::Discovery, &targets, 0)?;
     let scan_sequence = discovery.count as u64;
     run_stage(
@@ -121,14 +121,9 @@ where
         &mut emit,
         controller.as_mut(),
     )?;
-    composer.observe_all(progress.discovery.drain(..))?;
-    if let Some(controller) = &controller {
-        for index in controller.incomplete_targets(&targets) {
-            composer.incomplete(index);
-        }
-    }
-    let mut hosts = composer.finish();
-    let scanned = scanned(&targets, &hosts);
+    sweep.observe_all(progress.discovery.drain(..))?;
+    let discovered = sweep.finish_discovery(controller.as_ref());
+    let scanned = discovered.scan_targets();
     let scan = StagePlan::new(request, &planned, Stage::Scan, &scanned, scan_sequence)?;
     run_stage(
         &mut connector,
@@ -137,11 +132,7 @@ where
         &mut emit,
         controller.as_mut(),
     )?;
-    if let Some(controller) = &controller {
-        for index in controller.incomplete_targets(&targets) {
-            hosts[index].scan = Scan::Incomplete;
-        }
-    }
+    let hosts = discovered.finish_scan(controller.as_ref());
     enforce_deadline::<Error>(connector.deadline)?;
     let Progress {
         mut stats,

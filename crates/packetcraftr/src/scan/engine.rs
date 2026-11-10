@@ -32,7 +32,7 @@ use crate::{Client, Sink};
 use super::Error;
 use super::WORKFLOW;
 use super::adaptive::{Ceilings, Controller};
-use super::discovery::{self, Composer};
+use super::discovery::Sweep;
 use super::error::duration_limit;
 use super::evidence::ProbeClassifier;
 use super::executor::{AdaptiveAdmission, ClientExecutor, Pipelined};
@@ -276,7 +276,7 @@ where
             deadline,
         )?;
     }
-    let mut composer = Composer::new(&approved.targets, options.mode, options.unresponsive);
+    let mut sweep = Sweep::new(&approved.targets, options.mode, options.unresponsive);
     let mut stats = crate::Stats::default();
     let mut prober = Prober {
         request,
@@ -292,7 +292,7 @@ where
             sendable = discover_neighbors(
                 &mut prober,
                 &approved.targets,
-                &mut composer,
+                sweep.composer_mut(),
                 &mut stats,
                 scheduler.controller_mut(),
             )?;
@@ -312,7 +312,7 @@ where
                     ReachOutcome::Resolved => {}
                     ReachOutcome::Silent(_) => {
                         sendable[index] = false;
-                        composer.unreachable(index);
+                        sweep.unreachable(index);
                     }
                     ReachOutcome::HostExpired => sendable[index] = false,
                 }
@@ -363,20 +363,15 @@ where
         }
         let discovered = scheduler.execute_stage(&mut prober, &mut evidence, &discovery, &stats)?;
         add_stats(&mut stats, &discovered, scan_sequence)?;
-        composer.observe_all(evidence.classifier_mut().discovery.drain(..))?;
+        sweep.observe_all(evidence.classifier_mut().discovery.drain(..))?;
         if discovered.packets_attempted > 0 {
             // When the stage's last probe left is not known on the operation's
             // clock, so its whole pause stays owed.
             prober.owed.owe(1, None);
         }
     }
-    if let Some(controller) = scheduler.controller() {
-        for index in controller.incomplete_targets(&approved.targets) {
-            composer.incomplete(index);
-        }
-    }
-    let mut hosts = composer.finish();
-    let scanned = discovery::scanned(&approved.targets, &hosts);
+    let discovered = sweep.finish_discovery(scheduler.controller());
+    let scanned = discovered.scan_targets();
     if !approved.endpoints.is_empty() {
         for target in &scanned {
             // Discovery answers for a target it reached; without it, a
@@ -420,11 +415,7 @@ where
         &scanned,
         scan_sequence.saturating_add(scan_probes),
     )?;
-    if let Some(controller) = scheduler.controller() {
-        for index in controller.incomplete_targets(&approved.targets) {
-            hosts[index].scan = discovery::Scan::Incomplete;
-        }
-    }
+    let hosts = discovered.finish_scan(scheduler.controller());
     let retained_evidence_bytes = evidence.retained_evidence_bytes();
     let ProbeClassifier { winners, rtt, .. } = evidence.into_classifier();
     let mut counts = ClassificationCounts::default();

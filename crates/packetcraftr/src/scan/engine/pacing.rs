@@ -72,8 +72,12 @@ pub(super) fn pace<C: Clock>(
     spent: Duration,
     stats: &mut crate::Stats,
 ) -> Result<(), Error> {
-    let delay = rate_delay::<Error>("probes_per_second", items, request.probes_per_second)?
-        .saturating_sub(spent);
+    let delay = rate_delay::<Error>(
+        "probes_per_second",
+        items,
+        request.schedule().probes_per_second,
+    )?
+    .saturating_sub(spent);
     if delay.is_zero() {
         return Ok(());
     }

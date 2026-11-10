@@ -127,9 +127,9 @@ impl Discovery {
         reverse_dns: Option<ReverseDnsServer>,
     ) -> Self {
         Self {
-            mode: options.mode.into(),
+            mode: options.mode().into(),
             probes: options
-                .probes
+                .probes()
                 .iter()
                 .map(|probe| DiscoveryProbe {
                     transport: probe.transport().into(),
@@ -140,9 +140,9 @@ impl Discovery {
                         .then(|| TcpScan::from(library::TcpScan::Ack)),
                 })
                 .collect(),
-            neighbor: options.neighbor,
+            neighbor: options.neighbor(),
             excluded_endpoints,
-            unresponsive: options.unresponsive.into(),
+            unresponsive: options.unresponsive().into(),
             reverse_dns,
         }
     }
@@ -215,9 +215,9 @@ pub(crate) struct IpProtocols {
 impl From<&library::Selected> for IpProtocols {
     fn from(selected: &library::Selected) -> Self {
         Self {
-            excluded_protocols: selected.excluded,
+            excluded_protocols: selected.excluded(),
             protocols: selected
-                .endpoints
+                .endpoints()
                 .iter()
                 .filter_map(|endpoint| endpoint.ip_protocol())
                 .collect(),
@@ -237,11 +237,11 @@ impl From<&library::Selected> for Ports {
     fn from(selected: &library::Selected) -> Self {
         Self {
             port_catalog: library::catalog::data_set().into(),
-            excluded_endpoints: selected.excluded,
+            excluded_endpoints: selected.excluded(),
             tcp_scan: None,
             sctp_scan: None,
             endpoints: selected
-                .endpoints
+                .endpoints()
                 .iter()
                 .filter_map(|endpoint| {
                     let transport = endpoint.transport();

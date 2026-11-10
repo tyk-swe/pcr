@@ -49,9 +49,11 @@ impl Adaptive {
                 });
             }
         }
-        if !(self.min_timeout <= request.timeout && request.timeout <= self.max_timeout) {
+        if !(self.min_timeout <= request.schedule().timeout
+            && request.schedule().timeout <= self.max_timeout)
+        {
             return Err(Error::InvalidTimeout {
-                value: request.timeout,
+                value: request.schedule().timeout,
                 maximum: self.max_timeout.max(self.min_timeout),
             });
         }
@@ -72,17 +74,20 @@ impl Adaptive {
                 ),
             );
         }
-        if self.initial_window > request.max_in_flight {
+        if self.initial_window > request.schedule().max_in_flight {
             return invalid(
                 "initial_window",
                 self.initial_window,
-                format!("must not exceed max_in_flight={}", request.max_in_flight),
+                format!(
+                    "must not exceed max_in_flight={}",
+                    request.schedule().max_in_flight
+                ),
             );
         }
-        if self.host_timeout > request.limits.max_duration {
+        if self.host_timeout > request.limits().max_duration {
             return Err(Error::InvalidDuration {
                 value: self.host_timeout,
-                maximum: request.limits.max_duration,
+                maximum: request.limits().max_duration,
             });
         }
         if self.retry_backoff > self.max_backoff {

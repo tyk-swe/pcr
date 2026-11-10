@@ -14,50 +14,104 @@ pub(super) use host::{Composer, Observation, check_probes, scanned};
 use super::Error;
 use crate::probe;
 
-/// Whether and how a scan request discovers hosts. Discovery never runs
-/// unless selected, so a scan sends no probe its request did not name.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Mode {
-    /// The request did not ask for discovery: every host is scanned, and its
-    /// record says it was not discovered.
     #[default]
     Omitted,
-    /// Discovery was explicitly skipped: every host is scanned without any
-    /// claim that it is reachable.
     Skipped,
-    /// Discovery runs first, and its result decides which hosts are scanned.
     Before,
-    /// Discovery runs alone and no port is probed.
     Only,
 }
 
-/// What the scan stage does with hosts that did not answer discovery.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Unresponsive {
-    /// Leave them unscanned; their records say so.
     #[default]
     Skip,
-    /// Scan them like hosts that answered.
     Scan,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Plan {
+    probes: Vec<probe::Endpoint>,
+    neighbor: bool,
+}
+
+impl Plan {
+    pub(super) fn new(probes: Vec<probe::Endpoint>, neighbor: bool) -> Result<Self, Error> {
+        if probes.is_empty() && !neighbor {
+            return Err(Error::InvalidDiscovery {
+                message: "discovery needs at least one probe".to_owned(),
+            });
+        }
+        if probes.len() > super::MAX_PROBES {
+            return Err(Error::InvalidLimit {
+                field: "discovery_probes",
+                value: u64::try_from(probes.len()).unwrap_or(u64::MAX),
+                reason: format!("exceeds max_probes={}", super::MAX_PROBES),
+            });
+        }
+        Ok(Self { probes, neighbor })
+    }
+
+    pub fn probes(&self) -> &[probe::Endpoint] {
+        &self.probes
+    }
+
+    pub const fn neighbor(&self) -> bool {
+        self.neighbor
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Options {
-    pub mode: Mode,
-    /// The probes each target receives, in order, after neighbor discovery.
-    /// Unlike scan endpoints, ICMP echo combines with TCP and UDP ports.
-    pub probes: Vec<probe::Endpoint>,
-    /// Resolve each target's link address with ARP or NDP first. Routed
-    /// targets resolve their next hop instead, which is never host evidence.
-    pub neighbor: bool,
-    pub unresponsive: Unresponsive,
+pub enum Options {
+    #[default]
+    Omitted,
+    Skipped,
+    Before {
+        plan: Plan,
+        unresponsive: Unresponsive,
+    },
+    Only(Plan),
 }
 
 impl Options {
-    /// Whether this request runs a discovery stage.
     #[must_use]
     pub const fn runs(&self) -> bool {
-        matches!(self.mode, Mode::Before | Mode::Only)
+        matches!(self, Self::Before { .. } | Self::Only(_))
+    }
+
+    pub const fn mode(&self) -> Mode {
+        match self {
+            Self::Omitted => Mode::Omitted,
+            Self::Skipped => Mode::Skipped,
+            Self::Before { .. } => Mode::Before,
+            Self::Only(_) => Mode::Only,
+        }
+    }
+
+    pub fn probes(&self) -> &[probe::Endpoint] {
+        self.plan().map_or(&[], Plan::probes)
+    }
+
+    pub const fn neighbor(&self) -> bool {
+        match self {
+            Self::Before { plan, .. } | Self::Only(plan) => plan.neighbor,
+            Self::Omitted | Self::Skipped => false,
+        }
+    }
+
+    pub const fn unresponsive(&self) -> Unresponsive {
+        match self {
+            Self::Before { unresponsive, .. } => *unresponsive,
+            Self::Omitted | Self::Skipped | Self::Only(_) => Unresponsive::Skip,
+        }
+    }
+
+    const fn plan(&self) -> Option<&Plan> {
+        match self {
+            Self::Before { plan, .. } | Self::Only(plan) => Some(plan),
+            Self::Omitted | Self::Skipped => None,
+        }
     }
 
     pub(super) fn validate(
@@ -66,58 +120,45 @@ impl Options {
         limits: &super::Limits,
         family: crate::target::Family,
     ) -> Result<(), Error> {
-        let invalid = |message: &str| {
-            Err(Error::InvalidDiscovery {
-                message: message.to_owned(),
-            })
-        };
         if !self.runs() {
-            if !self.probes.is_empty() || self.neighbor {
-                return invalid("discovery probes need a discovery stage that runs");
-            }
-            if self.unresponsive != Unresponsive::Skip {
-                return invalid("unresponsive hosts can be scanned only after discovery");
-            }
             return Ok(());
         }
-        if self.mode == Mode::Only && self.unresponsive != Unresponsive::Skip {
-            return invalid("discovery-only requests scan no host");
-        }
-        if self.probes.is_empty() && !self.neighbor {
-            return invalid("discovery needs at least one probe");
-        }
-        if self.probes.contains(&probe::Endpoint::Sctp { port: 0 }) {
+        if self.probes().contains(&probe::Endpoint::Sctp { port: 0 }) {
             return Err(Error::InvalidPort {
                 message: "SCTP discovery probes require a non-zero destination port".to_owned(),
             });
         }
         if family == crate::target::Family::Ipv6
-            && self.probes.iter().any(|probe| {
+            && self.probes().iter().any(|probe| {
                 matches!(
                     probe,
                     probe::Endpoint::IcmpTimestamp | probe::Endpoint::IcmpNetmask
                 )
             })
         {
-            return invalid(
-                "ICMP timestamp and netmask discovery probes are IPv4-only and cannot be used with IPv6 targets",
-            );
+            return Err(Error::InvalidDiscovery {
+                message:
+                    "ICMP timestamp and netmask discovery probes are IPv4-only and cannot be used with IPv6 targets"
+                        .to_owned(),
+            });
         }
-        if self.probes.len() > limits.max_ports {
+        if self.probes().len() > limits.max_ports {
             return Err(Error::InvalidLimit {
                 field: "discovery_probes",
-                value: u64::try_from(self.probes.len()).unwrap_or(u64::MAX),
+                value: u64::try_from(self.probes().len()).unwrap_or(u64::MAX),
                 reason: format!("exceeds max_ports={}", limits.max_ports),
             });
         }
-        let mut seen = HashSet::with_capacity(self.probes.len());
-        if let Some(duplicate) = self.probes.iter().find(|probe| !seen.insert(**probe)) {
+        let mut seen = HashSet::with_capacity(self.probes().len());
+        if let Some(duplicate) = self.probes().iter().find(|probe| !seen.insert(**probe)) {
             return Err(Error::InvalidDiscovery {
                 message: format!("discovery probe {duplicate} is listed more than once"),
             });
         }
-        if self.neighbor && route.link_mode == packetcraftr_netio::link::Mode::Layer3 {
-            return invalid("neighbor discovery needs a link-layer route");
+        if self.neighbor() && route.link_mode == packetcraftr_netio::link::Mode::Layer3 {
+            return Err(Error::InvalidDiscovery {
+                message: "neighbor discovery needs a link-layer route".to_owned(),
+            });
         }
         Ok(())
     }

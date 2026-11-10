@@ -31,7 +31,6 @@ mod evidence;
 mod executor;
 pub mod followup;
 mod inference;
-mod ip_protocol;
 mod measurement;
 pub mod method;
 mod plan;
@@ -47,18 +46,18 @@ pub use adaptive::{Adaptive, Condition, ConditionKind, HostIdentity, Scheduling,
 pub use error::{Error, PipelineFailure};
 pub use evidence::{CorrelatedResponse, classify_response};
 pub use inference::{DiagnosticMethod, DiagnosticRule, Inference, Rule, State};
-pub use ip_protocol::{IpProtocolSelection, IpProtocolSpec, select_ip_protocols};
 pub use measurement::{Coverage, Measurement, Qualification};
 pub use plan::Probe;
 pub use report::{
     Aggregate, Attribution, Classification, ClassificationCounts, Collector, Endpoint, Event,
     PendingEvidence, ProbeEvidence, Report, Rtt, SentProbe, Unattributed,
 };
-pub use request::{Limits, PortSpec, Request, select_ports};
+pub use request::{Base, Limits, Request, Schedule, Targets, Udp};
 pub use sctp::SctpScan;
 pub use selection::{
-    MAX_PORT_TERMS, PortSelection, Selected, Selector, Term, select_endpoints,
-    select_endpoints_with_exclusion_counts,
+    DiscoveryProbe, DiscoverySelection, EndpointSelection, IpProtocolSelection, IpProtocolSpec,
+    MAX_PORT_TERMS, PortSelection, PortSpec, PortTransport, Prepared, Probes, ScanKind, Selected,
+    Selection, Selector, Term,
 };
 pub use tcp::TcpScan;
 

@@ -118,16 +118,16 @@ impl Lookup {
                 recursion_desired: true,
                 edns: None,
                 transport: reverse.transport,
-                attempts: scan.attempts,
-                timeout: scan.timeout,
-                queries_per_second: scan.probes_per_second,
+                attempts: scan.schedule().attempts,
+                timeout: scan.schedule().timeout,
+                queries_per_second: scan.schedule().probes_per_second,
                 limits: dns::Limits {
                     message: dns::MessageLimits::default(),
-                    evidence: scan.limits.evidence,
-                    max_duration: scan.limits.max_duration,
+                    evidence: scan.limits().evidence,
+                    max_duration: scan.limits().max_duration,
                 },
-                route: scan.route.clone(),
-                collection: scan.collection.clone(),
+                route: scan.route().clone(),
+                collection: scan.collection().clone(),
             },
         };
         if lookup.template.transport != dns::TransportMode::Tcp {

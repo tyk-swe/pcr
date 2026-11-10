@@ -28,7 +28,7 @@ pub(in crate::scan) fn adaptive_batches<'r>(
     stage: Stage,
     first_sequence: u64,
 ) -> impl Iterator<Item = Batch<Probe>> + 'r {
-    (1..=request.attempts)
+    (1..=request.schedule().attempts)
         .flat_map(move |attempt| {
             endpoints
                 .iter()
@@ -53,7 +53,7 @@ pub(in crate::scan) fn adaptive_batches<'r>(
                     crate::scan::plan::planned_probe(
                         request, sequence, stage, target, endpoint, attempt,
                     ),
-                    request.timeout,
+                    request.schedule().timeout,
                 )
             },
         )
@@ -64,9 +64,9 @@ pub(crate) fn adaptive_reservation(
     targets: &[SelectedAddress],
     endpoints_per_host: usize,
 ) -> usize {
-    let mut shared = request.udp_payload.len();
+    let mut shared = request.udp_payload().len();
     let mut profiles = std::collections::HashSet::new();
-    for profile in request.udp_profiles.values() {
+    for profile in request.udp_profiles().values() {
         if profiles.insert(std::sync::Arc::as_ptr(profile)) {
             shared = shared.saturating_add(profile.storage_bytes());
         }
@@ -75,6 +75,7 @@ pub(crate) fn adaptive_reservation(
         targets.len(),
         endpoints_per_host,
         request
+            .schedule()
             .max_in_flight
             .min(targets.len().saturating_mul(endpoints_per_host)),
         crate::scan::adaptive::scoped_bytes(targets),
@@ -90,7 +91,7 @@ pub(super) fn check_adaptive_prepared(
     let wave = window.saturating_mul(
         std::mem::size_of::<Batch<Probe>>().saturating_add(std::mem::size_of::<Probe>()),
     );
-    if reservation.saturating_add(wave) > request.limits.max_prepared_bytes {
+    if reservation.saturating_add(wave) > request.limits().max_prepared_bytes {
         return Err(prepared_limit(request));
     }
     Ok(())
@@ -103,8 +104,8 @@ pub(super) fn admit_adaptive<E: Pipelined>(
     approved: &Approved,
     reservation: usize,
 ) -> Result<[crate::scan::executor::AdaptiveAdmission; 2], Error> {
-    let discovery = if request.discovery.runs() {
-        request.discovery.probes.as_slice()
+    let discovery = if request.discovery().runs() {
+        request.discovery().probes()
     } else {
         &[]
     };
@@ -117,7 +118,11 @@ pub(super) fn admit_adaptive<E: Pipelined>(
         (
             approved.endpoints.as_slice(),
             Stage::Scan,
-            probe_count(approved.targets.len(), discovery.len(), request.attempts)? as u64,
+            probe_count(
+                approved.targets.len(),
+                discovery.len(),
+                request.schedule().attempts,
+            )? as u64,
         ),
     ]
     .into_iter()
@@ -127,6 +132,7 @@ pub(super) fn admit_adaptive<E: Pipelined>(
             continue;
         }
         let wave_len = request
+            .schedule()
             .max_in_flight
             .min(approved.targets.len().saturating_mul(endpoints.len()))
             .max(1);
@@ -173,7 +179,11 @@ pub(super) fn admit_adaptive<E: Pipelined>(
     for summary in &mut summaries {
         summary.reserve_summaries(summary_bytes);
         summary
-            .check(request.max_in_flight, approved.targets.len(), &options)
+            .check(
+                request.schedule().max_in_flight,
+                approved.targets.len(),
+                &options,
+            )
             .map_err(|source| Error::PipelineExecution { source })?;
     }
     Ok(summaries)
@@ -213,7 +223,7 @@ where
         .max_in_flight
         .min(targets.len().saturating_mul(endpoints.len()))
         .max(1);
-    let attempts = probe_count(targets.len(), endpoints.len(), request.attempts)?;
+    let attempts = probe_count(targets.len(), endpoints.len(), request.schedule().attempts)?;
     let mut feed = feed::Feed::new(
         request,
         feed::StageInput {

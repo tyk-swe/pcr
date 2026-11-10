@@ -41,19 +41,19 @@ pub(super) fn planned<A: Authorizer + ResolveTarget>(
             .filter_map(|endpoint| endpoint.port())
             .collect()
     };
-    let ports = tcp_ports(request.planned_endpoints()?);
+    let ports = tcp_ports(request.endpoints());
     if let Some(probe) = super::super::method::unconnectable(request) {
         return Err(Error::MethodProbe {
             method: super::super::method::Method::Connect.as_str(),
             probe,
         });
     }
-    let discovery = if request.discovery.runs() {
-        tcp_ports(&request.discovery.probes)
+    let discovery = if request.discovery().runs() {
+        tcp_ports(request.discovery().probes())
     } else {
         Vec::new()
     };
-    if request.route.requires_packet_route() {
+    if request.route().requires_packet_route() {
         return Err(Error::UnsupportedTcpRoute);
     }
     if ports.contains(&0) || discovery.contains(&0) {
@@ -63,28 +63,30 @@ pub(super) fn planned<A: Authorizer + ResolveTarget>(
         authorizer,
         deadline,
         DeclaredTargets {
-            selection: &request.targets,
-            family: FamilyGate::new(request.address_family, Error::family),
-            max_targets: request.limits.max_targets,
+            selection: request.targets(),
+            family: FamilyGate::new(request.address_family(), Error::family),
+            max_targets: request.limits().max_targets,
             resolved: None,
         },
         Error::TargetSelection,
         |selected| {
             let targets = selected.targets.len();
-            let discovery_count = probe_count(targets, discovery.len(), request.attempts)?;
-            let scan_count = probe_count(targets, ports.len(), request.attempts)?;
+            let discovery_count =
+                probe_count(targets, discovery.len(), request.schedule().attempts)?;
+            let scan_count = probe_count(targets, ports.len(), request.schedule().attempts)?;
             let count = discovery_count.checked_add(scan_count).ok_or_else(|| {
                 invalid("probes", usize::MAX, "probe-count arithmetic overflowed")
             })?;
-            crate::probe::check_probe_count::<Error>(count, request.limits.max_probes)?;
-            let delay = rate_delay::<Error>("probes_per_second", 1, request.probes_per_second)?;
+            crate::probe::check_probe_count::<Error>(count, request.limits().max_probes)?;
+            let delay =
+                rate_delay::<Error>("probes_per_second", 1, request.schedule().probes_per_second)?;
             let stage_pause = if discovery_count > 0 && scan_count > 0 {
                 delay
             } else {
                 Duration::ZERO
             };
             let stage_duration = |probes| {
-                request.adaptive.map_or_else(
+                request.schedule().adaptive.map_or_else(
                     || worst_case_duration(request, probes),
                     |adaptive| adaptive_worst_case_duration(request, &adaptive, probes),
                 )
@@ -98,17 +100,21 @@ pub(super) fn planned<A: Authorizer + ResolveTarget>(
             .try_fold(Duration::ZERO, Duration::checked_add)
             .ok_or(Error::DurationLimit {
                 actual: Duration::MAX,
-                limit: request.limits.max_duration,
+                limit: request.limits().max_duration,
             })?;
             crate::probe::check_probe_duration::<Error>(
                 planned_duration,
-                request.limits.max_duration,
+                request.limits().max_duration,
             )?;
             // Discovery may leave any target to the scan stage, so the
             // operation covers every target on every port of either stage.
             let every_port = authorization_ports(&discovery, &ports);
-            let effective = request.max_in_flight.min(tcp::MAX_PENDING_CONNECTIONS);
+            let effective = request
+                .schedule()
+                .max_in_flight
+                .min(tcp::MAX_PENDING_CONNECTIONS);
             let charge = request
+                .schedule()
                 .adaptive
                 .map(|_| {
                     super::super::adaptive::state_charge(
@@ -135,11 +141,11 @@ pub(super) fn planned<A: Authorizer + ResolveTarget>(
                         .saturating_mul(std::mem::size_of::<u16>()),
                 )
                 .saturating_add(effective.saturating_mul(active_size));
-            if charge > request.limits.max_prepared_bytes {
+            if charge > request.limits().max_prepared_bytes {
                 return Err(Error::PipelineExecution {
                     source: crate::scan::executor::limit(
                         "prepared descriptions",
-                        request.limits.max_prepared_bytes,
+                        request.limits().max_prepared_bytes,
                     ),
                 });
             }
@@ -218,7 +224,7 @@ impl<'a> StagePlan<'a> {
             count: probe_count(
                 targets.len().saturating_mul(ports.len()),
                 1,
-                request.attempts,
+                request.schedule().attempts,
             )?,
             targets,
             ports,
@@ -255,6 +261,10 @@ fn socket_endpoint(selected: &crate::target::SelectedAddress, port: u16) -> Sock
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scan::{
+        Base, DiscoverySelection, EndpointSelection, Limits, PortSelection, PortSpec,
+        PortTransport, Schedule, Selection, Selector, Targets, Term, Udp,
+    };
     use crate::target::{Authorized, Target};
     use packetcraftr_core::error::BoundaryError;
 
@@ -290,36 +300,80 @@ mod tests {
         }
     }
 
-    fn request() -> Request {
-        Request {
-            tcp_scan: Default::default(),
-            sctp_scan: Default::default(),
-            target_sources: Vec::new(),
-            max_in_flight: 1,
-            targets: "192.0.2.1".parse::<Target>().unwrap().into(),
-            udp_payload: Default::default(),
-            udp_profiles: Default::default(),
-            address_family: crate::target::Family::Any,
-            endpoints: [1, 443, 65, u16::MAX]
-                .into_iter()
-                .map(|port| probe::Endpoint::Tcp { port })
+    fn port_selection(ports: &[u16]) -> PortSelection {
+        PortSelection::new(
+            vec![PortTransport::Tcp],
+            ports
+                .iter()
+                .map(|&port| Term {
+                    transport: None,
+                    selector: Selector::Ports(PortSpec::Single(port)),
+                })
                 .collect(),
-            discovery: super::super::super::discovery::Options {
-                mode: super::super::super::discovery::Mode::Before,
-                probes: [u16::MAX, 443, 64]
-                    .into_iter()
-                    .map(|port| probe::Endpoint::Tcp { port })
-                    .collect(),
-                ..Default::default()
+            Vec::new(),
+        )
+        .unwrap()
+    }
+
+    fn request_with(
+        limits: Limits,
+        probes_per_second: Option<u32>,
+        tcp_scan: crate::scan::TcpScan,
+    ) -> Result<Request, Error> {
+        let sctp_scan = crate::scan::SctpScan::default();
+        let selection = Selection::new(
+            Some(EndpointSelection::Ports(port_selection(&[
+                1,
+                443,
+                65,
+                u16::MAX,
+            ]))),
+            DiscoverySelection::Before {
+                probes: crate::scan::Probes::new(
+                    vec![crate::scan::DiscoveryProbe::Tcp],
+                    Some(port_selection(&[u16::MAX, 443, 64])),
+                    None,
+                )
+                .unwrap(),
+                unresponsive: Default::default(),
             },
-            attempts: 2,
-            adaptive: None,
-            timeout: Duration::from_millis(1),
-            probes_per_second: None,
-            limits: Default::default(),
-            route: Default::default(),
-            collection: Default::default(),
-        }
+        )
+        .prepare(
+            crate::scan::catalog::bundled(),
+            crate::scan::DEFAULT_MAX_PORTS,
+            tcp_scan,
+            sctp_scan,
+            false,
+        )
+        .unwrap();
+        Request::new(
+            Base {
+                selection,
+                targets: Targets {
+                    selection: "192.0.2.1".parse::<Target>().unwrap().into(),
+                    sources: Vec::new(),
+                    family: crate::target::Family::Any,
+                },
+                udp: Udp {
+                    payload: Default::default(),
+                    profiles: Default::default(),
+                },
+                schedule: Schedule {
+                    max_in_flight: 1,
+                    attempts: 2,
+                    adaptive: None,
+                    timeout: Duration::from_millis(1),
+                    probes_per_second,
+                },
+                limits,
+            },
+            Default::default(),
+            Default::default(),
+        )
+    }
+
+    fn request() -> Request {
+        request_with(Default::default(), None, Default::default()).unwrap()
     }
 
     #[test]
@@ -343,21 +397,41 @@ mod tests {
         for limits in [
             super::super::super::Limits {
                 max_probes: 13,
-                ..request.limits
+                ..*request.limits()
             },
             super::super::super::Limits {
                 max_prepared_bytes: 1,
-                ..request.limits
+                ..*request.limits()
             },
         ] {
             let mut authorizer = RecordingAuthorizer::default();
-            let limited = Request {
-                limits,
-                ..request.clone()
-            };
+            let limited = request_with(limits, None, Default::default()).unwrap();
             assert!(planned(&limited, &mut authorizer, &deadline, 0).is_err());
             assert!(authorizer.endpoints.is_empty());
         }
+    }
+
+    #[test]
+    fn checked_construction_rejects_unvalidated_modes_and_smaller_endpoint_budgets() {
+        assert!(
+            request_with(
+                Default::default(),
+                None,
+                crate::scan::TcpScan::Custom { flags: 0x200 }
+            )
+            .is_err()
+        );
+        assert!(
+            request_with(
+                Limits {
+                    max_ports: 1,
+                    ..Default::default()
+                },
+                None,
+                Default::default()
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -368,10 +442,7 @@ mod tests {
             (),
         );
         for rate in [None, Some(3), Some(7)] {
-            let request = Request {
-                probes_per_second: rate,
-                ..request()
-            };
+            let request = request_with(Default::default(), rate, Default::default()).unwrap();
             let deadline = Deadline::new(Duration::from_secs(60));
             let (_, plan) =
                 planned(&request, &mut RecordingAuthorizer::default(), &deadline, 0).unwrap();
@@ -385,6 +456,58 @@ mod tests {
                 assert!(operation.neighbor_pause.as_nanos() * u128::from(rate) >= 1_000_000_000);
             }
         }
+    }
+
+    #[test]
+    fn workflow_revalidation_rejects_neighbor_discovery_without_a_link_layer() {
+        let selection = Selection::new(
+            None,
+            DiscoverySelection::Only(
+                crate::scan::Probes::new(vec![crate::scan::DiscoveryProbe::Neighbor], None, None)
+                    .unwrap(),
+            ),
+        )
+        .prepare(
+            crate::scan::catalog::bundled(),
+            1024,
+            Default::default(),
+            Default::default(),
+            false,
+        )
+        .unwrap();
+        let request = Request::new(
+            Base {
+                selection,
+                targets: Targets {
+                    selection: "192.0.2.1".parse::<Target>().unwrap().into(),
+                    sources: Vec::new(),
+                    family: crate::target::Family::Any,
+                },
+                udp: Udp {
+                    payload: Default::default(),
+                    profiles: Default::default(),
+                },
+                schedule: Schedule {
+                    max_in_flight: 1,
+                    attempts: 1,
+                    adaptive: None,
+                    timeout: Duration::from_millis(1),
+                    probes_per_second: None,
+                },
+                limits: Default::default(),
+            },
+            Default::default(),
+            Default::default(),
+        )
+        .unwrap();
+        let finalized = request.with_workflow(
+            crate::route::Options {
+                link_mode: packetcraftr_netio::link::Mode::Layer3,
+                ..Default::default()
+            },
+            Default::default(),
+        );
+        assert!(matches!(finalized, Err(Error::InvalidDiscovery { .. })));
     }
 
     #[test]

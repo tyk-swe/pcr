@@ -123,20 +123,20 @@ pub fn select(
 
 /// The first probe kind an ordinary TCP connection cannot send.
 pub(super) fn unconnectable(request: &Request) -> Option<&'static str> {
-    if !request.tcp_scan.is_syn() {
+    if !request.tcp_scan().is_syn() {
         return Some("non-SYN TCP diagnostic");
     }
-    if !request.sctp_scan.is_init() {
+    if !request.sctp_scan().is_init() {
         return Some("SCTP COOKIE-ECHO diagnostic");
     }
-    let discovery = &request.discovery;
+    let discovery = &request.discovery();
     let probes = if discovery.runs() {
-        discovery.probes.as_slice()
+        discovery.probes()
     } else {
         &[]
     };
     request
-        .endpoints
+        .endpoints()
         .iter()
         .chain(probes)
         .find_map(|endpoint| match endpoint {
@@ -146,5 +146,5 @@ pub(super) fn unconnectable(request: &Request) -> Option<&'static str> {
             crate::probe::Endpoint::IcmpNetmask => Some("icmp-netmask"),
             other => Some(other.transport().as_str()),
         })
-        .or_else(|| (discovery.runs() && discovery.neighbor).then_some("neighbor"))
+        .or_else(|| (discovery.runs() && discovery.neighbor()).then_some("neighbor"))
 }

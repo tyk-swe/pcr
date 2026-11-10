@@ -45,7 +45,7 @@ where
         // lookups, so their setup cannot extend its expiry; it starts before
         // the `started` marker so it cannot end later.
         let mut operation =
-            crate::engine::operation::Operation::new(self, scan.limits.max_duration)
+            crate::engine::operation::Operation::new(self, scan.limits().max_duration)
                 .with_neighbor_mode(crate::engine::operation::NeighborMode::Authorized);
         if lookup.is_some() {
             operation = crate::scan::NeighborBounds::authorize(&scan, operation)?;
@@ -176,7 +176,7 @@ where
             .map(|reverse| Lookup::new(reverse, &scan))
             .transpose()?;
         let mut operation =
-            crate::engine::operation::Operation::new(self, scan.limits.max_duration);
+            crate::engine::operation::Operation::new(self, scan.limits().max_duration);
         if reverse_dns
             .as_ref()
             .is_some_and(|reverse| reverse.transport != crate::dns::TransportMode::Tcp)

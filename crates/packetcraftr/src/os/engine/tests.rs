@@ -33,7 +33,7 @@ fn denied_target_is_refused_before_transmission() {
             Ok::<(), BoundaryError>(())
         })
         .unwrap_err();
-    assert!(matches!(error, super::Error::Authorization(_)));
+    assert!(matches!(error, super::Error::Authorization(_)), "{error:?}");
     assert_eq!(sends.load(Ordering::Relaxed), 0);
 }
 
@@ -47,7 +47,7 @@ fn first_event_output_failure_is_returned() {
             testing::fail_sink(&calls),
         )
         .unwrap_err();
-    assert!(matches!(error, super::Error::Output(_)));
+    assert!(matches!(error, super::Error::Output(_)), "{error:?}");
     assert_eq!(calls.load(Ordering::Relaxed), 1);
 }
 
@@ -60,6 +60,6 @@ fn exhausted_deadline_is_returned_before_transmission() {
             Ok::<(), BoundaryError>(())
         })
         .unwrap_err();
-    assert!(matches!(error, super::Error::Deadline(_)));
+    assert!(matches!(error, super::Error::Deadline(_)), "{error:?}");
     assert_eq!(sends.load(Ordering::Relaxed), 0);
 }

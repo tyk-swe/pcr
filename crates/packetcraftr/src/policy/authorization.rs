@@ -240,7 +240,7 @@ mod tests {
     use packetcraftr_core::budget::Deadline;
     use packetcraftr_core::error::{Classified, Kind};
     use packetcraftr_core::{
-        build::{Builder, Options},
+        build::{Builder, BuiltPacket, Options},
         codec::{Addresses, Mode as BuildMode},
         frame::LinkType,
         packet::{MacAddress, Packet},
@@ -307,6 +307,19 @@ mod tests {
         packet
     }
 
+    fn build_packet(packet: Packet, mode: BuildMode) -> BuiltPacket {
+        Builder::new(packetcraftr_core::protocol::builtin::registry())
+            .build(
+                packet,
+                Addresses::default(),
+                Options {
+                    mode,
+                    ..Options::default()
+                },
+            )
+            .unwrap()
+    }
+
     #[test]
     fn source_ownership_accepts_selected_preferred_and_planned_sources() {
         let plan = source_plan();
@@ -353,26 +366,14 @@ mod tests {
 
     #[test]
     fn permissive_packets_require_both_policy_and_operation_approval() {
-        let builder = Builder::new(packetcraftr_core::protocol::builtin::registry());
-        let build = |mode: BuildMode| {
-            builder
-                .build(
-                    source_packet(Ipv4Addr::LOCALHOST, [2, 0, 0, 0, 0, 1]),
-                    Addresses::default(),
-                    Options {
-                        mode,
-                        ..Options::default()
-                    },
-                )
-                .unwrap()
-        };
-        let strict = build(BuildMode::Strict);
+        let packet = source_packet(Ipv4Addr::LOCALHOST, [2, 0, 0, 0, 0, 1]);
+        let strict = build_packet(packet.clone(), BuildMode::Strict);
         assert!(
             Policy::default()
                 .authorize_built_packet(&strict, false)
                 .is_ok()
         );
-        let permissive = build(BuildMode::Permissive);
+        let permissive = build_packet(packet, BuildMode::Permissive);
         for (policy_allowed, operation_allowed) in
             [(false, false), (false, true), (true, false), (true, true)]
         {
@@ -385,6 +386,31 @@ mod tests {
                 (_, false) => assert!(matches!(result, Err(PolicyError::PermissiveLiveOptIn))),
                 (false, true) => assert!(matches!(result, Err(PolicyError::PermissivePacket))),
                 (true, true) => assert!(result.is_ok()),
+            }
+        }
+    }
+
+    #[test]
+    fn wire_authorization_checks_the_encoded_source() {
+        let plan = source_plan();
+        for source in ["10.0.0.1", "10.0.0.3"] {
+            let built = build_packet(
+                source_packet(source.parse().unwrap(), [2, 0, 0, 0, 0, 1]),
+                BuildMode::Strict,
+            );
+            let result = crate::policy::authorize_wire(
+                &Policy::default(),
+                LinkType::ETHERNET,
+                &built.bytes,
+                &plan,
+            );
+            if source == "10.0.0.1" {
+                assert!(result.is_ok());
+            } else {
+                assert!(matches!(result,
+                    Err(PolicyError::SourceNotInterfaceOwned { packet_source, .. })
+                        if packet_source == source
+                ));
             }
         }
     }

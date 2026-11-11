@@ -226,6 +226,13 @@ pub(in crate::scan::executor) fn run_stream<P: PacketProviders, K: Clock>(
         max_descriptor_bytes: descriptor_bytes,
         max_source_name_bytes: admission.max_source_name_bytes,
     };
+    let capture = super::CaptureEpoch::open(
+        executor,
+        plan.interfaces.clone(),
+        deadline,
+        &options.control,
+        options.max_evidence_frames,
+    )?;
     let mut pipeline = Pipeline::assemble(
         executor,
         options,
@@ -237,6 +244,7 @@ pub(in crate::scan::executor) fn run_stream<P: PacketProviders, K: Clock>(
             plan,
             descriptions,
             streaming: Some(streaming),
+            capture,
         },
     )?;
     let result = pipeline.drive();
@@ -365,7 +373,7 @@ impl<P: PacketProviders, K: Clock> Pipeline<'_, P, K> {
             {
                 drop(admitted.retained.take());
             }
-            let armed = self.plan.interfaces.contains(route.interface());
+            let armed = self.capture.contains(route.interface());
             self.attempts.queue(
                 offer.index,
                 Descriptor {

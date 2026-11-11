@@ -25,23 +25,23 @@ impl<P: PacketProviders, K: Clock> Pipeline<'_, P, K> {
     /// been drained, and reports whether they are still being drained.
     pub(super) fn settle_expired(&mut self) -> Result<bool, BoundaryError> {
         if self.attempts.notice_expired(self.executor.client.now()) {
-            self.capture_drain_remaining = self.capture_drain_limit;
+            self.capture.drain.reset();
         }
         // A callback can consume another probe's timeout while its reply is
         // already queued. Keep due probes until the bounded queues are drained.
-        let draining_captures = self.attempts.is_draining() && self.capture_drain_remaining > 0;
+        let draining_captures = self.capture.drain.active(self.attempts.is_draining());
         if !draining_captures {
             while let Some(index) = self.attempts.pop_expired() {
                 self.complete(index)?;
             }
-            self.capture_drain_remaining = self.capture_drain_limit;
+            self.capture.drain.reset();
         }
         Ok(draining_captures)
     }
 
     pub(super) fn ingest(&mut self, captured: capture::Captured) -> Result<(), BoundaryError> {
         self.ingress_unknown |= captured.received_at.is_none();
-        if !self.seen.insert(captured.identity()) {
+        if !self.capture.deduplicate(captured.identity()) {
             return Ok(());
         }
         let source = captured.source;
@@ -97,7 +97,7 @@ impl<P: PacketProviders, K: Clock> Pipeline<'_, P, K> {
             |index| self.attempts.description_if(index).map(Descriptor::probe),
             &self.executor.operation.registry,
             &decoded,
-            &self.plan.interfaces[source],
+            self.capture.source(source),
             received,
         );
 
@@ -110,7 +110,7 @@ impl<P: PacketProviders, K: Clock> Pipeline<'_, P, K> {
                 |index| self.attempts.description_if(index).map(Descriptor::probe),
                 &self.executor.operation.registry,
                 &decoded,
-                &self.plan.interfaces[source],
+                self.capture.source(source),
                 received,
             );
             return match settled.as_slice() {
@@ -135,7 +135,7 @@ impl<P: PacketProviders, K: Clock> Pipeline<'_, P, K> {
             && self.history.ambiguous(
                 self.attempts.description(index).probe(),
                 &decoded.packet,
-                &self.plan.interfaces[source],
+                self.capture.source(source),
             )
         {
             if self.diagnostics.insert("ambiguous") {

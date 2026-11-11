@@ -17,22 +17,23 @@ pub(crate) use self::adaptive_execution::adaptive_reservation;
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use packetcraftr_core::budget::Deadline;
-use packetcraftr_core::registry::Registry;
 
 use crate::clock::Clock;
 use crate::engine::execution::publisher;
+use crate::engine::operation::{Workflow, WorkflowSetup};
 use crate::policy::Authorizer;
 use crate::probe::runner::BatchEvidence;
 use crate::providers::{PacketProviders, TargetProviders};
-use crate::target::ResolveTarget;
+use crate::target::{ResolveTarget, SelectedAddress};
 use crate::{Client, Sink};
 
 use super::Error;
 use super::WORKFLOW;
 use super::adaptive::{Ceilings, Controller};
-use super::discovery::{self, Composer};
+use super::discovery::Sweep;
 use super::error::duration_limit;
 use super::evidence::ProbeClassifier;
 use super::executor::{AdaptiveAdmission, ClientExecutor, Pipelined};
@@ -41,6 +42,10 @@ use super::report::RttAccumulator;
 use super::{ClassificationCounts, Event, Report, Request, Scheduling};
 use crate::probe::Stage;
 use crate::probe::enforce_deadline;
+
+#[cfg(test)]
+#[path = "engine/tests.rs"]
+mod tests;
 
 impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
     /// Scans the request's authorized targets and publishes each probe's
@@ -64,22 +69,18 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
     where
         S: Sink<Event, Ack = ()>,
     {
-        let policy = operation.policy(&self.policy);
-        let mut admission =
-            crate::client::admission::Admission::new(&policy, self.providers.resolver());
+        let setup = WorkflowSetup::new(self, operation);
         let publish = publisher(
             &operation.runtime,
             sink,
             |error| duration_limit(0_u64, error),
             |source| Error::Output { source },
         )?;
+        let mut executor = ClientExecutor::new(self, &request, operation);
         run(
             &request,
-            &mut admission,
-            &operation.registry,
-            &mut ClientExecutor::new(self, &request, operation),
-            &mut self.clock.clone(),
-            &mut operation.deadline(self, request.limits.max_duration),
+            &mut setup.start(self, request.limits.max_duration),
+            &mut executor,
             publish,
         )
     }
@@ -121,11 +122,39 @@ impl Scheduler {
         }
     }
 
-    fn controller_mut(&mut self) -> Option<&mut Controller> {
+    fn is_adaptive(&self) -> bool {
+        matches!(self, Self::Adaptive(_))
+    }
+
+    fn host_index(&mut self, target: &SelectedAddress) -> Option<usize> {
         match self {
             Self::Fixed { .. } => None,
-            Self::Adaptive(adaptive) => Some(&mut adaptive.controller),
+            Self::Adaptive(adaptive) => Some(adaptive.controller.host_index(target)),
         }
+    }
+
+    fn host_started(&mut self, host: Option<usize>, now: Instant) {
+        if let (Self::Adaptive(adaptive), Some(host)) = (self, host) {
+            adaptive.controller.host_started(host, now);
+        }
+    }
+
+    fn host_expired(&mut self, host: Option<usize>, now: Instant) -> bool {
+        let (Self::Adaptive(adaptive), Some(host)) = (self, host) else {
+            return false;
+        };
+        if !adaptive.controller.host_expired(host, now) {
+            return false;
+        }
+        adaptive.controller.mark_incomplete(host);
+        true
+    }
+
+    fn host_remaining(&self, host: Option<usize>, now: Instant) -> Option<Duration> {
+        let (Self::Adaptive(adaptive), Some(host)) = (self, host) else {
+            return None;
+        };
+        Some(adaptive.controller.host_remaining(host, now))
     }
 
     fn execute_stage<E, C, F>(
@@ -177,11 +206,8 @@ impl Scheduler {
 
 pub(crate) fn run<A, E, C, F>(
     request: &Request,
-    authorizer: &mut A,
-    registry: &std::sync::Arc<Registry>,
+    workflow: &mut Workflow<A, C>,
     executor: &mut E,
-    clock: &mut C,
-    deadline: &mut Deadline,
     mut emit: F,
 ) -> Result<Report, Error>
 where
@@ -190,6 +216,12 @@ where
     C: Clock,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
+    let Workflow {
+        authorizer,
+        registry,
+        clock,
+        deadline,
+    } = workflow;
     enforce_deadline::<Error>(deadline)?;
     let approved = approve(request, authorizer, deadline)?;
     let options = &request.discovery;
@@ -260,9 +292,9 @@ where
             rtt: RttAccumulator::default(),
             discovery: Vec::new(),
             feedback: scheduler
-                .controller()
-                .map(|_| (Vec::new(), request.max_in_flight)),
-            adaptive_attempts: scheduler.controller().map(|_| request.attempts),
+                .is_adaptive()
+                .then(|| (Vec::new(), request.max_in_flight)),
+            adaptive_attempts: scheduler.is_adaptive().then_some(request.attempts),
         },
         &mut emit,
     );
@@ -276,7 +308,7 @@ where
             deadline,
         )?;
     }
-    let mut composer = Composer::new(&approved.targets, options.mode, options.unresponsive);
+    let mut sweep = Sweep::new(&approved.targets, options.mode, options.unresponsive);
     let mut stats = crate::Stats::default();
     let mut prober = Prober {
         request,
@@ -292,9 +324,9 @@ where
             sendable = discover_neighbors(
                 &mut prober,
                 &approved.targets,
-                &mut composer,
+                sweep.composer_mut(),
                 &mut stats,
-                scheduler.controller_mut(),
+                &mut scheduler,
             )?;
         }
         if !options.probes.is_empty() {
@@ -302,17 +334,11 @@ where
                 if !sendable[index] {
                     continue;
                 }
-                match reach_next_hop(
-                    &mut prober,
-                    target,
-                    &mut stats,
-                    0,
-                    scheduler.controller_mut(),
-                )? {
+                match reach_next_hop(&mut prober, target, &mut stats, 0, &mut scheduler)? {
                     ReachOutcome::Resolved => {}
                     ReachOutcome::Silent(_) => {
                         sendable[index] = false;
-                        composer.unreachable(index);
+                        sweep.unreachable(index);
                     }
                     ReachOutcome::HostExpired => sendable[index] = false,
                 }
@@ -335,7 +361,7 @@ where
             first_sequence: 0,
         };
         let discovery_probes = discovery.probes(request)?;
-        scan_sequence = if scheduler.controller().is_some() {
+        scan_sequence = if scheduler.is_adaptive() {
             probe_count(
                 approved.targets.len(),
                 options.probes.len(),
@@ -363,20 +389,15 @@ where
         }
         let discovered = scheduler.execute_stage(&mut prober, &mut evidence, &discovery, &stats)?;
         add_stats(&mut stats, &discovered, scan_sequence)?;
-        composer.observe_all(evidence.classifier_mut().discovery.drain(..))?;
+        sweep.observe_all(evidence.classifier_mut().discovery.drain(..))?;
         if discovered.packets_attempted > 0 {
             // When the stage's last probe left is not known on the operation's
             // clock, so its whole pause stays owed.
             prober.owed.owe(1, None);
         }
     }
-    if let Some(controller) = scheduler.controller() {
-        for index in controller.incomplete_targets(&approved.targets) {
-            composer.incomplete(index);
-        }
-    }
-    let mut hosts = composer.finish();
-    let scanned = discovery::scanned(&approved.targets, &hosts);
+    let discovered = sweep.finish_discovery(scheduler.controller());
+    let scanned = discovered.scan_targets();
     if !approved.endpoints.is_empty() {
         for target in &scanned {
             // Discovery answers for a target it reached; without it, a
@@ -386,7 +407,7 @@ where
                 target,
                 &mut stats,
                 scan_sequence,
-                scheduler.controller_mut(),
+                &mut scheduler,
             )? {
                 ReachOutcome::Resolved | ReachOutcome::HostExpired => {}
                 ReachOutcome::Silent(source) => {
@@ -420,11 +441,7 @@ where
         &scanned,
         scan_sequence.saturating_add(scan_probes),
     )?;
-    if let Some(controller) = scheduler.controller() {
-        for index in controller.incomplete_targets(&approved.targets) {
-            hosts[index].scan = discovery::Scan::Incomplete;
-        }
-    }
+    let hosts = discovered.finish_scan(scheduler.controller());
     let retained_evidence_bytes = evidence.retained_evidence_bytes();
     let ProbeClassifier { winners, rtt, .. } = evidence.into_classifier();
     let mut counts = ClassificationCounts::default();

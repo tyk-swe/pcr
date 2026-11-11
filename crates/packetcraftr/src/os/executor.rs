@@ -74,10 +74,12 @@ impl<P: PacketProviders, K: Clock> Native<'_, P, K> {
             .operation
             .neighbors
             .one_attempt(
-                self.preparation_timeout,
-                self.collection.capture.max_frames,
-                self.collection.capture.max_bytes,
-                self.collection.capture.snap_length,
+                crate::neighbor::Bounds {
+                    attempt_timeout: self.preparation_timeout,
+                    max_frames: self.collection.capture.max_frames,
+                    max_bytes: self.collection.capture.max_bytes,
+                    snap_length: self.collection.capture.snap_length,
+                },
                 1,
             )
             .map_err(BoundaryError::from_error)?;
@@ -102,12 +104,7 @@ impl<P: PacketProviders, K: Clock> Native<'_, P, K> {
         if resolution.evidence_truncated {
             return Err(FAULT.internal("neighbor evidence was truncated"));
         }
-        let stats = crate::neighbor::stats(
-            resolution.attempts,
-            bytes.len(),
-            self.client.now().saturating_duration_since(started),
-            resolution.capture_statistics,
-        );
+        let stats = resolution.stats(self.client.now().saturating_duration_since(started));
         self.operation
             .spent
             .checked_add_assign(&stats)

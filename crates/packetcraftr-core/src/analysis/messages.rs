@@ -6,7 +6,7 @@
 
 use super::{
     FrameRecord, ScopedFlowKey, Summary as RunSummary,
-    application::{self, Error, Limits, TcpSources},
+    application::{self, Error, Limits, Retained, TcpSources},
     provenance::{Accumulator, SourceSet},
     scope::Definition,
     session::{self, CollectorNeeds},
@@ -120,7 +120,7 @@ pub struct Collector {
     stopped: BTreeMap<ScopedFlowKey, (u64, u64)>,
     buffered: usize,
     buffer_capacity: usize,
-    retained: usize,
+    retained: Retained,
     summary: Summary,
 }
 impl Collector {
@@ -166,12 +166,12 @@ impl Collector {
             stopped: BTreeMap::new(),
             buffered: 0,
             buffer_capacity: 0,
-            retained: 0,
+            retained: Retained::new(limits),
             summary: Summary::default(),
         })
     }
     pub fn scopes(&self) -> impl Iterator<Item = &Definition> {
-        self.tcp.scopes.values()
+        self.tcp.scopes()
     }
     pub fn observe(&mut self, record: &FrameRecord<'_>) -> Result<Vec<Event>, Error> {
         let mut events = Vec::new();
@@ -597,11 +597,7 @@ impl Collector {
     }
     fn emit(&mut self, mut message: Message, out: &mut Vec<Event>) -> Result<(), Error> {
         self.limits.check_messages(self.summary.messages as usize)?;
-        let retained = self
-            .retained
-            .saturating_add(Limits::decoded_charge(message.wire.len()));
-        self.limits.check_retained(retained)?;
-        self.retained = retained;
+        self.retained.charge(message.wire.len())?;
         self.summary.messages += 1;
         message.index = self.summary.messages;
         *self

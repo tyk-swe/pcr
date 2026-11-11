@@ -324,6 +324,92 @@ fn dequeued_frame_survives_wait_interruption() {
     assert!(!outcome.evidence_truncated);
 }
 
+struct SilentSession {
+    metadata: capture::Metadata,
+}
+
+impl capture::Session for SilentSession {
+    fn metadata(&self) -> &capture::Metadata {
+        &self.metadata
+    }
+
+    fn wait_ready(&mut self, _: &Deadline) -> Result<(), packetcraftr_netio::Error> {
+        Ok(())
+    }
+
+    fn next_captured_frame(
+        &mut self,
+        _: &Deadline,
+    ) -> Result<Option<capture::Captured>, packetcraftr_netio::Error> {
+        Ok(None)
+    }
+
+    fn shutdown(&mut self) -> Result<(), packetcraftr_netio::Error> {
+        Ok(())
+    }
+
+    fn stats(&self) -> capture::Stats {
+        Default::default()
+    }
+}
+
+struct SilentCapture(capture::Metadata);
+
+impl capture::Provider for SilentCapture {
+    type Capture = SilentSession;
+
+    fn arm_capture(
+        &self,
+        _: &capture::Request,
+        _: &Deadline,
+    ) -> Result<SilentSession, packetcraftr_netio::Error> {
+        Ok(SilentSession {
+            metadata: self.0.clone(),
+        })
+    }
+}
+
+#[test]
+fn not_found_stats_count_every_request_frame() {
+    let request = Request {
+        interface: packetcraftr_netio::interface::Id {
+            name: "test0".into(),
+            index: 1,
+        },
+        interface_source: "192.168.1.1".parse().unwrap(),
+        interface_mac: MacAddress([2, 0, 0, 0, 0, 1]),
+        target: "192.168.1.2".parse().unwrap(),
+        vlan_tags: vec![],
+        mtu: 1500,
+        link_type: packetcraftr_core::frame::LinkType::ETHERNET,
+    };
+    let capture = SilentCapture(capture::Metadata {
+        interface: request.interface.clone(),
+        link_type: request.link_type,
+        snap_length: 1500,
+        native: Default::default(),
+    });
+    let transmitter = Transmitter(AtomicUsize::new(0));
+    let error = State::default()
+        .over(&transmitter, &capture)
+        .resolve(&request, &Deadline::new(Duration::from_secs(1)))
+        .unwrap_err();
+    let Error::NotFound {
+        attempts,
+        request_bytes,
+        ..
+    } = &error
+    else {
+        panic!("expected an unanswered neighbor resolution");
+    };
+    let frame_bytes = build_request_frame(&request).unwrap().len();
+    assert_eq!(*request_bytes, frame_bytes);
+    assert!(*attempts > 0);
+    let stats = error.exchange_stats(Duration::ZERO).unwrap();
+    assert_eq!(stats.packets_attempted, u64::from(*attempts));
+    assert_eq!(stats.bytes, u64::from(*attempts) * frame_bytes as u64);
+}
+
 fn cache_key(index: u16) -> NeighborCacheKey {
     let [high, low] = index.to_be_bytes();
     NeighborCacheKey::from(&Request {
@@ -695,4 +781,133 @@ fn cache_insertion_ttl_includes_lock_wait() {
             .unwrap(),
         None
     );
+}
+
+fn arp_reply_frame(request: &Request, responder: MacAddress) -> Frame {
+    use packetcraftr_core::build::{Builder, Options as BuildOptions};
+    use packetcraftr_core::codec::Addresses;
+    use packetcraftr_core::field::WireValue;
+    use packetcraftr_core::packet::Packet;
+    use packetcraftr_core::protocol::builtin;
+    use packetcraftr_core::protocol::link::{Arp, Ethernet};
+    use std::net::IpAddr;
+
+    let (IpAddr::V4(source), IpAddr::V4(target)) = (request.interface_source, request.target)
+    else {
+        unreachable!()
+    };
+    let mut packet = Packet::default();
+    packet.push(Ethernet {
+        destination: request.interface_mac.0,
+        source: responder.0,
+        ether_type: WireValue::Auto,
+    });
+    packet.push(Arp {
+        operation: Arp::OPERATION_REPLY,
+        sender_hardware: responder.0,
+        sender_protocol: target,
+        target_hardware: request.interface_mac.0,
+        target_protocol: source,
+        ..Arp::default()
+    });
+    let built = Builder::new(builtin::registry())
+        .build(packet, Addresses::default(), BuildOptions::default())
+        .unwrap();
+    Frame::new(
+        Some(std::time::SystemTime::now()),
+        packetcraftr_core::frame::LinkType::ETHERNET,
+        built.bytes,
+    )
+    .unwrap()
+}
+
+struct ReplySession {
+    metadata: capture::Metadata,
+    reads: usize,
+    reply: Frame,
+}
+
+impl capture::Session for ReplySession {
+    fn metadata(&self) -> &capture::Metadata {
+        &self.metadata
+    }
+
+    fn wait_ready(&mut self, _: &Deadline) -> Result<(), packetcraftr_netio::Error> {
+        Ok(())
+    }
+
+    fn next_captured_frame(
+        &mut self,
+        _: &Deadline,
+    ) -> Result<Option<capture::Captured>, packetcraftr_netio::Error> {
+        self.reads += 1;
+        if self.reads < 3 {
+            return Ok(None);
+        }
+        Ok(Some(capture::Captured::new(
+            self.reply.clone(),
+            Some(Instant::now()),
+        )))
+    }
+
+    fn shutdown(&mut self) -> Result<(), packetcraftr_netio::Error> {
+        Ok(())
+    }
+
+    fn stats(&self) -> capture::Stats {
+        Default::default()
+    }
+}
+
+struct ReplyCapture(std::sync::Mutex<Option<ReplySession>>);
+
+impl capture::Provider for ReplyCapture {
+    type Capture = ReplySession;
+
+    fn arm_capture(
+        &self,
+        _: &capture::Request,
+        _: &Deadline,
+    ) -> Result<Self::Capture, packetcraftr_netio::Error> {
+        Ok(self.0.lock().unwrap().take().unwrap())
+    }
+}
+
+#[test]
+fn resolved_stats_count_every_request_frame() {
+    let request = Request {
+        interface: packetcraftr_netio::interface::Id {
+            name: "test0".into(),
+            index: 1,
+        },
+        interface_source: "192.168.1.1".parse().unwrap(),
+        interface_mac: MacAddress([2, 0, 0, 0, 0, 1]),
+        target: "192.168.1.2".parse().unwrap(),
+        vlan_tags: vec![],
+        mtu: 1500,
+        link_type: packetcraftr_core::frame::LinkType::ETHERNET,
+    };
+    let responder = MacAddress([2, 0, 0, 0, 0, 9]);
+    let capture = ReplyCapture(std::sync::Mutex::new(Some(ReplySession {
+        metadata: capture::Metadata {
+            interface: request.interface.clone(),
+            link_type: request.link_type,
+            snap_length: 1500,
+            native: Default::default(),
+        },
+        reads: 0,
+        reply: arp_reply_frame(&request, responder),
+    })));
+    let transmitter = Transmitter(AtomicUsize::new(0));
+    let resolution = State::default()
+        .over(&transmitter, &capture)
+        .resolve(&request, &Deadline::new(Duration::from_secs(1)))
+        .unwrap();
+    assert_eq!(resolution.mac_address, responder);
+    assert_eq!(resolution.attempts, 2);
+    let frame_bytes = build_request_frame(&request).unwrap().len();
+    assert_eq!(resolution.request_bytes, frame_bytes);
+    let stats = resolution.stats(Duration::ZERO);
+    assert_eq!(stats.packets_attempted, 2);
+    assert_eq!(stats.bytes, 2 * frame_bytes as u64);
 }

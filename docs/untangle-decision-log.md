@@ -858,3 +858,110 @@ Piped and `--color never` output is unchanged. With colour enabled, topic
 headings such as `Values:` and `Operators:` are now styled like other
 headings, and plain lines that merely begin with `error`, `warning`, or
 `info` are no longer coloured.
+
+## Module depth sweep, 2026-11-10
+
+This pass ranked source files by recent churn times size and audited the
+hottest clusters in all four crates for shallow modules. It looked for
+pass-throughs, repeated multi-step sequences, positional knob clusters, and
+rules that callers had to know because the callee did not enforce them.
+Behaviour stays the same except where the visible changes below say otherwise.
+The maintainer approved the two behaviour changes and asked for
+characterization tests before the riskier engine and correlation work.
+
+### Decisions and problems addressed
+
+- Stage live workflow setup in one place.
+  - Eight entry points in dns, traceroute, scan, os, and fuzz repeated policy
+    narrowing, admission, clock, registry, and child deadline setup, and each
+    runner took about seven arguments.
+  - `WorkflowSetup` builds those once and `Workflow` carries them to the
+    runner. `Admission` owns its narrowed policy through a `Cow`, so the
+    client path still borrows.
+  - New entry-point tests pin policy denial before any send, sink failure on
+    the first event, and an exhausted deadline.
+- Make the discovery sweep own incomplete-target ordering.
+  - Both scan engines marked adaptive incomplete targets before composing
+    hosts and again after the scan stage. `Sweep` and `Discovered` make the
+    final host records reachable only after both passes.
+- Let the scan scheduler own adaptive host lifecycle calls.
+  - Eight call sites asked the scheduler for its optional controller and the
+    neighbor helpers threaded `Option<&mut Controller>`. The scheduler now
+    answers host questions itself and the fixed variant answers neutrally.
+- Report request bytes from the neighbor resolver.
+  - The resolver built the request frame and dropped its length, so four
+    callers rebuilt the frame only to count bytes. `Resolution` and
+    `Error::NotFound` now carry it and compute their own stats.
+  - The scan executor's two resolution paths share one exchange.
+- Narrow neighbor resolution through one `Bounds` value instead of four
+  positional arguments repeated by six callers, so scan approval and
+  execution validate the same narrowing.
+- Make each DNS batch question outcome a tagged union.
+  - The result and error options were valid only for one status each, a rule
+    kept in doc comments. The status is now derived from the outcome.
+- Compose the native capture source instead of copying ten of its fields.
+- Default capture request settings in `Request::new` and `GroupRequest::new`.
+- Give retained application bytes one owner. Four collectors repeated the
+  charge and check that HTTP/2 already kept in one method.
+- Let `AnalysisSetup` open captures and build sessions, so reader limits and
+  session options can no longer diverge across the analyze commands. One
+  function maps metered output errors for both callers.
+- Let one input reader own stdin-or-file documents for security documents and
+  UDP profiles.
+- Give the fuzz retained byte ceiling one owner, with a test for the byte
+  limit that had none.
+- Own the replay per-step deadline check in one guard and delete the
+  single-implementation replay executor trait.
+- Derive UDP decode-as selectability from catalog ports. Tunnel UDP ports now
+  live in their catalog rows instead of a hand list beside the bindings.
+- Build filter field references through one constructor and look up a
+  binding's schema once.
+
+### Requirements retained after inspection
+
+- The authoritative reply loop in `exchange/correlation.rs` stays separate
+  from `workflow_attribution`. The authoritative loop checks each request's
+  freshness on its own, while the workflow path takes the prefix found by
+  `partition_point`, and the two disagree when send markers are not in
+  order. The deadline is also checked before each matcher call in one and
+  after it in the other. Two tests now pin the authoritative behaviour.
+  Whether workflow sends can ever arrive out of order is a follow-up
+  question for `workflow_attribution`.
+- Differential keeps its own setup, because its preflight planning and
+  authorization run before the operation exists.
+- The scan stage budget stays written twice. The approval planner adds a
+  neighbor term, the fixed projections take different inputs, and the
+  overflow errors differ, so a shared helper would need three knobs to save
+  about ten lines.
+- Capture sessions keep their own shutdown, stats, and loss sequences. The
+  four callers read per-source or aggregate stats and apply the overflow
+  policy at different points.
+- `run_with_ip_events` stays because the IP reassembly fuzz target calls it.
+- The neighbor resolver and exchange still validate capture requests before
+  opening them, because the capture provider is a seam with fake and
+  third-party adapters.
+- The IPv4 and IPv6 option walkers stay separate until a malformed-option
+  table test exists, since their length rules differ.
+- `EvidenceFault` keeps its typed variants, because failures are modelled as
+  values here even when they are only rendered today.
+- `differential-join` keeps reading files only.
+- The built-bytes ceiling in fuzz `build_case` stays for now. Mutation
+  testing showed it can never decide an outcome, because the retained-byte
+  charge that follows it always holds at least as many bytes and fails with
+  the same error first. Removing it is a follow-up once the `actual` value it
+  reports is confirmed unused.
+- The uncalled dns batch `Report::status_counts` was removed.
+- Mutation testing over this pass's non-test diff kills 70 of 129 viable
+  mutants. The survivors sit in logic this pass reshaped but that had no
+  tests before it either, mainly the live scan neighbor helpers, the scan
+  executor's resolution paths, neighbor option bodies, capture evidence
+  stats, and CLI command entry points. Covering them needs live-path
+  fixtures and is left as follow-up work.
+
+### Visible changes
+
+`--decode-as udp.port=<port>:mpls` is now accepted, and the protocol reference
+lists `udp` as a transport for MPLS. An empty security document or UDP
+profiles document, from stdin or a file, now fails with `cli.input_source`
+before parsing instead of a JSON parse error. When a replay selector fails at
+the same moment the deadline expires, the deadline error is reported.

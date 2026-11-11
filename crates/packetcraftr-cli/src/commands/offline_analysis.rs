@@ -13,9 +13,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use packetcraftr_core::analysis;
+use packetcraftr_core::capture_file::Reader;
 use packetcraftr_core::filter::Filter;
 use packetcraftr_core::registry::Registry;
 
+use std::io::Read;
 use std::path::Path;
 
 use analysis::{StreamRef, StreamTransport};
@@ -37,6 +39,35 @@ pub(super) struct AnalysisSetup {
 }
 
 impl AnalysisSetup {
+    pub(super) fn open(
+        &self,
+        invocation: &crate::invocation::Invocation,
+        path: &Path,
+    ) -> Result<Reader<Box<dyn Read>>, CliError> {
+        crate::input::open_capture(
+            &invocation.control,
+            &invocation.output,
+            path,
+            self.capture_limits,
+        )
+    }
+
+    pub(super) fn session<C: analysis::Collector>(
+        &self,
+        invocation: &crate::invocation::Invocation,
+        collector: C,
+        stream: Option<StreamRef>,
+    ) -> analysis::Session<'_, C> {
+        analysis::Session::new(
+            self.registry.clone(),
+            analysis::SessionOptions {
+                stream,
+                ..self.session_options(invocation)
+            },
+            collector,
+        )
+    }
+
     pub(super) fn options(
         &self,
         invocation: &crate::invocation::Invocation,
@@ -56,7 +87,7 @@ impl AnalysisSetup {
         }
     }
 
-    pub(super) fn session_options(
+    fn session_options(
         &self,
         invocation: &crate::invocation::Invocation,
     ) -> analysis::SessionOptions<'_> {
@@ -144,20 +175,8 @@ pub(super) fn inspect<C: analysis::Collector>(
         selector,
     } = inspection;
     let setup = prepare(limits, None, decode)?;
-    let session = analysis::Session::new(
-        setup.registry.clone(),
-        analysis::SessionOptions {
-            stream: selector,
-            ..setup.session_options(invocation)
-        },
-        collector,
-    );
-    let mut reader = crate::input::open_capture(
-        &invocation.control,
-        &invocation.output,
-        path,
-        setup.capture_limits,
-    )?;
+    let session = setup.session(invocation, collector, selector);
+    let mut reader = setup.open(invocation, path)?;
     let mut output = EventOutput::new(invocation, application.max_output_bytes());
     let outcome = session
         .run(

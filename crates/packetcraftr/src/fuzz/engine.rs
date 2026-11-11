@@ -8,6 +8,7 @@ use packetcraftr_core::{build::Builder, fuzz as packet_fuzz, registry::Registry}
 
 use crate::clock::Clock;
 use crate::engine::execution::{Context, Executor, Grant, publisher, rate_delay};
+use crate::engine::operation::{Workflow, WorkflowSetup};
 use crate::engine::preparation::exact_bytes;
 use crate::exchange::WorkflowExecutor;
 use crate::policy::{Authorizer, DeclaredPackets, Operation, PermissiveLive, WireLimits};
@@ -21,6 +22,9 @@ use super::executor::{CaseEvidence, CaseStep};
 use super::plan::worst_case_duration;
 use super::{Event, Report, Request, Trial};
 
+#[cfg(test)]
+mod tests;
+
 impl<P: PacketProviders, K: Clock> Client<P, K> {
     pub fn fuzz<S>(&self, request: Request, sink: S) -> Result<Report, Error>
     where
@@ -28,32 +32,21 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
     {
         let operation =
             crate::engine::operation::Operation::new(self, request.campaign.limits.max_duration);
-        let mut deadline = operation.deadline(self, request.campaign.limits.max_duration);
+        let setup = WorkflowSetup::with_authorizer(self, &operation, self.policy.as_ref());
+        let mut workflow = setup.start(self, request.campaign.limits.max_duration);
         let publish = publisher(&self.runtime, sink, duration_limit, |source| {
             Error::Output { source }
         })?;
         let mut executor =
             WorkflowExecutor::new(self, &operation, request.send(), request.collection.clone());
-        let mut authorization = self.policy.as_ref();
-        run(
-            &request,
-            &mut authorization,
-            Arc::clone(&self.registry),
-            &mut executor,
-            &mut self.clock.clone(),
-            &mut deadline,
-            publish,
-        )
+        run(&request, &mut workflow, &mut executor, publish)
     }
 }
 
 pub(super) fn run<A, E, C, F>(
     request: &Request,
-    authorizer: &mut A,
-    registry: Arc<Registry>,
+    workflow: &mut Workflow<A, C>,
     executor: &mut E,
-    clock: &mut C,
-    deadline: &mut Deadline,
     mut emit: F,
 ) -> Result<Report, Error>
 where
@@ -62,9 +55,15 @@ where
     C: Clock,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
+    let Workflow {
+        authorizer,
+        registry,
+        clock,
+        deadline,
+    } = workflow;
     deadline.check_cancelled()?;
     request.validate()?;
-    let prepared = prepare_campaign(request, &registry, deadline)?;
+    let prepared = prepare_campaign(request, registry, deadline)?;
     deadline.enforce()?;
     authorize_campaign(request, &prepared, authorizer)?;
     deadline.enforce()?;
@@ -75,8 +74,12 @@ where
         ..
     } = prepared;
     let delay = rate_delay::<Error>("cases_per_second", 1, request.cases_per_second)?;
-    let builder = Builder::new(Arc::clone(&registry));
-    let mut recorder = Recorder::new(registry, request.campaign.limits, request.evidence());
+    let builder = Builder::new(Arc::clone(registry));
+    let mut recorder = Recorder::new(
+        Arc::clone(registry),
+        request.campaign.limits,
+        request.evidence(),
+    );
     let mut context = Context::new(deadline, clock);
     let mut executed_before = false;
     for mut case in cases {

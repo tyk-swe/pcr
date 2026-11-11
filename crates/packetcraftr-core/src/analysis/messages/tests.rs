@@ -452,6 +452,39 @@ fn capture_reassembles_and_attributes_messages() {
     );
 }
 
+#[test]
+fn capture_reports_the_scope_of_an_analyzed_tcp_stream() {
+    let registry = crate::protocol::builtin::registry();
+    let collector =
+        Collector::new(Limits::default(), registry.clone(), [BuiltinProtocol::Mqtt]).unwrap();
+    let capture = include_bytes!("../../../../../examples/captures/protocol-mqtt-stream.pcap");
+    let mut reader =
+        crate::capture_file::Reader::with_limits(&capture[..], Default::default()).unwrap();
+    let mut streams = Vec::new();
+    let outcome = crate::analysis::Session::new(registry, Default::default(), collector)
+        .run(
+            &mut reader,
+            |_| Ok(()),
+            |event| {
+                if let Event::Message(message) = event {
+                    streams.push(message.flow.scope);
+                }
+                Ok(())
+            },
+        )
+        .unwrap();
+    assert!(!streams.is_empty(), "the capture produced no messages");
+    for scope in streams {
+        assert!(
+            outcome
+                .scopes
+                .iter()
+                .any(|definition| definition.id == scope),
+            "scope {scope:?} of an analyzed stream is not reported"
+        );
+    }
+}
+
 fn deliver_on(
     collector: &mut Collector,
     tracker: &Tracker,

@@ -128,19 +128,16 @@ impl Session for Capture {
     }
 }
 fn group(control: &Arc<Control>, expire_ready: bool, queued: bool) -> Group<Capture> {
-    let mut group = Group::new(&GroupRequest {
-        interfaces: vec![Id {
+    let mut group = Group::new(&GroupRequest::new(
+        vec![Id {
             index: 1,
             name: "controlled".into(),
         }],
-        limits: Limits {
+        Limits {
             snap_length: 64,
             ..Default::default()
         },
-        filter: None,
-        promiscuous: false,
-        native: Default::default(),
-    })
+    ))
     .unwrap();
     group
         .arm(

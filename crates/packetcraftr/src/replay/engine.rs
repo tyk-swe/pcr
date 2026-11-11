@@ -13,14 +13,14 @@ use crate::clock::Clock;
 use crate::engine::execution::{self, Paused};
 use crate::policy::WireLimits;
 use crate::providers::PacketProviders;
-use crate::route::{self, Materialized as MaterializedRoute, Plan as RoutePlan};
+use crate::route::{self, Materialized as MaterializedRoute};
 use crate::{Client, Sink};
 use packetcraftr_core::error::BoundaryError;
 
 use super::admission::FrameAdmission;
 use super::error::Error;
 use super::evidence::{FrameEvidence, Transmission, validate_transmission};
-use super::executor::{Executor, ProviderExecutor};
+use super::executor::ProviderExecutor;
 use super::plan::{FramePlan, Tally, plan_frame};
 use super::report::{Event, Report};
 use super::request::{Limits, Options, Parts, Request, Selector, Timing, validate};
@@ -114,19 +114,19 @@ impl Session {
     }
 }
 
-struct Run<'a, 'x, 'c, 'p, S, X, C, F> {
+struct Run<'a, 'x, 'e, 'c, 'p, P, S, C, F> {
     options: &'a Options,
     selector: S,
     authorizer: &'a mut FrameAdmission<'p>,
-    executor: &'x mut X,
+    executor: &'x mut ProviderExecutor<'e, P>,
     clock: &'c mut C,
     emit: F,
 }
 
-pub(crate) fn run<R, S, X, C, F>(
+pub(crate) fn run<R, S, P, C, F>(
     parts: Parts<R, S>,
     authorizer: &mut FrameAdmission<'_>,
-    executor: &mut X,
+    executor: &mut ProviderExecutor<'_, P>,
     clock: &mut C,
     deadline: Deadline,
     emit: F,
@@ -134,7 +134,7 @@ pub(crate) fn run<R, S, X, C, F>(
 where
     R: Read,
     S: Selector,
-    X: Executor,
+    P: PacketProviders,
     C: Clock,
     F: FnMut(FrameEvidence, &Deadline) -> Result<(), Error>,
 {
@@ -201,10 +201,10 @@ where
     })
 }
 
-impl<S, X, C, F> Run<'_, '_, '_, '_, S, X, C, F>
+impl<P, S, C, F> Run<'_, '_, '_, '_, '_, P, S, C, F>
 where
+    P: PacketProviders,
     S: Selector,
-    X: Executor,
     C: Clock,
     F: FnMut(FrameEvidence, &Deadline) -> Result<(), Error>,
 {
@@ -262,19 +262,27 @@ where
                 break;
             };
             session.tally.frames_read += 1;
-            if !self.select(&session.deadline, source_index, &read)? {
+            let selected = guarded(&session.deadline, source_index, || {
+                self.selector.select(source_index, &read.frame)
+            })?;
+            if !selected {
                 source_index += 1;
                 continue;
             }
 
             let plan = plan_frame(self.options, &session.tally, &read.frame, source_index)?;
-            authorize_frame(
-                self.authorizer,
-                &session.deadline,
-                source_index,
-                &plan,
-                &read.frame,
-            )?;
+            guarded(&session.deadline, source_index, || {
+                self.authorizer
+                    .admit_frame(
+                        WireLimits::new(plan.next_completed, plan.next_bytes),
+                        &read.frame,
+                        plan.mode,
+                    )
+                    .map_err(|source| Error::Authorization {
+                        source_index,
+                        source,
+                    })
+            })?;
             let interface = self.selector.interface(source_index, &read.frame)?;
             let route = plan_frame_route(
                 self.executor,
@@ -284,13 +292,14 @@ where
                 &plan,
                 &read.frame,
             )?;
-            authorize_final_wire(
-                self.authorizer,
-                &session.deadline,
-                source_index,
-                &read.frame,
-                &route.plan,
-            )?;
+            guarded(&session.deadline, source_index, || {
+                self.authorizer
+                    .authorize_final_wire(&read.frame, &route.plan)
+                    .map_err(|source| Error::Authorization {
+                        source_index,
+                        source,
+                    })
+            })?;
             let overflow = || {
                 duration_limit(
                     source_index,
@@ -349,18 +358,6 @@ where
         session.tally.passes_completed += 1;
         Ok(source_index)
     }
-
-    fn select(
-        &mut self,
-        deadline: &Deadline,
-        source_index: u64,
-        read: &ReadFrame,
-    ) -> Result<bool, Error> {
-        enforce_deadline(deadline, source_index)?;
-        let selected = self.selector.select(source_index, &read.frame)?;
-        enforce_deadline(deadline, source_index)?;
-        Ok(selected)
-    }
 }
 
 fn read_frame<R: Read>(
@@ -370,14 +367,13 @@ fn read_frame<R: Read>(
     source_index: u64,
     frames_read: u64,
 ) -> Result<Option<ReadFrame>, Error> {
-    enforce_deadline(deadline, source_index)?;
-    let frame = reader.next_frame();
-    enforce_deadline(deadline, source_index)?;
-    let Some(frame) = frame.map_err(|source| Error::Capture {
-        source_index,
-        source,
-    })?
-    else {
+    let frame = guarded(deadline, source_index, || {
+        reader.next_frame().map_err(|source| Error::Capture {
+            source_index,
+            source,
+        })
+    })?;
+    let Some(frame) = frame else {
         return Ok(None);
     };
     let capture_interface = capture_interface(reader, &frame, source_index)?;
@@ -430,40 +426,21 @@ fn capture_interface<R: Read>(
         })
 }
 
-fn authorize_frame(
-    authorizer: &mut FrameAdmission<'_>,
-    deadline: &Deadline,
-    source_index: u64,
-    plan: &FramePlan,
-    frame: &Frame,
-) -> Result<(), Error> {
-    enforce_deadline(deadline, source_index)?;
-    let authorization = authorizer.admit_frame(
-        WireLimits::new(plan.next_completed, plan.next_bytes),
-        frame,
-        plan.mode,
-    );
-    enforce_deadline(deadline, source_index)?;
-    authorization.map_err(|source| Error::Authorization {
-        source_index,
-        source,
-    })
-}
-
-fn plan_frame_route<X: Executor>(
-    executor: &mut X,
+fn plan_frame_route<P: PacketProviders>(
+    executor: &mut ProviderExecutor<'_, P>,
     interface: &route::Interface,
     deadline: &Deadline,
     source_index: u64,
     plan: &FramePlan,
     frame: &Frame,
 ) -> Result<MaterializedRoute, Error> {
-    enforce_deadline(deadline, source_index)?;
-    let route = executor.plan_frame(interface, plan.mode, frame, deadline);
-    enforce_deadline(deadline, source_index)?;
-    let route = route.map_err(|source| Error::Transmission {
-        source_index,
-        source,
+    let route = guarded(deadline, source_index, || {
+        executor
+            .plan_frame(interface, plan.mode, frame, deadline)
+            .map_err(|source| Error::Transmission {
+                source_index,
+                source,
+            })
     })?;
     // The routed interface may name only the interface's name or index; the
     // executor resolves it to the complete identity it will use.
@@ -474,22 +451,6 @@ fn plan_frame_route<X: Executor>(
         });
     }
     Ok(route)
-}
-
-fn authorize_final_wire(
-    authorizer: &mut FrameAdmission<'_>,
-    deadline: &Deadline,
-    source_index: u64,
-    frame: &Frame,
-    route: &RoutePlan,
-) -> Result<(), Error> {
-    enforce_deadline(deadline, source_index)?;
-    let authorization = authorizer.authorize_final_wire(frame, route);
-    enforce_deadline(deadline, source_index)?;
-    authorization.map_err(|source| Error::Authorization {
-        source_index,
-        source,
-    })
 }
 
 fn pace<C: Clock>(
@@ -508,8 +469,8 @@ fn pace<C: Clock>(
     })
 }
 
-fn transmit_frame<X: Executor>(
-    executor: &mut X,
+fn transmit_frame<P: PacketProviders>(
+    executor: &mut ProviderExecutor<'_, P>,
     deadline: &Deadline,
     source_index: u64,
     route: &MaterializedRoute,
@@ -527,6 +488,17 @@ fn transmit_frame<X: Executor>(
         interface: route.plan.decision.interface.clone(),
         report,
     })
+}
+
+fn guarded<T>(
+    deadline: &Deadline,
+    source_index: u64,
+    step: impl FnOnce() -> Result<T, Error>,
+) -> Result<T, Error> {
+    enforce_deadline(deadline, source_index)?;
+    let result = step();
+    enforce_deadline(deadline, source_index)?;
+    result
 }
 
 fn enforce_deadline(deadline: &Deadline, source_index: u64) -> Result<(), Error> {
@@ -550,3 +522,6 @@ fn duration_limit(source_index: u64, error: DeadlineExceeded) -> Error {
         limit: error.limit,
     }
 }
+
+#[cfg(test)]
+mod tests;

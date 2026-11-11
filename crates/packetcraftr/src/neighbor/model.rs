@@ -26,8 +26,20 @@ pub(crate) struct Request {
 pub struct Resolution {
     pub mac_address: MacAddress,
     pub attempts: u32,
+    pub request_bytes: usize,
     pub cache_hit: bool,
     pub captured: Vec<Frame>,
     pub evidence_truncated: bool,
     pub capture_statistics: Stats,
+}
+
+impl Resolution {
+    pub(crate) fn stats(&self, elapsed: std::time::Duration) -> crate::Stats {
+        super::stats(
+            self.attempts,
+            self.request_bytes,
+            elapsed,
+            self.capture_statistics,
+        )
+    }
 }

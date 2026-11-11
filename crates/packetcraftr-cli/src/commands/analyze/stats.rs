@@ -19,7 +19,6 @@ use self::arguments::Args;
 use self::output::Table;
 use crate::commands::offline_analysis::prepare;
 use crate::errors::CliError;
-use crate::input::open_capture;
 use crate::publication::emit_published;
 
 use crate::output::contract::PublishedType;
@@ -97,12 +96,7 @@ pub(super) fn run(
     )
     .map_err(CliError::classified)?;
 
-    let mut reader = open_capture(
-        &invocation.control,
-        &invocation.output,
-        &arguments.path,
-        prepared.capture_limits,
-    )?;
+    let mut reader = prepared.open(invocation, &arguments.path)?;
 
     let options = prepared.options(invocation);
     let summary = analysis::run(&mut reader, prepared.registry.clone(), &options, |record| {

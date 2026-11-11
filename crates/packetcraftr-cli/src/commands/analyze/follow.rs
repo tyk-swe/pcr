@@ -15,7 +15,6 @@ use packetcraftr_core::analysis;
 use self::arguments::{Args, Direction};
 use crate::commands::offline_analysis::prepare;
 use crate::errors::CliError;
-use crate::input::open_capture;
 
 use analysis::follow::{Chunk, Collector};
 use rendering::State;
@@ -113,22 +112,10 @@ pub(super) fn run(
             )
         })
         .transpose()?;
-    let mut reader = open_capture(
-        &invocation.control,
-        &invocation.output,
-        &arguments.path,
-        prepared.capture_limits,
-    )?;
+    let mut reader = prepared.open(invocation, &arguments.path)?;
 
     // Indices stay capture-global, so the index stats reports is the index extracted here.
-    let session = analysis::Session::new(
-        prepared.registry.clone(),
-        analysis::SessionOptions {
-            stream: Some(selector),
-            ..prepared.session_options(invocation)
-        },
-        Collector::new(selector),
-    );
+    let session = prepared.session(invocation, Collector::new(selector), Some(selector));
     let direction = arguments.direction;
     let mut state = State::new(prepared.capture_limits.retention_ceiling());
     let mut sink = |chunk: Chunk| -> Result<(), packetcraftr_core::error::BoundaryError> {

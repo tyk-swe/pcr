@@ -198,19 +198,16 @@ fn capture(
     let client = packetcraftr::Client::new(builtin::registry(), policy, backend)
         .with_cancellation(cancellation);
     let request = packetcraftr::capture::Request::new(
-        net::capture::GroupRequest {
-            interfaces: vec![net::interface::Id {
+        net::capture::GroupRequest::new(
+            vec![net::interface::Id {
                 name: "mock".into(),
                 index: 1,
             }],
-            limits: net::capture::Limits {
+            net::capture::Limits {
                 overflow_policy: net::capture::OverflowPolicy::DropNewest,
                 ..net::capture::Limits::default()
             },
-            filter: None,
-            promiscuous: false,
-            native: net::capture::NativeSettings::default(),
-        },
+        ),
         Duration::from_secs(30),
     );
     let result = drive(&client, request, context, &args, &invocation);

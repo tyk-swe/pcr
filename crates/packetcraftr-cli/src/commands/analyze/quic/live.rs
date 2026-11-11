@@ -49,11 +49,9 @@ pub(super) fn run(
         .collect();
     let request = packetcraftr::capture::Request::new(
         net::capture::GroupRequest {
-            interfaces,
-            limits: args.capture.clone().into_limits(),
             filter: args.capture_filter.clone(),
             promiscuous: args.promiscuous,
-            native: net::capture::NativeSettings::default(),
+            ..net::capture::GroupRequest::new(interfaces, args.capture.clone().into_limits())
         },
         args.timeout.timeout(),
     );
@@ -116,11 +114,11 @@ fn drive<P: packetcraftr::CaptureProviders, K: packetcraftr::clock::Clock>(
                     *interfaces = sources
                         .iter()
                         .map(|source| capture_file::Interface {
-                            link_type: source.metadata.link_type,
-                            snap_len: u32::try_from(source.metadata.snap_length)
+                            link_type: source.native.metadata.link_type,
+                            snap_len: u32::try_from(source.native.metadata.snap_length)
                                 .unwrap_or(u32::MAX),
                             timestamp_resolution: capture_file::TimestampResolution::Decimal(
-                                match source.metadata.native.timestamp_precision.effective {
+                                match source.native.metadata.native.timestamp_precision.effective {
                                     Some(net::capture::TimestampPrecision::Micro) => 6,
                                     _ => 9,
                                 },

@@ -13,15 +13,12 @@ pub(in crate::commands) fn read(
     path: &Path,
     limit: usize,
 ) -> Result<Vec<u8>, CliError> {
-    if path == Path::new("-") {
-        crate::input::read_stdin_bounded_allow_empty(
-            &invocation.control,
-            limit,
-            crate::input::InputKind::SecurityDocument,
-        )
-    } else {
-        crate::input::read_bounded_json_document(&invocation.control, path, limit)
-    }
+    crate::input::read_document(
+        &invocation.control,
+        path,
+        limit,
+        crate::input::InputKind::SecurityDocument,
+    )
 }
 
 /// A pipe has one consumer; reject ambiguous inputs before consuming any bytes.

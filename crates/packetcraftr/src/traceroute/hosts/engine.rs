@@ -7,7 +7,6 @@ use std::time::Duration;
 
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::error::BoundaryError;
-use packetcraftr_core::registry::Registry;
 
 use super::planner::{HostsClassifier, Planner, Slot};
 use super::report::{Event, Report};
@@ -16,6 +15,7 @@ use super::selection::{Choice, choose};
 use crate::client::admission::{DeclaredTargets, FamilyGate, admit_selection, wire_limits};
 use crate::clock::Clock;
 use crate::engine::execution::{Executor, publisher, rate_delay};
+use crate::engine::operation::{Workflow as OperationWorkflow, WorkflowSetup};
 use crate::error::FromFailure as _;
 use crate::exchange::WorkflowExecutor;
 use crate::policy::Authorizer;
@@ -49,9 +49,7 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
         S: Sink<Event, Ack = ()>,
     {
         let mut operation = operation.clone();
-        let policy = operation.policy(&self.policy);
-        let mut admission =
-            crate::client::admission::Admission::new(&policy, self.providers.resolver());
+        let setup = WorkflowSetup::new(self, &operation);
         let runtime = operation.runtime.clone();
         let publish = publisher(
             &runtime,
@@ -71,10 +69,12 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
             let narrowed = operation
                 .neighbors
                 .one_attempt(
-                    request.timeout,
-                    request.limits.evidence.max_frames,
-                    request.limits.evidence.max_bytes,
-                    request.collection.capture.snap_length,
+                    crate::neighbor::Bounds {
+                        attempt_timeout: request.timeout,
+                        max_frames: request.limits.evidence.max_frames,
+                        max_bytes: request.limits.evidence.max_bytes,
+                        snap_length: request.collection.capture.snap_length,
+                    },
                     request.limits.max_probes,
                 )
                 .map_err(|source| Error::Collection(BoundaryError::from_error(source)))?;
@@ -93,11 +93,8 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
         ));
         let mut report = run(
             &request,
-            &mut admission,
-            &operation.registry,
+            &mut setup.start(self, request.limits.max_duration),
             &mut executor,
-            &mut self.clock.clone(),
-            &mut operation.deadline(self, request.limits.max_duration),
             publish,
         )?;
         // The neighbor requests the probes' routes resolved count in the
@@ -116,11 +113,8 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
 
 pub(super) fn run<A, E, C, F>(
     request: &Request,
-    authorizer: &mut A,
-    registry: &Registry,
+    workflow: &mut OperationWorkflow<A, C>,
     executor: &mut E,
-    clock: &mut C,
-    deadline: &mut Deadline,
     emit: F,
 ) -> Result<Report, Error>
 where
@@ -129,6 +123,12 @@ where
     C: Clock,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
+    let OperationWorkflow {
+        authorizer,
+        registry,
+        clock,
+        deadline,
+    } = workflow;
     enforce_deadline::<Error>(deadline)?;
     let approved = approve(request, authorizer, deadline)?;
     enforce_deadline::<Error>(deadline)?;

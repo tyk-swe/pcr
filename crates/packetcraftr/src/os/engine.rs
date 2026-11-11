@@ -1,14 +1,13 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::sync::Arc;
-
-use packetcraftr_core::{budget::Deadline, document::os_fingerprints as core, registry::Registry};
+use packetcraftr_core::{budget::Deadline, document::os_fingerprints as core};
 
 use super::{
     Collector, Error, Event, Match, Outcome, Probe, Report, Request, evidence::Fingerprints,
     executor::Native, plan::PlannedProbe,
 };
+use crate::engine::operation::{Workflow as OperationWorkflow, WorkflowSetup};
 use crate::error::FromFailure as _;
 use crate::{
     Client, Sink,
@@ -23,6 +22,9 @@ use crate::{
     target::{Family, ResolveTarget},
 };
 
+#[cfg(test)]
+mod tests;
+
 impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
     pub fn identify_os<S: Sink<Event, Ack = ()>>(
         &self,
@@ -31,15 +33,14 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
     ) -> Result<Report, Error> {
         request.validate()?;
         let operation = crate::engine::operation::Operation::new(self, request.limits.max_duration);
-        let mut deadline = operation.deadline(self, request.limits.max_duration);
+        let setup = WorkflowSetup::with_authorizer(self, &operation, self.admission());
+        let mut workflow = setup.start(self, request.limits.max_duration);
         let publish = crate::engine::execution::publisher(
             &self.runtime,
             sink,
             Error::Deadline,
             Error::Output,
         )?;
-        let mut clock = self.clock.clone();
-        let mut authorizer = self.admission();
         let mut operation = operation
             .with_neighbors(self.neighbors.for_operation(1))
             .with_neighbor_mode(crate::engine::operation::NeighborMode::Cached)
@@ -57,24 +58,13 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
             },
             collection: request.collection.clone(),
         };
-        run(
-            &request,
-            &self.registry,
-            &mut deadline,
-            &mut clock,
-            &mut authorizer,
-            &mut executor,
-            publish,
-        )
+        run(&request, &mut workflow, &mut executor, publish)
     }
 }
 
 pub(super) fn run<A, P, K, C, F>(
     request: &Request,
-    registry: &Arc<Registry>,
-    deadline: &mut Deadline,
-    clock: &mut C,
-    authorizer: &mut A,
+    workflow: &mut OperationWorkflow<A, C>,
     executor: &mut Native<'_, P, K>,
     mut publish: F,
 ) -> Result<Report, Error>
@@ -85,6 +75,12 @@ where
     C: Clock,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
+    let OperationWorkflow {
+        authorizer,
+        registry,
+        clock,
+        deadline,
+    } = workflow;
     let started = clock.now();
     request.validate()?;
     deadline.enforce()?;

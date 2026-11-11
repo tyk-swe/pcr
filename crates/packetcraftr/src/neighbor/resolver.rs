@@ -22,7 +22,7 @@ use super::error::{invalid_options, map_io_error};
 use super::evidence::{
     EvidenceBuffer, validate_captured_frame, validate_neighbor_send, validate_request,
 };
-use super::options::Options;
+use super::options::{Bounds, Options};
 use super::wire::{build_request_frame, match_neighbor_response};
 use super::{Error, Request, Resolution};
 
@@ -91,23 +91,9 @@ impl State {
         })
     }
 
-    /// A resolver sharing this cache that sends one request and waits
-    /// `attempt_timeout` for its reply, capturing at most `max_frames` frames
-    /// and `max_bytes` bytes, each cut at `snap_length`.
-    pub(crate) fn single_attempt(
-        &self,
-        attempt_timeout: std::time::Duration,
-        max_frames: usize,
-        max_bytes: usize,
-        snap_length: usize,
-    ) -> Result<Self, Error> {
-        Self::try_new(self.options.single_attempt(
-            attempt_timeout,
-            max_frames,
-            max_bytes,
-            snap_length,
-        ))
-        .map(|state| Self {
+    /// A resolver sharing this cache that sends one request under `bounds`.
+    pub(crate) fn single_attempt(&self, bounds: Bounds) -> Result<Self, Error> {
+        Self::try_new(self.options.single_attempt(bounds)).map(|state| Self {
             cache: Arc::clone(&self.cache),
             operation: self.operation.clone(),
             operation_entries: self.operation_entries,
@@ -116,25 +102,11 @@ impl State {
     }
 
     /// A resolver sharing this cache that sends at most one request per
-    /// fresh resolution, waiting at most `attempt_timeout` for its reply and
-    /// capturing at most `max_frames` frames and `max_bytes` bytes, each cut
-    /// at `snap_length`. Its
-    /// answers also live in a cache of its own for the whole operation, so a
-    /// resolution never has to run twice inside it, sized for at least
-    /// `max_neighbors` answers.
-    pub(crate) fn one_attempt(
-        &self,
-        attempt_timeout: std::time::Duration,
-        max_frames: usize,
-        max_bytes: usize,
-        snap_length: usize,
-        max_neighbors: usize,
-    ) -> Result<Self, Error> {
-        Self::try_new(
-            self.options
-                .one_attempt(attempt_timeout, max_frames, max_bytes, snap_length),
-        )
-        .map(|state| Self {
+    /// fresh resolution under `bounds`. Its answers also live in a cache of
+    /// its own for the whole operation, so a resolution never has to run
+    /// twice inside it, sized for at least `max_neighbors` answers.
+    pub(crate) fn one_attempt(&self, bounds: Bounds, max_neighbors: usize) -> Result<Self, Error> {
+        Self::try_new(self.options.one_attempt(bounds)).map(|state| Self {
             cache: Arc::clone(&self.cache),
             operation: Some(self.operation.clone().unwrap_or_default()),
             operation_entries: max_neighbors.max(self.operation_entries),
@@ -221,6 +193,7 @@ where
             return Ok(Resolution {
                 mac_address,
                 attempts: 0,
+                request_bytes: 0,
                 cache_hit: true,
                 captured: Vec::new(),
                 evidence_truncated: false,
@@ -230,13 +203,10 @@ where
 
         let request_bytes = build_request_frame(request)?;
         let decision = discovery_decision(request);
-        let capture_request = capture::Request {
-            interface: request.interface.clone(),
-            limits: self.state.options.capture_limits(),
-            filter: None,
-            promiscuous: false,
-            native: Default::default(),
-        };
+        let capture_request = capture::Request::new(
+            request.interface.clone(),
+            self.state.options.capture_limits(),
+        );
         capture_request
             .validate()
             .map_err(|error| map_io_error(request, "validating capture request", error))?;
@@ -294,6 +264,7 @@ where
                 interface: request.interface.name.clone(),
                 target: request.target,
                 attempts: outcome.attempts,
+                request_bytes: request_bytes.len(),
                 captured: outcome.captured,
                 evidence_truncated: outcome.evidence_truncated,
                 capture_statistics: statistics,
@@ -303,6 +274,7 @@ where
         Ok(Resolution {
             mac_address,
             attempts: outcome.attempts,
+            request_bytes: request_bytes.len(),
             cache_hit: false,
             captured: outcome.captured,
             evidence_truncated: outcome.evidence_truncated,

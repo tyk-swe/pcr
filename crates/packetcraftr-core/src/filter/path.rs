@@ -121,6 +121,15 @@ pub(super) struct FieldRef {
 }
 
 impl FieldRef {
+    fn new(source: FieldSource, specs: Vec<FieldSpec>, path: &str) -> Self {
+        Self {
+            source,
+            slice: None,
+            specs,
+            path: path.to_owned(),
+        }
+    }
+
     pub(super) fn is_flag(&self) -> bool {
         if let FieldSource::Layer {
             binding: FilterFieldBinding::Bits { .. },
@@ -235,29 +244,40 @@ fn frame_field(name: &str) -> Option<FrameField> {
     })
 }
 
-fn specs_for(
+fn binding_specs(
     registry: &Registry,
-    protocol: &crate::layer::Id,
-    fields: &[&'static str],
+    binding: &FilterFieldBinding,
     path: &str,
-) -> Result<Vec<FieldSpec>, Error> {
-    let Some(schema) = registry.schema(protocol.as_str()) else {
+) -> Result<(Vec<FieldSpec>, Vec<usize>), Error> {
+    let Some(schema) = registry.schema(binding.protocol().as_str()) else {
         // Decode-only schemas are unknown until runtime; defer static type checks.
-        return Ok(Vec::new());
+        return Ok((Vec::new(), Vec::new()));
     };
-    let mut specs = Vec::with_capacity(fields.len());
-    for field in fields {
-        let declared = schema
-            .fields
-            .iter()
-            .find(|entry| entry.name == *field)
-            .ok_or_else(|| Error::UnresolvableProtocol {
-                path: path.to_owned(),
-                protocol: *protocol,
-            })?;
-        specs.extend(FieldSpec::declared(declared));
-    }
-    Ok(specs)
+    let specs: Vec<FieldSpec> = binding
+        .fields()
+        .iter()
+        .map(|field| {
+            schema
+                .fields
+                .iter()
+                .find(|entry| entry.name == *field)
+                .ok_or_else(|| Error::UnresolvableProtocol {
+                    path: path.to_owned(),
+                    protocol: *binding.protocol(),
+                })
+                .map(FieldSpec::declared)
+        })
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .flatten()
+        .collect();
+    let indices = binding
+        .fields()
+        .iter()
+        .map(|field| schema.field_index(field))
+        .collect::<Option<Vec<_>>>()
+        .unwrap_or_default();
+    Ok((specs, indices))
 }
 
 /// The first list selector in `text`, with the text before and after it.
@@ -336,28 +356,16 @@ pub(super) fn resolve(path: &str, registry: &Registry, offset: usize) -> Result<
     }
 
     if let Some(binding) = registry.filter_field(&stripped) {
-        let specs = specs_for(registry, binding.protocol(), binding.fields(), path)?;
-        let indices = registry
-            .schema(binding.protocol().as_str())
-            .map(|schema| {
-                binding
-                    .fields()
-                    .iter()
-                    .filter_map(|field| schema.field_index(field))
-                    .collect::<Vec<_>>()
-            })
-            .filter(|indices| indices.len() == binding.fields().len())
-            .unwrap_or_default();
-        return Ok(Resolved::Field(FieldRef {
-            source: FieldSource::Layer {
+        let (specs, indices) = binding_specs(registry, binding, path)?;
+        return Ok(Resolved::Field(FieldRef::new(
+            FieldSource::Layer {
                 binding: binding.clone(),
                 indices,
                 occurrence,
             },
-            slice: None,
             specs,
-            path: path.to_owned(),
-        }));
+            path,
+        )));
     }
 
     if let Some((head, tail)) = stripped.split_once('.') {
@@ -373,38 +381,36 @@ pub(super) fn resolve(path: &str, registry: &Registry, offset: usize) -> Result<
             resolve_selection(tail, schema, path, offset, unknown)?
         {
             let root_index = schema.field_index(list.root()).ok_or_else(unknown)?;
-            return Ok(Resolved::Field(FieldRef {
-                source: FieldSource::NestedLayer {
+            return Ok(Resolved::Field(FieldRef::new(
+                FieldSource::NestedLayer {
                     protocol,
                     path: Box::new(list),
                     root_index,
                     selection: Some(Box::new(selection)),
                     occurrence,
                 },
-                slice: None,
-                specs: FieldSpec::declared(declared).into_iter().collect(),
-                path: path.to_owned(),
-            }));
+                FieldSpec::declared(declared).into_iter().collect(),
+                path,
+            )));
         }
         let nested = tail.parse::<crate::field::Path>().map_err(|_| unknown())?;
         let declared = nested.schema(schema).ok_or_else(unknown)?;
         if nested.is_nested() {
             let root_index = schema.field_index(nested.root()).ok_or_else(unknown)?;
-            return Ok(Resolved::Field(FieldRef {
-                source: FieldSource::NestedLayer {
+            return Ok(Resolved::Field(FieldRef::new(
+                FieldSource::NestedLayer {
                     protocol,
                     path: Box::new(nested),
                     root_index,
                     selection: None,
                     occurrence,
                 },
-                slice: None,
-                specs: FieldSpec::declared(declared).into_iter().collect(),
-                path: path.to_owned(),
-            }));
+                FieldSpec::declared(declared).into_iter().collect(),
+                path,
+            )));
         }
-        return Ok(Resolved::Field(FieldRef {
-            source: FieldSource::Layer {
+        return Ok(Resolved::Field(FieldRef::new(
+            FieldSource::Layer {
                 binding: FilterFieldBinding::Direct {
                     protocol,
                     field: declared.name,
@@ -412,10 +418,9 @@ pub(super) fn resolve(path: &str, registry: &Registry, offset: usize) -> Result<
                 indices: schema.field_index(declared.name).into_iter().collect(),
                 occurrence,
             },
-            slice: None,
-            specs: FieldSpec::declared(declared).into_iter().collect(),
-            path: path.to_owned(),
-        }));
+            FieldSpec::declared(declared).into_iter().collect(),
+            path,
+        )));
     }
 
     if find_selector(&stripped).is_some() {
@@ -463,12 +468,11 @@ fn resolve_synthetic(
             FrameField::Protocols => field::Kind::List,
             _ => field::Kind::Unsigned,
         };
-        return Ok(Some(Resolved::Field(FieldRef {
-            source: FieldSource::Frame(field),
-            slice: None,
-            specs: vec![FieldSpec::synthetic(kind)],
-            path: path.to_owned(),
-        })));
+        return Ok(Some(Resolved::Field(FieldRef::new(
+            FieldSource::Frame(field),
+            vec![FieldSpec::synthetic(kind)],
+            path,
+        ))));
     }
     if tail != "stream" || !(head.eq_ignore_ascii_case("tcp") || head.eq_ignore_ascii_case("udp")) {
         return Ok(None);
@@ -479,12 +483,11 @@ fn resolve_synthetic(
     } else {
         StreamTransport::Udp
     };
-    Ok(Some(Resolved::Field(FieldRef {
-        source: FieldSource::Stream(transport),
-        slice: None,
-        specs: vec![FieldSpec::synthetic(field::Kind::Unsigned)],
-        path: path.to_owned(),
-    })))
+    Ok(Some(Resolved::Field(FieldRef::new(
+        FieldSource::Stream(transport),
+        vec![FieldSpec::synthetic(field::Kind::Unsigned)],
+        path,
+    ))))
 }
 
 pub(super) fn attach_slice(

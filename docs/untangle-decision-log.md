@@ -965,3 +965,44 @@ lists `udp` as a transport for MPLS. An empty security document or UDP
 profiles document, from stdin or a file, now fails with `cli.input_source`
 before parsing instead of a JSON parse error. When a replay selector fails at
 the same moment the deadline expires, the deadline error is reported.
+
+## Scan capture epochs, 2026-11-11
+
+- Give scan capture lifetimes one owner.
+  - The pipeline tracked its capture group, accounting flag, aggregate quality,
+    source names, deduplication history, and drain allowance independently.
+    Fixed and streaming entry points each built the same capture prerequisites.
+  - `CaptureEpoch` now owns activation, readiness, bounded reads, rotating
+    interfaces, accounting state, observation quality, and deduplication. Its
+    callers supply a wake time, a new source set, and accounting behavior only
+    where those facts vary. Expiry settlement keeps its existing scheduling
+    policy through the epoch's drain state.
+  - Rotation still waits for every active probe to settle. The candidate index
+    and armed queue change only after the replacement is fully ready, so an
+    active interval never spans a capture cleanup/activation gap. Shutdown,
+    source statistics, failure evidence, and cleanup precedence are unchanged.
+  - Pipeline fixtures moved to `pipeline/tests.rs` beside the production
+    module. A new streaming regression fails a later source activation and
+    checks retained traffic, accumulated capture statistics, activation error
+    identity, no duplicate readiness, and no secondary cleanup error. Shutdown
+    failures retain capture statistics without publishing loss diagnostics.
+
+### Verification
+
+Streaming admission reserves all nine interface-name copies per source that
+overlap during rotation, including the epoch-owned list and rotation handoff.
+The long-name regression rejects an 80 KiB prepared-memory budget before
+capture starts and completes rotation with a 128 KiB budget.
+
+All 20 pipeline tests pass. Earlier verification passed all 213 packetcraftr
+library tests and all 159 CLI library tests. Clippy passes for the workflow
+library and tests with warnings denied. Formatting, layer, coupling, and file-size checks pass without
+changed thresholds. The full feature/platform, coverage, and mutation matrices
+were not run.
+
+A native-enabled CLI build succeeded. A bounded adaptive scan of a local
+listener with Layer 3 transmission attempted to arm capture on loopback but
+stopped in libpcap because this environment lacks CAP_NET_RAW. The live scan
+therefore could not verify received packets in this environment. The controlled
+multi-source pipeline fixtures exercise rotation, pending settlement, capture
+statistics, and failure evidence without raw-socket privileges.

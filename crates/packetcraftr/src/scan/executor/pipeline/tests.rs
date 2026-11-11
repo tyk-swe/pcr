@@ -14,6 +14,7 @@ use crate::{
 use packetcraftr_core::{
     build::{Builder, Options as BuildOptions},
     codec::Addresses,
+    error::{Classified as _, Code},
     frame::{Frame, LinkType},
     packet::Packet,
     protocol::{builtin, network::Ipv4, transport::Tcp},
@@ -28,6 +29,7 @@ use std::{collections::VecDeque, convert::Infallible, net::IpAddr, sync::Mutex};
 
 #[derive(Default)]
 struct Observed {
+    interface_name_suffix: String,
     frames: VecDeque<capture::Captured>,
     armed: Vec<interface::Id>,
     ready: Vec<interface::Id>,
@@ -47,11 +49,20 @@ fn interface(index: u32) -> interface::Id {
     }
 }
 
+impl Network {
+    fn interface(&self, index: u32) -> interface::Id {
+        let mut id = interface(index);
+        id.name
+            .push_str(&self.0.lock().unwrap().interface_name_suffix);
+        id
+    }
+}
+
 impl interface::Provider for Network {
     fn interfaces(&self, _: &Deadline) -> Result<Vec<interface::Info>, interface::Error> {
         Ok((1..=2)
             .map(|index| interface::Info {
-                id: interface(index),
+                id: self.interface(index),
                 description: None,
                 mac_address: None,
                 addresses: Vec::new(),
@@ -74,7 +85,7 @@ impl packetcraftr_netio::route::Provider for Network {
         _: &Deadline,
     ) -> Result<Decision, Self::Error> {
         Ok(Decision {
-            interface: interface(if destination == "10.0.0.3".parse::<IpAddr>().unwrap() {
+            interface: self.interface(if destination == "10.0.0.3".parse::<IpAddr>().unwrap() {
                 2
             } else {
                 1
@@ -575,6 +586,50 @@ fn stream_feed(client: &TestClient, network: &Network, batches: Vec<Batch<Probe>
         omitted: Vec::new(),
         late: Vec::new(),
     }
+}
+
+#[test]
+fn long_source_names_respect_prepared_memory_limits_before_capture() {
+    let (client, network) = fixture();
+    network.0.lock().unwrap().interface_name_suffix = "x".repeat(4000);
+    let batches = stream_batches(4);
+    let count = batches.len();
+    let (operation, admission) = admitted(&client, &batches, options(&client));
+    let executor = executor(&client, &operation);
+    let mut options = options(&client);
+    options.max_prepared_bytes = 80 * 1024;
+    assert!(
+        admission.check(count, 2, &options).is_err(),
+        "long source names exceeded the preparation budget but admission succeeded"
+    );
+    let mut feed = stream_feed(&client, &network, batches.clone());
+    let error = streaming::run_stream(
+        &executor,
+        options.clone(),
+        &admission,
+        count,
+        &mut feed,
+        &mut history(),
+    )
+    .unwrap_err();
+    assert_eq!(error.classification().code, Code::PolicyScanPipelineLimit);
+    assert!(network.0.lock().unwrap().armed.is_empty());
+    assert!(feed.sent.is_empty());
+
+    options.max_prepared_bytes = 128 * 1024;
+    admission.check(count, 2, &options).unwrap();
+    let mut feed = stream_feed(&client, &network, batches);
+    let stats = streaming::run_stream(
+        &executor,
+        options,
+        &admission,
+        count,
+        &mut feed,
+        &mut history(),
+    )
+    .unwrap();
+    assert_eq!(stats.packets_completed, 3);
+    assert_eq!(network.0.lock().unwrap().armed.len(), 2);
 }
 
 #[test]

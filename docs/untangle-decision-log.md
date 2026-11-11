@@ -989,7 +989,12 @@ the same moment the deadline expires, the deadline error is reported.
 
 ### Verification
 
-All 19 pipeline tests pass. Earlier verification passed all 213 packetcraftr
+Streaming admission reserves all nine interface-name copies per source that
+overlap during rotation, including the epoch-owned list and rotation handoff.
+The long-name regression rejects an 80 KiB prepared-memory budget before
+capture starts and completes rotation with a 128 KiB budget.
+
+All 20 pipeline tests pass. Earlier verification passed all 213 packetcraftr
 library tests and all 159 CLI library tests. Clippy passes for the workflow
 library and tests with warnings denied. Formatting, layer, coupling, and file-size checks pass without
 changed thresholds. The full feature/platform, coverage, and mutation matrices

@@ -132,10 +132,10 @@ impl AdaptiveAdmission {
 }
 
 pub(super) fn source_charge(sources: usize, name_bytes: usize, metadata: usize) -> usize {
-    // A closed epoch retains four names per source while the next interface
-    // list, group request and partitioned requests are constructed. New native
-    // sessions are armed only after assigning/dropping the old group.
-    sources.saturating_mul(name_bytes.saturating_mul(7).saturating_add(metadata))
+    // The closed epoch retains five names per source while the replacement
+    // list, rotation argument, group request, and partitioned requests overlap.
+    // New sessions are armed only after assignment drops the old group.
+    sources.saturating_mul(name_bytes.saturating_mul(9).saturating_add(metadata))
 }
 
 fn source_metadata<P: CaptureProviders>() -> usize {

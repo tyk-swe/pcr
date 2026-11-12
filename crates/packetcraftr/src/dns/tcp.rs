@@ -52,46 +52,22 @@ pub fn query<P>(request: Request<'_>, provider: Arc<P>) -> Result<Response, Erro
 where
     P: Provider<Stream: 'static> + 'static,
 {
-    query_with_connect_wait(
+    query_with_sources(
         request,
         provider,
         || SystemClock.now(),
         || SystemClock.wall_now(),
         Deadline::new,
-        tcp::PendingConnect::wait,
     )
 }
 
+/// [`query`] with injectable time sources, so tests can control the clocks.
 pub(crate) fn query_with_sources<P>(
-    request: Request<'_>,
-    provider: Arc<P>,
-    now: impl Fn() -> Instant,
-    wall_now: impl Fn() -> SystemTime,
-    connect_deadline: impl FnOnce(Duration) -> Deadline,
-) -> Result<Response, Error>
-where
-    P: Provider<Stream: 'static> + 'static,
-{
-    query_with_connect_wait(
-        request,
-        provider,
-        now,
-        wall_now,
-        connect_deadline,
-        tcp::PendingConnect::wait,
-    )
-}
-
-fn query_with_connect_wait<P>(
     request: Request<'_>,
     connector: Arc<P>,
     now: impl Fn() -> Instant,
     wall_now: impl Fn() -> SystemTime,
     connect_deadline: impl FnOnce(Duration) -> Deadline,
-    wait: impl FnOnce(
-        &mut tcp::PendingConnect<P::Stream>,
-        &Deadline,
-    ) -> Result<Option<tcp::ConnectOutcome<P::Stream>>, tcp::Error>,
 ) -> Result<Response, Error>
 where
     P: Provider<Stream: 'static> + 'static,
@@ -104,7 +80,7 @@ where
             value: request.timeout,
         })?;
     let (mut stream, peer_address, local_address) =
-        connect(connector, &request, deadline, &now, connect_deadline, wait)?;
+        connect(connector, &request, deadline, &now, connect_deadline)?;
 
     let mut bytes_written = 0usize;
     write_exact(
@@ -178,10 +154,6 @@ fn connect<P>(
     deadline: Instant,
     now: &impl Fn() -> Instant,
     connect_deadline: impl FnOnce(Duration) -> Deadline,
-    wait: impl FnOnce(
-        &mut tcp::PendingConnect<P::Stream>,
-        &Deadline,
-    ) -> Result<Option<tcp::ConnectOutcome<P::Stream>>, tcp::Error>,
 ) -> Result<(tcp::Connection<P::Stream>, SocketAddr, SocketAddr), Error>
 where
     P: Provider<Stream: 'static> + 'static,
@@ -191,7 +163,7 @@ where
         connect_deadline(connect_timeout).with_cancellation(request.cancellation.cloned());
     let mut pending = tcp::start_connect(connector, request.endpoint, &connect_deadline)
         .map_err(|source| map_connect_error(request.endpoint, source))?;
-    let outcome = wait(&mut pending, &connect_deadline)
+    let outcome = tcp::PendingConnect::wait(&mut pending, &connect_deadline)
         .map_err(|source| map_connect_error(request.endpoint, source))?;
     connect_deadline
         .live_remaining()

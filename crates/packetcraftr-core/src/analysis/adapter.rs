@@ -341,7 +341,9 @@ pub(crate) fn udp_payload(
     };
     let start = decoded.layout.layer(layer)?.range.end;
     let expected = usize::from(length).saturating_sub(8);
-    let end = start.saturating_add(expected).min(decoded.frame.bytes().len());
+    let end = start
+        .saturating_add(expected)
+        .min(decoded.frame.bytes().len());
     Some((start.min(end)..end, expected))
 }
 

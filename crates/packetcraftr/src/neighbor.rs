@@ -101,9 +101,15 @@ mod tests {
     #[test]
     fn multicast_and_layer3_charge_nothing() {
         let multicast = IpAddr::V6(Ipv6Addr::new(0xff02, 0, 0, 0, 0, 0, 0, 1));
-        assert_eq!(super::charge(Mode::Layer2, Some(multicast), 3, 2), Some((0, 0)));
+        assert_eq!(
+            super::charge(Mode::Layer2, Some(multicast), 3, 2),
+            Some((0, 0))
+        );
         let unicast = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1));
-        assert_eq!(super::charge(Mode::Layer3, Some(unicast), 3, 2), Some((0, 0)));
+        assert_eq!(
+            super::charge(Mode::Layer3, Some(unicast), 3, 2),
+            Some((0, 0))
+        );
     }
 
     #[test]

@@ -407,12 +407,8 @@ impl<P: PacketProviders, K: Clock> Executor<Batch<Probe>> for ClientExecutor<'_,
         if let Some(scope) = &first.scope {
             step = step.interface(scope.interface.clone());
         }
-        let exchange = executor.exchange_for_workflow(
-            template,
-            step,
-            &mut matches_request,
-            None,
-        )?;
+        let exchange =
+            executor.exchange_for_workflow(template, step, &mut matches_request, None)?;
         let evidence = Evidence::from_exchange(batch.permit, exchange);
         for sent in &evidence.sent {
             self.reply_history.sent(

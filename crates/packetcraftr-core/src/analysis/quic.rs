@@ -98,7 +98,12 @@ impl Collector {
         let Some((range, expected)) = adapter::udp_payload(view.decoded, view.layer) else {
             return Ok(Vec::new());
         };
-        let payload = view.decoded.frame.bytes().get(range).ok_or(Error::Truncated)?;
+        let payload = view
+            .decoded
+            .frame
+            .bytes()
+            .get(range)
+            .ok_or(Error::Truncated)?;
         let frames: Vec<_> = record.udp_sources().map_or_else(
             || vec![record.number],
             |sources| sources.frames().iter().map(|f| f.number).collect(),

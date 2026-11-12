@@ -150,9 +150,13 @@ fn with_neighbor_requests(
         crate::target::Target::Address(address) => Some(*address),
         _ => None,
     };
-    let (requests, request_bytes) =
-        crate::neighbor::charge(question.route.link_mode, address, limits.udp().packets(), attempts)
-            .ok_or(LimitOverflow)?;
+    let (requests, request_bytes) = crate::neighbor::charge(
+        question.route.link_mode,
+        address,
+        limits.udp().packets(),
+        attempts,
+    )
+    .ok_or(LimitOverflow)?;
     if requests == 0 {
         return Ok(limits);
     }
@@ -475,12 +479,23 @@ mod tests {
 
     #[test]
     fn empty_batch_is_rejected_before_indexing() {
-        let error = match Prepared::new(&Request { questions: Vec::new() }, 1) {
+        let error = match Prepared::new(
+            &Request {
+                questions: Vec::new(),
+            },
+            1,
+        ) {
             Ok(_) => panic!("an empty batch must be rejected"),
             Err(error) => error,
         };
         assert!(
-            matches!(error, super::Error::InvalidLimit { field: "questions", .. }),
+            matches!(
+                error,
+                super::Error::InvalidLimit {
+                    field: "questions",
+                    ..
+                }
+            ),
             "expected a questions limit error, got {error:?}"
         );
     }

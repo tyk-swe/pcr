@@ -48,10 +48,7 @@ pub(crate) struct WorkflowStep {
 }
 
 impl WorkflowStep {
-    pub(crate) const fn new(
-        timeout: std::time::Duration,
-        destination: std::net::IpAddr,
-    ) -> Self {
+    pub(crate) const fn new(timeout: std::time::Duration, destination: std::net::IpAddr) -> Self {
         Self {
             timeout,
             destination,

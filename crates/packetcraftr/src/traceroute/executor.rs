@@ -83,8 +83,7 @@ impl<P: PacketProviders, K: Clock> Executor<Batch<Probe>> for WorkflowExecutor<'
             };
         let exchange = self.exchange_for_workflow(
             template,
-            WorkflowStep::new(batch.timeout, first.address)
-                .template_packets(batch.probes.len()),
+            WorkflowStep::new(batch.timeout, first.address).template_packets(batch.probes.len()),
             &mut matches_request,
             None,
         )?;

@@ -186,7 +186,11 @@ impl Collector {
                         delivery.flow.clone(),
                     ))
                 });
-                conn.data(&delivery, number, &mut self.resources.context(deadline, out))
+                conn.data(
+                    &delivery,
+                    number,
+                    &mut self.resources.context(deadline, out),
+                )
             }
             application::Event::Gap { flow, .. } => self.fail_flow(
                 &flow,

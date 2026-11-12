@@ -156,8 +156,8 @@ impl Collector {
                         .entry(scope.id.get())
                         .or_insert_with(|| scope.clone());
                 }
-                let (range, expected) = adapter::udp_payload(view.decoded, view.layer)
-                    .ok_or(Error::Sources {
+                let (range, expected) =
+                    adapter::udp_payload(view.decoded, view.layer).ok_or(Error::Sources {
                         number: record.number,
                     })?;
                 // The emitted wire and every decoded name/rdata slice derived

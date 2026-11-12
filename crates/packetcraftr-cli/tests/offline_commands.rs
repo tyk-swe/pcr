@@ -376,6 +376,106 @@ fn dns_capture_analysis_succeeds() {
 }
 
 #[test]
+fn dns_analysis_preserves_mdns_cache_flush_record_values() {
+    use packetcraftr_core::build::Builder;
+    use packetcraftr_core::capture_file::{Format, Writer};
+    use packetcraftr_core::frame::{Frame, LinkType};
+    use packetcraftr_core::layer::Raw;
+    use packetcraftr_core::packet::Packet;
+    use packetcraftr_core::protocol::application::dns::Dns;
+    use packetcraftr_core::protocol::{
+        builtin,
+        link::Ethernet,
+        network::Ipv4,
+        transport::{Tcp, Udp},
+    };
+    use std::time::UNIX_EPOCH;
+
+    // RFC 6762 section 10.2, checked 2026-11-12, defines the mDNS cache-flush class bit.
+    let wire = [
+        0, 0, 0x84, 0, 0, 0, 0, 1, 0, 0, 0, 0, 4, b'h', b'o', b's', b't', 5, b'l', b'o', b'c',
+        b'a', b'l', 0, 0, 1, 0x80, 1, 0, 0, 0, 120, 0, 4, 192, 0, 2, 9,
+    ];
+    let directory = tempfile::tempdir().unwrap();
+    for (source, destination, tcp, kind) in [
+        (5353, 5353, false, "a"),
+        (5353, 40000, false, "a"),
+        (40000, 5353, false, "a"),
+        (53, 40000, false, "unknown"),
+        (5355, 40000, false, "unknown"),
+        (5353, 40000, true, "unknown"),
+    ] {
+        let mut packet = Packet::default();
+        packet.push(Ethernet::default());
+        packet.push(Ipv4 {
+            source: "192.0.2.1".parse().unwrap(),
+            destination: "224.0.0.251".parse().unwrap(),
+            ..Default::default()
+        });
+        if tcp {
+            packet.push(Tcp {
+                source_port: source,
+                destination_port: destination,
+                flags: Tcp::ACK,
+                ..Default::default()
+            });
+            let mut framed = (wire.len() as u16).to_be_bytes().to_vec();
+            framed.extend_from_slice(&wire);
+            packet.push(Raw::new(framed));
+        } else {
+            packet.push(Udp {
+                source_port: source,
+                destination_port: destination,
+                ..Default::default()
+            });
+            packet.push(Dns::try_from(wire.to_vec()).unwrap());
+        }
+        let built = Builder::new(builtin::registry())
+            .build(packet, Default::default(), Default::default())
+            .unwrap();
+        let path = directory
+            .path()
+            .join(format!("dns-{source}-{destination}-{tcp}.pcap"));
+        let mut writer = Writer::new(
+            std::fs::File::create(&path).unwrap(),
+            Format::Pcap,
+            LinkType::ETHERNET,
+        )
+        .unwrap();
+        writer
+            .write_frame(&Frame::new(Some(UNIX_EPOCH), LinkType::ETHERNET, built.bytes).unwrap())
+            .unwrap();
+        writer.flush().unwrap();
+        let path = path.to_str().unwrap();
+        let args = [
+            "--output",
+            "json",
+            "analyze",
+            "dns",
+            path,
+            "--dns-port",
+            "5353",
+            "--dns-port",
+            "5355",
+        ];
+        let report: serde_json::Value =
+            serde_json::from_str(&assert_success(&run(&args), &args)).unwrap();
+        let message = &report["result"]["messages"][0];
+        assert_eq!(message["status"], "complete", "{report}");
+        let record = &message["fields"]["answers"]["value"][0]["value"];
+        assert_eq!(record["class"]["value"], 0x8001, "{report}");
+        let value = &record["value"]["value"];
+        assert_eq!(
+            value["kind"]["value"], kind,
+            "ports {source}/{destination}: {report}"
+        );
+        if kind == "a" {
+            assert_eq!(value["address"]["value"], "192.0.2.9", "{report}");
+        }
+    }
+}
+
+#[test]
 fn capture_field_projection_preserves_rows_across_output_formats() {
     let path = capture_path("protocol-mqtt.pcap");
     let frames = capture_frames(&path);

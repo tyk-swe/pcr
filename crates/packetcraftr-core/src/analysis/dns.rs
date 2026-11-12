@@ -422,7 +422,10 @@ impl Collector {
         self.summary.messages += 1;
         message.index = self.summary.messages;
         if message.status == Status::Complete {
-            match Dns::from_wire_with_limits(message.wire.clone(), dns::Limits::default()) {
+            let mdns = message.transport == StreamTransport::Udp
+                && (message.flow.flow.source_port == dns::MDNS_PORT
+                    || message.flow.flow.destination_port == dns::MDNS_PORT);
+            match Dns::from_wire_with_mdns(message.wire.clone(), dns::Limits::default(), mdns) {
                 Ok(dns) => {
                     self.summary.complete_messages += 1;
                     message.dns = Some(dns);

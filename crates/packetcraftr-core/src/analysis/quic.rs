@@ -8,14 +8,10 @@ mod reset;
 mod state;
 mod transport;
 
-use crate::analysis::{FrameRecord, ScopedFlowKey, scope, session};
+use crate::analysis::{FrameRecord, ScopedFlowKey, adapter, scope, session};
 use crate::error::BoundaryError;
-use crate::field::WireValue;
 pub use crate::protocol::application::quic::Error;
-use crate::protocol::{
-    application::quic::{Packet, PacketKind, Version, parse_packet},
-    identity,
-};
+use crate::protocol::application::quic::{Packet, PacketKind, Version, parse_packet};
 use bytes::Bytes;
 pub use keylog::{Import, KeyLog};
 pub use model::{
@@ -99,25 +95,10 @@ impl Collector {
         let Some(scope) = record.scope_definition(conversation.flow.scope) else {
             return Err(Error::Invalid);
         };
-        let Some(WireValue::Exact(length)) = view
-            .decoded
-            .packet
-            .layer(view.layer)
-            .and_then(identity::udp_length)
-        else {
+        let Some((range, expected)) = adapter::udp_payload(view.decoded, view.layer) else {
             return Ok(Vec::new());
         };
-        let start = view
-            .decoded
-            .layout
-            .layer(view.layer)
-            .ok_or(Error::Invalid)?
-            .range
-            .end;
-        let expected = usize::from(length).saturating_sub(8);
-        let bytes = view.decoded.frame.bytes();
-        let end = start.saturating_add(expected).min(bytes.len());
-        let payload = bytes.get(start..end).ok_or(Error::Truncated)?;
+        let payload = view.decoded.frame.bytes().get(range).ok_or(Error::Truncated)?;
         let frames: Vec<_> = record.udp_sources().map_or_else(
             || vec![record.number],
             |sources| sources.frames().iter().map(|f| f.number).collect(),

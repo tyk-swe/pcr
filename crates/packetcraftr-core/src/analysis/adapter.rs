@@ -5,6 +5,7 @@ use crate::protocol::BuiltinProtocol;
 use std::net::IpAddr;
 
 use crate::decode::DecodedPacket;
+use crate::field::WireValue;
 use crate::frame::checked_slice;
 use crate::layer::Layer;
 use crate::layer::Padding;
@@ -327,6 +328,23 @@ pub(crate) fn ip_fragments(
     Ok(IpFragments { atomic, non_atomic })
 }
 
+/// The byte range of `layer`'s UDP payload and its declared length. The range
+/// is clamped to the frame, so callers compare its length against the declared
+/// length to detect truncation, then slice or copy as they need.
+pub(crate) fn udp_payload(
+    decoded: &DecodedPacket,
+    layer: usize,
+) -> Option<(std::ops::Range<usize>, usize)> {
+    let length = decoded.packet.layer(layer).and_then(identity::udp_length)?;
+    let WireValue::Exact(length) = length else {
+        return None;
+    };
+    let start = decoded.layout.layer(layer)?.range.end;
+    let expected = usize::from(length).saturating_sub(8);
+    let end = start.saturating_add(expected).min(decoded.frame.bytes().len());
+    Some((start.min(end)..end, expected))
+}
+
 /// Excludes padding identified at or above TCP (such as link padding), but
 /// retains bytes a protocol inside the payload treated as padding.
 pub(crate) fn transport_payload(decoded: &DecodedPacket, transport_index: usize) -> Bytes {
@@ -525,4 +543,63 @@ pub(crate) fn replayed_ip_prefix_layers(decoded: &DecodedPacket) -> usize {
         }
     }
     0
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        codec::Addresses,
+        decode::{Dissector, Options},
+        field::WireValue,
+        frame::{Frame, LinkType},
+        layer::Raw,
+        packet::Packet,
+        protocol::{builtin, link::Ethernet, network::Ipv4, transport::Udp},
+    };
+    use bytes::Bytes;
+
+    fn decode(payload: &[u8], declared: WireValue<u16>) -> crate::decode::DecodedPacket {
+        let registry = builtin::registry();
+        let builder = crate::build::Builder::new(registry.clone());
+        let mut packet = Packet::default();
+        packet.push(Ethernet::default());
+        packet.push(Ipv4::default());
+        packet.push(Udp {
+            destination_port: 9,
+            length: declared,
+            ..Default::default()
+        });
+        packet.push(Raw::new(Bytes::copy_from_slice(payload)));
+        let built = builder
+            .build(packet, Addresses::default(), Default::default())
+            .unwrap();
+        decode_bytes(built.bytes.to_vec())
+    }
+
+    fn decode_bytes(bytes: Vec<u8>) -> crate::decode::DecodedPacket {
+        let frame = Frame::new(None, LinkType::ETHERNET, bytes).unwrap();
+        Dissector::new(builtin::registry())
+            .decode(frame, Options::default())
+            .unwrap()
+    }
+
+    #[test]
+    fn declared_length_reports_the_udp_payload_size() {
+        let decoded = decode(b"hello", WireValue::Auto);
+        let (range, expected) = super::udp_payload(&decoded, 2).unwrap();
+        assert_eq!(expected, 5);
+        assert_eq!(&decoded.frame.bytes()[range], b"hello");
+    }
+
+    #[test]
+    fn trailing_link_padding_is_excluded_from_the_payload() {
+        let built = decode(b"hello", WireValue::Auto);
+        let mut bytes = built.frame.bytes().to_vec();
+        // Ethernet padding after the IP datagram is not UDP payload.
+        bytes.extend_from_slice(&[0_u8; 4]);
+        let decoded = decode_bytes(bytes);
+        let (range, expected) = super::udp_payload(&decoded, 2).unwrap();
+        assert_eq!(expected, 5);
+        assert_eq!(&decoded.frame.bytes()[range], b"hello");
+    }
 }

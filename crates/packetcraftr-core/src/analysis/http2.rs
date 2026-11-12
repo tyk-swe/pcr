@@ -47,7 +47,6 @@ use super::{
 
 type ConnectionKey = (u64, u64);
 
-/// The status, issue code, and detail one transport fault records together.
 struct Fault {
     status: Status,
     code: IssueCode,

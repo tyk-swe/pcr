@@ -49,6 +49,18 @@ class WithoutTestItemsTests(unittest.TestCase):
                 )
                 self.assertEqual(rust_source.without_test_items(source), "\nfn live() {}\n")
 
+    def test_test_constants_preserve_following_production_items(self):
+        for declaration in (
+            "const LESS: bool = 1 < 2;",
+            "const LESS_EQUAL: bool = 1 <= 2;",
+            "static SHIFT: u8 = 1 << 2;",
+            "const ARRAY: Option<[u8; 2]> = None;",
+            "const GENERIC: Example<{ let n = 1; n + 1 }> = Example;",
+        ):
+            with self.subTest(declaration=declaration):
+                source = "#[cfg(test)]\n" + declaration + "\nfn live() {}\n"
+                self.assertEqual(rust_source.without_test_items(source), "\nfn live() {}\n")
+
     def test_attribute_text_in_comments_and_literals_is_preserved(self):
         for prefix in (
             "// #[cfg(test)]\n",

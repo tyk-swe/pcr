@@ -140,34 +140,26 @@ impl<'a> Prepared<'a> {
 }
 
 /// Charges `attempts` neighbor requests before each of a question's UDP
-/// packets whose route may resolve a link-layer neighbor: an unanswered
-/// resolution is not remembered, so every packet may ask again.
+/// packets whose route may resolve a link-layer neighbor.
 fn with_neighbor_requests(
     question: &super::Request,
     limits: DnsOperation,
     attempts: u64,
 ) -> Result<DnsOperation, Error> {
-    if question.route.link_mode == packetcraftr_netio::link::Mode::Layer3 {
-        return Ok(limits);
-    }
-    // A multicast or limited-broadcast server's link address follows from its
-    // own, so no request precedes a query to it.
-    if let crate::target::Target::Address(address) = &question.server
-        && !crate::neighbor::needs_resolution(*address)
-    {
-        return Ok(limits);
-    }
-    // A server of unknown family is charged the larger solicitation.
-    let request_bytes = match &question.server {
-        crate::target::Target::Address(address) => crate::neighbor::request_wire_bytes(*address),
-        _ => crate::neighbor::IPV6_REQUEST_BYTES,
+    let address = match &question.server {
+        crate::target::Target::Address(address) => Some(*address),
+        _ => None,
     };
+    let (requests, request_bytes) =
+        crate::neighbor::charge(question.route.link_mode, address, limits.udp().packets(), attempts)
+            .ok_or(LimitOverflow)?;
+    if requests == 0 {
+        return Ok(limits);
+    }
     let udp = limits.udp();
-    let requests = udp.packets().checked_mul(attempts).ok_or(LimitOverflow)?;
     let packets = udp.packets().checked_add(requests).ok_or(LimitOverflow)?;
-    let bytes = requests
-        .checked_mul(request_bytes)
-        .and_then(|requests| requests.checked_add(udp.wire_bytes()))
+    let bytes = request_bytes
+        .checked_add(udp.wire_bytes())
         .ok_or(LimitOverflow)?;
     Ok(DnsOperation::new(
         WireLimits::new(packets, bytes),

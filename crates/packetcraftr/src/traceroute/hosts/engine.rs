@@ -255,22 +255,20 @@ fn plan_hosts(request: &Request, targets: &[SelectedAddress]) -> Result<Plan, Er
                     }
                 }
                 traced += 1;
-                if request.route.link_mode != packetcraftr_netio::link::Mode::Layer3
-                    && crate::neighbor::needs_resolution(target.address)
-                {
-                    neighbor_requests = neighbor_requests
-                        .checked_add(host_probes)
-                        .ok_or_else(|| overflow("probes"))?;
-                    let request_bytes = crate::neighbor::request_wire_bytes(target.address);
-                    neighbor_bytes = neighbor_bytes
-                        .checked_add(
-                            u64::try_from(host_probes)
-                                .unwrap_or(u64::MAX)
-                                .checked_mul(request_bytes)
-                                .ok_or_else(|| overflow("wire_bytes"))?,
-                        )
-                        .ok_or_else(|| overflow("wire_bytes"))?;
-                }
+                let requests = u64::try_from(host_probes).unwrap_or(u64::MAX);
+                let (extra_requests, extra_bytes) = crate::neighbor::charge(
+                    request.route.link_mode,
+                    Some(target.address),
+                    requests,
+                    1,
+                )
+                .ok_or_else(|| overflow("wire_bytes"))?;
+                neighbor_requests = neighbor_requests
+                    .checked_add(usize::try_from(extra_requests).unwrap_or(usize::MAX))
+                    .ok_or_else(|| overflow("probes"))?;
+                neighbor_bytes = neighbor_bytes
+                    .checked_add(extra_bytes)
+                    .ok_or_else(|| overflow("wire_bytes"))?;
                 Ok(selection)
             }
         };

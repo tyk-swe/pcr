@@ -22,7 +22,7 @@ use packetcraftr_core::registry::Registry;
 
 use crate::clock::Clock;
 use crate::engine::execution::{Executor, ExecutorFault};
-use crate::exchange::{WorkflowExecutor, WorkflowOverrides};
+use crate::exchange::{WorkflowExecutor, WorkflowStep};
 use crate::neighbor::Bounds;
 use crate::probe::{Batch, Evidence};
 use crate::providers::PacketProviders;
@@ -403,18 +403,12 @@ impl<P: PacketProviders, K: Clock> Executor<Batch<Probe>> for ClientExecutor<'_,
                     )
                     .is_some()
             };
-        let exchange = executor.exchange_for_workflow(
-            template,
-            WorkflowOverrides {
-                timeout: batch.timeout,
-                max_template_packets: 1,
-                destination: first.address,
-                interface: first.scope.as_ref().map(|scope| scope.interface.clone()),
-                max_responses: None,
-            },
-            &mut matches_request,
-            None,
-        )?;
+        let mut step = WorkflowStep::new(batch.timeout, first.address);
+        if let Some(scope) = &first.scope {
+            step = step.interface(scope.interface.clone());
+        }
+        let exchange =
+            executor.exchange_for_workflow(template, step, &mut matches_request, None)?;
         let evidence = Evidence::from_exchange(batch.permit, exchange);
         for sent in &evidence.sent {
             self.reply_history.sent(

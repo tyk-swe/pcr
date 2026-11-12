@@ -96,11 +96,8 @@ fn run(invocation: &crate::invocation::Invocation, args: Args) -> Result<(), Cli
     let application = args.application.limits()?;
     let mut ports = args.http2_ports.clone();
     ports.extend([80, 8080]);
-    let mut collector = Collector::new(application.core(), ports, args.http2_limits())
+    let collector = Collector::new(application.core(), ports, args.http2_limits())
         .map_err(CliError::classified)?;
-    if let Some(deadline) = invocation.control.deadline.clone() {
-        collector = collector.with_deadline(deadline);
-    }
     let selector = require_tcp_stream(args.stream.as_ref(), "HTTP/2")?;
     let (mut frames, mut messages, mut issues, mut connections) =
         (Vec::new(), Vec::new(), Vec::new(), Vec::new());

@@ -1387,7 +1387,11 @@ fn fragmented_tcp_resolves_event_filter_and_stream_dependencies() {
             }
         }
 
-        fn observe(&mut self, record: &FrameRecord<'_>) -> Result<Vec<TcpEvent>, BoundaryError> {
+        fn observe(
+            &mut self,
+            record: &FrameRecord<'_>,
+            _deadline: &crate::budget::Deadline,
+        ) -> Result<Vec<TcpEvent>, BoundaryError> {
             Ok(record.tcp_events.to_vec())
         }
 

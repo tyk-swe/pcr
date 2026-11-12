@@ -60,16 +60,6 @@ impl Request {
         }
         Ok(())
     }
-
-    pub(super) fn max_duration(&self) -> Result<Duration, Error> {
-        self.validate()?;
-        Ok(self
-            .questions
-            .iter()
-            .map(|question| question.limits.max_duration)
-            .min()
-            .expect("a validated batch is non-empty"))
-    }
 }
 
 /// The traffic limits `questions` need together, including the
@@ -85,10 +75,7 @@ where
     let mut failure = None;
     let operations = questions.into_iter().map_while(|question| {
         let question = question.borrow();
-        PreparedOperation::new(question)
-            .and_then(|prepared| {
-                with_neighbor_requests(question, prepared.limits, neighbor_attempts)
-            })
+        question_limits(question, neighbor_attempts)
             .map_err(|error| failure = Some(error))
             .ok()
     });
@@ -96,35 +83,87 @@ where
     failure.map_or(Ok(limits), Err)
 }
 
+fn question_limits(
+    question: &super::Request,
+    neighbor_attempts: u64,
+) -> Result<DnsOperation, Error> {
+    let prepared = PreparedOperation::new(question)?;
+    with_neighbor_requests(question, prepared.limits, neighbor_attempts)
+}
+
+/// One validated batch with its per-question operations and combined limits.
+/// Building it validates the batch once, so callers never index raw questions
+/// or rebuild the prepared set before execution.
+pub(crate) struct Prepared<'a> {
+    questions: &'a [super::Request],
+    operations: Vec<PreparedOperation<'a>>,
+    limits: DnsOperation,
+    max_duration: Duration,
+}
+
+impl<'a> Prepared<'a> {
+    pub(crate) fn new(request: &'a Request, neighbor_attempts: u64) -> Result<Self, Error> {
+        request.validate()?;
+        let questions = request.questions.as_slice();
+        let mut operations = Vec::with_capacity(questions.len());
+        let mut limits = Vec::with_capacity(questions.len());
+        for question in questions {
+            let prepared = PreparedOperation::new(question)?;
+            limits.push(with_neighbor_requests(
+                question,
+                prepared.limits,
+                neighbor_attempts,
+            )?);
+            operations.push(prepared);
+        }
+        let limits = batch_limits(limits.into_iter())?;
+        let max_duration = questions
+            .iter()
+            .map(|question| question.limits.max_duration)
+            .min()
+            .expect("a validated batch is non-empty");
+        Ok(Self {
+            questions,
+            operations,
+            limits,
+            max_duration,
+        })
+    }
+
+    pub(crate) const fn max_duration(&self) -> Duration {
+        self.max_duration
+    }
+
+    pub(crate) fn first(&self) -> &'a super::Request {
+        &self.questions[0]
+    }
+}
+
 /// Charges `attempts` neighbor requests before each of a question's UDP
-/// packets whose route may resolve a link-layer neighbor: an unanswered
-/// resolution is not remembered, so every packet may ask again.
+/// packets whose route may resolve a link-layer neighbor.
 fn with_neighbor_requests(
     question: &super::Request,
     limits: DnsOperation,
     attempts: u64,
 ) -> Result<DnsOperation, Error> {
-    if question.route.link_mode == packetcraftr_netio::link::Mode::Layer3 {
-        return Ok(limits);
-    }
-    // A multicast or limited-broadcast server's link address follows from its
-    // own, so no request precedes a query to it.
-    if let crate::target::Target::Address(address) = &question.server
-        && !crate::neighbor::needs_resolution(*address)
-    {
-        return Ok(limits);
-    }
-    // A server of unknown family is charged the larger solicitation.
-    let request_bytes = match &question.server {
-        crate::target::Target::Address(address) => crate::neighbor::request_wire_bytes(*address),
-        _ => crate::neighbor::IPV6_REQUEST_BYTES,
+    let address = match &question.server {
+        crate::target::Target::Address(address) => Some(*address),
+        _ => None,
     };
+    let (requests, request_bytes) = crate::neighbor::charge(
+        question.route.link_mode,
+        address,
+        limits.udp().packets(),
+        attempts,
+    )
+    .ok_or(LimitOverflow)?;
+    if requests == 0 {
+        return Ok(limits);
+    }
     let udp = limits.udp();
-    let requests = udp.packets().checked_mul(attempts).ok_or(LimitOverflow)?;
     let packets = udp.packets().checked_add(requests).ok_or(LimitOverflow)?;
-    let bytes = requests
-        .checked_mul(request_bytes)
-        .and_then(|requests| requests.checked_add(udp.wire_bytes()))
+    let bytes = request_bytes
+        .checked_add(udp.wire_bytes())
         .ok_or(LimitOverflow)?;
     Ok(DnsOperation::new(
         WireLimits::new(packets, bytes),
@@ -309,7 +348,7 @@ const FIRST_ATTEMPT: u32 = 1;
 
 /// Authorizes the combined worst-case traffic limits before discovery.
 pub(super) fn run<A, E, C, F>(
-    request: &Request,
+    prepared: Prepared<'_>,
     authorizer: &mut A,
     registry: &Registry,
     executor: &mut E,
@@ -323,13 +362,12 @@ where
     C: Clock,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
-    request.validate()?;
-    let requests = &request.questions;
-    let prepared = requests
-        .iter()
-        .map(PreparedOperation::new)
-        .collect::<Result<Vec<_>, _>>()?;
-    let limits = batch_limits(prepared.iter().map(|prepared| prepared.limits))?;
+    let Prepared {
+        questions: requests,
+        operations: prepared,
+        limits,
+        ..
+    } = prepared;
     let mut stop = deadline.enforce().is_err();
     if !stop {
         approve_operation::<_, Error>(authorizer, Operation::Dns(limits), deadline)?;
@@ -404,4 +442,72 @@ where
         questions,
         stats,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::{IpAddr, Ipv4Addr};
+    use std::time::Duration;
+
+    use super::{Prepared, Request};
+    use crate::dns::{Limits, QueryType, TransportMode};
+    use crate::target::{Family, Target};
+
+    fn question(name: &str) -> crate::dns::Request {
+        crate::dns::Request {
+            server: Target::Address(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))),
+            address_family: Family::Any,
+            server_port: 53,
+            source_port: 12_345,
+            query_name: name.to_owned(),
+            query_type: QueryType::A,
+            transaction_id: 7,
+            recursion_desired: true,
+            edns: None,
+            transport: TransportMode::Udp,
+            attempts: 2,
+            timeout: Duration::from_millis(250),
+            queries_per_second: None,
+            limits: Limits {
+                max_duration: Duration::from_secs(30),
+                ..Limits::default()
+            },
+            route: crate::route::Options::default(),
+            collection: crate::exchange::Collection::default(),
+        }
+    }
+
+    #[test]
+    fn empty_batch_is_rejected_before_indexing() {
+        let error = match Prepared::new(
+            &Request {
+                questions: Vec::new(),
+            },
+            1,
+        ) {
+            Ok(_) => panic!("an empty batch must be rejected"),
+            Err(error) => error,
+        };
+        assert!(
+            matches!(
+                error,
+                super::Error::InvalidLimit {
+                    field: "questions",
+                    ..
+                }
+            ),
+            "expected a questions limit error, got {error:?}"
+        );
+    }
+
+    #[test]
+    fn prepared_limits_match_the_authorization_entry_point() {
+        let questions = vec![question("a.test"), question("b.test")];
+        let request = Request {
+            questions: questions.clone(),
+        };
+        let expected = super::limits(questions.iter(), 3).unwrap();
+        let prepared = Prepared::new(&request, 3).unwrap();
+        assert_eq!(prepared.limits, expected);
+    }
 }

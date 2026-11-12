@@ -1006,3 +1006,74 @@ stopped in libpcap because this environment lacks CAP_NET_RAW. The live scan
 therefore could not verify received packets in this environment. The controlled
 multi-source pipeline fixtures exercise rotation, pending settlement, capture
 statistics, and failure evidence without raw-socket privileges.
+
+## Hotspot module deepening, 2026-11-12
+
+This pass ranked files by churn times size and audited the hottest clusters in
+all four crates, looking for callers that had to know a rule the callee should
+own. Behaviour and published output are unchanged; the only interface changes
+are on the unpublished-workspace basis earlier passes used. Each item landed as
+its own commit.
+
+### Decisions and problems addressed
+
+- Give a DNS batch one prepared owner.
+  - `dns_batch_in` read `&request.questions[0]` before validation, so an empty
+    batch panicked through a crate-private path instead of returning
+    `InvalidLimit`. Separately, `dns_limits` and `batch::run` each built the same
+    per-question `PreparedOperation` set.
+  - `batch::Prepared` now validates the batch once, owns the per-question
+    operations and combined limits, and is consumed by `run`. Empty-batch and
+    limits-equivalence tests cover it.
+- Let the session hand the deadline to `Collector::observe`.
+  - `observe` did not receive the deadline that `finish` got, so HTTP/2 stored
+    its own and required a `with_deadline` builder a caller could forget.
+  - The trait method now takes `&Deadline`. HTTP/2 uses the passed one and the
+    builder and stored field are gone. The existing expired-deadline test now
+    drives `observe` directly.
+- Share one UDP payload range extractor.
+  - DNS and QUIC each re-derived the UDP length field's payload size and clamped
+    it to the frame with different error handling.
+  - `adapter::udp_payload` owns the arithmetic and returns the range plus the
+    declared length, so each caller keeps its own truncation policy and its copy
+    or slice choice.
+- Share the neighbor-request charge.
+  - DNS batches and the traceroute host planner each restated the "one
+    solicitation per probe on a link-layer route, exempt multicast and
+    broadcast" authorization rule.
+  - `neighbor::charge` owns it in one place.
+- Make the workflow step a builder.
+  - `WorkflowOverrides` used `Option` for "inherit" and clamped
+    `max_unmatched_frames` from `max_responses` as an undocumented side effect.
+  - `WorkflowStep` names its two required inputs and defaults the rest, and
+    `Collection::with_max_responses` owns the clamp beside the fields it
+    narrows.
+- Read format and stream from the invocation in CLI inner runs.
+  - Six inner `run` functions took `format` and `stream` that were always
+    `invocation.format` and `&invocation.output`. OS identification also called
+    `with_deadline` on a client that already had it.
+- Collapse the DNS-over-TCP wait seam.
+  - `query` forwarded to `query_with_sources`, which forwarded to a third
+    wrapper whose `wait` parameter was `PendingConnect::wait` at every call
+    site. The middle layer owns the body now.
+
+### Deliberately left
+
+Audited and deferred as larger than a focused pass: the application collector
+budget kit, a scan `PreparedLedger`, splitting `probe::runner::Batch`,
+`filter::FieldRef` as a sum type, and the netio `Request`/`GroupRequest`
+shapes. A later pass should not re-derive that they are shallow; they are, and
+each needs several call-site rewrites at once.
+
+### Verification
+
+`cargo test --locked --workspace` passes all four crates, 843 tests. Clippy
+passes with warnings denied over all targets. The layer, coupling, file-length,
+and output-schema scripts pass without changed thresholds.
+
+Rebuilt-binary output is byte-identical to the pre-change binary for
+`analyze http2` on the multiplexed fixture, `analyze dns` on the response
+fixture, `--output ndjson files read`, and `network scan --list`.
+
+No mutation-gate file was touched, so the line-pinned exclusions in
+`.github/workflows/ci.yml` stay valid. Mutation testing was not run this pass.

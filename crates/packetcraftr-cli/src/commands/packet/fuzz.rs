@@ -71,17 +71,16 @@ impl crate::commands::Spec for Args {
         self,
         invocation: &crate::invocation::Invocation,
     ) -> Result<crate::commands::CommandExit, CliError> {
-        run(invocation, self, invocation.format, &invocation.output)
-            .map(|()| crate::commands::CommandExit::SUCCESS)
+        run(invocation, self).map(|()| crate::commands::CommandExit::SUCCESS)
     }
 }
 
 pub(super) fn run(
     invocation: &crate::invocation::Invocation,
     arguments: Args,
-    format: Format,
-    stream: &StreamEncoder,
 ) -> Result<(), CliError> {
+    let format = invocation.format;
+    let stream = &invocation.output;
     let (mut request, selectors) = prepare_request(&arguments)?;
     let mut live = prepare_live(&arguments, &request)?;
     let registry = packetcraftr_core::protocol::builtin::registry();

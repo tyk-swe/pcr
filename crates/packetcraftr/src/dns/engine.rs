@@ -86,15 +86,15 @@ impl<P: PacketProviders + TargetProviders + TcpProviders, K: Clock> Client<P, K>
     where
         Q: std::borrow::Borrow<Request>,
     {
-        batch::limits(questions, u64::from(self.neighbors.max_attempts()))
+        self.dns_limits_with(questions, u64::from(self.neighbors.max_attempts()))
     }
 
-    pub(crate) fn dns_limits_in<Q: std::borrow::Borrow<Request>>(
+    pub(crate) fn dns_limits_with<Q: std::borrow::Borrow<Request>>(
         &self,
         questions: impl IntoIterator<Item = Q>,
-        operation: &crate::engine::operation::Operation,
+        neighbor_attempts: u64,
     ) -> Result<DnsOperation, Error> {
-        batch::limits(questions, u64::from(operation.neighbors.max_attempts()))
+        batch::limits(questions, neighbor_attempts)
     }
 
     /// Runs DNS questions in input order under one deadline: the shortest `limits.max_duration`.
@@ -103,13 +103,14 @@ impl<P: PacketProviders + TargetProviders + TcpProviders, K: Clock> Client<P, K>
     where
         S: Sink<batch::Event, Ack = ()>,
     {
-        let operation = crate::engine::operation::Operation::new(self, request.max_duration()?);
-        self.dns_batch_in(request, sink, &operation)
+        let prepared = batch::Prepared::new(&request, u64::from(self.neighbors.max_attempts()))?;
+        let operation = crate::engine::operation::Operation::new(self, prepared.max_duration());
+        self.dns_batch_in(prepared, sink, &operation)
     }
 
     pub(crate) fn dns_batch_in<S>(
         &self,
-        request: batch::Request,
+        prepared: batch::Prepared<'_>,
         sink: S,
         operation: &crate::engine::operation::Operation,
     ) -> Result<batch::Report, Error>
@@ -117,11 +118,11 @@ impl<P: PacketProviders + TargetProviders + TcpProviders, K: Clock> Client<P, K>
         S: Sink<batch::Event, Ack = ()>,
     {
         let setup = WorkflowSetup::new(self, operation);
-        let mut workflow = setup.start(self, request.max_duration()?);
+        let mut workflow = setup.start(self, prepared.max_duration());
         let publish = publisher(&operation.runtime, sink, Error::from, |source| {
             Error::Output { source }
         })?;
-        let first = &request.questions[0];
+        let first = prepared.first();
         let OperationWorkflow {
             authorizer: admission,
             registry,
@@ -129,7 +130,7 @@ impl<P: PacketProviders + TargetProviders + TcpProviders, K: Clock> Client<P, K>
             deadline,
         } = &mut workflow;
         batch::run(
-            &request,
+            prepared,
             admission,
             registry,
             &mut WorkflowExecutor::new(

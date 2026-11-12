@@ -257,7 +257,7 @@ impl Lookup {
                     .ok()
             });
         let limits = client
-            .dns_limits_in(questions, operation)
+            .dns_limits_with(questions, u64::from(operation.neighbors.max_attempts()))
             .map_err(|error| error.to_string());
         if let Some(error) = failure {
             return Err(error);
@@ -301,8 +301,16 @@ impl Lookup {
             }
         };
         let collector = batch::Collector::default();
+        let request = batch::Request { questions };
+        let prepared = match batch::Prepared::new(
+            &request,
+            u64::from(operation.neighbors.max_attempts()),
+        ) {
+            Ok(prepared) => prepared,
+            Err(error) => return ended(batch::QuestionStatus::Failed, Some(error.to_string())),
+        };
         match client
-            .dns_batch_in(batch::Request { questions }, collector.clone(), operation)
+            .dns_batch_in(prepared, collector.clone(), operation)
             .and_then(|report| collector.finish(report))
         {
             Ok(aggregate) => {

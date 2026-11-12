@@ -251,7 +251,11 @@ impl analysis::Collector for Collector {
             track_sources: true,
         }
     }
-    fn observe(&mut self, r: &FrameRecord<'_>) -> Result<Vec<Finding>, BoundaryError> {
+    fn observe(
+        &mut self,
+        r: &FrameRecord<'_>,
+        _deadline: &crate::budget::Deadline,
+    ) -> Result<Vec<Finding>, BoundaryError> {
         if r.decoded.frame.captured_length() < r.decoded.frame.original_length() {
             self.report
                 .completeness

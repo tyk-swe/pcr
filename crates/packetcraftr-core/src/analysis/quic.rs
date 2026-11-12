@@ -739,7 +739,11 @@ impl session::Collector for Collector {
             ..session::CollectorNeeds::default()
         }
     }
-    fn observe(&mut self, record: &FrameRecord<'_>) -> Result<Vec<Event>, BoundaryError> {
+    fn observe(
+        &mut self,
+        record: &FrameRecord<'_>,
+        _deadline: &crate::budget::Deadline,
+    ) -> Result<Vec<Event>, BoundaryError> {
         Self::observe(self, record).map_err(BoundaryError::from_error)
     }
     fn finish(

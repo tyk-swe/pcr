@@ -51,7 +51,11 @@ macro_rules! application_collector {
                 Self::scopes(self).cloned().collect()
             }
 
-            fn observe(&mut self, record: &FrameRecord<'_>) -> Result<Vec<Event>, BoundaryError> {
+            fn observe(
+                &mut self,
+                record: &FrameRecord<'_>,
+                _deadline: &crate::budget::Deadline,
+            ) -> Result<Vec<Event>, BoundaryError> {
                 Self::observe(self, record).map_err(BoundaryError::from_error)
             }
 
@@ -96,7 +100,13 @@ pub trait Collector {
         Vec::new()
     }
 
-    fn observe(&mut self, record: &FrameRecord<'_>) -> Result<Vec<Self::Event>, BoundaryError>;
+    /// Observe one frame under the run's control. Collectors whose per-frame
+    /// work is unbounded check `deadline` inside it; the rest ignore it.
+    fn observe(
+        &mut self,
+        record: &FrameRecord<'_>,
+        deadline: &Deadline,
+    ) -> Result<Vec<Self::Event>, BoundaryError>;
 
     /// Finalize under the original run control, delivering terminal events in
     /// order through `event_sink`. Check the deadline during large
@@ -260,7 +270,7 @@ impl<'a, C: Collector> Session<'a, C> {
             &self.options,
             ip_sink,
             |record, deadline| {
-                let events = collector.observe(&record)?;
+                let events = collector.observe(&record, deadline)?;
                 deliver(deadline, events, event_sink)?;
                 Ok(())
             },

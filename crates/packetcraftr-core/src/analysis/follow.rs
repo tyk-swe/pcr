@@ -244,7 +244,11 @@ impl session::Collector for Collector {
         }
     }
 
-    fn observe(&mut self, record: &FrameRecord<'_>) -> Result<Vec<Chunk>, BoundaryError> {
+    fn observe(
+        &mut self,
+        record: &FrameRecord<'_>,
+        _deadline: &crate::budget::Deadline,
+    ) -> Result<Vec<Chunk>, BoundaryError> {
         Ok(Self::observe(self, record))
     }
 

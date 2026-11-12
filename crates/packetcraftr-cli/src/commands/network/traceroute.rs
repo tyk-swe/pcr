@@ -14,7 +14,6 @@ use packetcraftr_netio as net;
 use self::arguments::Args;
 use crate::command_options::parse_target;
 use crate::errors::CliError;
-use crate::invocation::StreamEncoder;
 use crate::system::{Runtime, prepare_workflow};
 
 use crate::output::contract::PublishedType;
@@ -83,17 +82,16 @@ impl crate::commands::Spec for Args {
         self,
         invocation: &crate::invocation::Invocation,
     ) -> Result<crate::commands::CommandExit, CliError> {
-        run(invocation, self, invocation.format, &invocation.output)
-            .map(|()| crate::commands::CommandExit::SUCCESS)
+        run(invocation, self).map(|()| crate::commands::CommandExit::SUCCESS)
     }
 }
 
 pub(super) fn run(
     invocation: &crate::invocation::Invocation,
     arguments: Args,
-    format: Format,
-    stream: &StreamEncoder,
 ) -> Result<(), CliError> {
+    let format = invocation.format;
+    let stream = &invocation.output;
     let queue_limits = arguments.limits.clone().into_limits();
     let flow_count = arguments.flow_count();
     let request = prepare_request(&arguments, queue_limits)?;

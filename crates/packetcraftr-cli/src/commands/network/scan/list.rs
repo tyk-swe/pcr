@@ -7,7 +7,6 @@ use std::time::Duration;
 use crate::command_options::{AddressFamily, HostnamePolicyArgs};
 use crate::errors::CliError;
 use crate::input::manifest::Declaration;
-use crate::invocation::StreamEncoder;
 use crate::output::{self, contract::Format};
 use crate::system::{Runtime, client};
 use crate::terminal::{write_stdout_line, write_summary_line};
@@ -30,9 +29,9 @@ pub(super) struct Request {
 pub(super) fn run(
     invocation: &crate::invocation::Invocation,
     request: Request,
-    format: Format,
-    stream: &StreamEncoder,
 ) -> Result<(), CliError> {
+    let format = invocation.format;
+    let stream = &invocation.output;
     let Request {
         selection,
         origins,

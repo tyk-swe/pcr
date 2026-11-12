@@ -129,12 +129,10 @@ pub(super) fn run(
     invocation: &crate::invocation::Invocation,
     arguments: Args,
 ) -> Result<(), CliError> {
-    let format = invocation.format;
-    let stream = &invocation.output;
     match preparation::prepare(invocation, arguments)? {
-        Planned::List(request) => list::run(invocation, request, format, stream),
-        Planned::Connect(request) => connect::run(invocation, request, format, stream),
-        Planned::Raw(request) => raw::run(invocation, request, format, stream),
+        Planned::List(request) => list::run(invocation, request),
+        Planned::Connect(request) => connect::run(invocation, request),
+        Planned::Raw(request) => raw::run(invocation, request),
     }
 }
 

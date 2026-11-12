@@ -161,10 +161,7 @@ impl crate::commands::Spec for Args {
             request.timeout,
             request.collection.capture,
         )?;
-        let mut client = workflow.client(invocation, Runtime::Workflow);
-        if let Some(deadline) = invocation.control.deadline.clone() {
-            client = client.with_deadline((*deadline).clone());
-        }
+        let client = workflow.client(invocation, Runtime::Workflow);
         request.route = workflow.route;
         // Preserve explicit evidence ceilings; preparation supplies native decoding options.
         request.collection.decode = workflow.collection.decode;

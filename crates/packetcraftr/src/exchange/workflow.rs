@@ -36,14 +36,46 @@ impl<'a, P, K> WorkflowExecutor<'a, P, K> {
 }
 
 /// What one step changes about the workflow's shared exchange settings.
-pub(crate) struct WorkflowOverrides {
-    pub(crate) timeout: std::time::Duration,
-    pub(crate) max_template_packets: usize,
-    pub(crate) destination: std::net::IpAddr,
-    pub(crate) interface: Option<packetcraftr_netio::interface::Id>,
-    /// The workflow's own evidence limit for this one exchange, or `None` to
-    /// keep the executor's ceilings.
-    pub(crate) max_responses: Option<usize>,
+/// `destination` and `timeout` are required; the rest default to the
+/// executor's own settings.
+pub(crate) struct WorkflowStep {
+    timeout: std::time::Duration,
+    destination: std::net::IpAddr,
+    interface: Option<packetcraftr_netio::interface::Id>,
+    /// This exchange's own evidence limit, or `None` to keep the executor's.
+    max_responses: Option<usize>,
+    max_template_packets: usize,
+}
+
+impl WorkflowStep {
+    pub(crate) const fn new(
+        timeout: std::time::Duration,
+        destination: std::net::IpAddr,
+    ) -> Self {
+        Self {
+            timeout,
+            destination,
+            interface: None,
+            max_responses: None,
+            max_template_packets: 1,
+        }
+    }
+
+    pub(crate) fn interface(mut self, interface: packetcraftr_netio::interface::Id) -> Self {
+        self.interface = Some(interface);
+        self
+    }
+
+    /// Caps this exchange's responses and its unmatched frames together.
+    pub(crate) fn responses(mut self, max_responses: usize) -> Self {
+        self.max_responses = Some(max_responses);
+        self
+    }
+
+    pub(crate) fn template_packets(mut self, packets: usize) -> Self {
+        self.max_template_packets = packets;
+        self
+    }
 }
 
 impl<P, K> WorkflowExecutor<'_, P, K>
@@ -54,27 +86,26 @@ where
     pub(crate) fn exchange_for_workflow(
         &self,
         template: packetcraftr_core::template::Template,
-        overrides: WorkflowOverrides,
+        step: WorkflowStep,
         matches_request: &mut WorkflowResponseMatcher<'_>,
         stop_after_response: Option<&mut WorkflowStopPredicate<'_>>,
     ) -> Result<WorkflowEvidence, BoundaryError> {
         let mut send = self.send.clone();
-        send.destination = Some(overrides.destination);
-        if let Some(interface) = overrides.interface {
+        send.destination = Some(step.destination);
+        if let Some(interface) = step.interface {
             send.plan.interface = Some(Interface::Id(interface));
         }
-        let mut collection = self.collection.clone();
-        if let Some(max_responses) = overrides.max_responses {
-            collection.max_responses = max_responses;
-            collection.max_unmatched_frames = collection.max_unmatched_frames.min(max_responses);
-        }
+        let collection = match step.max_responses {
+            Some(max_responses) => self.collection.clone().with_max_responses(max_responses),
+            None => self.collection.clone(),
+        };
         self.client
             .exchange_hooked(
                 Step {
                     template,
                     send,
-                    timeout: overrides.timeout,
-                    max_template_packets: overrides.max_template_packets,
+                    timeout: step.timeout,
+                    max_template_packets: step.max_template_packets,
                     collection,
                 },
                 self.operation,

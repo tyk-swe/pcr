@@ -4,7 +4,7 @@
 use crate::engine::execution::Executor;
 use crate::engine::execution::ExecutorFault;
 use crate::exchange::WorkflowExecutor;
-use crate::exchange::WorkflowOverrides;
+use crate::exchange::WorkflowStep;
 use crate::probe::{Batch, Evidence, Transport};
 use packetcraftr_core::error::BoundaryError;
 use packetcraftr_core::protocol::identity;
@@ -83,13 +83,8 @@ impl<P: PacketProviders, K: Clock> Executor<Batch<Probe>> for WorkflowExecutor<'
             };
         let exchange = self.exchange_for_workflow(
             template,
-            WorkflowOverrides {
-                timeout: batch.timeout,
-                max_template_packets: batch.probes.len(),
-                destination: first.address,
-                interface: None,
-                max_responses: None,
-            },
+            WorkflowStep::new(batch.timeout, first.address)
+                .template_packets(batch.probes.len()),
             &mut matches_request,
             None,
         )?;

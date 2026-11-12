@@ -14,7 +14,7 @@ use crate::clock::Clock;
 use crate::engine::correlation;
 use crate::engine::execution::{Executor, ExecutorFault};
 use crate::evidence::ExecutionPermit;
-use crate::exchange::{WorkflowExecutor, WorkflowOverrides};
+use crate::exchange::{WorkflowExecutor, WorkflowStep};
 use crate::probe::Transport as ProbeTransport;
 use crate::providers::{PacketProviders, TcpProviders};
 use packetcraftr_core::error::BoundaryError;
@@ -142,13 +142,8 @@ impl<P: PacketProviders, K: Clock> Executor<Exchange> for WorkflowExecutor<'_, P
             };
         let result = self.exchange_for_workflow(
             packetcraftr_core::template::Template::new(exchange.probe.packet()),
-            WorkflowOverrides {
-                timeout: exchange.timeout,
-                max_template_packets: 1,
-                destination: exchange.probe.server_address,
-                interface: None,
-                max_responses: Some(max_responses),
-            },
+            WorkflowStep::new(exchange.timeout, exchange.probe.server_address)
+                .responses(max_responses),
             &mut matches_request,
             Some(&mut stop_after_response),
         )?;

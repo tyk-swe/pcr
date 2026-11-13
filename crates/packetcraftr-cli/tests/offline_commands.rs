@@ -2093,3 +2093,106 @@ fn quic_keylog_rejects_idle_nonregular_input() {
             .contains("regular file")
     );
 }
+
+#[test]
+fn dns_transactions_follow_first_captured_bytes_not_completion_order() {
+    use packetcraftr_core::capture_file::{Format, Writer};
+    use packetcraftr_core::frame::{Frame, LinkType};
+    use packetcraftr_core::protocol::checksum_parts;
+    use std::time::{Duration, UNIX_EPOCH};
+
+    fn segment(reverse: bool, sequence: u32, flags: u8, payload: &[u8]) -> Vec<u8> {
+        let (src, dst, sport, dport) = if reverse {
+            ([192, 0, 2, 2], [192, 0, 2, 1], 53u16, 40000u16)
+        } else {
+            ([192, 0, 2, 1], [192, 0, 2, 2], 40000u16, 53u16)
+        };
+        let mut wire = vec![0u8; 40];
+        wire[0] = 0x45;
+        wire[2..4].copy_from_slice(&u16::try_from(40 + payload.len()).unwrap().to_be_bytes());
+        wire[8] = 64;
+        wire[9] = 6;
+        wire[12..16].copy_from_slice(&src);
+        wire[16..20].copy_from_slice(&dst);
+        wire[20..22].copy_from_slice(&sport.to_be_bytes());
+        wire[22..24].copy_from_slice(&dport.to_be_bytes());
+        wire[24..28].copy_from_slice(&sequence.to_be_bytes());
+        if flags & 0x10 != 0 {
+            wire[28..32].copy_from_slice(&(if reverse { 101u32 } else { 501 }).to_be_bytes());
+        }
+        wire[32] = 0x50;
+        wire[33] = flags;
+        wire[34..36].copy_from_slice(&65535u16.to_be_bytes());
+        wire.extend_from_slice(payload);
+        let length = u16::try_from(wire.len() - 20).unwrap().to_be_bytes();
+        let sum = checksum_parts(&[&src, &dst, &[0, 6], &length, &wire[20..]]);
+        wire[36..38].copy_from_slice(&sum.to_be_bytes());
+        let sum = checksum_parts(&[&wire[..20]]);
+        wire[10..12].copy_from_slice(&sum.to_be_bytes());
+        wire
+    }
+    let query = b"\x00\x1d\x12\x34\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00\x07example\x03com\x00\x00\x01\x00\x01";
+    let mut response = query.to_vec();
+    response[4..6].copy_from_slice(&0x8180u16.to_be_bytes());
+    for response_started_first in [true, false] {
+        let mut frames = vec![
+            segment(false, 100, 2, &[]),
+            segment(true, 500, 18, &[]),
+            segment(false, 101, 16, &[]),
+        ];
+        if response_started_first {
+            frames.extend([
+                segment(true, 501, 24, &response[..10]),
+                segment(false, 101, 24, query),
+                segment(true, 511, 24, &response[10..]),
+            ]);
+        } else {
+            frames.extend([
+                segment(false, 101, 24, &query[..10]),
+                segment(true, 501, 24, &response),
+                segment(false, 111, 24, &query[10..]),
+            ]);
+        }
+        let capture = tempfile::NamedTempFile::new().unwrap();
+        let mut writer =
+            Writer::new(capture.reopen().unwrap(), Format::Pcap, LinkType::IPV4).unwrap();
+        for (index, bytes) in frames.into_iter().enumerate() {
+            let frame = Frame::new(
+                Some(UNIX_EPOCH + Duration::from_secs(index as u64)),
+                LinkType::IPV4,
+                bytes,
+            )
+            .unwrap();
+            writer.write_frame(&frame).unwrap();
+        }
+        writer.flush().unwrap();
+        let args = [
+            "--output",
+            "json",
+            "analyze",
+            "dns",
+            capture.path().to_str().unwrap(),
+        ];
+        let output = run(&args);
+        let result: serde_json::Value =
+            serde_json::from_str(&assert_success(&output, &args)).unwrap();
+        let transactions = result["result"]["transactions"].as_array().unwrap();
+        let statuses: Vec<_> = transactions
+            .iter()
+            .map(|t| t["status"].as_str().unwrap())
+            .collect();
+        if response_started_first {
+            assert_eq!(statuses.len(), 2, "{result}");
+            assert!(
+                statuses.contains(&"orphan_response") && statuses.contains(&"unanswered"),
+                "{result}"
+            );
+        } else {
+            assert_eq!(statuses, ["matched"], "{result}");
+            assert_eq!(
+                transactions[0]["first_query_latency"]["negative"], true,
+                "{result}"
+            );
+        }
+    }
+}

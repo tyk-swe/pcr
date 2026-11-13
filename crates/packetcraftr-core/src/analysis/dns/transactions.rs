@@ -198,7 +198,11 @@ impl Tracker {
             index: message.index,
             sources: message.sources.clone(),
         };
-        if let Some(pending) = self.pending.remove(&key) {
+        if self.pending.get(&key).is_some_and(|pending| {
+            response.sources.frames()[0].number
+                > pending.sources.first().expect("query has sources").number
+        }) {
+            let pending = self.pending.remove(&key).expect("matching query exists");
             return Ok(vec![self.matched(&key, pending, response)?]);
         }
         if self.answered.contains_key(&key) {

@@ -92,3 +92,39 @@ fn yaml_preserves_resource_limit_classification() {
         assert_eq!(error.classification().kind, Kind::Usage);
     }
 }
+
+#[test]
+fn yaml_preserves_unsigned_timestamp_range() {
+    use crate::build::{Builder, Options};
+    use crate::codec::Addresses;
+    use crate::field::Value;
+    use crate::protocol::builtin;
+
+    let registry = builtin::registry();
+    for value in [0, i64::MAX as u64, (i64::MAX as u64) + 1, u64::MAX] {
+        for fields in [
+            format!("type: unsigned, value: {value}"),
+            format!("value: {value}, type: unsigned"),
+        ] {
+            let input = format!(
+                "schema: packetcraftr.packet/v1\nlayers:\n  - protocol: ntp\n    fields:\n      transmit_timestamp: {{{fields}}}\n"
+            );
+            let document = Packet::parse(&input, Format::Yaml, input.len()).unwrap();
+            assert_eq!(
+                document.layers[0].fields["transmit_timestamp"],
+                Value::Unsigned(value)
+            );
+            let packet = document.to_packet(&registry, 1).unwrap();
+            let built = Builder::new(registry.clone())
+                .build(packet, Addresses::default(), Options::default())
+                .unwrap();
+            assert_eq!(&built.bytes[40..48], &value.to_be_bytes());
+        }
+    }
+    for value in ["-1", "18446744073709551616", "1.5", "1.0"] {
+        let input = format!(
+            "schema: packetcraftr.packet/v1\nlayers:\n  - protocol: ntp\n    fields:\n      transmit_timestamp: {{type: unsigned, value: {value}}}\n"
+        );
+        assert!(Packet::parse(&input, Format::Yaml, input.len()).is_err());
+    }
+}

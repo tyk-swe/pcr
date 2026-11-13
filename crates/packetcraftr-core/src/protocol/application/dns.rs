@@ -9,6 +9,8 @@ pub(crate) use codec::DnsCodec;
 pub use codec::decode_name;
 pub use model::{Dns, Edns, EdnsOption, Name, Question, Record, RecordValue};
 
+pub(crate) const MDNS_PORT: u16 = 5353;
+
 pub const MAX_MESSAGE_BYTES: usize = 65_535;
 pub const TYPE_OPT: u16 = 41;
 pub const MAX_RECORDS: usize = 4_096;

@@ -6,7 +6,7 @@
 //! Product and version fields are unauthenticated claims. Matching a claim
 //! never authenticates an endpoint or makes a vulnerability assertion.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
@@ -223,8 +223,19 @@ pub struct Corpus {
 
 impl Corpus {
     pub fn validate(&self) -> Result<(), Error> {
+        self.validated().map(|_| ())
+    }
+
+    pub fn validated(&self) -> Result<Validated<'_>, Error> {
         validate(self)
     }
+}
+
+/// A corpus checked once and indexed for repeated identification.
+pub struct Validated<'c> {
+    corpus: &'c Corpus,
+    probes: BTreeMap<&'c str, &'c Probe>,
+    rules: BTreeMap<&'c str, Vec<usize>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -341,7 +352,7 @@ pub fn parse(document: &[u8]) -> Result<Corpus, Error> {
     Ok(corpus)
 }
 
-fn validate(corpus: &Corpus) -> Result<(), Error> {
+fn validate(corpus: &Corpus) -> Result<Validated<'_>, Error> {
     if corpus.schema != SERVICE_PROBES_SCHEMA_V1 {
         return Err(invalid("schema", "unsupported service-probes schema"));
     }
@@ -349,20 +360,21 @@ fn validate(corpus: &Corpus) -> Result<(), Error> {
     text("corpus version", &corpus.version)?;
     count("probes", corpus.probes.len(), MAX_PROBES)?;
     count("matches", corpus.matches.len(), MAX_MATCHES)?;
-    let mut probes = BTreeSet::new();
+    let mut probes = BTreeMap::new();
     for probe in &corpus.probes {
         validate_probe(probe)?;
-        if !probes.insert(probe.id.as_str()) {
+        if probes.insert(probe.id.as_str(), probe).is_some() {
             return Err(invalid("probe ID", "duplicate"));
         }
     }
-    let mut rules = BTreeSet::new();
-    for rule in &corpus.matches {
+    let mut ids = BTreeSet::new();
+    let mut rules: BTreeMap<_, Vec<_>> = BTreeMap::new();
+    for (index, rule) in corpus.matches.iter().enumerate() {
         identifier("match ID", &rule.id)?;
-        if !rules.insert(rule.id.as_str()) {
+        if !ids.insert(rule.id.as_str()) {
             return Err(invalid("match ID", "duplicate"));
         }
-        let Some(probe) = corpus.probes.iter().find(|probe| probe.id == rule.probe) else {
+        let Some(&probe) = probes.get(rule.probe.as_str()) else {
             return Err(invalid("match probe", "names no probe"));
         };
         if rule.field.protocol() != probe.request.protocol() {
@@ -428,8 +440,13 @@ fn validate(corpus: &Corpus) -> Result<(), Error> {
             ));
         }
         metadata(&rule.metadata)?;
+        rules.entry(probe.id.as_str()).or_default().push(index);
     }
-    Ok(())
+    Ok(Validated {
+        corpus,
+        probes,
+        rules,
+    })
 }
 
 fn validate_cpe(value: &str) -> Result<(), Error> {

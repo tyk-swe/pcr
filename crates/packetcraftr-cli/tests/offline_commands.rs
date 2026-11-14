@@ -172,6 +172,55 @@ fn dns_capture_dissects_successfully() {
 }
 
 #[test]
+fn hunt_reports_each_indicator_matching_capture_addresses_and_names() {
+    let indicators = tempfile::NamedTempFile::new().expect("create indicator file");
+    std::fs::write(
+        indicators.path(),
+        r#"{"schema":"packetcraftr.indicators/v1","indicators":[
+            {"id":"server","kind":"ip","value":"192.0.2.53"},
+            {"id":"client-net","kind":"cidr","value":"198.51.100.0/24"},
+            {"id":"zone","kind":"domain_suffix","value":"Test."},
+            {"id":"absent-host","kind":"ip","value":"203.0.113.1"},
+            {"id":"absent-name","kind":"domain","value":"other.test"}
+        ]}"#,
+    )
+    .expect("write indicators");
+    let capture = capture_path("dns-response.pcap");
+    let args = [
+        "--output",
+        "json",
+        "analyze",
+        "hunt",
+        capture.to_str().unwrap(),
+        "--indicators",
+        indicators.path().to_str().unwrap(),
+    ];
+    let output = run(&args);
+    assert_success(&output, &args);
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).expect("JSON report");
+    let matches: std::collections::BTreeSet<_> = report["result"]["findings"]
+        .as_array()
+        .expect("findings")
+        .iter()
+        .map(|finding| {
+            assert_eq!(finding["rule_id"], "ioc.match");
+            (
+                finding["indicator_id"].as_str().unwrap().to_owned(),
+                finding["subject"].as_str().unwrap().to_owned(),
+            )
+        })
+        .collect();
+    let expected = [
+        ("client-net", "198.51.100.8"),
+        ("server", "192.0.2.53"),
+        ("zone", "example.test."),
+        ("zone", "ns.example.test."),
+    ]
+    .map(|(id, subject)| (id.to_owned(), subject.to_owned()));
+    assert_eq!(matches, expected.into());
+}
+
+#[test]
 fn frame_text_shows_bytes_only_when_verbose_or_as_a_field_tree() {
     let path = capture_path("dns-response.pcap");
     let capture = path.to_string_lossy().into_owned();

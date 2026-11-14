@@ -124,6 +124,7 @@ type BeaconKey = (u32, IpAddr, IpAddr, u16);
 
 pub struct Collector {
     mode: Mode,
+    indicators: Option<crate::security::indicators::Matcher>,
     limits: Limits,
     report: Report,
     dns: Option<dns::Collector>,
@@ -143,11 +144,17 @@ impl Collector {
         app: application::Limits,
     ) -> Result<Self, BoundaryError> {
         limits.validate().map_err(BoundaryError::from_error)?;
-        match &mut mode {
-            Mode::Dns(options) => options.validate().map_err(BoundaryError::from_error)?,
-            Mode::Beacons(options) => options.validate().map_err(BoundaryError::from_error)?,
-            Mode::Hunt(document) => document.validate().map_err(BoundaryError::from_error)?,
-        }
+        let indicators = match &mut mode {
+            Mode::Dns(options) => {
+                options.validate().map_err(BoundaryError::from_error)?;
+                None
+            }
+            Mode::Beacons(options) => {
+                options.validate().map_err(BoundaryError::from_error)?;
+                None
+            }
+            Mode::Hunt(document) => Some(document.compile().map_err(BoundaryError::from_error)?),
+        };
         let hunt = matches!(mode, Mode::Hunt(_));
         let has_dns = !matches!(mode, Mode::Beacons(_));
         let report = Report::new(match mode {
@@ -157,6 +164,7 @@ impl Collector {
         });
         Ok(Self {
             mode,
+            indicators,
             limits,
             report,
             dns: if has_dns {

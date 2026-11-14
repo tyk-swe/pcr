@@ -1,10 +1,12 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use std::net::IpAddr;
 use std::sync::Arc;
 
 use packetcraftr_core::error::{Classification, Kind};
 use packetcraftr_core::frame::Frame;
+use packetcraftr_core::protocol::semantics;
 use packetcraftr_core::{build, codec, decode, registry::Registry};
 use packetcraftr_netio::link::Mode;
 
@@ -40,7 +42,11 @@ impl<'c> FrameAdmission<'c> {
         }
     }
 
-    fn authorize_frame(&mut self, frame: &Frame, mode: Mode) -> Result<(), BoundaryError> {
+    fn authorize_frame(
+        &mut self,
+        frame: &Frame,
+        mode: Mode,
+    ) -> Result<Option<IpAddr>, BoundaryError> {
         validate_complete_frame(frame)?;
         self.validate_link_type(frame)?;
         validate_network_frame(frame, mode)?;
@@ -49,8 +55,12 @@ impl<'c> FrameAdmission<'c> {
         let decoded = self.decode_frame(frame)?;
         let rebuilt = self.rebuild_frame(&decoded)?;
         self.validate_rebuild(frame, &rebuilt)?;
+        let packet_source = semantics::outer_ip_path(&trusted.packet)
+            .ok()
+            .flatten()
+            .map(|path| path.source);
         self.wire_decode = Some(trusted);
-        Ok(())
+        Ok(packet_source)
     }
 
     fn validate_link_type(&self, frame: &Frame) -> Result<(), BoundaryError> {
@@ -202,12 +212,13 @@ fn validate_network_frame(frame: &Frame, mode: Mode) -> Result<(), BoundaryError
 }
 
 impl FrameAdmission<'_> {
+    /// Returns the frame's outer IP source as read by the trusted decoder.
     pub(super) fn admit_frame(
         &mut self,
         limits: WireLimits,
         frame: &Frame,
         mode: Mode,
-    ) -> Result<(), BoundaryError> {
+    ) -> Result<Option<IpAddr>, BoundaryError> {
         self.policy
             .authorize(Operation::Wire(limits))
             .map_err(BoundaryError::from_error)?;

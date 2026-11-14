@@ -235,13 +235,17 @@ fn fixture() -> (TestClient, Network) {
 }
 
 fn batch(sequence: u64, address: &str) -> Batch<Probe> {
+    endpoint_batch(sequence, address, crate::probe::Endpoint::Tcp { port: 80 })
+}
+
+fn endpoint_batch(sequence: u64, address: &str, endpoint: crate::probe::Endpoint) -> Batch<Probe> {
     Batch {
         probes: vec![Probe {
             sequence,
             stage: Stage::Scan,
             address: address.parse().unwrap(),
             scope: None,
-            endpoint: crate::probe::Endpoint::Tcp { port: 80 },
+            endpoint,
             tcp_scan: Default::default(),
             sctp_scan: Default::default(),
             attempt: 1,
@@ -354,6 +358,51 @@ fn completed_attempt_remains_available_for_late_attribution() {
     assert_eq!(late, [Some(0)]);
     let observed = network.0.lock().unwrap();
     assert_eq!(observed.shutdown, observed.armed.len());
+}
+
+#[test]
+fn only_probes_with_confusable_replies_wait_for_each_other() {
+    use crate::probe::Endpoint;
+    let tcp = Endpoint::Tcp { port: 80 };
+    let raw_tcp = Endpoint::Ip { protocol: 6 };
+    let raw_other = Endpoint::Ip { protocol: 253 };
+    let concurrent = ["sent 0", "sent 1", "completed 0", "completed 1"];
+    let serialized = ["sent 0", "completed 0", "sent 1", "completed 1"];
+    for (first, second, expected) in [
+        (tcp, tcp, concurrent),
+        (raw_tcp, tcp, serialized),
+        (tcp, raw_tcp, serialized),
+        (raw_other, tcp, concurrent),
+    ] {
+        let (client, _network) = fixture();
+        let operation = Operation::new(&client, Duration::from_secs(2));
+        let executor = executor(&client, &operation);
+        let mut order = Vec::new();
+        run(
+            &executor,
+            &[
+                endpoint_batch(0, "10.0.0.1", first),
+                endpoint_batch(1, "10.0.0.1", second),
+            ],
+            PipelineOptions {
+                max_in_flight: 2,
+                ..options(&client)
+            },
+            &mut |event| {
+                match event {
+                    PipelineEvent::Sent { index, .. } => order.push(format!("sent {index}")),
+                    PipelineEvent::Completed { index, .. } => {
+                        order.push(format!("completed {index}"));
+                    }
+                    _ => {}
+                }
+                Ok(())
+            },
+            &mut history(),
+        )
+        .unwrap();
+        assert_eq!(order, expected, "{first:?} then {second:?}");
+    }
 }
 
 #[test]

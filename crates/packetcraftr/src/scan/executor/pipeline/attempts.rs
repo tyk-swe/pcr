@@ -9,7 +9,7 @@ use super::{
 use crate::{
     evidence::SentPacket,
     probe::Batch,
-    scan::{PendingEvidence, Probe, SentProbe},
+    scan::{PendingEvidence, Probe, SentProbe, plan::replies_overlap},
 };
 use packetcraftr_core::{error::BoundaryError, frame::Frame, packet::Packet, registry::Registry};
 use std::{
@@ -65,6 +65,7 @@ pub(super) struct Attempts<'a> {
     armed_ready: BTreeSet<usize>,
     ready_deadlines: BTreeSet<(Instant, usize)>,
     pending: BTreeMap<usize, Pending>,
+    raw_ip_pending: BTreeSet<usize>,
     recent: VecDeque<(usize, Arc<SentPacket>, usize)>,
     recent_sent: BTreeMap<usize, Arc<SentPacket>>,
     candidates: CandidateIndex,
@@ -101,6 +102,7 @@ impl<'a> Attempts<'a> {
             armed_ready,
             ready_deadlines,
             pending: BTreeMap::new(),
+            raw_ip_pending: BTreeSet::new(),
             recent: VecDeque::new(),
             recent_sent: BTreeMap::new(),
             candidates: CandidateIndex::new(sources, capacity),
@@ -139,8 +141,14 @@ impl<'a> Attempts<'a> {
         self.armed_ready.iter().copied()
     }
 
-    pub(super) fn pending_indices(&self) -> impl Iterator<Item = usize> + '_ {
-        self.pending.keys().copied()
+    pub(super) fn reply_overlaps(&self, index: usize) -> bool {
+        let next = self.description(index).probe();
+        let overlaps = |pending: &usize| replies_overlap(next, self.description(*pending).probe());
+        if next.endpoint.ip_protocol().is_some() {
+            self.pending.keys().any(overlaps)
+        } else {
+            self.raw_ip_pending.iter().any(overlaps)
+        }
     }
 
     pub(super) fn queued_memory(&self, index: usize) -> usize {
@@ -264,6 +272,15 @@ impl<'a> Attempts<'a> {
             .insert(index, source, &sent.built().packet, registry)?;
         self.deadlines.insert(deadline, index);
         self.retained += charge;
+        if self
+            .description(index)
+            .probe()
+            .endpoint
+            .ip_protocol()
+            .is_some()
+        {
+            self.raw_ip_pending.insert(index);
+        }
         self.pending.insert(
             index,
             Pending {
@@ -305,6 +322,7 @@ impl<'a> Attempts<'a> {
             .pending
             .remove(&index)
             .expect("completed pending probe");
+        self.raw_ip_pending.remove(&index);
         if self.recent.len() == self.recent_capacity {
             self.retire_recent();
         }

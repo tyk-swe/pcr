@@ -2,7 +2,7 @@ use super::output::{EarlyData, Stream};
 use crate::{errors::CliError, invocation::Invocation, staged_output::StagedFile};
 use packetcraftr_core::error::Kind;
 use serde::Serialize;
-use std::io::Write;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 #[derive(Serialize)]
@@ -110,18 +110,24 @@ impl Exporter {
     pub(super) fn finish(mut self) -> Result<(), CliError> {
         let path = self.directory.join("quic-manifest.json");
         let mut manifest = self.manifest;
-        serde_json::to_writer_pretty(
-            manifest.as_file_mut(),
+        let mut writer = io::BufWriter::with_capacity(64 * 1024, manifest.as_file_mut());
+        let written = serde_json::to_writer_pretty(
+            &mut writer,
             &Manifest {
                 schema: "packetcraftr.quic-streams/v1",
                 connections: self.connections,
             },
         )
-        .map_err(|e| CliError::caused(Kind::Io, &e))?;
-        manifest
-            .as_file_mut()
-            .write_all(b"\n")
-            .map_err(|e| CliError::caused(Kind::Io, &e))?;
+        .map_err(|e| CliError::caused(Kind::Io, &e))
+        .and_then(|()| {
+            writer
+                .write_all(b"\n")
+                .and_then(|()| writer.flush())
+                .map_err(|e| CliError::caused(Kind::Io, &e))
+        });
+        // BufWriter's Drop would retry buffered output after a failed write or flush.
+        let _ = writer.into_parts();
+        written?;
         self.files.push((path, manifest));
         for (_, file) in &self.files {
             file.sync()?;

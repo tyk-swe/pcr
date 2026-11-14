@@ -278,6 +278,13 @@ impl<W: Write> Write for Output<W> {
             WriterState::Zstd(writer) => writer.write(bytes),
         }
     }
+    fn write_vectored(&mut self, parts: &[io::IoSlice<'_>]) -> io::Result<usize> {
+        match &mut self.encoder {
+            WriterState::Plain(writer) => writer.write_vectored(parts),
+            WriterState::Gzip(writer) => writer.write_vectored(parts),
+            WriterState::Zstd(writer) => writer.write_vectored(parts),
+        }
+    }
     fn flush(&mut self) -> io::Result<()> {
         match &mut self.encoder {
             WriterState::Plain(writer) => writer.flush(),

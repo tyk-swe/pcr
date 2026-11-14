@@ -3,7 +3,7 @@
 
 //! Indicator matching across packet, DNS, HTTP, and TLS observations.
 
-use super::{Collector, Finding, Mode, Severity, sample};
+use super::{Collector, Finding, Severity, sample};
 use crate::protocol::identity;
 use crate::security::indicators::Kind;
 use crate::{
@@ -22,23 +22,16 @@ impl Collector {
         frames: Vec<u64>,
         context: serde_json::Value,
     ) -> Result<(), BoundaryError> {
-        let Mode::Hunt(doc) = &self.mode else {
+        let Some(indicators) = &self.indicators else {
             return Ok(());
         };
-        let matched: Vec<_> = doc
-            .indicators
-            .iter()
-            .filter(|i| {
-                if let Some(ip) = ip {
-                    i.matches_ip(ip)
-                } else if let Some(kind) = fingerprint {
-                    i.kind == kind && i.value == value
-                } else {
-                    i.matches_domain(value)
-                }
-            })
-            .map(|i| i.id.clone())
-            .collect();
+        let matched = if let Some(ip) = ip {
+            indicators.ip(ip)
+        } else if let Some(kind) = fingerprint {
+            indicators.fingerprint(kind, value)
+        } else {
+            indicators.domain(value)
+        };
         for id in matched {
             let mut finding = Finding::new(
                 "ioc.match",

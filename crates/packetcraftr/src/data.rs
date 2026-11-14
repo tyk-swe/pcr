@@ -103,6 +103,7 @@ mod tests {
         if training.source.trim().is_empty() || training.fixtures.is_empty() {
             return Err("source and fixtures must be nonempty");
         }
+        let validated = corpus.validated().map_err(|_| "invalid corpus")?;
         let mut ids = BTreeSet::new();
         for fixture in &training.fixtures {
             if fixture.id.trim().is_empty() || !ids.insert(&fixture.id) {
@@ -122,7 +123,7 @@ mod tests {
                 return Err("rule belongs to another probe");
             }
             let observation = service_probes::observe(probe, fixture.response.as_bytes(), false);
-            let identification = corpus.identify(probe, &observation);
+            let identification = validated.identify(probe, &observation);
             if identification.outcome != service_probes::MatchOutcome::Matched
                 || !identification.candidates.iter().any(|candidate| {
                     candidate.provenance.rule == fixture.rule
@@ -179,6 +180,48 @@ mod tests {
                 }
                 name => panic!("no parser for {name}"),
             }
+        }
+    }
+
+    #[test]
+    fn identification_requires_a_valid_corpus_and_its_exact_probe() {
+        let corpus = service_probes::parse(SERVICE_PROBES).expect("service probes parse");
+        let training: Training =
+            serde_json::from_slice(include_bytes!("../data/service-probes.training.v1.json"))
+                .unwrap();
+        let fixture = &training.fixtures[0];
+        let probe = corpus
+            .probes
+            .iter()
+            .find(|probe| probe.id == fixture.probe)
+            .unwrap();
+        let observation = service_probes::observe(probe, fixture.response.as_bytes(), false);
+        let identification = corpus.identify(probe, &observation);
+        assert_eq!(
+            identification.outcome,
+            service_probes::MatchOutcome::Matched
+        );
+        assert_eq!(
+            identification,
+            corpus.validated().unwrap().identify(probe, &observation)
+        );
+        let altered = service_probes::Probe {
+            intensity: probe.intensity ^ 1,
+            ..probe.clone()
+        };
+        let duplicate = service_probes::Corpus {
+            matches: [&corpus.matches[..], &corpus.matches[..1]].concat(),
+            ..corpus.clone()
+        };
+        for identification in [
+            corpus.identify(&altered, &observation),
+            duplicate.identify(probe, &observation),
+        ] {
+            assert_eq!(
+                identification.outcome,
+                service_probes::MatchOutcome::Malformed
+            );
+            assert!(identification.candidates.is_empty());
         }
     }
 

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::io::Read;
+use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -271,7 +272,7 @@ where
             }
 
             let plan = plan_frame(self.options, &session.tally, &read.frame, source_index)?;
-            guarded(&session.deadline, source_index, || {
+            let packet_source = guarded(&session.deadline, source_index, || {
                 self.authorizer
                     .admit_frame(
                         WireLimits::new(plan.next_completed, plan.next_bytes),
@@ -291,6 +292,7 @@ where
                 source_index,
                 &plan,
                 &read.frame,
+                packet_source,
             )?;
             guarded(&session.deadline, source_index, || {
                 self.authorizer
@@ -433,10 +435,11 @@ fn plan_frame_route<P: PacketProviders>(
     source_index: u64,
     plan: &FramePlan,
     frame: &Frame,
+    packet_source: Option<IpAddr>,
 ) -> Result<MaterializedRoute, Error> {
     let route = guarded(deadline, source_index, || {
         executor
-            .plan_frame(interface, plan.mode, frame, deadline)
+            .plan_frame(interface, plan.mode, frame, packet_source, deadline)
             .map_err(|source| Error::Transmission {
                 source_index,
                 source,

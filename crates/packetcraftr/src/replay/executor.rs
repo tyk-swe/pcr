@@ -1,11 +1,12 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use std::net::IpAddr;
+
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::codec::NetworkEnvelope;
 use packetcraftr_core::error::{Classified, Kind};
 use packetcraftr_core::frame::Frame;
-use packetcraftr_core::protocol::semantics;
 use packetcraftr_netio::route::Provider as RouteProvider;
 use packetcraftr_netio::{
     Error as LiveIoError, NativeCapability, Unsupported,
@@ -14,7 +15,6 @@ use packetcraftr_netio::{
     transmit::{Outbound, Provider as TransmitProvider, Report as IoSendReport},
 };
 
-use crate::policy::decode_wire;
 use crate::providers::PacketProviders;
 use crate::route::{Interface, Materialized as MaterializedRoute};
 
@@ -59,7 +59,7 @@ fn materialized_route<Q: RouteProvider>(
     routes: &Q,
     interface: &InterfaceInfo,
     mode: LinkMode,
-    frame: &Frame,
+    packet_source: Option<IpAddr>,
     network: Option<NetworkEnvelope>,
     deadline: &Deadline,
 ) -> Result<MaterializedRoute, LiveIoError> {
@@ -71,7 +71,7 @@ fn materialized_route<Q: RouteProvider>(
                     interface: interface.id.clone(),
                     source_mac: interface.mac_address,
                     selected_source,
-                    preferred_source: interface_owned_packet_source(interface, frame),
+                    preferred_source: interface_owned(interface, packet_source),
                     next_hop: None,
                     selection_reason: packetcraftr_netio::route::SelectionReason::InterfaceOnly,
                     destination_scope: packetcraftr_netio::route::Scope::Link,
@@ -153,18 +153,14 @@ fn materialized_route<Q: RouteProvider>(
     })
 }
 
-fn interface_owned_packet_source(
-    interface: &InterfaceInfo,
-    frame: &Frame,
-) -> Option<std::net::IpAddr> {
-    let decoded = decode_wire(frame.link_type, frame.bytes()).ok()?;
-    let source = semantics::outer_ip_path(&decoded.packet).ok()??.source;
-    (!source.is_unspecified()
-        && interface
-            .addresses
-            .iter()
-            .any(|address| address.address == source))
-    .then_some(source)
+fn interface_owned(interface: &InterfaceInfo, source: Option<IpAddr>) -> Option<IpAddr> {
+    source.filter(|source| {
+        !source.is_unspecified()
+            && interface
+                .addresses
+                .iter()
+                .any(|address| address.address == *source)
+    })
 }
 
 impl<P: PacketProviders> ProviderExecutor<'_, P> {
@@ -175,6 +171,7 @@ impl<P: PacketProviders> ProviderExecutor<'_, P> {
         requested: &Interface,
         mode: LinkMode,
         frame: &Frame,
+        packet_source: Option<IpAddr>,
         deadline: &Deadline,
     ) -> Result<MaterializedRoute, LiveIoError> {
         let network = match mode {
@@ -232,7 +229,7 @@ impl<P: PacketProviders> ProviderExecutor<'_, P> {
             self.providers.route(),
             &selected,
             mode,
-            frame,
+            packet_source,
             network,
             deadline,
         )

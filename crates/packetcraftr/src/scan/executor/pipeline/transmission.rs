@@ -4,10 +4,8 @@
 
 use super::{Pipeline, check, limit, max_wait_secs};
 use crate::{
-    clock::Clock,
-    engine::preparation::RebuildError,
-    providers::PacketProviders,
-    scan::{executor::PipelineEvent, plan::replies_overlap},
+    clock::Clock, engine::preparation::RebuildError, providers::PacketProviders,
+    scan::executor::PipelineEvent,
 };
 use packetcraftr_core::error::BoundaryError;
 use packetcraftr_netio::{Error as LiveIoError, capture};
@@ -27,7 +25,7 @@ impl<P: PacketProviders, K: Clock> Pipeline<'_, P, K> {
             let Some(index) = self
                 .attempts
                 .armed_indices()
-                .find(|index| !self.reply_overlaps(*index))
+                .find(|index| !self.attempts.reply_overlaps(*index))
             else {
                 break;
             };
@@ -52,13 +50,6 @@ impl<P: PacketProviders, K: Clock> Pipeline<'_, P, K> {
             }
         }
         Ok(())
-    }
-
-    fn reply_overlaps(&self, index: usize) -> bool {
-        let next = self.attempts.description(index).probe();
-        self.attempts
-            .pending_indices()
-            .any(|pending| replies_overlap(next, self.attempts.description(pending).probe()))
     }
 
     fn omit(&mut self, index: usize) -> Result<(), BoundaryError> {
@@ -186,16 +177,17 @@ impl<P: PacketProviders, K: Clock> Pipeline<'_, P, K> {
         if let Some(deadline) = self.attempts.next_ready_deadline() {
             earliest = earliest.min(deadline);
         }
-        let can_send = self
-            .attempts
-            .armed_indices()
-            .find(|index| !self.reply_overlaps(*index))
-            .is_some_and(|index| {
-                self.attempts
-                    .retained()
-                    .saturating_add(self.attempts.queued_memory(index))
-                    <= self.options.max_prepared_bytes
-            });
+        let can_send = self.attempts.pending_count() < self.options.max_in_flight
+            && self
+                .attempts
+                .armed_indices()
+                .find(|index| !self.attempts.reply_overlaps(*index))
+                .is_some_and(|index| {
+                    self.attempts
+                        .retained()
+                        .saturating_add(self.attempts.queued_memory(index))
+                        <= self.options.max_prepared_bytes
+                });
         let can_refill = self.streaming.as_ref().is_some_and(|stream| {
             !stream.done
                 && self
@@ -209,7 +201,7 @@ impl<P: PacketProviders, K: Clock> Pipeline<'_, P, K> {
                     .saturating_add(stream.max_probe_bytes)
                     <= self.options.max_prepared_bytes
         });
-        if self.attempts.pending_count() < self.options.max_in_flight && can_send {
+        if can_send {
             earliest = earliest.min(self.next_send);
         }
         if can_refill {

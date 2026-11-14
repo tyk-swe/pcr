@@ -271,12 +271,9 @@ impl Collector {
                 &self.limits,
                 false,
             );
-            self.handle_result(
-                &mut state,
-                result,
-                &packet,
+            self.handle_result(&mut state, result, &packet, input.number, |reason| {
                 Pending {
-                    reason: PendingReason::MissingSecrets,
+                    reason,
                     bytes: Bytes::copy_from_slice(packet.bytes),
                     direction,
                     dcid_length: length,
@@ -284,8 +281,8 @@ impl Collector {
                     timestamp: input.timestamp,
                     flow: input.flow.flow.clone(),
                     keylog_revision: self.keylog.revision(),
-                },
-            );
+                }
+            });
             self.retry(&mut state);
             self.replay_resets(&mut state);
             self.summary.decrypted_packets += state.report.metrics.decrypted_packets - before;
@@ -317,24 +314,19 @@ impl Collector {
         state: &mut State,
         result: Result<bool, Error>,
         packet: &Packet<'_>,
-        pending: Pending,
+        number: u64,
+        pending: impl FnOnce(PendingReason) -> Pending,
     ) {
         match result {
             Ok(true) => {}
-            Ok(false) => self.defer(state, pending),
+            Ok(false) => self.defer(state, pending(PendingReason::MissingSecrets)),
             Err(Error::Authentication) => {
                 state.report.metrics.authentication_failures += 1;
                 if packet.number_offset.is_some() {
-                    self.defer(
-                        state,
-                        Pending {
-                            reason: PendingReason::Authentication,
-                            ..pending
-                        },
-                    );
+                    self.defer(state, pending(PendingReason::Authentication));
                 } else {
                     state.diagnostic(
-                        pending.number,
+                        number,
                         "authentication_failed",
                         "QUIC packet authentication failed",
                         &self.limits,
@@ -347,7 +339,7 @@ impl Collector {
                     Error::UnsupportedFrame(_) => "unsupported_frame",
                     _ => "malformed_packet",
                 };
-                state.diagnostic(pending.number, code, error.to_string(), &self.limits);
+                state.diagnostic(number, code, error.to_string(), &self.limits);
             }
         }
     }

@@ -136,7 +136,7 @@ impl capture::Provider for Network {
             metadata: capture::Metadata {
                 interface: request.interface.clone(),
                 link_type: LinkType::RAW,
-                snap_length: request.limits.snap_length,
+                snap_length: request.settings.limits.snap_length,
                 native: Default::default(),
             },
             stats: Default::default(),

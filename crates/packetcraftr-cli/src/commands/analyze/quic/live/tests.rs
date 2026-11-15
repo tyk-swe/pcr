@@ -56,7 +56,7 @@ impl net::capture::Provider for Backend {
             metadata: net::capture::Metadata {
                 interface: request.interface.clone(),
                 link_type: self.frames[0].link_type,
-                snap_length: request.limits.snap_length,
+                snap_length: request.settings.limits.snap_length,
                 native: net::capture::RealizedSettings::default(),
             },
             keys: self.keys.clone(),

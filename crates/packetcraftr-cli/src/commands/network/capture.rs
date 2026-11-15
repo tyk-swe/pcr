@@ -194,10 +194,13 @@ pub(super) fn run(invocation: &crate::invocation::Invocation, args: Args) -> Res
     }
     let request = workflow::Request::new(
         net::capture::GroupRequest {
-            filter: args.capture_filter,
-            promiscuous: args.promiscuous,
-            native,
-            ..net::capture::GroupRequest::new(interfaces, limits)
+            interfaces,
+            settings: net::capture::Settings {
+                filter: args.capture_filter,
+                promiscuous: args.promiscuous,
+                native,
+                ..net::capture::Settings::new(limits)
+            },
         },
         timeout,
     );

@@ -18,7 +18,7 @@ use packetcraftr_netio::{
 };
 
 use super::cache::{NeighborCache, NeighborCacheKey};
-use super::error::{invalid_options, map_io_error};
+use super::error::{invalid_options, map_io_error, spent_io_error};
 use super::evidence::{
     EvidenceBuffer, validate_captured_frame, validate_neighbor_send, validate_request,
 };
@@ -343,18 +343,12 @@ where
                 let captured_frame = match capture.next_captured_frame(&wait) {
                     Ok(captured_frame) => captured_frame,
                     Err(source) => {
-                        let (captured, evidence_truncated) = evidence.into_evidence();
-                        let mut error =
-                            map_io_error(request, "receiving discovery response", source);
-                        let Error::Io { spent, .. } = &mut error else {
-                            unreachable!()
-                        };
-                        *spent = Some(Box::new(super::error::FailureEvidence {
-                            attempts: attempt,
-                            captured: captured.into_boxed_slice(),
-                            evidence_truncated,
-                        }));
-                        return Err(error);
+                        return Err(spent_io_error(
+                            request,
+                            "receiving discovery response",
+                            source,
+                            evidence.spent(attempt),
+                        ));
                     }
                 };
                 let Some(captured_frame) = captured_frame else {
@@ -390,15 +384,21 @@ where
                 evidence.retain(frame);
             }
         }
-        {
-            let (captured, evidence_truncated) = evidence.into_evidence();
-            Ok(ExchangeOutcome {
-                mac_address: None,
-                attempts,
-                captured,
-                evidence_truncated,
-            })
+        if let Err(cancelled) = deadline.check_cancelled() {
+            return Err(spent_io_error(
+                request,
+                "waiting for discovery response",
+                cancelled.into(),
+                evidence.spent(attempts),
+            ));
         }
+        let (captured, evidence_truncated) = evidence.into_evidence();
+        Ok(ExchangeOutcome {
+            mac_address: None,
+            attempts,
+            captured,
+            evidence_truncated,
+        })
     }
 
     fn drain_pre_request<S: Session>(

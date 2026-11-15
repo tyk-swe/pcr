@@ -26,7 +26,7 @@ struct Session {
     metadata: capture::Metadata,
     cancellation: Cancellation,
     cancel_before_send: bool,
-    reads: usize,
+    reads: Arc<AtomicUsize>,
 }
 impl capture::Session for Session {
     fn metadata(&self) -> &capture::Metadata {
@@ -39,7 +39,7 @@ impl capture::Session for Session {
         &mut self,
         deadline: &Deadline,
     ) -> Result<Option<capture::Captured>, packetcraftr_netio::Error> {
-        self.reads += 1;
+        self.reads.fetch_add(1, Ordering::SeqCst);
         if self.cancel_before_send || !deadline.limit().is_zero() {
             self.cancellation.cancel();
             if !self.cancel_before_send {
@@ -118,7 +118,8 @@ fn parent_cancellation_stops_reads_and_attempts() {
         let parent =
             Deadline::new(Duration::from_secs(1)).with_cancellation(Some(cancellation.clone()));
         let deadline = Deadline::new(Duration::from_secs(1)).with_parent(Some(Arc::new(parent)));
-        let mut session = Session {
+        let reads = Arc::new(AtomicUsize::new(0));
+        let capture = Armed(std::sync::Mutex::new(Some(Session {
             metadata: capture::Metadata {
                 interface: request.interface.clone(),
                 link_type: request.link_type,
@@ -127,30 +128,29 @@ fn parent_cancellation_stops_reads_and_attempts() {
             },
             cancellation,
             cancel_before_send,
-            reads: 0,
-        };
+            reads: Arc::clone(&reads),
+        })));
         let transmitter = Transmitter(AtomicUsize::new(0));
-        let state = State::default();
-        let active = state.over(&transmitter, &Captures);
-        let decision = discovery_decision(&request);
-        let bytes = build_request_frame(&request).unwrap();
-        let result = active
-            .exchange(
-                &request,
-                &bytes,
-                transmit::Route {
-                    decision: &decision,
-                    mode: Mode::Layer2,
-                    lookup_destination: None,
-                },
-                &mut session,
-                &deadline,
-            )
-            .unwrap();
+        let error = State::default()
+            .over(&transmitter, &capture)
+            .resolve(&request, &deadline)
+            .unwrap_err();
+        let Error::Io {
+            spent: Some(spent),
+            source,
+            ..
+        } = error
+        else {
+            panic!("cancellation must not read as an unanswered resolution: {error:?}");
+        };
         let expected = u32::from(!cancel_before_send);
-        assert_eq!(result.attempts, expected);
+        assert!(matches!(source, packetcraftr_netio::Error::Cancelled(_)));
+        assert_eq!(spent.attempts, expected);
         assert_eq!(transmitter.0.load(Ordering::SeqCst), expected as usize);
-        assert_eq!(session.reads, if cancel_before_send { 1 } else { 2 });
+        assert_eq!(
+            reads.load(Ordering::SeqCst),
+            if cancel_before_send { 1 } else { 2 }
+        );
     }
 }
 
@@ -207,10 +207,10 @@ impl capture::Session for InterruptedSession {
     }
 }
 
-struct InterruptedCapture(std::sync::Mutex<Option<InterruptedSession>>);
+struct Armed<S>(std::sync::Mutex<Option<S>>);
 
-impl capture::Provider for InterruptedCapture {
-    type Capture = InterruptedSession;
+impl<S: capture::Session + Send> capture::Provider for Armed<S> {
+    type Capture = S;
 
     fn arm_capture(
         &self,
@@ -239,7 +239,7 @@ fn interrupted_read_preserves_attempt_and_evidence() {
     let parent =
         Deadline::new(Duration::from_secs(1)).with_cancellation(Some(cancellation.clone()));
     let deadline = Deadline::new(Duration::from_secs(1)).with_parent(Some(Arc::new(parent)));
-    let capture = InterruptedCapture(std::sync::Mutex::new(Some(InterruptedSession {
+    let capture = Armed(std::sync::Mutex::new(Some(InterruptedSession {
         metadata: capture::Metadata {
             interface: request.interface.clone(),
             link_type: request.link_type,

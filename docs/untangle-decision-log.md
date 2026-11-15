@@ -1204,8 +1204,8 @@ capture provider that returns no frame on cancellation, which the resolver
 test drives.
 
 Mutation testing over this branch's non-test diff, running workspace tests,
-catches 186 of 220 viable mutants, with 50 unviable. It caught 114 before the
-added tests. The survivors are the HTTP/2 set and offer cost magnitudes,
+catches 186 of 220 viable mutants, with 50 unviable. Before the added tests,
+running only each mutated crate's own tests, it caught 114. The survivors are the HTTP/2 set and offer cost magnitudes,
 which every charge and its release share so balance tests cannot see them,
 the live capture CLI wiring and native `open`, `Projection::selects_single_values`,
 which only forwarding verification reads, the description charge constant,

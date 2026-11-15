@@ -399,12 +399,7 @@ impl ConnectionState {
             FrameBody::Control { .. } => wire_bytes.len(),
         };
         let sources = sources.ok_or(Error::Invariant("frame sources missing"))?;
-        context.charge_retained(
-            retained
-                + budget::EVENT_OVERHEAD
-                + budget::SET_OVERHEAD
-                + sources.frames().len() * budget::SPAN_OVERHEAD,
-        )?;
+        context.charge_retained(retained + budget::EVENT_OVERHEAD + budget::set_cost(&sources))?;
         context.frame(super::super::model::Frame {
             index: self.frames,
             stream: self.stream,

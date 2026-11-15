@@ -411,19 +411,7 @@ fn not_found_stats_count_every_request_frame() {
 }
 
 fn cache_key(index: u16) -> NeighborCacheKey {
-    let [high, low] = index.to_be_bytes();
-    NeighborCacheKey::from(&Request {
-        interface: packetcraftr_netio::interface::Id {
-            name: "test0".into(),
-            index: 1,
-        },
-        interface_source: "192.0.2.1".parse().unwrap(),
-        interface_mac: MacAddress([2, 0, 0, 0, 0, 1]),
-        target: std::net::Ipv4Addr::new(198, 51, high, low).into(),
-        vlan_tags: vec![],
-        mtu: 1500,
-        link_type: packetcraftr_core::frame::LinkType::ETHERNET,
-    })
+    NeighborCacheKey::from(&neighbor(index))
 }
 
 fn cache_options(capacity: usize, ttl: u64) -> Options {
@@ -910,4 +898,37 @@ fn resolved_stats_count_every_request_frame() {
     let stats = resolution.stats(Duration::ZERO);
     assert_eq!(stats.packets_attempted, 2);
     assert_eq!(stats.bytes, 2 * frame_bytes as u64);
+}
+
+fn neighbor(index: u16) -> Request {
+    let [high, low] = index.to_be_bytes();
+    Request {
+        interface: packetcraftr_netio::interface::Id {
+            name: "test0".into(),
+            index: 1,
+        },
+        interface_source: "192.0.2.1".parse().unwrap(),
+        interface_mac: MacAddress([2, 0, 0, 0, 0, 1]),
+        target: std::net::Ipv4Addr::new(198, 51, high, low).into(),
+        vlan_tags: vec![],
+        mtu: 1500,
+        link_type: packetcraftr_core::frame::LinkType::ETHERNET,
+    }
+}
+
+#[test]
+fn operation_answers_outlive_shared_eviction_and_stay_pinned() {
+    let shared = State::try_new(cache_options(1, 3600)).unwrap();
+    let pinned = shared.for_operation(2);
+    let [first, second] = [1, 2].map(|index| MacAddress([2, 0, 0, 0, 0, index]));
+    pinned.remember(first, cache_key(1)).unwrap();
+    pinned.remember(second, cache_key(2)).unwrap();
+
+    assert_eq!(shared.cached(&neighbor(1)).unwrap(), None);
+    assert_eq!(shared.cached(&neighbor(2)).unwrap(), Some(second));
+    assert_eq!(pinned.cached(&neighbor(1)).unwrap(), Some(first));
+    let repinned = pinned.for_operation(1);
+    assert_eq!(repinned.cached(&neighbor(1)).unwrap(), Some(first));
+    assert_eq!(repinned.cached(&neighbor(2)).unwrap(), Some(second));
+    assert_eq!(pinned.fresh().cached(&neighbor(2)).unwrap(), None);
 }

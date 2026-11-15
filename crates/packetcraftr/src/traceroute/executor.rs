@@ -87,7 +87,7 @@ impl<P: PacketProviders, K: Clock> Executor<Batch<Probe>> for WorkflowExecutor<'
             &mut matches_request,
             None,
         )?;
-        let execution = Evidence::from_exchange(batch.permit, exchange);
+        let execution = batch.evidence(exchange);
         Ok(execution)
     }
 }

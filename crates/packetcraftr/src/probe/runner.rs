@@ -24,11 +24,35 @@ use crate::{Stats, evidence::SentPacket};
 pub(crate) struct Batch<P> {
     pub(crate) probes: Vec<P>,
     pub(crate) timeout: Duration,
-    pub(crate) permit: ExecutionPermit,
+    permit: ExecutionPermit,
     pub(crate) sequence: u64,
 }
 
 impl<P> Batch<P> {
+    /// A batch with its own permit. The runner replaces the permit and
+    /// timeout with its grant before execution.
+    pub(crate) fn new(sequence: u64, probes: Vec<P>, timeout: Duration) -> Self {
+        Self {
+            probes,
+            timeout,
+            permit: ExecutionPermit::new(),
+            sequence,
+        }
+    }
+
+    pub(crate) fn permit(&self) -> ExecutionPermit {
+        self.permit
+    }
+
+    pub(crate) fn with_permit(self, permit: ExecutionPermit) -> Self {
+        Self { permit, ..self }
+    }
+
+    /// Exchange evidence attributed to this batch.
+    pub(crate) fn evidence(&self, exchange: crate::exchange::WorkflowEvidence) -> Evidence {
+        Evidence::from_exchange(self.permit, exchange)
+    }
+
     fn bind(&mut self, grant: Grant) {
         self.timeout = grant.timeout;
         self.permit = grant.permit;
@@ -201,3 +225,6 @@ where
     context.enforce(last_sequence)?;
     Ok(context.into_stats())
 }
+
+#[cfg(test)]
+mod tests;

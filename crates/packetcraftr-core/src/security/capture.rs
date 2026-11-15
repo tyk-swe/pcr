@@ -7,14 +7,12 @@ mod hunt;
 
 use super::{Error, Finding, Limits, Report, Severity, indicators::Document};
 use crate::{
-    analysis::{self, FrameRecord, application, dns, http, tls},
+    analysis::{self, FrameRecord, application, dns},
     error::BoundaryError,
+    protocol::application::dns::Dns,
 };
 use serde_json::json;
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    net::IpAddr,
-};
+use std::collections::{BTreeMap, btree_map::Entry};
 
 #[derive(Clone, Copy, Debug)]
 pub struct DnsOptions {
@@ -107,98 +105,65 @@ pub enum Mode {
     Dns(DnsOptions),
     Beacons(BeaconOptions),
 }
-#[derive(Default)]
-struct DnsGroup {
-    responses: usize,
-    nx: usize,
-    labels: BTreeSet<Vec<u8>>,
-    frames: Vec<u64>,
-}
-#[derive(Default)]
-struct BeaconGroup {
-    times: Vec<std::time::Duration>,
-    frames: Vec<u64>,
-}
-type DnsKey = (u32, IpAddr, u64, Option<String>);
-type BeaconKey = (u32, IpAddr, IpAddr, u16);
 
 pub struct Collector {
-    mode: Mode,
-    indicators: Option<crate::security::indicators::Matcher>,
+    engine: Engine,
+    output: Output,
+}
+
+/// The state one mode keeps; no mode carries another's collectors or groups.
+enum Engine {
+    Hunt(Box<hunt::Hunt>),
+    Dns(Box<dns_anomalies::Anomalies>),
+    Beacons(beacons::Beacons),
+}
+
+/// What every mode records into: its limits, its report, and the observations charged.
+struct Output {
     limits: Limits,
     report: Report,
-    dns: Option<dns::Collector>,
-    http: Option<http::Collector>,
-    tls: Option<tls::Collector>,
-    dns_groups: BTreeMap<DnsKey, DnsGroup>,
-    replies: BTreeMap<u64, (u16, u64)>,
-    beacons: BTreeMap<BeaconKey, BeaconGroup>,
-    stream_sources: BTreeMap<u64, Vec<u64>>,
-    syns: BTreeMap<analysis::ScopedFlowKey, BTreeSet<u32>>,
     observations: usize,
 }
+
 impl Collector {
     pub fn new(
-        mut mode: Mode,
+        mode: Mode,
         limits: Limits,
         app: application::Limits,
     ) -> Result<Self, BoundaryError> {
         limits.validate().map_err(BoundaryError::from_error)?;
-        let indicators = match &mut mode {
+        let (kind, engine) = match mode {
+            Mode::Hunt(mut document) => {
+                let indicators = document.compile().map_err(BoundaryError::from_error)?;
+                (
+                    "hunt",
+                    Engine::Hunt(Box::new(hunt::Hunt::new(indicators, app)?)),
+                )
+            }
             Mode::Dns(options) => {
                 options.validate().map_err(BoundaryError::from_error)?;
-                None
+                (
+                    "dns-anomalies",
+                    Engine::Dns(Box::new(dns_anomalies::Anomalies::new(options, app)?)),
+                )
             }
             Mode::Beacons(options) => {
                 options.validate().map_err(BoundaryError::from_error)?;
-                None
+                ("beacons", Engine::Beacons(beacons::Beacons::new(options)))
             }
-            Mode::Hunt(document) => Some(document.compile().map_err(BoundaryError::from_error)?),
         };
-        let hunt = matches!(mode, Mode::Hunt(_));
-        let has_dns = !matches!(mode, Mode::Beacons(_));
-        let report = Report::new(match mode {
-            Mode::Hunt(_) => "hunt",
-            Mode::Dns(_) => "dns-anomalies",
-            Mode::Beacons(_) => "beacons",
-        });
         Ok(Self {
-            mode,
-            indicators,
-            limits,
-            report,
-            dns: if has_dns {
-                Some(dns::Collector::new(app, [53]).map_err(BoundaryError::from_error)?)
-            } else {
-                None
+            engine,
+            output: Output {
+                limits,
+                report: Report::new(kind),
+                observations: 0,
             },
-            http: if hunt {
-                Some(
-                    http::Collector::new(app, [80, 8080, 8000], application::MAX_BODY_BYTES)
-                        .map_err(BoundaryError::from_error)?,
-                )
-            } else {
-                None
-            },
-            tls: if hunt {
-                Some(
-                    tls::Collector::new(tls::Limits {
-                        max_sessions: app.max_streams,
-                        max_buffered_bytes: app.max_buffer_bytes,
-                    })
-                    .map_err(BoundaryError::from_error)?,
-                )
-            } else {
-                None
-            },
-            dns_groups: BTreeMap::new(),
-            replies: BTreeMap::new(),
-            beacons: BTreeMap::new(),
-            stream_sources: BTreeMap::new(),
-            syns: BTreeMap::new(),
-            observations: 0,
         })
     }
+}
+
+impl Output {
     fn charge(&mut self) -> Result<(), BoundaryError> {
         if self.observations == self.limits.max_observations {
             return Err(BoundaryError::from_error(Error::Limit {
@@ -209,21 +174,74 @@ impl Collector {
         self.observations += 1;
         Ok(())
     }
-    fn group(&self) -> Result<(), BoundaryError> {
-        if self.dns_groups.len() + self.beacons.len() + self.stream_sources.len()
-            >= self.limits.max_groups
-        {
-            return Err(BoundaryError::from_error(Error::Limit {
-                field: "max_groups",
-                limit: self.limits.max_groups,
-            }));
+
+    /// The group at `key`, opened with `open` if it is new and `max_groups` allows another.
+    fn group<'m, K: Ord, V>(
+        &self,
+        groups: &'m mut BTreeMap<K, V>,
+        key: K,
+        open: impl FnOnce() -> V,
+    ) -> Result<&'m mut V, BoundaryError> {
+        let open_groups = groups.len();
+        match groups.entry(key) {
+            Entry::Occupied(entry) => Ok(entry.into_mut()),
+            Entry::Vacant(entry) => {
+                if open_groups >= self.limits.max_groups {
+                    return Err(BoundaryError::from_error(Error::Limit {
+                        field: "max_groups",
+                        limit: self.limits.max_groups,
+                    }));
+                }
+                Ok(entry.insert(open()))
+            }
         }
-        Ok(())
     }
+
     fn add(&mut self, finding: Finding) -> Result<(), BoundaryError> {
         self.limits
             .push(&mut self.report, finding)
             .map_err(BoundaryError::from_error)
+    }
+
+    /// Charges a DNS message and notes an incomplete one. `None` means it did not parse.
+    fn dns_message<'m>(
+        &mut self,
+        message: &'m dns::Message,
+    ) -> Result<Option<(&'m Dns, Vec<u64>)>, BoundaryError> {
+        self.charge()?;
+        if message.status != dns::Status::Complete {
+            self.report
+                .completeness
+                .note("incomplete or malformed DNS messages");
+        }
+        Ok(message
+            .dns
+            .as_ref()
+            .map(|d| (d, message.sources.iter().map(|s| s.number).collect())))
+    }
+
+    fn dns_issue(&mut self) {
+        self.report
+            .completeness
+            .note("DNS stream has missing or conflicting bytes");
+    }
+
+    fn note_run(&mut self, run: &analysis::Summary) {
+        if run.frames_matched == 0 {
+            self.report
+                .completeness
+                .note("no frames matched the selected capture scope");
+        }
+        if !run.incomplete_sources.is_empty() || run.source_outcomes_omitted > 0 {
+            self.report
+                .completeness
+                .note("capture reassembly has incomplete source evidence");
+        }
+        if run.clock.regressions > 0 {
+            self.report
+                .completeness
+                .note("capture clock regressions observed; beacon timing conclusions suppressed");
+        }
     }
 }
 fn sample(dest: &mut Vec<u64>, source: &[u64]) {
@@ -255,7 +273,7 @@ impl analysis::Collector for Collector {
             tcp_stream: true,
             udp_stream: true,
             ip_reassembly: true,
-            tcp_events: !matches!(self.mode, Mode::Beacons(_)),
+            tcp_events: !matches!(self.engine, Engine::Beacons(_)),
             track_sources: true,
         }
     }
@@ -265,27 +283,15 @@ impl analysis::Collector for Collector {
         _deadline: &crate::budget::Deadline,
     ) -> Result<Vec<Finding>, BoundaryError> {
         if r.decoded.frame.captured_length() < r.decoded.frame.original_length() {
-            self.report
+            self.output
+                .report
                 .completeness
                 .note("capture contains truncated frames");
         }
-        if matches!(self.mode, Mode::Hunt(_)) {
-            self.observe_hunt(r)?;
-        }
-        if matches!(self.mode, Mode::Beacons(_)) {
-            self.beacon(r)?;
-        }
-        if let Some(d) = &mut self.dns {
-            let events = d.observe(r).map_err(BoundaryError::from_error)?;
-            self.dns_events(events)?;
-        }
-        if let Some(h) = &mut self.http {
-            let events = h.observe(r).map_err(BoundaryError::from_error)?;
-            self.http_events(events)?;
-        }
-        if let Some(t) = &mut self.tls {
-            let events = t.observe(r);
-            self.tls_events(events)?;
+        match &mut self.engine {
+            Engine::Hunt(hunt) => hunt.observe(r, &mut self.output)?,
+            Engine::Dns(anomalies) => anomalies.observe(r, &mut self.output)?,
+            Engine::Beacons(beacons) => beacons.observe(r, &mut self.output)?,
         }
         Ok(Vec::new())
     }
@@ -306,56 +312,32 @@ impl analysis::Collector for Collector {
 }
 impl Collector {
     fn finalize(
-        mut self,
+        self,
         run: &analysis::Summary,
         deadline: &crate::budget::Deadline,
     ) -> Result<Report, BoundaryError> {
         deadline.enforce().map_err(BoundaryError::from_error)?;
-        if let Some(d) = self.dns.take() {
-            analysis::Collector::finish(d, run, deadline, &mut |e| self.dns_events(vec![e]))?;
+        let Self { engine, mut output } = self;
+        match engine {
+            Engine::Hunt(hunt) => hunt.finish(run, deadline, &mut output)?,
+            Engine::Dns(anomalies) => anomalies.finish(run, deadline, &mut output)?,
+            Engine::Beacons(beacons) => beacons.finish(run, deadline, &mut output)?,
         }
-        if let Some(h) = self.http.take() {
-            analysis::Collector::finish(h, run, deadline, &mut |e| self.http_events(vec![e]))?;
-        }
-        if let Some(t) = self.tls.take() {
-            analysis::Collector::finish(t, run, deadline, &mut |e| self.tls_events(vec![e]))?;
-        }
-        if run.frames_matched == 0 {
-            self.report
-                .completeness
-                .note("no frames matched the selected capture scope");
-        }
-        if !run.incomplete_sources.is_empty() || run.source_outcomes_omitted > 0 {
-            self.report
-                .completeness
-                .note("capture reassembly has incomplete source evidence");
-        }
-        if run.clock.regressions > 0 {
-            self.report
-                .completeness
-                .note("capture clock regressions observed; beacon timing conclusions suppressed");
-        }
-        match self.mode {
-            Mode::Dns(o) => self.finish_dns(o, deadline)?,
-            Mode::Beacons(o) => self.finish_beacons(o, run, deadline)?,
-            Mode::Hunt(_) => {}
-        }
-        self.report
+        let mut report = output.report;
+        report
             .measurements
             .insert("frames_read".into(), json!(run.frames_read));
-        self.report
+        report
             .measurements
             .insert("frames_matched".into(), json!(run.frames_matched));
-        self.report
-            .measurements
-            .insert("clock".into(), json!(run.clock));
-        self.report
+        report.measurements.insert("clock".into(), json!(run.clock));
+        report
             .measurements
             .insert("scopes".into(), json!(run.scopes));
-        for f in &mut self.report.findings {
-            f.complete &= self.report.completeness.complete;
+        for f in &mut report.findings {
+            f.complete &= report.completeness.complete;
         }
-        Ok(self.report)
+        Ok(report)
     }
 }
 
@@ -520,6 +502,7 @@ mod tests {
         .unwrap();
         for subject in ["first", "second"] {
             collector
+                .output
                 .add(Finding::new(
                     "test",
                     Severity::Low,
@@ -621,16 +604,21 @@ mod tests {
                 .is_err()
             );
         }
-        let collector = Collector::new(
+        let mut collector = Collector::new(
             Mode::Hunt(document("dns", "EXAMPLE.TEST.")),
             Limits::default(),
             application::Limits::default(),
         )
         .unwrap();
-        let Mode::Hunt(doc) = collector.mode else {
-            panic!()
+        let Engine::Hunt(hunt) = &collector.engine else {
+            panic!("a hunt document builds a hunt")
         };
-        assert_eq!(doc.indicators[0].value, "example.test");
+        hunt.matches
+            .dns_events(vec![dns_event("Example.TEST.")], &mut collector.output)
+            .unwrap();
+        let findings = &collector.output.report.findings;
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].indicator_id.as_deref(), Some("dns"));
     }
 
     #[test]
@@ -647,14 +635,17 @@ mod tests {
         )
         .unwrap();
         let epoch = Duration::from_secs(1_800_000_000);
-        collector.beacons.insert(
+        let Engine::Beacons(beacons) = &mut collector.engine else {
+            panic!("beacon options build a beacon collector")
+        };
+        beacons.groups.insert(
             (
                 0,
                 "192.0.2.1".parse().unwrap(),
                 "192.0.2.2".parse().unwrap(),
                 443,
             ),
-            BeaconGroup {
+            beacons::BeaconGroup {
                 times: vec![
                     epoch,
                     epoch + Duration::from_nanos(1),
@@ -663,16 +654,15 @@ mod tests {
                 frames: vec![1, 2, 3],
             },
         );
-        collector
-            .finish_beacons(
-                options,
+        let report = collector
+            .finalize(
                 &analysis::Summary::default(),
                 &crate::budget::Deadline::new(Duration::from_secs(1)),
             )
             .unwrap();
-        assert_eq!(collector.report.findings.len(), 1);
+        assert_eq!(report.findings.len(), 1);
         assert_eq!(
-            collector.report.findings[0].evidence["mean_interval_seconds"],
+            report.findings[0].evidence["mean_interval_seconds"],
             json!(1e-9)
         );
     }
@@ -720,6 +710,24 @@ mod tests {
         }))
     }
 
+    fn group_dns(collector: &mut Collector, name: &str) -> Result<(), BoundaryError> {
+        let Engine::Dns(anomalies) = &mut collector.engine else {
+            panic!("DNS options build a DNS collector")
+        };
+        anomalies
+            .grouping
+            .events(vec![dns_event(name)], &mut collector.output)
+    }
+
+    fn dns_groups(
+        collector: &Collector,
+    ) -> &BTreeMap<dns_anomalies::DnsKey, dns_anomalies::DnsGroup> {
+        let Engine::Dns(anomalies) = &collector.engine else {
+            panic!("DNS options build a DNS collector")
+        };
+        &anomalies.grouping.groups
+    }
+
     #[test]
     fn dns_groups_inner_labels_within_budget() {
         let options = DnsOptions {
@@ -734,31 +742,22 @@ mod tests {
             application::Limits::default(),
         )
         .unwrap();
-        collector
-            .dns_events(vec![dns_event("a.aBcD.Example.test.")])
-            .unwrap();
+        group_dns(&mut collector, "a.aBcD.Example.test.").unwrap();
+        let groups = dns_groups(&collector);
         assert!(
-            collector
-                .dns_groups
+            groups
                 .keys()
                 .any(|key| key.3.as_deref() == Some("example.test."))
         );
         assert!(
-            collector
-                .dns_groups
+            groups
                 .values()
                 .any(|group| group.labels.contains(b"abcd".as_slice()))
         );
+        assert!(!groups.keys().any(|key| key.3.as_deref() == Some(".")));
+        group_dns(&mut collector, "aBcD.").unwrap();
         assert!(
-            !collector
-                .dns_groups
-                .keys()
-                .any(|key| key.3.as_deref() == Some("."))
-        );
-        collector.dns_events(vec![dns_event("aBcD.")]).unwrap();
-        assert!(
-            !collector
-                .dns_groups
+            !dns_groups(&collector)
                 .keys()
                 .any(|key| key.3.as_deref() == Some("."))
         );
@@ -771,10 +770,6 @@ mod tests {
             application::Limits::default(),
         )
         .unwrap();
-        assert!(
-            bounded
-                .dns_events(vec![dns_event("aBcD.eFgH.test.")])
-                .is_err()
-        );
+        assert!(group_dns(&mut bounded, "aBcD.eFgH.test.").is_err());
     }
 }

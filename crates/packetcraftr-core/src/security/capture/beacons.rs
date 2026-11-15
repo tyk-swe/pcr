@@ -3,7 +3,7 @@
 
 //! Connection-attempt deduplication and periodicity evaluation.
 
-use super::{BeaconOptions, Collector, Finding, Severity, sample};
+use super::{BeaconOptions, Finding, Output, Severity, sample};
 use crate::{
     analysis::{self, FrameRecord},
     budget::Deadline,
@@ -11,10 +11,39 @@ use crate::{
     protocol::transport::Tcp,
 };
 use serde_json::json;
-use std::time::UNIX_EPOCH;
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    net::IpAddr,
+    time::UNIX_EPOCH,
+};
 
-impl Collector {
-    pub(super) fn beacon(&mut self, r: &FrameRecord<'_>) -> Result<(), BoundaryError> {
+#[derive(Default)]
+pub(super) struct BeaconGroup {
+    pub(super) times: Vec<std::time::Duration>,
+    pub(super) frames: Vec<u64>,
+}
+pub(super) type BeaconKey = (u32, IpAddr, IpAddr, u16);
+
+pub(super) struct Beacons {
+    options: BeaconOptions,
+    syns: BTreeMap<analysis::ScopedFlowKey, BTreeSet<u32>>,
+    pub(super) groups: BTreeMap<BeaconKey, BeaconGroup>,
+}
+
+impl Beacons {
+    pub(super) fn new(options: BeaconOptions) -> Self {
+        Self {
+            options,
+            syns: BTreeMap::new(),
+            groups: BTreeMap::new(),
+        }
+    }
+
+    pub(super) fn observe(
+        &mut self,
+        r: &FrameRecord<'_>,
+        output: &mut Output,
+    ) -> Result<(), BoundaryError> {
         let Some(tcp) = r.tcp else { return Ok(()) };
         let Some(c) = tcp.conversation else {
             return Ok(());
@@ -33,13 +62,14 @@ impl Collector {
         {
             return Ok(());
         }
-        self.charge()?;
+        output.charge()?;
         self.syns
             .entry(c.flow.clone())
             .or_default()
             .insert(tcp.header.sequence);
         let Ok(time) = r.timestamp.duration_since(UNIX_EPOCH) else {
-            self.report
+            output
+                .report
                 .completeness
                 .note("beacon timestamp unavailable");
             return Ok(());
@@ -50,10 +80,7 @@ impl Collector {
             c.flow.flow.destination,
             c.flow.flow.destination_port,
         );
-        if !self.beacons.contains_key(&key) {
-            self.group()?;
-        }
-        let g = self.beacons.entry(key).or_default();
+        let g = output.group(&mut self.groups, key, BeaconGroup::default)?;
         g.times.push(time);
         sample(
             &mut g.frames,
@@ -62,14 +89,16 @@ impl Collector {
         );
         Ok(())
     }
-    pub(super) fn finish_beacons(
-        &mut self,
-        o: BeaconOptions,
+    pub(super) fn finish(
+        self,
         run: &analysis::Summary,
         deadline: &Deadline,
+        output: &mut Output,
     ) -> Result<(), BoundaryError> {
-        self.report.measurements.insert("thresholds".into(), json!({"min_attempts":o.min_attempts,"min_interval_seconds":o.min_interval_seconds,"max_cv":o.max_cv}));
-        for ((scope, src, dst, port), g) in std::mem::take(&mut self.beacons) {
+        output.note_run(run);
+        let o = self.options;
+        output.report.measurements.insert("thresholds".into(), json!({"min_attempts":o.min_attempts,"min_interval_seconds":o.min_interval_seconds,"max_cv":o.max_cv}));
+        for ((scope, src, dst, port), g) in self.groups {
             deadline.enforce().map_err(BoundaryError::from_error)?;
             if run.clock.regressions > 0 || g.times.len() < o.min_attempts {
                 continue;
@@ -97,7 +126,7 @@ impl Collector {
                     "Correlate periodic traffic with the originating process and expected scheduled activity.",
                 );
                 f.frames = g.frames;
-                self.add(f)?;
+                output.add(f)?;
             }
         }
         Ok(())

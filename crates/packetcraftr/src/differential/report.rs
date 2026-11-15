@@ -203,9 +203,15 @@ impl ResponderCollector {
     #[must_use]
     pub fn finish(self, report: ResponderReport) -> ResponderAggregate {
         ResponderAggregate {
-            records: self.0.take(),
+            records: self.into_records(),
             report,
         }
+    }
+
+    /// The records received so far, for a run that ended without a report.
+    #[must_use]
+    pub fn into_records(self) -> Vec<ReceptionRecord> {
+        self.0.take()
     }
 }
 

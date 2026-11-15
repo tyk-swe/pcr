@@ -13,6 +13,10 @@ const HASH_LEN: usize = 32;
 pub const TOKEN_LEN: usize = 16;
 pub const MIN_PAYLOAD_LEN: usize = HEADER_LEN + HASH_LEN;
 pub const REPLY_LEN: usize = 28 + HASH_LEN;
+const _: () = assert!(
+    REPLY_LEN < MIN_PAYLOAD_LEN,
+    "a reply must stay smaller than any probe it answers, so a responder never amplifies"
+);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Probe {

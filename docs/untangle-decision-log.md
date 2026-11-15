@@ -1077,3 +1077,110 @@ fixture, `--output ndjson files read`, and `network scan --list`.
 
 No mutation-gate file was touched, so the line-pinned exclusions in
 `.github/workflows/ci.yml` stay valid. Mutation testing was not run this pass.
+
+## Deferred-list deepening, 2026-11-15
+
+This pass took the shallow modules the 2026-11-12 pass deferred, plus the
+hottest files that pass did not reach, and kept each change behind its
+existing published behaviour except for one bug fix. Each item landed as its
+own commit.
+
+### Decisions and problems addressed
+
+- Report a cancelled neighbor resolution as interrupted.
+  - The attempt loop left through the same exits on cancellation as on an
+    exhausted budget, so `resolve` returned `NotFound` and scans recorded a
+    cancelled target as silent, sometimes with zero attempts.
+  - Cancellation now returns `Error::Io` with the cancelled source and the
+    spent attempts and evidence. `NotFound` keeps meaning the resolution ran
+    out of attempts or time. The resolver test now drives `resolve` and fails
+    without the fix.
+- Let probe batches own their permit and evidence attribution.
+  - Five literal constructions minted a placeholder permit that the runner
+    then overwrote, and three executors restated that evidence carries the
+    batch permit.
+  - `Batch::new` mints it, `Batch::evidence` attributes exchange evidence,
+    and the field is private to the runner. The first runner tests pin that
+    executors see a fresh grant bounded by the deadline and that evidence
+    under another permit is refused.
+- Share one capture `Settings` between `Request` and `GroupRequest`.
+  - Both shapes repeated the filter, promiscuous, native, and limit fields,
+    their defaults, and their validation chain, and `partition` copied each
+    field by hand. `size_of::<capture::Request>()`, which scan admission
+    charges, is unchanged at 120 bytes.
+  - A new test pins the remainder split and setting propagation in
+    `partition`.
+- Let the scan preparation plan own its planning-only charge.
+  - Streaming admission recomputed the description, index, expiry, and
+    source-table bytes that planning had charged, only to subtract them.
+  - `Plan::release_staging` returns exactly that charge, and one function
+    owns the description, descriptor, and per-probe formulas. A new test
+    pins that only route owners stay charged after release.
+- Make each filter field read a variant that carries only its own state.
+  - Frame and stream reads could hold a byte slice that evaluation ignored,
+    and one optional selection decided whether a nested path named a list or
+    a field.
+  - Layer reads own the slice, and nested and selected reads are separate
+    variants. Characterization tests for byte slices, `len` and `count`,
+    `#last` and `#-1`, `[*]` and `[-1]`, and the order in which unsliceable
+    paths are refused landed first, as the module had no unit tests.
+- Give each security capture mode its own engine state.
+  - The collector kept the hunt matcher, the DNS, HTTP, and TLS collectors,
+    and the DNS and beacon groups beside the mode, and eleven sites re-decided
+    the mode.
+  - `Engine` holds only the active mode's state, and `Output` owns the
+    report, limits, observation charge, and group admission. Completeness
+    notes keep their order, since reasons are an ordered list.
+- Give HTTP/2 source-set and settings-offer costs one owner.
+  - Eight sites restated the source-set cost and five the offer cost with a
+    bare 24, and two reservations built their own overflow error that the
+    limit check already reports. `budget::set_cost` and `budget::offer_cost`
+    own them.
+- Time DNS-over-TCP queries with one clock and one wait window.
+  - `query_with_sources` took three closures that its only caller filled
+    from one clock, and each socket loop threaded the deadline, cancellation,
+    and time source separately. `query_with_clock` takes the clock, and
+    `Window` owns the rest. A new test pins that the given clock bounds the
+    whole query.
+- Let the canary format own the no-amplification rule. Replies are fixed at
+  60 bytes and probes below 62 never parse, so a compile-time assertion
+  beside those sizes replaces the responder's runtime comparison.
+- Model operation-pinned neighbor answers as one resolver state. `Answers`
+  is either shared or an operation cache with its own bound, replacing an
+  optional cache paired with a count. A new test pins that operation answers
+  outlive shared eviction and survive re-pinning.
+- Give the CLI responder reception log one owner. `ReceptionLog` publishes or
+  salvages the log, and `ResponderCollector::into_records` replaces a
+  placeholder report built only to read records.
+
+### Deliberately left
+
+- The security `DnsGroup` stays one struct. Its key's optional suffix already
+  decides which rule reads the group, so a tagged union needed unreachable
+  arms to restate the key, and splitting the key reorders findings.
+- The HTTP/2 header cost stays inline. Its three sites hold two different
+  header types and the formula is one line.
+- The application collector budget keeps one meaning per collector.
+  `max_buffer_bytes` counts allocated capacity in messages, used bytes in
+  HTTP and DNS, and modeled overhead in HTTP/2 and QUIC, so a shared ledger
+  would move limit trigger points for identical input.
+- The scan steady-state bound is still written twice. `admission.rs` adds a
+  map-route term that `streaming.rs` does not, and the streaming refill check
+  compares a description without its 384-byte base against a maximum that
+  includes it. Unifying either changes when admission refuses a stage.
+- The reported prepared-memory limit still depends on the path. Adaptive and
+  streaming paths report the remaining budget and fixed paths the full limit.
+- Hunt mode charges `max_observations` only for DNS messages, not for its IP,
+  HTTP, and TLS observations. Charging them would change when a hunt stops.
+- The hunt reassembles HTTP on ports 80, 8080, and 8000, while the protocol
+  catalog lists 80 and 8080. Which one is intended needs a decision.
+- A neighbor resolution whose deadline has already expired before readiness
+  still reports `NotFound` with zero attempts, even when it was also
+  cancelled, because `for_wait` reports only expiry.
+- `[N]` after a list selector, as in `dns.answers[*].name[1]`, reads as a
+  list index rather than a byte slice. The characterization tests use the
+  range form and leave this unpinned.
+
+### Verification
+
+VERIFICATION_PLACEHOLDER

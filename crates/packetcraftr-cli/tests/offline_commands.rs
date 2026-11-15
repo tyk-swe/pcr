@@ -2142,3 +2142,86 @@ fn quic_keylog_rejects_idle_nonregular_input() {
             .contains("regular file")
     );
 }
+
+#[test]
+fn security_modes_observe_each_frame_and_finish_their_run() {
+    let indicators = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/documents/indicators.json");
+    let indicators = indicators.to_str().unwrap();
+    let report = |mode: &str, capture: &str| {
+        let capture = capture_path(capture);
+        let capture = capture.to_str().unwrap();
+        let args: Vec<&str> = match mode {
+            "hunt" => vec![
+                "--output",
+                "json",
+                "analyze",
+                "hunt",
+                capture,
+                "--indicators",
+                indicators,
+            ],
+            mode => vec!["--output", "json", "analyze", mode, capture],
+        };
+        let output = run(&args);
+        assert_success(&output, &args);
+        let report: serde_json::Value =
+            serde_json::from_slice(&output.stdout).expect("JSON report");
+        report["result"].clone()
+    };
+    let findings = |result: &serde_json::Value| -> Vec<(String, String)> {
+        result["findings"]
+            .as_array()
+            .expect("findings")
+            .iter()
+            .map(|finding| {
+                (
+                    finding["rule_id"].as_str().unwrap().to_owned(),
+                    finding["evidence"]["context"]["protocol"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_owned(),
+                )
+            })
+            .collect()
+    };
+    let reasons = |result: &serde_json::Value| result["completeness"]["reasons"].clone();
+
+    let beacons = report("beacons", "beacon-periodic.pcap");
+    assert_eq!(
+        findings(&beacons),
+        [("traffic.periodic_connections".to_owned(), String::new())]
+    );
+
+    for (capture, protocol) in [
+        ("http-stream.pcap", "http_host"),
+        ("tls-handshake.pcapng", "tls"),
+    ] {
+        let hunt = report("hunt", capture);
+        assert!(
+            findings(&hunt).contains(&("ioc.match".to_owned(), protocol.to_owned())),
+            "{capture}: {hunt}"
+        );
+        assert_eq!(reasons(&hunt), serde_json::json!([]), "{capture}");
+    }
+    assert_eq!(
+        reasons(&report("hunt", "clock-regression.pcap")),
+        serde_json::json!([
+            "capture clock regressions observed; beacon timing conclusions suppressed"
+        ])
+    );
+    assert_eq!(
+        reasons(&report("hunt", "quic-demo-truncated.pcap")),
+        serde_json::json!(["capture contains truncated frames"])
+    );
+
+    let anomalies = report("dns-anomalies", "dns-response.pcap");
+    assert_eq!(
+        reasons(&anomalies),
+        serde_json::json!(["DNS transactions include unanswered, orphan, or duplicate messages"])
+    );
+    assert_eq!(
+        anomalies["measurements"]["thresholds"]["window_seconds"],
+        60
+    );
+}

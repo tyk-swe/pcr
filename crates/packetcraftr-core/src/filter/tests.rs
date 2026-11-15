@@ -21,6 +21,16 @@ use crate::{
 };
 
 fn decoded(registry: &std::sync::Arc<Registry>) -> DecodedPacket {
+    decoded_with(
+        registry,
+        RespValue::Array(Some(vec![
+            RespValue::Simple(Bytes::from_static(b"OK")),
+            RespValue::Simple(Bytes::from_static(b"LAST")),
+        ])),
+    )
+}
+
+fn decoded_with(registry: &std::sync::Arc<Registry>, value: RespValue) -> DecodedPacket {
     let mut packet = Packet::default();
     packet.push(Ethernet {
         source: [0x00, 0x1b, 0x21, 0xaa, 0xbb, 0xcc],
@@ -31,12 +41,7 @@ fn decoded(registry: &std::sync::Arc<Registry>) -> DecodedPacket {
         destination_port: 6379,
         ..Default::default()
     });
-    packet.push(Resp {
-        value: RespValue::Array(Some(vec![
-            RespValue::Simple(Bytes::from_static(b"OK")),
-            RespValue::Simple(Bytes::from_static(b"LAST")),
-        ])),
-    });
+    packet.push(Resp { value });
     let built = crate::build::Builder::new(registry.clone())
         .build(packet, Addresses::default(), Default::default())
         .unwrap();
@@ -73,6 +78,10 @@ fn slices_selectors_occurrences_and_measures_read_the_intended_values() {
         ("ipv4#-1.ttl == 64", true),
         ("ipv4#2.ttl == 64", false),
         ("ipv4#last.ttl == 63", false),
+        ("ipv4.identification && ipv4.identification == 0", true),
+        ("ipv4.dont_fragment", false),
+        ("!ipv4.dont_fragment", true),
+        ("count(tcp.options) == 0", true),
     ] {
         let filter = Filter::compile(source, &registry, Default::default())
             .unwrap_or_else(|error| panic!("{source}: {error}"));
@@ -90,6 +99,7 @@ fn unsliceable_and_unmeasurable_paths_are_refused_in_check_order() {
         ("frame.len[2:1] == 00", false),
         ("frame.len[x] == 00", false),
         ("count(ethernet.source[0:2]) == 1", false),
+        ("count(tcp.options[0]) == 1", false),
     ] {
         let error = Filter::compile(source, &registry, Default::default()).unwrap_err();
         assert_eq!(
@@ -130,5 +140,23 @@ fn projections_gather_all_selected_elements_and_pick_one_for_the_last() {
             Some(Bytes::from_static(&[0x00, 0x1b]).into()),
             Some(Bytes::from_static(b"AS").into()),
         ]
+    );
+}
+
+#[test]
+fn an_empty_selected_list_projects_as_an_empty_list_and_a_missing_one_as_absent() {
+    let registry = builtin::registry();
+    let empty = decoded_with(&registry, RespValue::Array(Some(Vec::new())));
+    let scalar = decoded_with(&registry, RespValue::Integer(7));
+    let projection = Projection::compile(["resp.value.data[*].data"], &registry).unwrap();
+    assert_eq!(
+        projection.values(&Context::frame(&empty, 1), 4096).unwrap(),
+        vec![Some(field::Value::List(Vec::new()))]
+    );
+    assert_eq!(
+        projection
+            .values(&Context::frame(&scalar, 1), 4096)
+            .unwrap(),
+        vec![None]
     );
 }

@@ -932,3 +932,53 @@ fn operation_answers_outlive_shared_eviction_and_stay_pinned() {
     assert_eq!(repinned.cached(&neighbor(2)).unwrap(), Some(second));
     assert_eq!(pinned.fresh().cached(&neighbor(2)).unwrap(), None);
 }
+
+#[test]
+fn one_attempt_resolvers_share_the_cache_and_pin_their_answers() {
+    let shared = State::try_new(Options {
+        max_attempts: 3,
+        ..cache_options(1, 3600)
+    })
+    .unwrap();
+    let bounds = Bounds {
+        attempt_timeout: Duration::from_millis(50),
+        max_frames: 8,
+        max_bytes: 64 * 1024,
+        snap_length: 1500,
+    };
+    let narrowed = shared.one_attempt(bounds, 2).unwrap();
+    assert_eq!(narrowed.max_attempts(), 1);
+    let [first, second] = [1, 2].map(|index| MacAddress([2, 0, 0, 0, 0, index]));
+    narrowed.remember(first, cache_key(1)).unwrap();
+    narrowed.remember(second, cache_key(2)).unwrap();
+    assert_eq!(shared.cached(&neighbor(2)).unwrap(), Some(second));
+    assert_eq!(narrowed.cached(&neighbor(1)).unwrap(), Some(first));
+
+    let fresh = narrowed.fresh();
+    assert_eq!(fresh.max_attempts(), 1);
+    assert_eq!(fresh.cached(&neighbor(1)).unwrap(), None);
+    assert_eq!(fresh.cached(&neighbor(2)).unwrap(), None);
+}
+
+#[test]
+fn single_attempt_resolvers_keep_the_shared_cache_and_pinned_answers() {
+    let bounds = Bounds {
+        attempt_timeout: Duration::from_millis(50),
+        max_frames: 8,
+        max_bytes: 64 * 1024,
+        snap_length: 1500,
+    };
+    let shared = State::try_new(cache_options(1, 3600)).unwrap();
+    let [first, second, third] = [1, 2, 3].map(|index| MacAddress([2, 0, 0, 0, 0, index]));
+    let single = shared.single_attempt(bounds).unwrap();
+    assert_eq!(single.max_attempts(), 1);
+    single.remember(first, cache_key(1)).unwrap();
+    assert_eq!(shared.cached(&neighbor(1)).unwrap(), Some(first));
+
+    let pinned = shared.for_operation(2);
+    pinned.remember(second, cache_key(2)).unwrap();
+    let pinned_single = pinned.single_attempt(bounds).unwrap();
+    pinned_single.remember(third, cache_key(3)).unwrap();
+    assert_eq!(shared.cached(&neighbor(2)).unwrap(), None);
+    assert_eq!(pinned_single.cached(&neighbor(2)).unwrap(), Some(second));
+}

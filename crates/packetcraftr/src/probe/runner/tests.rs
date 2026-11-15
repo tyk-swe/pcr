@@ -146,3 +146,11 @@ fn evidence_under_another_permit_is_rejected() {
         "{failure:?}"
     );
 }
+
+#[test]
+fn a_rebuilt_batch_keeps_the_permit_it_is_given() {
+    let original = Batch::<Unit>::new(1, Vec::new(), Duration::from_millis(10));
+    let rebuilt =
+        Batch::<Unit>::new(1, Vec::new(), Duration::from_millis(10)).with_permit(original.permit());
+    assert_eq!(rebuilt.permit(), original.permit());
+}

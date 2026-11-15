@@ -1183,4 +1183,32 @@ own commit.
 
 ### Verification
 
-VERIFICATION_PLACEHOLDER
+`cargo test --locked --workspace` passes 871 tests, 887 with
+`--all-features`, and 861 with `--no-default-features`. The CI Layer 3 build
+of the CLI and netio passes 303. Clippy passes with warnings denied over all
+targets with all features and with no default features. The layer, coupling,
+file-length, document, and output-schema scripts pass without changed
+thresholds.
+
+A rebuilt binary is byte-identical to the pre-change binary on 22 offline
+commands, covering `analyze hunt`, `dns-anomalies`, and `beacons` over five
+captures, `analyze http`, `http2`, `dns`, `tls`, `messages`, and `quic`,
+`files read` with byte-slice, occurrence, and `len` filters, and
+`network scan --list`.
+
+The neighbor fix was also run live in an isolated network namespace with a
+silent target and an interrupt. Both binaries reported `io.cancelled` there,
+because the native capture read sees the cancellation itself. The faulty exits
+are reached when cancellation lands between reads or attempts, or with a
+capture provider that returns no frame on cancellation, which the resolver
+test drives.
+
+Mutation testing over this branch's non-test diff, running workspace tests,
+catches 186 of 220 viable mutants, with 50 unviable. It caught 114 before the
+added tests. The survivors are the HTTP/2 set and offer cost magnitudes,
+which every charge and its release share so balance tests cannot see them,
+the live capture CLI wiring and native `open`, `Projection::selects_single_values`,
+which only forwarding verification reads, the description charge constant,
+and two equivalent mutants. Two more hang the HTTP/2 prelude loop and time
+out. No mutation-gate file was touched, so the
+line-pinned exclusions in `.github/workflows/ci.yml` stay valid.

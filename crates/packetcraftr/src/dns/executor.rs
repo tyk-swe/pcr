@@ -180,10 +180,7 @@ impl<P: PacketProviders, K: Clock> Executor<Exchange> for WorkflowExecutor<'_, P
 /// Kernel TCP honors no route override: `Request::validate` refuses them before any query.
 impl<P: TcpProviders, K: Clock> TcpQuerier for WorkflowExecutor<'_, P, K> {
     fn query(&mut self, query: &TcpQuery) -> Result<TcpEvidence, super::tcp::Error> {
-        let clock = self.client.clock.clone();
-        let wall_clock = clock.clone();
-        let deadline_clock = clock.clone();
-        let response = super::tcp::query_with_sources(
+        let response = super::tcp::query_with_clock(
             super::tcp::Request {
                 endpoint: query.endpoint,
                 query: &query.query,
@@ -194,13 +191,7 @@ impl<P: TcpProviders, K: Clock> TcpQuerier for WorkflowExecutor<'_, P, K> {
             std::sync::Arc::new(crate::providers::TcpOf(std::sync::Arc::clone(
                 &self.client.providers,
             ))),
-            move || clock.now(),
-            move || wall_clock.wall_now(),
-            |limit| {
-                packetcraftr_core::budget::Deadline::with_time_source(limit, move || {
-                    deadline_clock.now()
-                })
-            },
+            &self.client.clock,
         )?;
         Ok(TcpEvidence {
             permit: query.permit,

@@ -36,12 +36,7 @@ impl crate::probe::runner::Sequenced for Probe {
 
 impl Batch<Probe> {
     pub(super) fn single(probe: Probe, timeout: Duration) -> Self {
-        Self {
-            sequence: probe.sequence,
-            probes: vec![probe],
-            timeout,
-            permit: crate::evidence::ExecutionPermit::new(),
-        }
+        Self::new(probe.sequence, vec![probe], timeout)
     }
 
     pub(crate) fn probe(&self) -> Result<&Probe, BoundaryError> {

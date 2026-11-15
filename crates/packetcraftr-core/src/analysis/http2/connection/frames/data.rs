@@ -362,10 +362,7 @@ impl ConnectionState {
                         context.track(&mut msg.charge, &sources)?;
                         msg.sets.push(sources);
                     }
-                    None => context.charge(
-                        &mut self.charge,
-                        budget::SET_OVERHEAD + sources.frames().len() * budget::SPAN_OVERHEAD,
-                    )?,
+                    None => context.charge(&mut self.charge, budget::set_cost(&sources))?,
                 }
             }
         } else if side == Side::Server

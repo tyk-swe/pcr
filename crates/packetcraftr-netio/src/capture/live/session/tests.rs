@@ -77,11 +77,11 @@ impl Provider for Backend {
             metadata: Metadata {
                 interface: request.interface.clone(),
                 link_type: LinkType(1),
-                snap_length: request.limits.snap_length,
+                snap_length: request.settings.limits.snap_length,
                 native: Default::default(),
             },
         };
-        let (started, reader) = NativeCaptureSession::prepare(parts, request.limits);
+        let (started, reader) = NativeCaptureSession::prepare(parts, request.settings.limits);
         let permit = self.pool.admit().unwrap();
         let lease = permit.lease();
         let task = permit.spawn(move || reader.run()).unwrap();

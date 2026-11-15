@@ -21,6 +21,7 @@ pub(crate) const SPAN_OVERHEAD: usize = 24;
 pub(crate) const ORIGIN_ENTRY_OVERHEAD: usize = 96;
 pub(crate) const PENDING_OVERHEAD: usize = 160;
 pub(crate) const OFFER_OVERHEAD: usize = 384;
+const OFFER_SETTING_OVERHEAD: usize = 24;
 // Two historical directional debts, stream key, and map-node overhead.
 pub(crate) const CLOSED_CREDIT_OVERHEAD: usize = 160;
 pub(crate) const PRELUDE_HEADER_OVERHEAD: usize =
@@ -29,6 +30,16 @@ pub(crate) const PRELUDE_BODY_RESERVE: usize = 4
     * (crate::protocol::application::http::MAX_HEADER_BYTES
         + crate::protocol::application::http::MAX_START_LINE)
     + crate::protocol::application::http::MAX_HEADERS * HEADER_OVERHEAD * 2;
+
+/// What one retained source set costs.
+pub(crate) fn set_cost(set: &SourceSet) -> usize {
+    SET_OVERHEAD + set.frames().len() * SPAN_OVERHEAD
+}
+
+/// What one pending settings offer costs while its values occupy `capacity` slots.
+pub(crate) fn offer_cost(capacity: usize) -> usize {
+    OFFER_OVERHEAD + capacity * OFFER_SETTING_OVERHEAD
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Charge {
@@ -92,14 +103,7 @@ impl Context<'_> {
     }
 
     pub(crate) fn reserve_scratch(&mut self, bytes: usize) -> Result<(), Error> {
-        let next = self
-            .budget
-            .live
-            .checked_add(bytes)
-            .ok_or(Error::Application(application::Error::Limit {
-                field: "max_buffer_bytes",
-                limit: self.app.max_buffer_bytes,
-            }))?;
+        let next = self.budget.live.saturating_add(bytes);
         self.app.check_buffer(next)?;
         self.budget.live = next;
         Ok(())
@@ -120,10 +124,9 @@ impl Context<'_> {
     }
 
     fn charge_sources(&mut self, set: &SourceSet) -> Result<(), Error> {
-        let frames = set.frames().len();
         let previous = self.budget.spans;
-        self.charge_spans(frames)?;
-        if let Err(error) = self.reserve_scratch(SET_OVERHEAD + frames * SPAN_OVERHEAD) {
+        self.charge_spans(set.frames().len())?;
+        if let Err(error) = self.reserve_scratch(set_cost(set)) {
             self.budget.spans = previous;
             return Err(error);
         }
@@ -131,14 +134,7 @@ impl Context<'_> {
     }
 
     fn charge_spans(&mut self, frames: usize) -> Result<(), Error> {
-        let next = self
-            .budget
-            .spans
-            .checked_add(frames)
-            .ok_or(Error::Application(application::Error::Limit {
-                field: "max_source_spans",
-                limit: self.app.max_source_spans,
-            }))?;
+        let next = self.budget.spans.saturating_add(frames);
         self.app.check_source_spans(next)?;
         self.budget.spans = next;
         Ok(())
@@ -169,9 +165,8 @@ impl Context<'_> {
 
     pub(crate) fn track(&mut self, owner: &mut Charge, set: &SourceSet) -> Result<(), Error> {
         self.charge_sources(set)?;
-        let frames = set.frames().len();
-        owner.spans += frames;
-        owner.bytes += SET_OVERHEAD + frames * SPAN_OVERHEAD;
+        owner.spans += set.frames().len();
+        owner.bytes += set_cost(set);
         Ok(())
     }
 
@@ -182,7 +177,7 @@ impl Context<'_> {
             .checked_sub(frames)
             .ok_or(Error::Invariant("owner span underflow"))?;
         self.release_spans(frames)?;
-        self.release(owner, SET_OVERHEAD + frames * SPAN_OVERHEAD)
+        self.release(owner, set_cost(set))
     }
 
     pub(crate) fn release_all(&mut self, owner: &mut Charge) -> Result<(), Error> {

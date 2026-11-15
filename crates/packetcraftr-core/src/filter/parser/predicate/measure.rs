@@ -177,7 +177,6 @@ fn check_measurable(field: &FieldRef, measure: Measure, offset: usize) -> Result
                 .specs
                 .iter()
                 .any(|spec| spec.kind == field::Kind::List)
-                && field.slice.is_none()
                 && !field.reads_list_elements()
         }
     };

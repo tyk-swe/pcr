@@ -114,11 +114,8 @@ impl ConnectionState {
             build.content_charge()
                 + budget::EVENT_OVERHEAD
                 + budget::MESSAGE_OVERHEAD
-                + budget::SET_OVERHEAD
-                + sources.frames().len() * budget::SPAN_OVERHEAD
-                + compression_sources.as_ref().map_or(0, |set| {
-                    budget::SET_OVERHEAD + set.frames().len() * budget::SPAN_OVERHEAD
-                }),
+                + budget::set_cost(&sources)
+                + compression_sources.as_ref().map_or(0, budget::set_cost),
         )?;
         context.message(Message {
             index: build.index,

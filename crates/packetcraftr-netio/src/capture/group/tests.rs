@@ -51,7 +51,7 @@ impl Provider for Backend {
             metadata: Metadata {
                 interface: request.interface.clone(),
                 link_type: LinkType(1),
-                snap_length: request.limits.snap_length,
+                snap_length: request.settings.limits.snap_length,
                 native: Default::default(),
             },
             control: Arc::clone(&self.control),
@@ -214,4 +214,73 @@ fn zero_duration_poll_drains_queued_record() {
     let captured = group.next_captured_frame(&immediate).unwrap().unwrap();
     assert_eq!(captured.frame.bytes().as_ref(), &[7]);
     assert!(group.next_captured_frame(&immediate).unwrap().is_none());
+}
+
+#[test]
+fn partition_splits_queues_and_shares_every_other_setting() {
+    let interfaces: Vec<_> = (1..=3)
+        .map(|index| Id {
+            name: format!("test{index}"),
+            index,
+        })
+        .collect();
+    let request = GroupRequest {
+        interfaces: interfaces.clone(),
+        settings: Settings {
+            filter: Some("udp".into()),
+            promiscuous: true,
+            ..Settings::new(Limits {
+                max_frames: 10,
+                max_bytes: 3_001,
+                ..Limits::default()
+            })
+        },
+    };
+    let sources = request.partition();
+    let interfaces_seen: Vec<_> = sources.iter().map(|source| &source.interface).collect();
+    assert_eq!(interfaces_seen, interfaces.iter().collect::<Vec<_>>());
+    let queues: Vec<_> = sources
+        .iter()
+        .map(|source| {
+            (
+                source.settings.limits.max_frames,
+                source.settings.limits.max_bytes,
+            )
+        })
+        .collect();
+    assert_eq!(queues, [(4, 1_001), (3, 1_000), (3, 1_000)]);
+    for source in &sources {
+        assert_eq!(
+            Settings {
+                limits: request.settings.limits,
+                ..source.settings.clone()
+            },
+            request.settings
+        );
+    }
+}
+
+#[test]
+fn shared_queues_must_hold_one_full_snapshot_per_interface() {
+    let request = |max_frames, max_bytes| GroupRequest {
+        interfaces: (1..=3)
+            .map(|index| Id {
+                name: format!("test{index}"),
+                index,
+            })
+            .collect(),
+        settings: Settings::new(Limits {
+            max_frames,
+            max_bytes,
+            snap_length: 1_000,
+            ..Limits::default()
+        }),
+    };
+    assert!(request(3, 3_000).validate().is_ok());
+    for (max_frames, max_bytes) in [(2, 3_000), (3, 2_999)] {
+        assert!(matches!(
+            request(max_frames, max_bytes).validate(),
+            Err(Error::InvalidCaptureGroup { .. })
+        ));
+    }
 }

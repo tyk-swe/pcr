@@ -52,59 +52,46 @@ pub fn query<P>(request: Request<'_>, provider: Arc<P>) -> Result<Response, Erro
 where
     P: Provider<Stream: 'static> + 'static,
 {
-    query_with_sources(
-        request,
-        provider,
-        || SystemClock.now(),
-        || SystemClock.wall_now(),
-        Deadline::new,
-    )
+    query_with_clock(request, provider, &SystemClock)
 }
 
-/// [`query`] with injectable time sources, so tests can control the clocks.
-pub(crate) fn query_with_sources<P>(
+/// [`query`] timed by `clock`.
+pub(crate) fn query_with_clock<P, K: Clock>(
     request: Request<'_>,
     connector: Arc<P>,
-    now: impl Fn() -> Instant,
-    wall_now: impl Fn() -> SystemTime,
-    connect_deadline: impl FnOnce(Duration) -> Deadline,
+    clock: &K,
 ) -> Result<Response, Error>
 where
     P: Provider<Stream: 'static> + 'static,
 {
     let query_frame = query_frame(&request)?;
-    let started = now();
-    let deadline = started
-        .checked_add(request.timeout)
-        .ok_or(Error::DeadlineOverflow {
-            value: request.timeout,
-        })?;
-    let (mut stream, peer_address, local_address) =
-        connect(connector, &request, deadline, &now, connect_deadline)?;
+    let started = clock.now();
+    let window = Window {
+        deadline: started
+            .checked_add(request.timeout)
+            .ok_or(Error::DeadlineOverflow {
+                value: request.timeout,
+            })?,
+        cancellation: request.cancellation,
+        clock,
+    };
+    let (mut stream, peer_address, local_address) = connect(connector, &request, &window)?;
 
     let mut bytes_written = 0usize;
     write_exact(
         &mut stream,
         &query_frame,
-        deadline,
-        request.cancellation,
+        &window,
         query_frame.len(),
         &mut bytes_written,
-        &now,
     )?;
-    let sent = now();
-    let sent_at = wall_now();
+    let sent = clock.now();
+    let sent_at = clock.wall_now();
 
-    let frame = read_frame(
-        &mut stream,
-        deadline,
-        request.cancellation,
-        request.max_message_bytes,
-        &now,
-    )?;
-    let received_at = wall_now();
-    let completed = now();
-    if completed >= deadline {
+    let frame = read_frame(&mut stream, &window, request.max_message_bytes)?;
+    let received_at = clock.wall_now();
+    let completed = clock.now();
+    if completed >= window.deadline {
         return Err(Error::Timeout {
             phase: Phase::ReadMessage,
             transferred: frame.len() - LENGTH_PREFIX_BYTES,
@@ -148,19 +135,52 @@ fn query_frame(request: &Request<'_>) -> Result<Vec<u8>, Error> {
     Ok(frame)
 }
 
-fn connect<P>(
+/// The query's absolute deadline, the cancellation every wait checks first, and the clock both read.
+struct Window<'a, K> {
+    deadline: Instant,
+    cancellation: Option<&'a Cancellation>,
+    clock: &'a K,
+}
+
+impl<K: Clock> Window<'_, K> {
+    fn remaining(&self, phase: Phase, transferred: usize) -> Result<Duration, Error> {
+        self.deadline
+            .checked_duration_since(self.clock.now())
+            .filter(|remaining| !remaining.is_zero())
+            .ok_or(Error::Timeout { phase, transferred })
+    }
+
+    /// The next socket wait, at most [`POLL_INTERVAL`], once cancellation is checked.
+    fn next_wait(&self, phase: Phase, transferred: usize) -> Result<Duration, Error> {
+        if let Some(cancellation) = self.cancellation {
+            cancellation.check().map_err(|cancelled| Error::Cancelled {
+                phase,
+                transferred,
+                cancelled,
+            })?;
+        }
+        self.remaining(phase, transferred)
+            .map(|remaining| remaining.min(POLL_INTERVAL))
+    }
+
+    fn connect_deadline(&self) -> Result<Deadline, Error> {
+        let clock = self.clock.clone();
+        Ok(
+            Deadline::with_time_source(self.remaining(Phase::Connect, 0)?, move || clock.now())
+                .with_cancellation(self.cancellation.cloned()),
+        )
+    }
+}
+
+fn connect<P, K: Clock>(
     connector: Arc<P>,
     request: &Request<'_>,
-    deadline: Instant,
-    now: &impl Fn() -> Instant,
-    connect_deadline: impl FnOnce(Duration) -> Deadline,
+    window: &Window<'_, K>,
 ) -> Result<(tcp::Connection<P::Stream>, SocketAddr, SocketAddr), Error>
 where
     P: Provider<Stream: 'static> + 'static,
 {
-    let connect_timeout = remaining(deadline, now(), Phase::Connect, 0)?;
-    let connect_deadline =
-        connect_deadline(connect_timeout).with_cancellation(request.cancellation.cloned());
+    let connect_deadline = window.connect_deadline()?;
     let mut pending = tcp::start_connect(connector, request.endpoint, &connect_deadline)
         .map_err(|source| map_connect_error(request.endpoint, source))?;
     let outcome = tcp::PendingConnect::wait(&mut pending, &connect_deadline)
@@ -178,7 +198,7 @@ where
                 transferred: 0,
             },
         })?;
-    remaining(deadline, now(), Phase::Connect, 0)?;
+    window.remaining(Phase::Connect, 0)?;
     let stream = outcome
         .ok_or(Error::Timeout {
             phase: Phase::Connect,
@@ -206,22 +226,13 @@ where
     Ok((stream, peer_address, local_address))
 }
 
-fn read_frame<S: Stream>(
+fn read_frame<S: Stream, K: Clock>(
     stream: &mut S,
-    deadline: Instant,
-    cancellation: Option<&Cancellation>,
+    window: &Window<'_, K>,
     max_message_bytes: usize,
-    now: &impl Fn() -> Instant,
 ) -> Result<Vec<u8>, Error> {
     let mut prefix = [0u8; LENGTH_PREFIX_BYTES];
-    let prefix_read = read_exact(
-        stream,
-        &mut prefix,
-        deadline,
-        cancellation,
-        Phase::ReadPrefix,
-        now,
-    )?;
+    let prefix_read = read_exact(stream, &mut prefix, window, Phase::ReadPrefix)?;
     if prefix_read != LENGTH_PREFIX_BYTES {
         return Err(Error::IncompletePrefix {
             actual: prefix_read,
@@ -243,14 +254,7 @@ fn read_frame<S: Stream>(
     frame.extend_from_slice(&prefix);
     frame.resize(total, 0);
     let (_, message) = frame.split_at_mut(LENGTH_PREFIX_BYTES);
-    let message_read = read_exact(
-        stream,
-        message,
-        deadline,
-        cancellation,
-        Phase::ReadMessage,
-        now,
-    )?;
+    let message_read = read_exact(stream, message, window, Phase::ReadMessage)?;
     if message_read != declared {
         return Err(Error::IncompleteMessage {
             declared,
@@ -258,35 +262,6 @@ fn read_frame<S: Stream>(
         });
     }
     Ok(frame)
-}
-
-fn remaining(
-    deadline: Instant,
-    now: Instant,
-    phase: Phase,
-    transferred: usize,
-) -> Result<Duration, Error> {
-    deadline
-        .checked_duration_since(now)
-        .filter(|remaining| !remaining.is_zero())
-        .ok_or(Error::Timeout { phase, transferred })
-}
-
-fn next_wait(
-    deadline: Instant,
-    cancellation: Option<&Cancellation>,
-    now: Instant,
-    phase: Phase,
-    transferred: usize,
-) -> Result<Duration, Error> {
-    if let Some(cancellation) = cancellation {
-        cancellation.check().map_err(|cancelled| Error::Cancelled {
-            phase,
-            transferred,
-            cancelled,
-        })?;
-    }
-    remaining(deadline, now, phase, transferred).map(|remaining| remaining.min(POLL_INTERVAL))
 }
 
 fn map_connect_error(endpoint: SocketAddr, error: packetcraftr_netio::tcp::Error) -> Error {
@@ -318,17 +293,15 @@ fn map_connect_error(endpoint: SocketAddr, error: packetcraftr_netio::tcp::Error
     }
 }
 
-fn write_exact<S: Stream>(
+fn write_exact<S: Stream, K: Clock>(
     stream: &mut S,
     mut bytes: &[u8],
-    deadline: Instant,
-    cancellation: Option<&Cancellation>,
+    window: &Window<'_, K>,
     expected: usize,
     written: &mut usize,
-    now: &impl Fn() -> Instant,
 ) -> Result<(), Error> {
     while !bytes.is_empty() {
-        let timeout = next_wait(deadline, cancellation, now(), Phase::Write, *written)?;
+        let timeout = window.next_wait(Phase::Write, *written)?;
         stream
             .set_write_timeout(Some(timeout))
             .map_err(|source| Error::ConfigureTimeout {
@@ -371,7 +344,7 @@ fn write_exact<S: Stream>(
         }
     }
     loop {
-        let timeout = next_wait(deadline, cancellation, now(), Phase::Write, *written)?;
+        let timeout = window.next_wait(Phase::Write, *written)?;
         stream
             .set_write_timeout(Some(timeout))
             .map_err(|source| Error::ConfigureTimeout {
@@ -394,17 +367,15 @@ fn write_exact<S: Stream>(
     }
 }
 
-fn read_exact<S: Stream>(
+fn read_exact<S: Stream, K: Clock>(
     stream: &mut S,
     bytes: &mut [u8],
-    deadline: Instant,
-    cancellation: Option<&Cancellation>,
+    window: &Window<'_, K>,
     phase: Phase,
-    now: &impl Fn() -> Instant,
 ) -> Result<usize, Error> {
     let mut read = 0usize;
     while read < bytes.len() {
-        let timeout = next_wait(deadline, cancellation, now(), phase, read)?;
+        let timeout = window.next_wait(phase, read)?;
         stream
             .set_read_timeout(Some(timeout))
             .map_err(|source| Error::ConfigureTimeout {
@@ -436,7 +407,7 @@ fn read_exact<S: Stream>(
             }
         }
     }
-    let _ = remaining(deadline, now(), phase, read)?;
+    window.remaining(phase, read)?;
     Ok(read)
 }
 
@@ -607,6 +578,68 @@ mod tests {
         assert_eq!(reads, 0);
     }
 
+    /// Advances one millisecond on every read.
+    #[derive(Clone)]
+    struct Ticking {
+        started: Instant,
+        ticks: Arc<AtomicUsize>,
+    }
+
+    impl Clock for Ticking {
+        type Error = std::convert::Infallible;
+
+        fn now(&self) -> Instant {
+            let ticks = self.ticks.fetch_add(1, Ordering::SeqCst) + 1;
+            self.started + Duration::from_millis(ticks as u64)
+        }
+
+        fn wall_now(&self) -> SystemTime {
+            SystemTime::now()
+        }
+
+        fn sleep(&self, _: Duration, _: &Deadline) -> Result<(), Self::Error> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn the_given_clock_bounds_the_whole_query() {
+        let provider = Arc::new(BufferedProvider(Mutex::new(Some(BufferedStream {
+            pending: Vec::new(),
+            response: None,
+            flush_errors: VecDeque::new(),
+            cancellation: None,
+            reads: Arc::new(AtomicUsize::new(0)),
+        }))));
+        let clock = Ticking {
+            started: SystemClock.now(),
+            ticks: Arc::new(AtomicUsize::new(0)),
+        };
+        let error = query_with_clock(
+            Request {
+                endpoint: SocketAddr::from(([127, 0, 0, 1], 53)),
+                query: QUERY,
+                timeout: Duration::from_millis(1),
+                cancellation: None,
+                max_message_bytes: 512,
+            },
+            Arc::clone(&provider),
+            &clock,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(
+                error,
+                Error::Timeout {
+                    phase: Phase::Connect,
+                    transferred: 0
+                }
+            ),
+            "{error:?}"
+        );
+        assert!(provider.0.lock().unwrap().is_some());
+    }
+
     #[test]
     fn flush_retries_stop_at_deadline() {
         let reads = Arc::new(AtomicUsize::new(0));
@@ -617,25 +650,20 @@ mod tests {
             cancellation: None,
             reads: reads.clone(),
         };
-        let started = SystemClock.now();
-        let ticks = std::cell::Cell::new(0);
-        let now = || {
-            ticks.set(ticks.get() + 1);
-            started + Duration::from_millis(ticks.get())
+        let clock = Ticking {
+            started: SystemClock.now(),
+            ticks: Arc::new(AtomicUsize::new(0)),
         };
         let mut frame = (QUERY.len() as u16).to_be_bytes().to_vec();
         frame.extend_from_slice(QUERY);
         let mut written = 0;
-        let error = write_exact(
-            &mut stream,
-            &frame,
-            started + Duration::from_millis(100),
-            None,
-            frame.len(),
-            &mut written,
-            &now,
-        )
-        .unwrap_err();
+        let window = Window {
+            deadline: clock.started + Duration::from_millis(100),
+            cancellation: None,
+            clock: &clock,
+        };
+        let error =
+            write_exact(&mut stream, &frame, &window, frame.len(), &mut written).unwrap_err();
         assert!(matches!(
             error,
             Error::Timeout {

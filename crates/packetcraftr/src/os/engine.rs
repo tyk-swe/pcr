@@ -192,12 +192,7 @@ where
         if let Some(mut cleanup) = evidence.classifier_mut().pending_cleanup.take() {
             sequence += 1;
             cleanup.sequence = sequence;
-            return Ok(Some(Batch {
-                probes: vec![cleanup],
-                timeout: request.timeout,
-                sequence,
-                permit: crate::evidence::ExecutionPermit::new(),
-            }));
+            return Ok(Some(Batch::new(sequence, vec![cleanup], request.timeout)));
         }
         if phase >= kinds.len() {
             return Ok(None);
@@ -243,12 +238,7 @@ where
             phase += 1;
             attempt = 1;
         }
-        Ok(Some(Batch {
-            probes: vec![probe],
-            timeout: request.timeout,
-            sequence,
-            permit: crate::evidence::ExecutionPermit::new(),
-        }))
+        Ok(Some(Batch::new(sequence, vec![probe], request.timeout)))
     };
     let mut stats = run_planned(
         &mut planned,

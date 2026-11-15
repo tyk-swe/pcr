@@ -246,7 +246,7 @@ impl ConnectionState {
     ) -> Result<(), Error> {
         context.release(
             &mut self.charge,
-            budget::OFFER_OVERHEAD + offer.settings.capacity() * 24,
+            budget::offer_cost(offer.settings.capacity()),
         )?;
         if let Some(mut msg) = offer.msg {
             msg.stream_id = 1;
@@ -282,12 +282,13 @@ impl ConnectionState {
         };
         context.release(
             &mut self.charge,
-            budget::OFFER_OVERHEAD + offer.settings.capacity() * 24,
+            budget::offer_cost(offer.settings.capacity()),
         )?;
         prelude.upgraded = true;
         let upgrade_charge = head_wire.len()
-            + budget::SET_OVERHEAD
-            + sources.as_ref().map_or(0, |s| s.frames().len()) * budget::SPAN_OVERHEAD
+            + sources
+                .as_ref()
+                .map_or(budget::SET_OVERHEAD, budget::set_cost)
             + offer.settings.len() * 8
             + budget::OFFER_OVERHEAD;
         context.charge(&mut self.upgrade.charge, upgrade_charge)?;

@@ -4,7 +4,7 @@
 use super::*;
 use crate::{
     engine::operation::Operation,
-    evidence::{ExecutionPermit, SentPacket},
+    evidence::SentPacket,
     policy::{DestinationConstraint, Policy},
     scan::{
         Stage,
@@ -136,7 +136,7 @@ impl capture::Provider for Network {
             metadata: capture::Metadata {
                 interface: request.interface.clone(),
                 link_type: LinkType::RAW,
-                snap_length: request.limits.snap_length,
+                snap_length: request.settings.limits.snap_length,
                 native: Default::default(),
             },
             stats: Default::default(),
@@ -239,8 +239,9 @@ fn batch(sequence: u64, address: &str) -> Batch<Probe> {
 }
 
 fn endpoint_batch(sequence: u64, address: &str, endpoint: crate::probe::Endpoint) -> Batch<Probe> {
-    Batch {
-        probes: vec![Probe {
+    Batch::new(
+        sequence,
+        vec![Probe {
             sequence,
             stage: Stage::Scan,
             address: address.parse().unwrap(),
@@ -252,10 +253,8 @@ fn endpoint_batch(sequence: u64, address: &str, endpoint: crate::probe::Endpoint
             udp_payload: Default::default(),
             udp_profile: None,
         }],
-        timeout: Duration::from_millis(100),
-        permit: ExecutionPermit::new(),
-        sequence,
-    }
+        Duration::from_millis(100),
+    )
 }
 
 fn executor<'a>(

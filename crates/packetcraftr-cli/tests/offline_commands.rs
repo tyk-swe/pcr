@@ -2315,7 +2315,8 @@ fn scan_timing_conflicts_and_seeded_order_is_reproducible() {
 #[test]
 fn report_rejects_identical_html_and_bundle_paths() {
     let directory = tempfile::tempdir().expect("tempdir");
-    let same = directory.path().join("same.out");
+    std::fs::create_dir(directory.path().join("sub")).expect("subdirectory");
+    let same = directory.path().join("sub").join("..").join("same.out");
     let scan = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../examples/documents/output-scan-success.json");
     let same_arg = same.to_string_lossy().into_owned();
@@ -2330,7 +2331,10 @@ fn report_rejects_identical_html_and_bundle_paths() {
         same_arg.as_str(),
     ]);
     assert_eq!(output.status.code(), Some(2));
-    assert!(!same.exists(), "no output may be published on rejection");
+    assert!(
+        !directory.path().join("same.out").exists(),
+        "no output may be published on rejection"
+    );
 }
 
 #[test]
@@ -2370,11 +2374,50 @@ fn inventory_ties_macs_only_to_arp_senders() {
         "routed.pcapng",
         "ethernet(src=02:00:00:00:00:09,dst=02:00:00:00:00:01)/ipv4(src=198.51.100.7,dst=192.0.2.2)/udp(sport=40000,dport=9999)/raw(text=hi)",
     );
+    let probe = build(
+        "probe.pcapng",
+        "ethernet(src=02:00:00:00:00:01,dst=ff:ff:ff:ff:ff:ff)/arp(operation=1,sender_hardware=02:00:00:00:00:01,sender_protocol=0.0.0.0,target_hardware=00:00:00:00:00:00,target_protocol=192.0.2.1)",
+    );
+    assert!(
+        inventory(&probe).contains("hosts=0"),
+        "an ARP probe claims no address yet"
+    );
     let text = inventory(&routed);
     assert!(
         text.contains("host=198.51.100.7 mac=-"),
         "a routed frame must not attribute the router MAC, got:\n{text}"
     );
+}
+
+#[test]
+fn scan_resource_diagnostics_report_the_timing_preset() {
+    let args = [
+        "--output",
+        "json",
+        "--resource-diagnostics",
+        "network",
+        "scan",
+        "127.0.0.1",
+        "--connect",
+        "--ports",
+        "1",
+        "--timing",
+        "fast",
+    ];
+    let output = run(&args);
+    let text = assert_success(&output, &args);
+    let report: serde_json::Value = serde_json::from_str(&text).expect("JSON report");
+    let settings = report["resources"]["settings"]
+        .as_array()
+        .expect("settings");
+    let value = |name: &str| {
+        settings
+            .iter()
+            .find(|setting| setting["name"] == name)
+            .map(|setting| setting["value"].clone())
+    };
+    assert_eq!(value("--max-in-flight"), Some(serde_json::json!(16)));
+    assert_eq!(value("--timeout-ms"), Some(serde_json::json!(500)));
 }
 
 #[test]

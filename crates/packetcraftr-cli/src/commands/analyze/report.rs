@@ -53,7 +53,11 @@ impl Spec for Assessment {
             return Err(invalid("reports accept at most 128 result files"));
         }
         input::validate_stdin_sources(self.results.iter().map(PathBuf::as_path))?;
-        if self.bundle.as_deref() == Some(self.html.as_path()) {
+        if self
+            .bundle
+            .as_deref()
+            .is_some_and(|bundle| same_destination(bundle, &self.html))
+        {
             return Err(invalid("--html and --bundle must name different files"));
         }
         let mut staged = crate::staged_output::StagedFile::stage(i, &self.html)?;
@@ -168,6 +172,36 @@ impl Spec for Assessment {
         }
         publish(i, Command::Assessment, report, self.bounds)
     }
+}
+
+fn same_destination(left: &std::path::Path, right: &std::path::Path) -> bool {
+    fn normalized(path: &std::path::Path) -> PathBuf {
+        use std::path::Component;
+        let absolute = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            std::env::current_dir()
+                .unwrap_or_else(|_| PathBuf::from("."))
+                .join(path)
+        };
+        let mut out = PathBuf::new();
+        for component in absolute.components() {
+            match component {
+                Component::CurDir => {}
+                Component::ParentDir => {
+                    out.pop();
+                }
+                other => out.push(other.as_os_str()),
+            }
+        }
+        if let Some(parent) = out.parent().and_then(|parent| parent.canonicalize().ok())
+            && let Some(name) = out.file_name()
+        {
+            return parent.join(name);
+        }
+        out
+    }
+    normalized(left) == normalized(right)
 }
 
 fn append_sources(

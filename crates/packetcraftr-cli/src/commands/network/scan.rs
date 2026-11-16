@@ -101,17 +101,40 @@ impl crate::commands::Spec for Args {
     }
 
     fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
-        crate::resources::declare!(settings, self, [
-            max_in_flight: Count @ Operation,
-            max_targets: Count @ Operation,
-            max_ports: Count @ Operation,
-            max_probes: Count @ Operation,
-            max_undecoded: Count @ ResultRetention,
-            max_prepared_bytes: Bytes @ Preparation,
-            traceroute_max_hops: Count @ Operation if self.traceroute,
-            traceroute_max_probes: Count @ Operation if self.traceroute,
-        ]);
-        self.timeout.resources(settings);
+        if let Some(timing) = self.timing {
+            let schedule = timing.schedule();
+            settings.declare(crate::resources::Field {
+                id: "max_in_flight",
+                value: crate::resources::SettingValue::setting_value(&schedule.max_in_flight),
+                unit: crate::resources::Unit::Count,
+                stage: crate::resources::Stage::Operation,
+                enabled: crate::resources::Enabled::Fixed(true),
+                preset: None,
+            });
+            crate::command_options::TimeoutArgs::from_millis(schedule.timeout_ms)
+                .resources(settings);
+            crate::resources::declare!(settings, self, [
+                max_targets: Count @ Operation,
+                max_ports: Count @ Operation,
+                max_probes: Count @ Operation,
+                max_undecoded: Count @ ResultRetention,
+                max_prepared_bytes: Bytes @ Preparation,
+                traceroute_max_hops: Count @ Operation if self.traceroute,
+                traceroute_max_probes: Count @ Operation if self.traceroute,
+            ]);
+        } else {
+            crate::resources::declare!(settings, self, [
+                max_in_flight: Count @ Operation,
+                max_targets: Count @ Operation,
+                max_ports: Count @ Operation,
+                max_probes: Count @ Operation,
+                max_undecoded: Count @ ResultRetention,
+                max_prepared_bytes: Bytes @ Preparation,
+                traceroute_max_hops: Count @ Operation if self.traceroute,
+                traceroute_max_probes: Count @ Operation if self.traceroute,
+            ]);
+            self.timeout.resources(settings);
+        }
         self.duration.resources(settings);
         self.limits.resources(settings);
         self.policy.resources(settings);

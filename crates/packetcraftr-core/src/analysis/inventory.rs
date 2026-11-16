@@ -72,7 +72,9 @@ impl Collector {
             *self.protocols.entry((*name).to_owned()).or_default() += 1;
         }
 
-        if let Some(arp) = record.decoded.packet.get::<Arp>() {
+        if let Some(arp) = record.decoded.packet.get::<Arp>()
+            && !arp.sender_protocol.is_unspecified()
+        {
             let sender = IpAddr::V4(arp.sender_protocol);
             let host = self.hosts.entry(sender).or_default();
             host.mac_addresses.insert(arp.sender_hardware);

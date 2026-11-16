@@ -271,6 +271,7 @@ pub fn join_receptions(mut aggregate: Aggregate, records: &[ReceptionRecord]) ->
         .collect();
     for attempt in &mut aggregate.attempts {
         if attempt.answered {
+            attempt.rewritten = false;
             continue;
         }
         let Ok(variant_index) = u16::try_from(attempt.variant_index) else {
@@ -284,6 +285,9 @@ pub fn join_receptions(mut aggregate: Aggregate, records: &[ReceptionRecord]) ->
             expected_source,
         );
         attempt.answered = identities.contains(&key);
+        if attempt.answered {
+            attempt.rewritten = false;
+        }
         if !attempt.answered
             && expected_source.is_some()
             && received.contains(&(variant_index, attempt.attempt_seq, digest))
@@ -435,5 +439,17 @@ mod tests {
         assert_eq!(joined.rows[1].verdict, Verdict::Rewritten);
         assert_eq!(joined.rows[1].rewritten, 1);
         assert!(joined.valid);
+
+        let mut rejoined = joined;
+        rejoined.attempts[1].answered = false;
+        let declared = vec![ReceptionRecord {
+            variant_index: 1,
+            attempt_seq: 1,
+            source: "192.0.2.99:53210".parse().expect("addr"),
+            payload_sha256: hex(&[0x11; 32]),
+        }];
+        let rejoined = join_receptions(rejoined, &declared);
+        assert!(rejoined.attempts[1].answered);
+        assert!(!rejoined.attempts[1].rewritten);
     }
 }

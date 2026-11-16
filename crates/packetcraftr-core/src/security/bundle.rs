@@ -29,12 +29,19 @@ pub struct Bundle {
 }
 
 fn inputs_digest(sources: &[Source]) -> String {
-    let mut lines: Vec<String> = sources
+    let mut records: Vec<(&str, &str)> = sources
         .iter()
-        .map(|source| format!("{}\n{}\n", source.path, source.sha256))
+        .map(|source| (source.path.as_str(), source.sha256.as_str()))
         .collect();
-    lines.sort();
-    crate::field::hex::compact_hex(&Sha256::digest(lines.concat().as_bytes()))
+    records.sort();
+    let mut hasher = Sha256::new();
+    for (path, sha256) in records {
+        for field in [path, sha256] {
+            hasher.update((field.len() as u64).to_be_bytes());
+            hasher.update(field.as_bytes());
+        }
+    }
+    crate::field::hex::compact_hex(&hasher.finalize())
 }
 
 impl Bundle {
@@ -136,6 +143,25 @@ mod tests {
         assert_eq!(parsed.kind, "report");
         assert_eq!(parsed.report.findings.len(), 1);
         assert_eq!(parsed.scope.unwrap().label, "lab");
+    }
+
+    #[test]
+    fn newline_paths_cannot_alias_two_source_records() {
+        let one = vec![Source {
+            path: format!("a\n{}\nb", "e".repeat(64)),
+            sha256: "f".repeat(64),
+        }];
+        let two = vec![
+            Source {
+                path: "a".into(),
+                sha256: "e".repeat(64),
+            },
+            Source {
+                path: "b".into(),
+                sha256: "f".repeat(64),
+            },
+        ];
+        assert_ne!(inputs_digest(&one), inputs_digest(&two));
     }
 
     #[test]

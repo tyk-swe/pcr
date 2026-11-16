@@ -107,16 +107,20 @@ impl Collector {
         ] {
             if let Some(stream) = conversation {
                 let flow = &stream.flow.flow;
-                self.hosts
-                    .entry(flow.source)
-                    .or_default()
-                    .observed_ports
-                    .insert((transport, flow.source_port));
-                self.hosts
-                    .entry(flow.destination)
-                    .or_default()
-                    .observed_ports
-                    .insert((transport, flow.destination_port));
+                if usable_host(flow.source) {
+                    self.hosts
+                        .entry(flow.source)
+                        .or_default()
+                        .observed_ports
+                        .insert((transport, flow.source_port));
+                }
+                if usable_host(flow.destination) {
+                    self.hosts
+                        .entry(flow.destination)
+                        .or_default()
+                        .observed_ports
+                        .insert((transport, flow.destination_port));
+                }
             }
         }
     }
@@ -148,6 +152,13 @@ impl Collector {
                 .collect(),
         }
     }
+}
+
+fn usable_host(address: IpAddr) -> bool {
+    if address.is_unspecified() || address.is_multicast() {
+        return false;
+    }
+    !matches!(address, IpAddr::V4(v4) if v4.is_broadcast())
 }
 
 fn innermost_network(record: &FrameRecord<'_>) -> Option<(IpAddr, IpAddr)> {

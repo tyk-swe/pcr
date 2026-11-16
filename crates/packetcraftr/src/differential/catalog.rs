@@ -173,8 +173,15 @@ fn fragmented(
     datagram.extend_from_slice(&0_u16.to_be_bytes());
     datagram.extend_from_slice(payload);
     let split = FIRST_FRAGMENT_BYTES.min(datagram.len());
+    let campaign_salt = payload.get(6..14).map_or(0, |bytes| {
+        u64::from_be_bytes(bytes.try_into().unwrap_or_default())
+    });
+    let fragment_id = crate::engine::correlation::nonzero_ipv4_identification(
+        u64::from(attempt_seq) ^ campaign_salt.rotate_left(17),
+    );
     let fragment = |offset_units: u16, more: bool, chunk: &[u8]| {
         let mut ip = base_ip(shape, attempt_seq);
+        ip.identification = fragment_id;
         ip.more_fragments = more;
         ip.fragment_offset = offset_units;
         ip.protocol = WireValue::Exact(17);
@@ -352,5 +359,11 @@ mod tests {
             assert_eq!(&datagram[6..8], &[0, 0], "{id} zero UDP checksum");
             assert_eq!(&datagram[8..], payload.as_slice(), "{id}");
         }
+        let mut other_campaign = vec![0xAB; 64];
+        other_campaign[6..14].copy_from_slice(&[0xCD; 8]);
+        let mine = build_attempt(&shape(), &by_id("ip-fragmented"), &payload, 7);
+        let other = build_attempt(&shape(), &by_id("ip-fragmented"), &other_campaign, 7);
+        let id = |packet: &Packet| packet.get::<Ipv4>().expect("ipv4").identification;
+        assert_ne!(id(&mine[0]), id(&other[0]));
     }
 }

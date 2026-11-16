@@ -174,7 +174,33 @@ struct ExchangeResult {
 }
 
 #[derive(serde::Deserialize, Default)]
+struct TracerouteSummary {
+    #[serde(default)]
+    planned_probes: u64,
+    #[serde(default)]
+    probes_sent: u64,
+    #[serde(default)]
+    answered_probes: u64,
+    #[serde(default)]
+    unanswered_probes: u64,
+    #[serde(default)]
+    incomplete: bool,
+    #[serde(default)]
+    nodes: u64,
+    #[serde(default)]
+    edges: u64,
+}
+
+#[derive(serde::Deserialize, Default)]
 struct TracerouteResult {
+    #[serde(default)]
+    mode: Option<String>,
+    #[serde(default)]
+    summary: Option<TracerouteSummary>,
+    #[serde(default)]
+    probes: Vec<serde::de::IgnoredAny>,
+    #[serde(default)]
+    completions: Vec<serde::de::IgnoredAny>,
     #[serde(default)]
     target: Option<String>,
     #[serde(default)]
@@ -408,6 +434,56 @@ fn summarize(command: &str, result: Engagement) -> Report {
         }
         Engagement::Traceroute(trace) => {
             put(&mut summary, "hops", serde_json::json!(trace.hops.len()));
+            if let Some(mode) = &trace.mode {
+                put(&mut summary, "mode", serde_json::json!(mode));
+            }
+            put(
+                &mut summary,
+                "probes",
+                serde_json::json!(trace.probes.len()),
+            );
+            put(
+                &mut summary,
+                "completions",
+                serde_json::json!(trace.completions.len()),
+            );
+            if let Some(trace_summary) = &trace.summary {
+                put(
+                    &mut summary,
+                    "planned_probes",
+                    serde_json::json!(trace_summary.planned_probes),
+                );
+                put(
+                    &mut summary,
+                    "probes_sent",
+                    serde_json::json!(trace_summary.probes_sent),
+                );
+                put(
+                    &mut summary,
+                    "answered_probes",
+                    serde_json::json!(trace_summary.answered_probes),
+                );
+                put(
+                    &mut summary,
+                    "unanswered_probes",
+                    serde_json::json!(trace_summary.unanswered_probes),
+                );
+                put(
+                    &mut summary,
+                    "nodes",
+                    serde_json::json!(trace_summary.nodes),
+                );
+                put(
+                    &mut summary,
+                    "edges",
+                    serde_json::json!(trace_summary.edges),
+                );
+                if trace_summary.incomplete {
+                    report
+                        .completeness
+                        .note("multipath traceroute summary is incomplete");
+                }
+            }
             put(
                 &mut summary,
                 "resolved_addresses",
@@ -533,6 +609,13 @@ mod tests {
         let imported = report(&serde_json::to_vec(&incomplete).unwrap()).unwrap();
         assert!(!imported.completeness.complete);
         assert_eq!(imported.findings[0].evidence["incomplete_hosts"], 1);
+
+        let multipath = report(&read_example("output-traceroute-multipath-success.json")).unwrap();
+        assert_eq!(multipath.kind, "traceroute");
+        assert_eq!(multipath.findings[0].evidence["probes"], 6);
+        assert_eq!(multipath.findings[0].evidence["answered_probes"], 6);
+        assert_eq!(multipath.findings[0].evidence["completions"], 2);
+        assert!(multipath.completeness.complete);
 
         let build = read_example("output-build-success.json");
         assert!(report(&build).is_err());

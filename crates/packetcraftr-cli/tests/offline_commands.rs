@@ -2335,6 +2335,32 @@ fn report_rejects_identical_html_and_bundle_paths() {
         !directory.path().join("same.out").exists(),
         "no output may be published on rejection"
     );
+
+    #[cfg(unix)]
+    {
+        let real = directory.path().join("real");
+        std::fs::create_dir_all(real.join("sub")).expect("real subdirectory");
+        std::os::unix::fs::symlink(real.join("sub"), directory.path().join("link"))
+            .expect("symlink");
+        let html = real.join("report.out");
+        let bundle = directory.path().join("link").join("..").join("report.out");
+        let html_arg = html.to_string_lossy().into_owned();
+        let bundle_arg = bundle.to_string_lossy().into_owned();
+        let output = run(&[
+            "analyze",
+            "report",
+            scan_arg.as_str(),
+            "--html",
+            html_arg.as_str(),
+            "--bundle",
+            bundle_arg.as_str(),
+        ]);
+        assert_eq!(output.status.code(), Some(2));
+        assert!(
+            !html.exists(),
+            "symlink aliases must be rejected before staging"
+        );
+    }
 }
 
 #[test]

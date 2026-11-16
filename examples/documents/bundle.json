@@ -6,7 +6,7 @@
     "label": "lab-segment",
     "digest": "127aea6817ee857b095337f87234f805872775e20578adfa3a63a90ceced317f"
   },
-  "inputs_digest": "31dde4517af5793f2bed10650c33eb35873a1d73f793f0c3475b924d67ef41f7",
+  "inputs_digest": "3393aa96d223c4c8d440022fab57c310cb6c1c3bfb7c6fd699b68350d4892ffd",
   "sources": [
     {
       "path": "examples/documents/output-scan-success.json",

@@ -189,19 +189,29 @@ fn same_destination(left: &std::path::Path, right: &std::path::Path) -> bool {
             match component {
                 Component::CurDir => {}
                 Component::ParentDir => {
+                    if let Ok(resolved) = out.canonicalize() {
+                        out = resolved;
+                    }
                     out.pop();
                 }
-                other => out.push(other.as_os_str()),
+                other => {
+                    out.push(other.as_os_str());
+                    if let Ok(resolved) = out.canonicalize() {
+                        out = resolved;
+                    }
+                }
             }
-        }
-        if let Some(parent) = out.parent().and_then(|parent| parent.canonicalize().ok())
-            && let Some(name) = out.file_name()
-        {
-            return parent.join(name);
         }
         out
     }
-    normalized(left) == normalized(right)
+    let left = normalized(left);
+    let right = normalized(right);
+    if cfg!(windows) {
+        left.to_string_lossy()
+            .eq_ignore_ascii_case(&right.to_string_lossy())
+    } else {
+        left == right
+    }
 }
 
 fn append_sources(

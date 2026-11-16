@@ -12,15 +12,24 @@ use std::{collections::BTreeSet, io::Write, path::PathBuf};
 
 #[derive(Debug, Args)]
 pub(crate) struct Assessment {
-    /// Aggregate JSON from hunt, dns-anomalies, beacons, audit-tls, audit-http, or scan-diff.
+    /// Aggregate JSON from hunt, dns-anomalies, beacons, audit-tls, audit-http,
+    /// scan-diff, scan, differential, fuzz, exchange, or traceroute. Engagement
+    /// results become one info observation each from typed counts, their raw
+    /// frames are never copied, and --fail-on info therefore applies to them.
     /// One input may be - to read redirected JSON stdin.
     #[arg(required = true, num_args = 1..)]
     results: Vec<PathBuf>,
     /// New standalone HTML file; existing destinations are refused.
     #[arg(long)]
     html: PathBuf,
+    /// New packetcraftr.bundle/v1 evidence bundle JSON file; existing
+    /// destinations are refused.
+    #[arg(long)]
+    bundle: Option<PathBuf>,
     #[command(flatten)]
     bounds: Bounds,
+    #[command(flatten)]
+    scope: crate::command_options::ScopeArgs,
 }
 use crate::output::contract::PublishedType;
 
@@ -45,6 +54,11 @@ impl Spec for Assessment {
         }
         input::validate_stdin_sources(self.results.iter().map(PathBuf::as_path))?;
         let mut staged = crate::staged_output::StagedFile::stage(i, &self.html)?;
+        let mut staged_bundle = self
+            .bundle
+            .as_ref()
+            .map(|path| crate::staged_output::StagedFile::stage(i, path))
+            .transpose()?;
         let mut report = Report::new("report");
         let mut seen_sources = BTreeSet::new();
         for path in &self.results {
@@ -86,6 +100,16 @@ impl Spec for Assessment {
         report
             .measurements
             .insert("html".into(), serde_json::json!(self.html));
+        if let Some(bundle) = &self.bundle {
+            report
+                .measurements
+                .insert("bundle".into(), serde_json::json!(bundle));
+        }
+        if let Some(scope) = self.scope.scope() {
+            report
+                .measurements
+                .insert("scope_digest".into(), serde_json::json!(scope.digest()));
+        }
         crate::publication::bounded_json_len(
             &crate::commands::security::output::Report::from(&report),
             self.bounds.max_result_bytes,
@@ -103,8 +127,35 @@ impl Spec for Assessment {
             .write_all(html.as_bytes())
             .map_err(|e| CliError::caused(packetcraftr_core::error::Kind::Io, &e))?;
         staged.sync()?;
+        if let Some(staged_bundle) = staged_bundle.as_mut() {
+            let bundle = packetcraftr_core::security::bundle::Bundle::new(
+                report.clone(),
+                self.scope
+                    .scope()
+                    .map(|scope| packetcraftr_core::security::bundle::ScopeRef {
+                        label: scope.label.clone(),
+                        digest: scope.digest(),
+                    }),
+            );
+            crate::publication::bounded_json_len(
+                &bundle,
+                self.bounds.max_result_bytes,
+                serde_json::ser::CompactFormatter,
+            )
+            .map_err(|e| e.into_cli_error(|| invalid("bundle exceeds --max-result-bytes")))?;
+            let bytes = serde_json::to_vec_pretty(&bundle)
+                .map_err(|e| CliError::caused(packetcraftr_core::error::Kind::Io, &e))?;
+            staged_bundle
+                .as_file_mut()
+                .write_all(&bytes)
+                .map_err(|e| CliError::caused(packetcraftr_core::error::Kind::Io, &e))?;
+            staged_bundle.sync()?;
+        }
         i.check()?;
         staged.persist()?;
+        if let Some(staged_bundle) = staged_bundle {
+            staged_bundle.persist()?;
+        }
         publish(i, Command::Assessment, report, self.bounds)
     }
 }

@@ -23,7 +23,7 @@
       0
     ]
   },
-  "schema": "packetcraftr.output/v20",
+  "schema": "packetcraftr.output/v21",
   "sequence": 1,
   "status": "success"
 }

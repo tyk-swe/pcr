@@ -32,6 +32,8 @@ struct Attempt {
     variant: String,
     attempt_seq: u32,
     answered: bool,
+    #[serde(default)]
+    rewritten: bool,
     packets_sent: usize,
     payload_sha256: String,
 }
@@ -53,6 +55,7 @@ impl TryFrom<Attempt> for lib::AttemptEvidence {
             variant_index,
             attempt_seq: attempt.attempt_seq,
             answered: attempt.answered,
+            rewritten: attempt.rewritten,
             packets_sent: attempt.packets_sent,
             payload_sha256: parse_hash(&attempt.payload_sha256)?,
             reply: None,

@@ -46,7 +46,7 @@ pub(in crate::commands) fn source(path: &Path, bytes: &[u8]) -> Source {
 
 /// Validate the published envelope before admitting an assessment's input report.
 pub(in crate::commands) fn report(bytes: &[u8]) -> Result<Report, CliError> {
-    let envelope = input::aggregate::<Report>(
+    let security = input::aggregate::<Report>(
         bytes,
         &[
             Command::Hunt.as_str(),
@@ -56,12 +56,366 @@ pub(in crate::commands) fn report(bytes: &[u8]) -> Result<Report, CliError> {
             Command::AuditHttp.as_str(),
             Command::ScanDiff.as_str(),
         ],
+    );
+    match security {
+        Ok(envelope) => {
+            if envelope.result.kind != envelope.command {
+                return Err(invalid("report kind does not match command"));
+            }
+            Ok(envelope.result)
+        }
+        Err(security_error) => engagement(bytes).map_err(|_| invalid(security_error.to_string())),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct ScanEndpoint {
+    #[serde(default)]
+    classification: String,
+}
+
+#[derive(serde::Deserialize, Default)]
+struct ScanResult {
+    #[serde(default)]
+    target: Option<String>,
+    #[serde(default)]
+    endpoints: Vec<ScanEndpoint>,
+    #[serde(default)]
+    hosts: Vec<serde::de::IgnoredAny>,
+    #[serde(default)]
+    resolved_addresses: Vec<serde::de::IgnoredAny>,
+    #[serde(default)]
+    undecoded: Vec<serde::de::IgnoredAny>,
+    #[serde(default)]
+    unattributed: Vec<serde::de::IgnoredAny>,
+    #[serde(default)]
+    retained_evidence_bytes: Option<u64>,
+}
+
+#[derive(serde::Deserialize, Default)]
+struct DifferentialRow {
+    #[serde(default)]
+    verdict: String,
+}
+
+#[derive(serde::Deserialize, Default)]
+struct DifferentialResult {
+    #[serde(default)]
+    valid: Option<bool>,
+    #[serde(default)]
+    provisional: Option<bool>,
+    #[serde(default)]
+    plan_digest: Option<String>,
+    #[serde(default)]
+    source_port: u64,
+    #[serde(default)]
+    rows: Vec<DifferentialRow>,
+    #[serde(default)]
+    attempts: Vec<serde::de::IgnoredAny>,
+}
+
+#[derive(serde::Deserialize, Default)]
+struct FuzzResult {
+    #[serde(default)]
+    seed: u64,
+    #[serde(default)]
+    first_case: u64,
+    #[serde(default)]
+    mode: Option<String>,
+    #[serde(default)]
+    cases_generated: u64,
+    #[serde(default)]
+    cases_built: u64,
+    #[serde(default)]
+    cases_rejected: u64,
+    #[serde(default)]
+    cases: Vec<serde::de::IgnoredAny>,
+}
+
+#[derive(serde::Deserialize, Default)]
+struct ExchangeResult {
+    #[serde(default)]
+    sent: Vec<serde::de::IgnoredAny>,
+    #[serde(default)]
+    responses: Vec<serde::de::IgnoredAny>,
+    #[serde(default)]
+    unanswered: Vec<serde::de::IgnoredAny>,
+    #[serde(default)]
+    unsolicited: Vec<serde::de::IgnoredAny>,
+    #[serde(default)]
+    undecoded: Vec<serde::de::IgnoredAny>,
+}
+
+#[derive(serde::Deserialize, Default)]
+struct TracerouteResult {
+    #[serde(default)]
+    target: Option<String>,
+    #[serde(default)]
+    destination: Option<String>,
+    #[serde(default)]
+    strategy: Option<String>,
+    #[serde(default)]
+    completion: Option<String>,
+    #[serde(default)]
+    destination_port: Option<u64>,
+    #[serde(default)]
+    hops: Vec<serde::de::IgnoredAny>,
+    #[serde(default)]
+    resolved_addresses: Vec<serde::de::IgnoredAny>,
+    #[serde(default)]
+    undecoded: Vec<serde::de::IgnoredAny>,
+    #[serde(default)]
+    retained_evidence_bytes: Option<u64>,
+}
+
+enum Engagement {
+    Scan(ScanResult),
+    Differential(DifferentialResult),
+    Fuzz(FuzzResult),
+    Exchange(ExchangeResult),
+    Traceroute(TracerouteResult),
+}
+
+fn engagement(bytes: &[u8]) -> Result<Report, CliError> {
+    let envelope = input::aggregate::<serde_json::Value>(
+        bytes,
+        &[
+            Command::Scan.as_str(),
+            Command::Differential.as_str(),
+            Command::Fuzz.as_str(),
+            Command::Exchange.as_str(),
+            Command::Traceroute.as_str(),
+        ],
     )
     .map_err(|error| invalid(error.to_string()))?;
-    if envelope.result.kind != envelope.command {
-        return Err(invalid("report kind does not match command"));
+    let result = envelope.result;
+    let typed = match envelope.command.as_str() {
+        command if command == Command::Scan.as_str() => serde_json::from_value(result)
+            .map(Engagement::Scan)
+            .map_err(|error| invalid(error.to_string())),
+        command if command == Command::Differential.as_str() => serde_json::from_value(result)
+            .map(Engagement::Differential)
+            .map_err(|error| invalid(error.to_string())),
+        command if command == Command::Fuzz.as_str() => serde_json::from_value(result)
+            .map(Engagement::Fuzz)
+            .map_err(|error| invalid(error.to_string())),
+        command if command == Command::Exchange.as_str() => serde_json::from_value(result)
+            .map(Engagement::Exchange)
+            .map_err(|error| invalid(error.to_string())),
+        _ => serde_json::from_value(result)
+            .map(Engagement::Traceroute)
+            .map_err(|error| invalid(error.to_string())),
+    }?;
+    Ok(summarize(&envelope.command, typed))
+}
+
+fn count_by<'a>(
+    names: impl IntoIterator<Item = &'a str>,
+) -> serde_json::Map<String, serde_json::Value> {
+    let mut counts = serde_json::Map::new();
+    for name in names {
+        if name.is_empty() {
+            continue;
+        }
+        let count = counts
+            .entry(name.to_owned())
+            .or_insert(serde_json::json!(0));
+        *count = serde_json::json!(count.as_u64().unwrap_or(0) + 1);
     }
-    Ok(envelope.result)
+    counts
+}
+
+fn summarize(command: &str, result: Engagement) -> Report {
+    use packetcraftr_core::security::{Finding, Severity};
+    let mut report = Report::new(command);
+    report
+        .measurements
+        .insert("engagement_command".into(), serde_json::json!(command));
+    let mut summary = serde_json::Map::new();
+    let put = |summary: &mut serde_json::Map<String, serde_json::Value>,
+               key: &str,
+               value: serde_json::Value| {
+        summary.insert(key.to_owned(), value);
+    };
+    match &result {
+        Engagement::Scan(scan) => {
+            put(
+                &mut summary,
+                "endpoints",
+                serde_json::json!(scan.endpoints.len()),
+            );
+            put(&mut summary, "hosts", serde_json::json!(scan.hosts.len()));
+            put(
+                &mut summary,
+                "resolved_addresses",
+                serde_json::json!(scan.resolved_addresses.len()),
+            );
+            put(
+                &mut summary,
+                "undecoded",
+                serde_json::json!(scan.undecoded.len()),
+            );
+            put(
+                &mut summary,
+                "unattributed",
+                serde_json::json!(scan.unattributed.len()),
+            );
+            if let Some(target) = &scan.target {
+                put(&mut summary, "target", serde_json::json!(target));
+            }
+            if let Some(bytes) = scan.retained_evidence_bytes {
+                put(
+                    &mut summary,
+                    "retained_evidence_bytes",
+                    serde_json::json!(bytes),
+                );
+            }
+            let classifications = count_by(
+                scan.endpoints
+                    .iter()
+                    .map(|endpoint| endpoint.classification.as_str()),
+            );
+            put(
+                &mut summary,
+                "classifications",
+                serde_json::Value::Object(classifications),
+            );
+        }
+        Engagement::Differential(differential) => {
+            put(
+                &mut summary,
+                "rows",
+                serde_json::json!(differential.rows.len()),
+            );
+            put(
+                &mut summary,
+                "attempts",
+                serde_json::json!(differential.attempts.len()),
+            );
+            put(
+                &mut summary,
+                "source_port",
+                serde_json::json!(differential.source_port),
+            );
+            if let Some(valid) = differential.valid {
+                put(&mut summary, "valid", serde_json::json!(valid));
+            }
+            if let Some(provisional) = differential.provisional {
+                put(&mut summary, "provisional", serde_json::json!(provisional));
+            }
+            if let Some(digest) = &differential.plan_digest {
+                put(&mut summary, "plan_digest", serde_json::json!(digest));
+            }
+            let verdicts = count_by(differential.rows.iter().map(|row| row.verdict.as_str()));
+            put(
+                &mut summary,
+                "verdicts",
+                serde_json::Value::Object(verdicts),
+            );
+            if differential.valid == Some(false) {
+                report
+                    .completeness
+                    .note("differential Campaign was not valid, its Baseline was not accepted");
+            }
+            if differential.provisional == Some(true) {
+                report
+                    .completeness
+                    .note("differential Campaign is provisional until differential-join");
+            }
+        }
+        Engagement::Fuzz(fuzz) => {
+            put(&mut summary, "seed", serde_json::json!(fuzz.seed));
+            put(
+                &mut summary,
+                "first_case",
+                serde_json::json!(fuzz.first_case),
+            );
+            put(
+                &mut summary,
+                "cases_generated",
+                serde_json::json!(fuzz.cases_generated),
+            );
+            put(
+                &mut summary,
+                "cases_built",
+                serde_json::json!(fuzz.cases_built),
+            );
+            put(
+                &mut summary,
+                "cases_rejected",
+                serde_json::json!(fuzz.cases_rejected),
+            );
+            put(&mut summary, "cases", serde_json::json!(fuzz.cases.len()));
+            if let Some(mode) = &fuzz.mode {
+                put(&mut summary, "mode", serde_json::json!(mode));
+            }
+        }
+        Engagement::Exchange(exchange) => {
+            put(&mut summary, "sent", serde_json::json!(exchange.sent.len()));
+            put(
+                &mut summary,
+                "responses",
+                serde_json::json!(exchange.responses.len()),
+            );
+            put(
+                &mut summary,
+                "unanswered",
+                serde_json::json!(exchange.unanswered.len()),
+            );
+            put(
+                &mut summary,
+                "unsolicited",
+                serde_json::json!(exchange.unsolicited.len()),
+            );
+            put(
+                &mut summary,
+                "undecoded",
+                serde_json::json!(exchange.undecoded.len()),
+            );
+        }
+        Engagement::Traceroute(trace) => {
+            put(&mut summary, "hops", serde_json::json!(trace.hops.len()));
+            put(
+                &mut summary,
+                "resolved_addresses",
+                serde_json::json!(trace.resolved_addresses.len()),
+            );
+            put(
+                &mut summary,
+                "undecoded",
+                serde_json::json!(trace.undecoded.len()),
+            );
+            for (key, value) in [
+                ("target", &trace.target),
+                ("destination", &trace.destination),
+                ("strategy", &trace.strategy),
+                ("completion", &trace.completion),
+            ] {
+                if let Some(value) = value {
+                    put(&mut summary, key, serde_json::json!(value));
+                }
+            }
+            if let Some(port) = trace.destination_port {
+                put(&mut summary, "destination_port", serde_json::json!(port));
+            }
+            if let Some(bytes) = trace.retained_evidence_bytes {
+                put(
+                    &mut summary,
+                    "retained_evidence_bytes",
+                    serde_json::json!(bytes),
+                );
+            }
+        }
+    }
+    report.findings.push(Finding::new(
+        &format!("engagement.{command}.summary"),
+        Severity::Info,
+        command.to_owned(),
+        "Imported engagement evidence summary, observations only and not a vulnerability finding",
+        serde_json::Value::Object(summary),
+        "Review the linked source result for the full evidence",
+    ));
+    report
 }
 
 #[cfg(test)]
@@ -89,6 +443,46 @@ mod tests {
     #[test]
     fn current_security_output_is_accepted() {
         assert_eq!(report(&current_hunt()).unwrap().kind, "hunt");
+    }
+
+    #[test]
+    fn engagement_results_are_summarized_not_copied() {
+        let read_example = |name: &str| {
+            std::fs::read(
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../examples/documents")
+                    .join(name),
+            )
+            .unwrap()
+        };
+        let scan = report(&read_example("output-scan-success.json")).unwrap();
+        assert_eq!(scan.kind, "scan");
+        assert_eq!(scan.findings.len(), 1);
+        assert_eq!(scan.findings[0].rule_id, "engagement.scan.summary");
+        assert_eq!(scan.findings[0].evidence["endpoints"], 1);
+        assert_eq!(scan.findings[0].evidence["classifications"]["timeout"], 1);
+        assert!(scan.completeness.complete);
+
+        let differential = report(&read_example("output-differential-success.json")).unwrap();
+        assert_eq!(differential.kind, "differential");
+        assert_eq!(
+            differential.findings[0].evidence["verdicts"]["accepted"],
+            differential.findings[0].evidence["rows"]
+        );
+        assert!(differential.findings[0].evidence["plan_digest"].is_string());
+
+        for (name, kind, field) in [
+            ("output-fuzz-success.json", "fuzz", "cases_generated"),
+            ("output-exchange-success.json", "exchange", "responses"),
+            ("output-traceroute-success.json", "traceroute", "hops"),
+        ] {
+            let imported = report(&read_example(name)).unwrap();
+            assert_eq!(imported.kind, kind, "{name}");
+            assert!(imported.findings[0].evidence[field].is_number(), "{name}");
+        }
+
+        let build = read_example("output-build-success.json");
+        assert!(report(&build).is_err());
     }
 
     #[test]

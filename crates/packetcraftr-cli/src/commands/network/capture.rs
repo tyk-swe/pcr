@@ -160,7 +160,8 @@ pub(super) fn run(invocation: &crate::invocation::Invocation, args: Args) -> Res
     } else {
         None
     };
-    let policy = args.budgets.into_policy();
+    let mut policy = args.budgets.into_policy();
+    args.scope.apply_to(&mut policy);
     let files = args
         .write
         .map(|path| {

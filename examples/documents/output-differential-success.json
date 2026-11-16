@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v20",
+  "schema": "packetcraftr.output/v21",
   "command": "differential",
   "mode": "aggregate",
   "status": "success",
@@ -14,54 +14,63 @@
         "variant": "baseline",
         "verdict": "accepted",
         "answered": 1,
+        "rewritten": 0,
         "attempts": 1
       },
       {
         "variant": "ttl-255",
         "verdict": "accepted",
         "answered": 1,
+        "rewritten": 0,
         "attempts": 1
       },
       {
         "variant": "ttl-1",
         "verdict": "accepted",
         "answered": 1,
+        "rewritten": 0,
         "attempts": 1
       },
       {
         "variant": "dscp-ecn",
         "verdict": "accepted",
         "answered": 1,
+        "rewritten": 0,
         "attempts": 1
       },
       {
         "variant": "ecn-ce",
         "verdict": "accepted",
         "answered": 1,
+        "rewritten": 0,
         "attempts": 1
       },
       {
         "variant": "ip-id-max",
         "verdict": "accepted",
         "answered": 1,
+        "rewritten": 0,
         "attempts": 1
       },
       {
         "variant": "df-set",
         "verdict": "accepted",
         "answered": 1,
+        "rewritten": 0,
         "attempts": 1
       },
       {
         "variant": "ip-options-router-alert",
         "verdict": "accepted",
         "answered": 1,
+        "rewritten": 0,
         "attempts": 1
       },
       {
         "variant": "udp-checksum-zero",
         "verdict": "accepted",
         "answered": 1,
+        "rewritten": 0,
         "attempts": 1
       }
     ],
@@ -70,6 +79,7 @@
         "variant": "baseline",
         "attempt_seq": 0,
         "answered": true,
+        "rewritten": false,
         "packets_sent": 1,
         "payload_sha256": "15e509379becbbdd0e4bbc3e71f8755e732e8563697597c9b312f34d1b107312",
         "reply": {
@@ -88,6 +98,7 @@
         "variant": "ttl-255",
         "attempt_seq": 1,
         "answered": true,
+        "rewritten": false,
         "packets_sent": 1,
         "payload_sha256": "9ecece1629e21e557eb641d71f9fb1d8b1bad8e0ff08be6aed57de4af5519473",
         "reply": {
@@ -106,6 +117,7 @@
         "variant": "ttl-1",
         "attempt_seq": 2,
         "answered": true,
+        "rewritten": false,
         "packets_sent": 1,
         "payload_sha256": "6594eb7c50ba6c6b21666ad548d6c38a1b3acc37e171e3266077cca17f76e47a",
         "reply": {
@@ -124,6 +136,7 @@
         "variant": "dscp-ecn",
         "attempt_seq": 3,
         "answered": true,
+        "rewritten": false,
         "packets_sent": 1,
         "payload_sha256": "c7a01e099a5115a922154c46b34cfb9d10181c67ce0afd2ddcf8d64847008126",
         "reply": {
@@ -142,6 +155,7 @@
         "variant": "ecn-ce",
         "attempt_seq": 4,
         "answered": true,
+        "rewritten": false,
         "packets_sent": 1,
         "payload_sha256": "12eb54447dd9dfbc7919fbf1a32c19265ffcb243a6a7ac411d897cf04755cbba",
         "reply": {
@@ -160,6 +174,7 @@
         "variant": "ip-id-max",
         "attempt_seq": 5,
         "answered": true,
+        "rewritten": false,
         "packets_sent": 1,
         "payload_sha256": "23ed1c669e8f16fcb3b9dc9a557e844d23ff2357402778dba967d62e5caa256b",
         "reply": {
@@ -178,6 +193,7 @@
         "variant": "df-set",
         "attempt_seq": 6,
         "answered": true,
+        "rewritten": false,
         "packets_sent": 1,
         "payload_sha256": "7ac1136dc17e1bbafe93e5f3bf1f6574f5caa8913069ac65c402d483af29f8ac",
         "reply": {
@@ -196,6 +212,7 @@
         "variant": "ip-options-router-alert",
         "attempt_seq": 7,
         "answered": true,
+        "rewritten": false,
         "packets_sent": 1,
         "payload_sha256": "12c050f7f72eadd2cf3784c1c07df7e5b0c71ef7f2106c080f820c0e5cfaf1f8",
         "reply": {
@@ -214,6 +231,7 @@
         "variant": "udp-checksum-zero",
         "attempt_seq": 8,
         "answered": true,
+        "rewritten": false,
         "packets_sent": 1,
         "payload_sha256": "b4bf77c379436453e0392993552ce27c78ef636abe099e2a134a437e80f52787",
         "reply": {

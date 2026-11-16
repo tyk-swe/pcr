@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:packetcraftr:bundle:v1",
+  "title": "PacketcraftR evidence bundle v1",
+  "type": "object",
+  "required": [
+    "schema",
+    "tool_version",
+    "kind",
+    "scope",
+    "inputs_digest",
+    "sources",
+    "report"
+  ],
+  "properties": {
+    "schema": {
+      "const": "packetcraftr.bundle/v1"
+    },
+    "tool_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "kind": {
+      "type": "string",
+      "minLength": 1
+    },
+    "scope": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "required": [
+            "label",
+            "digest"
+          ],
+          "properties": {
+            "label": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "digest": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{64}$"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "inputs_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "sources": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "path",
+          "sha256"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "report": {
+      "type": "object",
+      "required": [
+        "kind",
+        "findings",
+        "completeness",
+        "measurements",
+        "sources"
+      ]
+    }
+  },
+  "additionalProperties": false
+}

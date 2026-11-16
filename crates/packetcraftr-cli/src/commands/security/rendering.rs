@@ -60,6 +60,9 @@ pub(crate) fn text(i: &Invocation, report: &Report<'_>) -> Result<(), CliError> 
         "after_endpoints",
         "unchanged_endpoints",
         "html",
+        "bundle",
+        "scope_digest",
+        "engagement_command",
     ] {
         if let Some(value) = report.measurements.get(key) {
             crate::terminal::write_stdout_line(i, format_args!("  {key}: {value}"))?;
@@ -135,6 +138,18 @@ pub(crate) fn html(report: &Report<'_>) -> String {
     );
     for reason in report.completeness.reasons {
         let _ = write!(html, "<p>{}</p>", escape(reason));
+    }
+    if !report.measurements.is_empty() {
+        html.push_str("<h2>Measurements</h2><ul>");
+        for (key, value) in report.measurements {
+            let _ = write!(
+                html,
+                "<li>{}: <code>{}</code></li>",
+                escape(key),
+                escape(&value.to_string())
+            );
+        }
+        html.push_str("</ul>");
     }
     for f in &report.findings {
         let severity = format!("{:?}", f.severity).to_ascii_lowercase();

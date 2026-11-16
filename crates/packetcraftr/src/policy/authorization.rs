@@ -26,10 +26,50 @@ impl Policy {
                 maximum: MAX_DESTINATION_CONSTRAINTS,
             });
         }
+        if self.denied_destinations.len() > MAX_DESTINATION_CONSTRAINTS {
+            return Err(Error::DestinationConstraintLimit {
+                actual: self.denied_destinations.len(),
+                maximum: MAX_DESTINATION_CONSTRAINTS,
+            });
+        }
+        for group in &self.required_destination_groups {
+            if group.is_empty() || group.len() > MAX_DESTINATION_CONSTRAINTS {
+                return Err(Error::DestinationConstraintLimit {
+                    actual: group.len(),
+                    maximum: MAX_DESTINATION_CONSTRAINTS,
+                });
+            }
+        }
         Ok(())
     }
 
     pub fn authorize_destination(&self, destination: IpAddr) -> Result<(), Error> {
+        if let Some(denied) = self
+            .denied_destinations
+            .iter()
+            .find(|constraint| constraint.contains(destination))
+        {
+            return Err(Error::DestinationDenied {
+                destination,
+                constraints: denied.to_string(),
+            });
+        }
+        for group in &self.required_destination_groups {
+            if !group
+                .iter()
+                .any(|constraint| constraint.contains(destination))
+            {
+                let constraints = group
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                return Err(Error::DestinationNotAllowed {
+                    destination,
+                    constraints,
+                });
+            }
+        }
         if !self.allowed_destinations.is_empty()
             && !self
                 .allowed_destinations
@@ -414,5 +454,36 @@ mod tests {
             ..Policy::default()
         };
         assert!(permissive.authorize_destination(public_v4).is_ok());
+    }
+
+    #[test]
+    fn scope_exclusion_and_group_both_restrict_a_cli_allowlist() {
+        let scope = crate::policy::Scope::parse(
+            br#"{"schema":"packetcraftr.scope/v1","label":"lab","allowed_destinations":["10.0.0.0/8"],"denied_destinations":["10.0.0.1"],"max_packets":5}"#,
+        )
+        .unwrap();
+        let cli = Policy {
+            allowed_destinations: vec![
+                "10.0.0.0/8".parse().unwrap(),
+                "192.168.0.0/16".parse().unwrap(),
+            ],
+            ..Policy::default()
+        };
+        let narrowed = scope.narrow(&cli);
+        narrowed.validate().unwrap();
+        assert_eq!(narrowed.max_packets_per_operation, 5);
+        assert!(matches!(
+            narrowed.authorize_destination("10.0.0.1".parse().unwrap()),
+            Err(PolicyError::DestinationDenied { .. })
+        ));
+        assert!(matches!(
+            narrowed.authorize_destination("192.168.1.1".parse().unwrap()),
+            Err(PolicyError::DestinationNotAllowed { .. })
+        ));
+        assert!(
+            narrowed
+                .authorize_destination("10.1.2.3".parse().unwrap())
+                .is_ok()
+        );
     }
 }

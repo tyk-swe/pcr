@@ -1,6 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use std::io::Read;
+use std::path::Path;
+
 use clap::Args;
 
 use crate::resources::{Settings, declare};
@@ -46,6 +49,47 @@ pub(crate) struct DestinationAllowlistArgs {
 }
 
 #[derive(Clone, Debug, Args)]
+pub(crate) struct ScopeArgs {
+    /// Engagement scope document (packetcraftr.scope/v1 JSON, regular file).
+    /// A scope only narrows this command's policy and budgets, it never
+    /// grants an opt-in the command flags did not give.
+    #[arg(long, value_name = "PATH", value_parser = load_scope)]
+    scope_file: Option<packetcraftr::policy::Scope>,
+}
+
+impl ScopeArgs {
+    pub(crate) fn apply_to(self, policy: &mut packetcraftr::policy::Policy) {
+        if let Some(scope) = self.scope_file {
+            *policy = scope.narrow(policy);
+        }
+    }
+
+    pub(crate) fn scope(&self) -> Option<&packetcraftr::policy::Scope> {
+        self.scope_file.as_ref()
+    }
+}
+
+fn load_scope(path: &str) -> Result<packetcraftr::policy::Scope, String> {
+    let path = Path::new(path);
+    let metadata = std::fs::metadata(path)
+        .map_err(|error| format!("cannot read scope file {}: {error}", path.display()))?;
+    if !metadata.is_file() {
+        return Err(format!(
+            "scope file {} is not a regular file",
+            path.display()
+        ));
+    }
+    let file = std::fs::File::open(path)
+        .map_err(|error| format!("cannot read scope file {}: {error}", path.display()))?;
+    let limit = packetcraftr::policy::MAX_SCOPE_DOCUMENT_BYTES;
+    let mut bytes = Vec::new();
+    file.take(limit as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| format!("cannot read scope file {}: {error}", path.display()))?;
+    packetcraftr::policy::Scope::parse(&bytes).map_err(|error| error.to_string())
+}
+
+#[derive(Clone, Debug, Args)]
 pub(crate) struct TrafficBudgetArgs {
     /// Maximum packets authorized for one operation.
     #[arg(
@@ -76,6 +120,8 @@ pub(crate) struct SendPolicyArgs {
     destination_allowlist: DestinationAllowlistArgs,
     #[command(flatten)]
     pub(crate) budgets: TrafficBudgetArgs,
+    #[command(flatten)]
+    scope: ScopeArgs,
 }
 
 /// `fuzz` and `replay`: packets addressed numerically, so no hostname
@@ -92,6 +138,8 @@ pub(crate) struct NumericPolicyArgs {
     destination_allowlist: DestinationAllowlistArgs,
     #[command(flatten)]
     pub(crate) budgets: TrafficBudgetArgs,
+    #[command(flatten)]
+    scope: ScopeArgs,
 }
 
 /// `scan`, `traceroute`, and `dns`: a named target, packets built by the
@@ -106,6 +154,8 @@ pub(crate) struct HostnamePolicyArgs {
     destination_allowlist: DestinationAllowlistArgs,
     #[command(flatten)]
     pub(crate) budgets: TrafficBudgetArgs,
+    #[command(flatten)]
+    scope: ScopeArgs,
 }
 
 /// Identification uses numeric endpoints and constructs reviewed requests.
@@ -117,6 +167,8 @@ pub(crate) struct IdentificationPolicyArgs {
     destination_allowlist: DestinationAllowlistArgs,
     #[command(flatten)]
     pub(crate) budgets: TrafficBudgetArgs,
+    #[command(flatten)]
+    scope: ScopeArgs,
 }
 
 impl IdentificationPolicyArgs {
@@ -125,6 +177,7 @@ impl IdentificationPolicyArgs {
         self.public_destination.apply_to(&mut policy);
         self.destination_allowlist.apply_to(&mut policy);
         self.budgets.apply_to(&mut policy);
+        self.scope.apply_to(&mut policy);
         policy
     }
 }
@@ -211,6 +264,7 @@ impl SendPolicyArgs {
         self.source_spoofing.apply_to(&mut policy);
         self.destination_allowlist.apply_to(&mut policy);
         self.budgets.apply_to(&mut policy);
+        self.scope.apply_to(&mut policy);
         policy
     }
 }
@@ -223,6 +277,7 @@ impl NumericPolicyArgs {
         self.source_spoofing.apply_to(&mut policy);
         self.destination_allowlist.apply_to(&mut policy);
         self.budgets.apply_to(&mut policy);
+        self.scope.apply_to(&mut policy);
         policy
     }
 }
@@ -234,6 +289,7 @@ impl HostnamePolicyArgs {
         self.hostname_resolution.apply_to(&mut policy);
         self.destination_allowlist.apply_to(&mut policy);
         self.budgets.apply_to(&mut policy);
+        self.scope.apply_to(&mut policy);
         policy
     }
 }

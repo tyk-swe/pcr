@@ -39,7 +39,7 @@ pub(super) fn prepare(
     let Args {
         connect,
         method,
-        max_in_flight,
+        mut max_in_flight,
         max_prepared_bytes,
         list,
         targets,
@@ -68,10 +68,12 @@ pub(super) fn prepare(
         unresponsive_hosts,
         reverse_dns,
         reverse_dns_port,
-        attempts,
+        mut attempts,
         adaptive,
-        timeout,
-        rate,
+        mut timeout,
+        mut rate,
+        timing,
+        shuffle_seed,
         max_ports,
         max_probes,
         duration,
@@ -89,6 +91,14 @@ pub(super) fn prepare(
         limits,
         policy,
     } = arguments;
+
+    if let Some(preset) = timing {
+        let schedule = preset.schedule();
+        rate = Some(schedule.rate);
+        timeout = crate::command_options::TimeoutArgs::from_millis(schedule.timeout_ms);
+        attempts = schedule.attempts;
+        max_in_flight = schedule.max_in_flight;
+    }
 
     let requested = if connect {
         method::Requested::Connect
@@ -142,7 +152,7 @@ pub(super) fn prepare(
                 "--transport ip needs the raw method; drop --connect and --method tcp-connect",
             ));
         }
-        let selected = EndpointRequest {
+        let mut selected = EndpointRequest {
             transports,
             ports,
             exclude_ports,
@@ -151,6 +161,9 @@ pub(super) fn prepare(
             max_ports,
         }
         .select_if_requested()?;
+        if let (Some(seed), Some(selected)) = (shuffle_seed, selected.as_mut()) {
+            packetcraftr::scan::shuffle_endpoints(&mut selected.endpoints, seed);
+        }
         let (ports, ip_protocols) = if ip_only {
             (
                 None,
@@ -231,6 +244,7 @@ pub(super) fn prepare(
             adaptive,
             timeout,
             rate,
+            shuffle_seed,
         },
         family,
         targets,
@@ -275,12 +289,16 @@ pub(super) fn prepare(
     }
     let plan = publication_plan(
         selection,
+        PublicationInputs {
+            timing,
+            shuffle_seed,
+            excluded_endpoints: built.excluded_endpoints,
+            curated: built.curated,
+            discovery_excluded: built.discovery_excluded,
+            reverse_dns: &reverse_dns,
+            reverse_dns_port,
+        },
         &built.request,
-        built.excluded_endpoints,
-        built.curated,
-        built.discovery_excluded,
-        &reverse_dns,
-        reverse_dns_port,
     );
     let reverse_dns = reverse_dns
         .map(crate::command_options::parse_target)
@@ -356,14 +374,20 @@ fn validate_list_options(
     Ok(())
 }
 
-fn publication_plan(
-    selection: method::Selection,
-    request: &packetcraftr::scan::Request,
+struct PublicationInputs<'a> {
+    timing: Option<arguments::Timing>,
+    shuffle_seed: Option<u64>,
     excluded_endpoints: usize,
     curated: Option<super::output::plan::CuratedPayloads>,
     discovery_excluded: usize,
-    reverse_dns: &Option<String>,
+    reverse_dns: &'a Option<String>,
     reverse_dns_port: u16,
+}
+
+fn publication_plan(
+    selection: method::Selection,
+    schedule: PublicationInputs<'_>,
+    request: &packetcraftr::scan::Request,
 ) -> super::output::plan::Plan {
     let selected_method = selection.method;
     super::output::plan::Plan {
@@ -380,17 +404,20 @@ fn publication_plan(
                 .any(|endpoint| endpoint.transport() == Transport::Sctp))
         .then(|| super::output::plan::SctpScan::from(request.sctp_scan)),
         method: selection.into(),
+        timing: schedule.timing.map(arguments::Timing::as_str),
+        shuffle_seed: schedule.shuffle_seed,
         port_catalog: packetcraftr::scan::catalog::data_set().into(),
-        excluded_endpoints,
-        curated_udp_payloads: curated,
+        excluded_endpoints: schedule.excluded_endpoints,
+        curated_udp_payloads: schedule.curated,
         discovery: super::output::plan::Discovery::new(
             &request.discovery,
-            discovery_excluded,
-            reverse_dns
+            schedule.discovery_excluded,
+            schedule
+                .reverse_dns
                 .as_ref()
                 .map(|server| super::output::plan::ReverseDnsServer {
                     server: server.clone(),
-                    port: reverse_dns_port,
+                    port: schedule.reverse_dns_port,
                 }),
         ),
     }

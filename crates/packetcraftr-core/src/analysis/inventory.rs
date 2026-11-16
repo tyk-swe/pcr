@@ -8,6 +8,7 @@ use crate::analysis::pipeline::FrameRecord;
 use crate::analysis::{StreamTransport, Summary as RunSummary};
 use crate::packet::MacAddress;
 use crate::protocol::identity;
+use crate::protocol::link::Arp;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ObservedPort {
@@ -71,6 +72,15 @@ impl Collector {
             *self.protocols.entry((*name).to_owned()).or_default() += 1;
         }
 
+        if let Some(arp) = record.decoded.packet.get::<Arp>() {
+            let sender = IpAddr::V4(arp.sender_protocol);
+            let host = self.hosts.entry(sender).or_default();
+            host.mac_addresses.insert(arp.sender_hardware);
+            host.frames_sent += 1;
+            for name in &seen {
+                host.protocols.insert((*name).to_owned());
+            }
+        }
         let Some((source, destination)) = innermost_network(record) else {
             return;
         };
@@ -82,19 +92,6 @@ impl Collector {
         }
         self.hosts.entry(source).or_default().frames_sent += 1;
         self.hosts.entry(destination).or_default().frames_received += 1;
-
-        if let Some((source_mac, _)) = record
-            .decoded
-            .packet
-            .iter()
-            .find_map(identity::link_addresses)
-        {
-            self.hosts
-                .entry(source)
-                .or_default()
-                .mac_addresses
-                .insert(source_mac);
-        }
 
         for (transport, conversation) in [
             (

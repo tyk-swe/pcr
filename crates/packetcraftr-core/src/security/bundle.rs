@@ -89,7 +89,7 @@ impl Bundle {
         }
         if let Some(scope) = &self.scope
             && (scope.label.trim().is_empty()
-                || scope.label.len() > 128
+                || scope.label.chars().count() > 128
                 || scope.label.chars().any(char::is_control)
                 || scope.digest.len() != 64
                 || !scope.digest.bytes().all(|byte| byte.is_ascii_hexdigit()))

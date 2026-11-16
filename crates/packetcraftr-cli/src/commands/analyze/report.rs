@@ -53,6 +53,9 @@ impl Spec for Assessment {
             return Err(invalid("reports accept at most 128 result files"));
         }
         input::validate_stdin_sources(self.results.iter().map(PathBuf::as_path))?;
+        if self.bundle.as_deref() == Some(self.html.as_path()) {
+            return Err(invalid("--html and --bundle must name different files"));
+        }
         let mut staged = crate::staged_output::StagedFile::stage(i, &self.html)?;
         let mut staged_bundle = self
             .bundle
@@ -137,14 +140,21 @@ impl Spec for Assessment {
                         digest: scope.digest(),
                     }),
             );
+            let bundle_limit = self
+                .bounds
+                .max_result_bytes
+                .min(packetcraftr_core::security::bundle::MAX_BUNDLE_DOCUMENT_BYTES);
             crate::publication::bounded_json_len(
                 &bundle,
-                self.bounds.max_result_bytes,
+                bundle_limit,
                 serde_json::ser::CompactFormatter,
             )
             .map_err(|e| e.into_cli_error(|| invalid("bundle exceeds --max-result-bytes")))?;
             let bytes = serde_json::to_vec_pretty(&bundle)
                 .map_err(|e| CliError::caused(packetcraftr_core::error::Kind::Io, &e))?;
+            if bytes.len() > bundle_limit {
+                return Err(invalid("bundle exceeds --max-result-bytes"));
+            }
             staged_bundle
                 .as_file_mut()
                 .write_all(&bytes)

@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use crate::command_options::{DecodeArgs, OfflineLimitsArgs};
 
-pub(crate) const AFTER_LONG_HELP: &str = r"Passive inventory reads a capture file only, it sends no packet and resolves no name. Every host, protocol, and observed port in the report was present in a decoded frame, and observed ports are endpoints seen in either direction, not proof that a host listens on them. A source MAC address is tied only to the source address of the frame that carried it, so a gateway MAC is never attributed to a routed destination.
+pub(crate) const AFTER_LONG_HELP: &str = r"Passive inventory reads a capture file only, it sends no packet and resolves no name. Every host, protocol, and observed port in the report was present in a decoded frame, and observed ports are endpoints seen in either direction, not proof that a host listens on them. A MAC address is tied to an address only when an ARP sender mapping in the capture establishes it, so a router MAC on a routed frame is never attributed to the remote host it forwarded for.
 
 Examples:
   packetcraftr analyze inventory capture.pcapng

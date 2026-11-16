@@ -2313,6 +2313,71 @@ fn scan_timing_conflicts_and_seeded_order_is_reproducible() {
 }
 
 #[test]
+fn report_rejects_identical_html_and_bundle_paths() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let same = directory.path().join("same.out");
+    let scan = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/documents/output-scan-success.json");
+    let same_arg = same.to_string_lossy().into_owned();
+    let scan_arg = scan.to_string_lossy().into_owned();
+    let output = run(&[
+        "analyze",
+        "report",
+        scan_arg.as_str(),
+        "--html",
+        same_arg.as_str(),
+        "--bundle",
+        same_arg.as_str(),
+    ]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(!same.exists(), "no output may be published on rejection");
+}
+
+#[test]
+fn inventory_ties_macs_only_to_arp_senders() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let build = |name: &str, packet: &str| {
+        let path = directory.path().join(name);
+        let args = [
+            "--output",
+            "pcapng",
+            "packet",
+            "build",
+            "--packet",
+            packet,
+            "--link-type",
+            "ethernet",
+        ];
+        let output = run(&args);
+        assert_success(&output, &args);
+        std::fs::write(&path, &output.stdout).expect("write capture");
+        path.to_string_lossy().into_owned()
+    };
+    let inventory = |capture: &str| {
+        let args = ["analyze", "inventory", capture];
+        let output = run(&args);
+        assert_success(&output, &args)
+    };
+    let arp = build(
+        "arp.pcapng",
+        "ethernet(src=02:00:00:00:00:01,dst=ff:ff:ff:ff:ff:ff)/arp(operation=1,sender_hardware=02:00:00:00:00:01,sender_protocol=192.0.2.2,target_hardware=00:00:00:00:00:00,target_protocol=192.0.2.1)",
+    );
+    assert!(
+        inventory(&arp).contains("host=192.0.2.2 mac=02:00:00:00:00:01"),
+        "ARP sender mapping is established evidence"
+    );
+    let routed = build(
+        "routed.pcapng",
+        "ethernet(src=02:00:00:00:00:09,dst=02:00:00:00:00:01)/ipv4(src=198.51.100.7,dst=192.0.2.2)/udp(sport=40000,dport=9999)/raw(text=hi)",
+    );
+    let text = inventory(&routed);
+    assert!(
+        text.contains("host=198.51.100.7 mac=-"),
+        "a routed frame must not attribute the router MAC, got:\n{text}"
+    );
+}
+
+#[test]
 fn passive_inventory_reports_only_observed_hosts_and_ports() {
     let capture = capture_path("dns-response.pcap");
     let capture = capture.to_string_lossy().into_owned();

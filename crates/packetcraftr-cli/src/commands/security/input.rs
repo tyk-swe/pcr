@@ -46,26 +46,45 @@ pub(in crate::commands) fn source(path: &Path, bytes: &[u8]) -> Source {
 
 /// Validate the published envelope before admitting an assessment's input report.
 pub(in crate::commands) fn report(bytes: &[u8]) -> Result<Report, CliError> {
-    let security = input::aggregate::<Report>(
-        bytes,
-        &[
-            Command::Hunt.as_str(),
-            Command::DnsAnomalies.as_str(),
-            Command::Beacons.as_str(),
-            Command::AuditTls.as_str(),
-            Command::AuditHttp.as_str(),
-            Command::ScanDiff.as_str(),
-        ],
-    );
-    match security {
-        Ok(envelope) => {
-            if envelope.result.kind != envelope.command {
-                return Err(invalid("report kind does not match command"));
-            }
-            Ok(envelope.result)
+    let security_commands = [
+        Command::Hunt.as_str(),
+        Command::DnsAnomalies.as_str(),
+        Command::Beacons.as_str(),
+        Command::AuditTls.as_str(),
+        Command::AuditHttp.as_str(),
+        Command::ScanDiff.as_str(),
+    ];
+    let engagement_commands = [
+        Command::Scan.as_str(),
+        Command::Differential.as_str(),
+        Command::Fuzz.as_str(),
+        Command::Exchange.as_str(),
+        Command::Traceroute.as_str(),
+    ];
+    let allowed: Vec<&str> = security_commands
+        .iter()
+        .chain(&engagement_commands)
+        .copied()
+        .collect();
+    let envelope = input::aggregate::<serde_json::Value>(bytes, &allowed)
+        .map_err(|error| invalid(error.to_string()))?;
+    if security_commands.contains(&envelope.command.as_str()) {
+        let result: Report =
+            serde_json::from_value(envelope.result).map_err(|error| invalid(error.to_string()))?;
+        if result.kind != envelope.command {
+            return Err(invalid("report kind does not match command"));
         }
-        Err(security_error) => engagement(bytes).map_err(|_| invalid(security_error.to_string())),
+        return Ok(result);
     }
+    engagement(&envelope.command, envelope.result)
+}
+
+fn is_plan(command: &str, result: &serde_json::Value) -> bool {
+    let Some(fields) = result.as_object() else {
+        return false;
+    };
+    (command == Command::Scan.as_str() && fields.contains_key("targets"))
+        || (command == Command::Differential.as_str() && fields.contains_key("token"))
 }
 
 #[derive(serde::Deserialize)]
@@ -75,7 +94,15 @@ struct ScanEndpoint {
 }
 
 #[derive(serde::Deserialize, Default)]
+struct ScanScheduling {
+    #[serde(default)]
+    incomplete: Vec<serde::de::IgnoredAny>,
+}
+
+#[derive(serde::Deserialize, Default)]
 struct ScanResult {
+    #[serde(default)]
+    scheduling: Option<ScanScheduling>,
     #[serde(default)]
     target: Option<String>,
     #[serde(default)]
@@ -176,20 +203,13 @@ enum Engagement {
     Traceroute(TracerouteResult),
 }
 
-fn engagement(bytes: &[u8]) -> Result<Report, CliError> {
-    let envelope = input::aggregate::<serde_json::Value>(
-        bytes,
-        &[
-            Command::Scan.as_str(),
-            Command::Differential.as_str(),
-            Command::Fuzz.as_str(),
-            Command::Exchange.as_str(),
-            Command::Traceroute.as_str(),
-        ],
-    )
-    .map_err(|error| invalid(error.to_string()))?;
-    let result = envelope.result;
-    let typed = match envelope.command.as_str() {
+fn engagement(command: &str, result: serde_json::Value) -> Result<Report, CliError> {
+    if is_plan(command, &result) {
+        return Err(invalid(
+            "engagement plans are not executed results, run the command without --list or --plan-only first",
+        ));
+    }
+    let typed = match command {
         command if command == Command::Scan.as_str() => serde_json::from_value(result)
             .map(Engagement::Scan)
             .map_err(|error| invalid(error.to_string())),
@@ -206,7 +226,7 @@ fn engagement(bytes: &[u8]) -> Result<Report, CliError> {
             .map(Engagement::Traceroute)
             .map_err(|error| invalid(error.to_string())),
     }?;
-    Ok(summarize(&envelope.command, typed))
+    Ok(summarize(command, typed))
 }
 
 fn count_by<'a>(
@@ -269,6 +289,19 @@ fn summarize(command: &str, result: Engagement) -> Report {
                     "retained_evidence_bytes",
                     serde_json::json!(bytes),
                 );
+            }
+            if let Some(scheduling) = &scan.scheduling
+                && !scheduling.incomplete.is_empty()
+            {
+                put(
+                    &mut summary,
+                    "incomplete_hosts",
+                    serde_json::json!(scheduling.incomplete.len()),
+                );
+                report.completeness.note(format!(
+                    "scan scheduling left {} host(s) incomplete",
+                    scheduling.incomplete.len()
+                ));
             }
             let classifications = count_by(
                 scan.endpoints
@@ -480,6 +513,26 @@ mod tests {
             assert_eq!(imported.kind, kind, "{name}");
             assert!(imported.findings[0].evidence[field].is_number(), "{name}");
         }
+
+        for plan in [
+            "output-scan-list-aggregate.json",
+            "output-differential-plan-success.json",
+        ] {
+            let error = report(&read_example(plan)).unwrap_err();
+            assert!(
+                error.message.contains("not executed"),
+                "{plan}: {}",
+                error.message
+            );
+        }
+
+        let mut incomplete: serde_json::Value =
+            serde_json::from_slice(&read_example("output-scan-success.json")).unwrap();
+        incomplete["result"]["scheduling"]["incomplete"] =
+            serde_json::json!([{"address": "192.0.2.1"}]);
+        let imported = report(&serde_json::to_vec(&incomplete).unwrap()).unwrap();
+        assert!(!imported.completeness.complete);
+        assert_eq!(imported.findings[0].evidence["incomplete_hosts"], 1);
 
         let build = read_example("output-build-success.json");
         assert!(report(&build).is_err());

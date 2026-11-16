@@ -8,7 +8,7 @@ use super::model::{DestinationConstraint, Error, MAX_DESTINATION_CONSTRAINTS, Po
 
 pub const SCHEMA: &str = "packetcraftr.scope/v1";
 pub const MAX_SCOPE_DOCUMENT_BYTES: usize = 1024 * 1024;
-const MAX_LABEL_BYTES: usize = 128;
+const MAX_LABEL_CHARS: usize = 128;
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -89,11 +89,11 @@ impl Scope {
             )));
         }
         if raw.label.trim().is_empty()
-            || raw.label.len() > MAX_LABEL_BYTES
+            || raw.label.chars().count() > MAX_LABEL_CHARS
             || raw.label.chars().any(char::is_control)
         {
             return Err(invalid(
-                "scope label must be printable and 1..=128 bytes".to_owned(),
+                "scope label must be printable and 1..=128 characters".to_owned(),
             ));
         }
         Ok(Self {
@@ -187,6 +187,24 @@ mod tests {
         ] {
             assert!(parse(document).is_err(), "{document}");
         }
+    }
+
+    #[test]
+    fn label_limit_counts_characters_like_the_schema() {
+        let fits = "é".repeat(100);
+        assert!(
+            parse(&format!(
+                "{{\"schema\":\"packetcraftr.scope/v1\",\"label\":\"{fits}\"}}"
+            ))
+            .is_ok()
+        );
+        let too_long = "é".repeat(129);
+        assert!(
+            parse(&format!(
+                "{{\"schema\":\"packetcraftr.scope/v1\",\"label\":\"{too_long}\"}}"
+            ))
+            .is_err()
+        );
     }
 
     #[test]

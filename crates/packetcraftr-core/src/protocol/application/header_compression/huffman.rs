@@ -308,6 +308,13 @@ fn build() -> Vec<[Edge; 2]> {
     nodes
 }
 
+pub(crate) fn max_encoded_bytes(decoded_bytes: usize) -> usize {
+    const MAX_CODE_BITS: usize = 30;
+    decoded_bytes
+        .checked_mul(MAX_CODE_BITS)
+        .map_or(usize::MAX, |bits| bits.div_ceil(8))
+}
+
 pub(crate) fn decode<E>(
     input: &[u8],
     max_output: usize,

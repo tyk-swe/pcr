@@ -34,6 +34,17 @@ struct DeclaredLength {
     status: Option<u16>,
 }
 
+enum ReadUntil<'a> {
+    End(Option<&'a str>),
+    ConnectResponseHead,
+}
+
+#[derive(PartialEq, Eq)]
+enum Progress {
+    Paused,
+    Finished,
+}
+
 pub(super) fn read_pair(
     [request, response]: [Option<&Stream>; 2],
     [client, server]: [&qpack::History; 2],
@@ -42,33 +53,28 @@ pub(super) fn read_pair(
     work: &mut Work<'_>,
 ) -> Result<[Option<Side>; 2], BoundaryError> {
     let mut remaining = limits.max_exchange_bytes;
-    let mut read =
-        |message: &mut Message<'_>, history: &qpack::History, request_method: Option<&str>| {
-            message.read(
-                history,
-                limits,
-                request_method,
-                connect_enabled,
-                &mut remaining,
-                work,
-            )
-        };
+    let mut read = |message: &mut Message<'_>, history: &qpack::History, until: ReadUntil<'_>| {
+        message.read(
+            history,
+            limits,
+            until,
+            connect_enabled,
+            &mut remaining,
+            work,
+        )
+    };
     let mut request = request.map(Message::new);
     let mut response = response.map(Message::new);
     if let Some(request) = &mut request {
-        read(request, client, None)?;
+        read(request, client, ReadUntil::End(None))?;
     }
-    let request_method = request
-        .as_ref()
-        .and_then(|message| message.side.header_sections.first())
-        .and_then(|section| section.method.as_deref());
-    if let Some(response) = &mut response {
-        read(response, server, request_method)?;
-    }
-
     if let Some(request) = &mut request
         && matches!(request.stage, Stage::AwaitConnectResponse)
     {
+        let progress = match &mut response {
+            Some(response) => read(response, server, ReadUntil::ConnectResponseHead)?,
+            None => Progress::Finished,
+        };
         request.stage = if response
             .as_ref()
             .is_some_and(|message| matches!(message.stage, Stage::Tunnel))
@@ -80,7 +86,18 @@ pub(super) fn read_pair(
                 trailers_forbidden: false,
             }
         };
-        read(request, client, None)?;
+        read(request, client, ReadUntil::End(None))?;
+        if let Some(response) = &mut response
+            && progress == Progress::Paused
+        {
+            read(response, server, ReadUntil::End(Some("CONNECT")))?;
+        }
+    } else if let Some(response) = &mut response {
+        let request_method = request
+            .as_ref()
+            .and_then(|message| message.side.header_sections.first())
+            .and_then(|section| section.method.as_deref());
+        read(response, server, ReadUntil::End(request_method))?;
     }
     Ok([
         request.map(|message| message.side),
@@ -136,11 +153,15 @@ impl<'a> Message<'a> {
         &mut self,
         history: &qpack::History,
         limits: Limits,
-        request_method: Option<&str>,
+        until: ReadUntil<'_>,
         connect_enabled: Option<bool>,
         remaining: &mut usize,
         work: &mut Work<'_>,
-    ) -> Result<(), BoundaryError> {
+    ) -> Result<Progress, BoundaryError> {
+        let request_method = match until {
+            ReadUntil::End(method) => method,
+            ReadUntil::ConnectResponseHead => Some("CONNECT"),
+        };
         let Self {
             stream,
             reader,
@@ -155,7 +176,7 @@ impl<'a> Message<'a> {
                 Err(qpack::Failure::Interrupted(error)) => return Err(error),
                 Err(_) => {
                     side.issue(Code::Limit, Some(offset));
-                    return Ok(());
+                    return Ok(Progress::Finished);
                 }
             }
             let Ok(frame) = frame(reader) else {
@@ -165,7 +186,7 @@ impl<'a> Message<'a> {
                     Code::TruncatedFrame
                 };
                 side.issue(code, Some(offset));
-                return Ok(());
+                return Ok(Progress::Finished);
             };
             match frame.kind {
                 0 => {
@@ -202,7 +223,7 @@ impl<'a> Message<'a> {
                 1 => {
                     let Some(bytes) = remaining.checked_sub(SECTION_CHARGE) else {
                         side.issue(Code::Limit, Some(offset));
-                        return Ok(());
+                        return Ok(Progress::Finished);
                     };
                     *remaining = bytes;
                     let maximum = bytes.min(limits.max_header_section_bytes);
@@ -249,7 +270,7 @@ impl<'a> Message<'a> {
                                     section.required_insert_count = None;
                                     side.issue(Code::Limit, Some(offset));
                                     side.header_sections.push(section);
-                                    return Ok(());
+                                    return Ok(Progress::Finished);
                                 }
                             }
                         }
@@ -265,8 +286,11 @@ impl<'a> Message<'a> {
                         }
                     }
                     side.header_sections.push(section);
-                    if matches!(stage, Stage::AwaitConnectResponse) {
-                        return Ok(());
+                    if matches!(stage, Stage::AwaitConnectResponse)
+                        || (matches!(until, ReadUntil::ConnectResponseHead)
+                            && matches!(stage, Stage::Tunnel | Stage::Body { .. }))
+                    {
+                        return Ok(Progress::Paused);
                     }
                 }
                 2..=4 | 6..=9 | 13 => side.issue(Code::InvalidFramePlacement, Some(offset)),
@@ -306,7 +330,7 @@ impl<'a> Message<'a> {
         side.complete = stream.complete
             && matches!(stage, Stage::Body { .. } | Stage::Tunnel | Stage::Trailers)
             && side.issues.is_empty();
-        Ok(())
+        Ok(Progress::Finished)
     }
 }
 

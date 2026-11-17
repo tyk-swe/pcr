@@ -313,7 +313,12 @@ impl<'a> Reader<'a> {
             .get(self.position..end)
             .ok_or(Failure::Truncated)?;
         self.position = end;
-        if !compressed && length > limit.bytes() {
+        let maximum = if compressed {
+            huffman::max_encoded_bytes(limit.bytes())
+        } else {
+            limit.bytes()
+        };
+        if length > maximum {
             return Err(limit.exceeded());
         }
         work(length)?;

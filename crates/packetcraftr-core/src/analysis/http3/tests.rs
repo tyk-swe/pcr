@@ -752,6 +752,26 @@ fn illegal_tunnel_headers_do_not_spend_the_response_header_budget() {
 }
 
 #[test]
+fn connect_request_retains_frame_diagnostics_under_shared_work_limit() {
+    use quic::Direction::{Client, Server};
+    let request = b"\x01\x0a\0\0\xcf\x50\x05a:443\x01\x02\0\0\0\x01x";
+    let response = [b"\x01\x03\0\0\xd9".as_slice(), &b"\0\0".repeat(256)].concat();
+    let result = exchanges(
+        vec![stream(0, Client, request), stream(0, Server, &response)],
+        Limits {
+            max_steps: 256,
+            ..Limits::default()
+        },
+    );
+    let request = result[0].request.as_ref().unwrap();
+    let response = result[0].response.as_ref().unwrap();
+    assert_eq!(request.issues[0].code, Code::InvalidFramePlacement);
+    assert_eq!(request.data_bytes, 1);
+    assert_eq!(response.header_sections[0].status, Some(200));
+    assert_eq!(response.issues[0].code, Code::Limit);
+}
+
+#[test]
 fn classifies_encoder_capacity_violations_separately_from_history_limits() {
     use quic::Direction::{Client, Server};
     let with_instructions = |capacity: u8, encoder: &[u8], limits| {
@@ -802,10 +822,13 @@ fn classifies_encoder_capacity_violations_separately_from_history_limits() {
     };
     let small_table = [b"\x02\x3f\x03\x41x\x1e".as_slice(), &[b'y'; 30]].concat();
     let large_table = [b"\x02\x3f\x20\x41x\x1e".as_slice(), &[b'y'; 30]].concat();
-    assert_eq!(
-        with_instructions(34, &small_table, limits),
-        [Code::QpackEncoderError]
-    );
+    let compressed = [b"\x02\x3f\x03\x41x\x9e".as_slice(), &[0; 30]].concat();
+    for instructions in [&small_table, &compressed] {
+        assert_eq!(
+            with_instructions(34, instructions, limits),
+            [Code::QpackEncoderError]
+        );
+    }
     assert_eq!(with_instructions(63, &large_table, limits), [Code::Limit]);
 }
 

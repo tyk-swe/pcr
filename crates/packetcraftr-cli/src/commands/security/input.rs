@@ -76,7 +76,32 @@ pub(in crate::commands) fn report(bytes: &[u8]) -> Result<Report, CliError> {
         }
         return Ok(result);
     }
-    engagement(&envelope.command, envelope.result)
+    engagement(&envelope.command, envelope.result, diagnostic_codes(bytes))
+}
+
+#[derive(serde::Deserialize, Default)]
+struct DiagnosticCode {
+    #[serde(default)]
+    code: String,
+}
+
+#[derive(serde::Deserialize, Default)]
+struct EnvelopeDiagnostics {
+    #[serde(default)]
+    diagnostics: Vec<DiagnosticCode>,
+}
+
+fn diagnostic_codes(bytes: &[u8]) -> Vec<String> {
+    serde_json::from_slice::<EnvelopeDiagnostics>(bytes).map_or_else(
+        |_| Vec::new(),
+        |envelope| {
+            envelope
+                .diagnostics
+                .into_iter()
+                .map(|diagnostic| diagnostic.code)
+                .collect()
+        },
+    )
 }
 
 fn is_plan(command: &str, result: &serde_json::Value) -> bool {
@@ -101,15 +126,10 @@ struct ScanScheduling {
 
 #[derive(serde::Deserialize, Default)]
 struct ScanResult {
-    #[serde(default)]
     scheduling: Option<ScanScheduling>,
-    #[serde(default)]
-    target: Option<String>,
-    #[serde(default)]
+    target: String,
     endpoints: Vec<ScanEndpoint>,
-    #[serde(default)]
     hosts: Vec<serde::de::IgnoredAny>,
-    #[serde(default)]
     resolved_addresses: Vec<serde::de::IgnoredAny>,
     #[serde(default)]
     undecoded: Vec<serde::de::IgnoredAny>,
@@ -127,49 +147,31 @@ struct DifferentialRow {
 
 #[derive(serde::Deserialize, Default)]
 struct DifferentialResult {
-    #[serde(default)]
-    valid: Option<bool>,
-    #[serde(default)]
-    provisional: Option<bool>,
-    #[serde(default)]
-    plan_digest: Option<String>,
-    #[serde(default)]
+    valid: bool,
+    provisional: bool,
+    plan_digest: String,
     source_port: u64,
-    #[serde(default)]
     rows: Vec<DifferentialRow>,
-    #[serde(default)]
     attempts: Vec<serde::de::IgnoredAny>,
 }
 
-#[derive(serde::Deserialize, Default)]
+#[derive(serde::Deserialize)]
 struct FuzzResult {
-    #[serde(default)]
     seed: u64,
-    #[serde(default)]
     first_case: u64,
-    #[serde(default)]
-    mode: Option<String>,
-    #[serde(default)]
+    mode: String,
     cases_generated: u64,
-    #[serde(default)]
     cases_built: u64,
-    #[serde(default)]
     cases_rejected: u64,
-    #[serde(default)]
     cases: Vec<serde::de::IgnoredAny>,
 }
 
-#[derive(serde::Deserialize, Default)]
+#[derive(serde::Deserialize)]
 struct ExchangeResult {
-    #[serde(default)]
     sent: Vec<serde::de::IgnoredAny>,
-    #[serde(default)]
     responses: Vec<serde::de::IgnoredAny>,
-    #[serde(default)]
     unanswered: Vec<serde::de::IgnoredAny>,
-    #[serde(default)]
     unsolicited: Vec<serde::de::IgnoredAny>,
-    #[serde(default)]
     undecoded: Vec<serde::de::IgnoredAny>,
 }
 
@@ -201,12 +203,9 @@ struct TracerouteResult {
     probes: Vec<serde::de::IgnoredAny>,
     #[serde(default)]
     completions: Vec<serde::de::IgnoredAny>,
-    #[serde(default)]
-    target: Option<String>,
-    #[serde(default)]
-    destination: Option<String>,
-    #[serde(default)]
-    strategy: Option<String>,
+    target: String,
+    destination: String,
+    strategy: String,
     #[serde(default)]
     completion: Option<String>,
     #[serde(default)]
@@ -229,7 +228,11 @@ enum Engagement {
     Traceroute(TracerouteResult),
 }
 
-fn engagement(command: &str, result: serde_json::Value) -> Result<Report, CliError> {
+fn engagement(
+    command: &str,
+    result: serde_json::Value,
+    diagnostics: Vec<String>,
+) -> Result<Report, CliError> {
     if is_plan(command, &result) {
         return Err(invalid(
             "engagement plans are not executed results, run the command without --list or --plan-only first",
@@ -252,7 +255,7 @@ fn engagement(command: &str, result: serde_json::Value) -> Result<Report, CliErr
             .map(Engagement::Traceroute)
             .map_err(|error| invalid(error.to_string())),
     }?;
-    Ok(summarize(command, typed))
+    Ok(summarize(command, typed, &diagnostics))
 }
 
 fn count_by<'a>(
@@ -271,7 +274,7 @@ fn count_by<'a>(
     counts
 }
 
-fn summarize(command: &str, result: Engagement) -> Report {
+fn summarize(command: &str, result: Engagement, diagnostics: &[String]) -> Report {
     use packetcraftr_core::security::{Finding, Severity};
     let mut report = Report::new(command);
     report
@@ -306,9 +309,7 @@ fn summarize(command: &str, result: Engagement) -> Report {
                 "unattributed",
                 serde_json::json!(scan.unattributed.len()),
             );
-            if let Some(target) = &scan.target {
-                put(&mut summary, "target", serde_json::json!(target));
-            }
+            put(&mut summary, "target", serde_json::json!(scan.target));
             if let Some(bytes) = scan.retained_evidence_bytes {
                 put(
                     &mut summary,
@@ -356,27 +357,29 @@ fn summarize(command: &str, result: Engagement) -> Report {
                 "source_port",
                 serde_json::json!(differential.source_port),
             );
-            if let Some(valid) = differential.valid {
-                put(&mut summary, "valid", serde_json::json!(valid));
-            }
-            if let Some(provisional) = differential.provisional {
-                put(&mut summary, "provisional", serde_json::json!(provisional));
-            }
-            if let Some(digest) = &differential.plan_digest {
-                put(&mut summary, "plan_digest", serde_json::json!(digest));
-            }
+            put(&mut summary, "valid", serde_json::json!(differential.valid));
+            put(
+                &mut summary,
+                "provisional",
+                serde_json::json!(differential.provisional),
+            );
+            put(
+                &mut summary,
+                "plan_digest",
+                serde_json::json!(differential.plan_digest),
+            );
             let verdicts = count_by(differential.rows.iter().map(|row| row.verdict.as_str()));
             put(
                 &mut summary,
                 "verdicts",
                 serde_json::Value::Object(verdicts),
             );
-            if differential.valid == Some(false) {
+            if !differential.valid {
                 report
                     .completeness
                     .note("differential Campaign was not valid, its Baseline was not accepted");
             }
-            if differential.provisional == Some(true) {
+            if differential.provisional {
                 report
                     .completeness
                     .note("differential Campaign is provisional until differential-join");
@@ -405,11 +408,21 @@ fn summarize(command: &str, result: Engagement) -> Report {
                 serde_json::json!(fuzz.cases_rejected),
             );
             put(&mut summary, "cases", serde_json::json!(fuzz.cases.len()));
-            if let Some(mode) = &fuzz.mode {
-                put(&mut summary, "mode", serde_json::json!(mode));
-            }
+            put(&mut summary, "mode", serde_json::json!(fuzz.mode));
         }
         Engagement::Exchange(exchange) => {
+            for code in diagnostics {
+                if matches!(
+                    code.as_str(),
+                    "exchange.unsolicited_limit"
+                        | "exchange.capture_frame_limit"
+                        | "exchange.capture_byte_limit"
+                ) {
+                    report.completeness.note(format!(
+                        "exchange retention limit {code} dropped later frames"
+                    ));
+                }
+            }
             put(&mut summary, "sent", serde_json::json!(exchange.sent.len()));
             put(
                 &mut summary,
@@ -502,15 +515,15 @@ fn summarize(command: &str, result: Engagement) -> Report {
                     .completeness
                     .note("traceroute ended before reaching its destination");
             }
-            for (key, value) in [
-                ("target", &trace.target),
-                ("destination", &trace.destination),
-                ("strategy", &trace.strategy),
-                ("completion", &trace.completion),
-            ] {
-                if let Some(value) = value {
-                    put(&mut summary, key, serde_json::json!(value));
-                }
+            put(&mut summary, "target", serde_json::json!(trace.target));
+            put(
+                &mut summary,
+                "destination",
+                serde_json::json!(trace.destination),
+            );
+            put(&mut summary, "strategy", serde_json::json!(trace.strategy));
+            if let Some(completion) = &trace.completion {
+                put(&mut summary, "completion", serde_json::json!(completion));
             }
             if let Some(port) = trace.destination_port {
                 put(&mut summary, "destination_port", serde_json::json!(port));
@@ -629,6 +642,20 @@ mod tests {
             serde_json::from_slice(&read_example("output-traceroute-success.json")).unwrap();
         partial["result"]["completion"] = serde_json::json!("maximum_hops");
         let imported = report(&serde_json::to_vec(&partial).unwrap()).unwrap();
+        assert!(!imported.completeness.complete);
+
+        let mut damaged: serde_json::Value =
+            serde_json::from_slice(&read_example("output-scan-success.json")).unwrap();
+        damaged["result"]
+            .as_object_mut()
+            .unwrap()
+            .remove("endpoints");
+        assert!(report(&serde_json::to_vec(&damaged).unwrap()).is_err());
+
+        let mut limited: serde_json::Value =
+            serde_json::from_slice(&read_example("output-exchange-success.json")).unwrap();
+        limited["diagnostics"] = serde_json::json!([{"code": "exchange.capture_frame_limit"}]);
+        let imported = report(&serde_json::to_vec(&limited).unwrap()).unwrap();
         assert!(!imported.completeness.complete);
 
         let build = read_example("output-build-success.json");

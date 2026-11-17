@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::{Failure, Field, Reader, Work};
+use super::{Failure, Field, Reader, StringLimit, Work};
 
 struct Entry {
     field: Field,
@@ -54,11 +54,13 @@ impl History {
     }
 
     pub(crate) fn replay(&mut self, input: &[u8], work: &mut Work<'_>) -> Result<(), Failure> {
+        if self.max_capacity == Some(0) && !input.is_empty() {
+            return Err(Failure::Invalid);
+        }
         let mut reader = Reader::new(input);
         while !reader.done() {
             work(1)?;
             let flags = reader.first()?;
-            let max_field = self.capacity.min(self.limit).saturating_sub(32);
             let field = match flags.leading_zeros() {
                 0 => {
                     let index = reader.integer(6)?;
@@ -67,14 +69,20 @@ impl History {
                     } else {
                         Field::static_entry(index)?
                     };
+                    let maximum = self
+                        .field_bytes()?
+                        .checked_sub(field.name.len())
+                        .ok_or(Failure::Invalid)?;
                     Field {
                         name: field.name,
-                        value: reader.string(7, max_field, work)?,
+                        value: reader.string(7, StringLimit::EncoderTable(maximum), work)?,
                     }
                 }
                 1 => {
-                    let name = reader.string(5, max_field, work)?;
-                    let value = reader.string(7, max_field - name.len(), work)?;
+                    let maximum = self.field_bytes()?;
+                    let name = reader.string(5, StringLimit::EncoderTable(maximum), work)?;
+                    let value =
+                        reader.string(7, StringLimit::EncoderTable(maximum - name.len()), work)?;
                     Field { name, value }
                 }
                 2 => {
@@ -94,6 +102,10 @@ impl History {
             self.insert(field, work)?;
         }
         Ok(())
+    }
+
+    fn field_bytes(&self) -> Result<usize, Failure> {
+        self.capacity.checked_sub(32).ok_or(Failure::Invalid)
     }
 
     fn relative(&self, index: u64) -> Result<&Field, Failure> {

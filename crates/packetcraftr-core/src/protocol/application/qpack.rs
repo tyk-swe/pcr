@@ -31,15 +31,6 @@ impl From<IntegerError> for Failure {
     }
 }
 
-impl From<huffman::Error> for Failure {
-    fn from(error: huffman::Error) -> Self {
-        match error {
-            huffman::Error::Limit => Self::Limit,
-            _ => Self::Invalid,
-        }
-    }
-}
-
 #[derive(Clone, Debug)]
 pub(crate) struct Field {
     pub name: Bytes,
@@ -89,7 +80,7 @@ impl Line {
             }
             1 => {
                 let index = reader.integer(4)?;
-                let value = reader.string(7, maximum, work)?;
+                let value = reader.string(7, StringLimit::Header(maximum), work)?;
                 if flags & 0x10 != 0 {
                     return Ok(Self::Field(Field {
                         name: Field::static_entry(index)?.name,
@@ -99,14 +90,14 @@ impl Line {
                 Ok(Self::Relative(Reference::Name(index, value)))
             }
             2 => {
-                let name = reader.string(3, maximum, work)?;
-                let value = reader.string(7, maximum - name.len(), work)?;
+                let name = reader.string(3, StringLimit::Header(maximum), work)?;
+                let value = reader.string(7, StringLimit::Header(maximum - name.len()), work)?;
                 Ok(Self::Field(Field { name, value }))
             }
             3 => Ok(Self::PostBase(Reference::Indexed(reader.integer(4)?))),
             _ => {
                 let index = reader.integer(3)?;
-                let value = reader.string(7, maximum, work)?;
+                let value = reader.string(7, StringLimit::Header(maximum), work)?;
                 Ok(Self::PostBase(Reference::Name(index, value)))
             }
         }
@@ -262,6 +253,27 @@ fn resolve(
     }))
 }
 
+#[derive(Clone, Copy)]
+enum StringLimit {
+    Header(usize),
+    EncoderTable(usize),
+}
+
+impl StringLimit {
+    fn bytes(self) -> usize {
+        match self {
+            Self::Header(bytes) | Self::EncoderTable(bytes) => bytes,
+        }
+    }
+
+    fn exceeded(self) -> Failure {
+        match self {
+            Self::Header(_) => Failure::Limit,
+            Self::EncoderTable(_) => Failure::Invalid,
+        }
+    }
+}
+
 struct Reader<'a> {
     input: &'a [u8],
     position: usize,
@@ -287,9 +299,14 @@ impl<'a> Reader<'a> {
         Ok(integer(self.input, &mut self.position, prefix)?)
     }
 
-    fn string(&mut self, prefix: u32, limit: usize, work: &mut Work<'_>) -> Result<Bytes, Failure> {
+    fn string(
+        &mut self,
+        prefix: u32,
+        limit: StringLimit,
+        work: &mut Work<'_>,
+    ) -> Result<Bytes, Failure> {
         let compressed = self.first()? & (1 << prefix) != 0;
-        let length = usize::try_from(self.integer(prefix)?).map_err(|_| Failure::Limit)?;
+        let length = usize::try_from(self.integer(prefix)?).map_err(|_| Failure::Invalid)?;
         let end = self.position.checked_add(length).ok_or(Failure::Invalid)?;
         let data = self
             .input
@@ -298,10 +315,14 @@ impl<'a> Reader<'a> {
         self.position = end;
         work(length)?;
         if compressed {
-            return huffman::decode(data, limit, &mut || work(0), Failure::from).map(Bytes::from);
+            return huffman::decode(data, limit.bytes(), &mut || work(0), |error| match error {
+                huffman::Error::Limit => limit.exceeded(),
+                _ => Failure::Invalid,
+            })
+            .map(Bytes::from);
         }
-        if length > limit {
-            return Err(Failure::Limit);
+        if length > limit.bytes() {
+            return Err(limit.exceeded());
         }
         Ok(Bytes::copy_from_slice(data))
     }

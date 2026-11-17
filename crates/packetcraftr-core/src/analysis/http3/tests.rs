@@ -470,6 +470,7 @@ fn rejects_nonempty_data_on_bodyless_responses() {
     let cases = [
         (None, b"\x01\x04\0\0\xff\x01".as_slice()),
         (None, b"\x01\x03\0\0\xda".as_slice()),
+        (None, b"\x01\x08\0\0\x5f\x09\x03205".as_slice()),
         (Some(head.as_slice()), b"\x01\x03\0\0\xd9".as_slice()),
     ];
     for (request, headers) in cases {
@@ -657,4 +658,121 @@ fn distinguishes_missing_final_response_from_missing_initial_headers() {
     assert_eq!(closed.issues.len(), 1);
     assert_eq!(closed.issues[0].code, Code::MissingFinalResponse);
     assert!(result[2].response.as_ref().unwrap().issues.is_empty());
+}
+
+#[test]
+fn rejects_trailers_on_bodyless_statuses() {
+    use quic::Direction::Server;
+    let trailers = b"\x01\x06\0\0\x21x\x01y";
+    for headers in [b"\x01\x04\0\0\xff\x01".as_slice(), b"\x01\x03\0\0\xda"] {
+        let response = [headers, trailers].concat();
+        let result = exchanges(vec![stream(0, Server, &response)], Limits::default());
+        let side = result[0].response.as_ref().unwrap();
+        assert!(!side.complete);
+        assert_eq!(side.header_sections.len(), 1);
+        assert_eq!(side.issues.len(), 1);
+        assert_eq!(side.issues[0].code, Code::InvalidFramePlacement);
+        assert_eq!(side.issues[0].offset, Some(headers.len() as u64));
+    }
+}
+
+#[test]
+fn only_successful_connect_disallows_later_request_headers() {
+    use quic::Direction::{Client, Server};
+    let headers = b"\x01\x0a\0\0\xcf\x50\x05a:443";
+    let data = b"\0\x01x";
+    let trailers = b"\x01\x06\0\0\x21x\x01y";
+    for (status, extra_headers, complete) in [
+        (0xd9, b"".as_slice(), true),
+        (0xd9, trailers.as_slice(), false),
+        (0xdb, trailers.as_slice(), true),
+    ] {
+        let request = [headers.as_slice(), data, extra_headers].concat();
+        let response = [1, 3, 0, 0, status];
+        let result = exchanges(
+            vec![stream(0, Client, &request), stream(0, Server, &response)],
+            Limits::default(),
+        );
+        let side = result[0].request.as_ref().unwrap();
+        assert_eq!(side.complete, complete);
+        assert_eq!(side.data_bytes, 1);
+        if !complete {
+            assert_eq!(side.issues.len(), 1);
+            assert_eq!(side.issues[0].code, Code::InvalidFramePlacement);
+            assert_eq!(
+                side.issues[0].offset,
+                Some((headers.len() + data.len()) as u64)
+            );
+            assert_eq!(side.header_sections[1].kind, SectionKind::Unclassified);
+        }
+    }
+}
+
+#[test]
+fn classifies_encoder_capacity_violations_separately_from_history_limits() {
+    use quic::Direction::{Client, Server};
+    let with_instructions = |capacity: u8, encoder: &[u8], limit| {
+        let streams = vec![
+            stream(2, Client, b"\0\x04\0"),
+            stream(3, Server, &[0, 4, 2, 1, capacity]),
+            stream(6, Client, encoder),
+        ]
+        .into_iter()
+        .map(|stream| quic::Stream {
+            complete: false,
+            final_size: None,
+            ..stream
+        })
+        .collect();
+        let mut issues = Vec::new();
+        inspect(
+            &connection(streams),
+            None,
+            Limits {
+                max_qpack_history_bytes: limit,
+                ..Limits::default()
+            },
+            &Deadline::new(Duration::MAX),
+            &mut |event| {
+                if let Event::Connection(connection) = event {
+                    issues.extend(connection.client.issues.into_iter().map(|issue| issue.code));
+                }
+                Ok(())
+            },
+        )
+        .unwrap();
+        issues
+    };
+    assert!(with_instructions(0, b"\x02", 1024).is_empty());
+    // Capacity 34 leaves two bytes for the name and value of an entry.
+    for instructions in [
+        b"\x02\x3f\x03\x43abc\0".as_slice(),
+        b"\x02\x3f\x03\x41x\x02yz",
+        b"\x02\x3f\x03\xc0\0",
+        b"\x02\x3f\x03\x41x\x82\x00\x3f",
+    ] {
+        assert_eq!(
+            with_instructions(34, instructions, 1024),
+            [Code::QpackEncoderError]
+        );
+    }
+    let valid = b"\x02\x3f\x03\x41x\x01y";
+    assert!(with_instructions(34, valid, 1024).is_empty());
+    assert_eq!(with_instructions(34, valid, 32), [Code::Limit]);
+}
+
+#[test]
+fn rejects_encoder_instructions_when_peer_capacity_is_zero() {
+    use quic::Direction::{Client, Server};
+    let open = |id, direction, bytes: &[u8]| quic::Stream {
+        final_size: None,
+        complete: false,
+        ..stream(id, direction, bytes)
+    };
+    let streams = vec![
+        open(2, Client, b"\0\x04\0"),
+        open(3, Server, b"\0\x04\0"),
+        open(6, Client, b"\x02\x20"),
+    ];
+    assert_eq!(client_critical_issues(streams), [Code::QpackEncoderError]);
 }

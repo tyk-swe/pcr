@@ -19,7 +19,7 @@ use crate::invocation::Invocation;
 use crate::output::contract::{Command, Format, PublishedType};
 use crate::resources::{Enabled, Settings};
 
-use super::quic::keylog;
+use super::quic::{arguments::StreamRetentionArgs, keylog};
 use output::{Event, Report, Summary, Terminal};
 
 #[derive(Debug, clap::Args)]
@@ -49,6 +49,8 @@ pub(crate) struct Args {
     include_header_values: bool,
     #[arg(long, default_value_t = 64 * 1024 * 1024, help = "Maximum serialized HTTP/3 evidence bytes")]
     max_application_output_bytes: usize,
+    #[command(flatten)]
+    stream_retention: StreamRetentionArgs,
     #[command(flatten)]
     decode: DecodeArgs,
     #[command(flatten)]
@@ -86,6 +88,7 @@ impl Spec for Args {
         crate::resources::declare!(settings, self, [
             max_application_output_bytes: Bytes @ ResultRetention preset(8388608, 67108864),
         ]);
+        self.stream_retention.resources(settings);
         self.limits.resources(
             settings,
             AnalysisStages {
@@ -114,8 +117,11 @@ fn run(args: &Args, invocation: &Invocation) -> Result<(), CliError> {
     )?;
     let setup = offline_analysis::prepare(args.limits, args.filter.as_deref(), &args.decode)?;
     let deadline = invocation.control.io_control();
-    let mut collector =
-        quic::Collector::new(quic::Limits::default()).map_err(CliError::classified)?;
+    let quic_limits = quic::Limits {
+        max_stream_bytes: args.stream_retention.max_quic_stream_bytes,
+        ..quic::Limits::default()
+    };
+    let mut collector = quic::Collector::new(quic_limits).map_err(CliError::classified)?;
     keylog::Input::open(Some(&args.keylog))?.poll(&mut collector, invocation, true)?;
     let mut reader = setup.open(invocation, &args.path)?;
     let mut options = setup.options(invocation);

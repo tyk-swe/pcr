@@ -16,7 +16,10 @@ const MAX_ISSUES: usize = 64;
 enum Stage {
     Initial,
     Informational,
-    Body { content_forbidden: bool },
+    Body {
+        content_forbidden: bool,
+        trailers_forbidden: bool,
+    },
     Tunnel,
     Trailers,
     Unknown,
@@ -91,14 +94,23 @@ pub(super) fn read(
                 } else if matches!(
                     stage,
                     Stage::Body {
-                        content_forbidden: true
+                        content_forbidden: true,
+                        ..
                     }
                 ) && !frame.data.is_empty()
                 {
                     side.issue(Code::UnexpectedResponseContent, Some(offset));
                 }
             }
-            1 if matches!(stage, Stage::Tunnel) => {
+            1 if matches!(
+                stage,
+                Stage::Tunnel
+                    | Stage::Body {
+                        trailers_forbidden: true,
+                        ..
+                    }
+            ) =>
+            {
                 side.issue(Code::InvalidFramePlacement, Some(offset));
             }
             1 => {
@@ -203,6 +215,21 @@ pub(super) fn read(
 }
 
 impl Side {
+    pub(super) fn check_connect_request(&mut self, response: &Self) {
+        let successful = response.header_sections.iter().any(|section| {
+            section.kind == SectionKind::Response && matches!(section.status, Some(200..=299))
+        });
+        if !successful {
+            return;
+        }
+        if let Some(trailer) = self.header_sections.get_mut(1) {
+            trailer.kind = SectionKind::Unclassified;
+            let offset = trailer.offset;
+            self.issue(Code::InvalidFramePlacement, Some(offset));
+            self.complete = false;
+        }
+    }
+
     fn issue(&mut self, code: Code, offset: Option<u64>) {
         if self.issues.len() < MAX_ISSUES {
             self.issues.push(Issue { code, offset });
@@ -225,6 +252,7 @@ fn after_unreadable_headers(stage: &Stage, direction: Direction) -> Stage {
     match stage {
         Stage::Initial if direction == Direction::Client => Stage::Body {
             content_forbidden: false,
+            trailers_forbidden: false,
         },
         Stage::Body { .. } | Stage::Trailers => Stage::Trailers,
         _ => Stage::Unknown,
@@ -278,7 +306,8 @@ fn classify(
             } else {
                 Stage::Body {
                     content_forbidden: request_method == Some("HEAD")
-                        || matches!(status, Some(204 | 304)),
+                        || matches!(status, Some(204 | 205 | 304)),
+                    trailers_forbidden: matches!(status, Some(204 | 304)),
                 }
             };
             SectionKind::Response
@@ -286,6 +315,7 @@ fn classify(
         (FieldRole::Request, _) => {
             *stage = Stage::Body {
                 content_forbidden: false,
+                trailers_forbidden: false,
             };
             section.method = meta
                 .method

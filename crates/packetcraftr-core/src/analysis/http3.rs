@@ -206,7 +206,7 @@ pub fn inspect(
                 &mut budget,
             )
         };
-        let request = request
+        let mut request = request
             .map(|side| read(side, &client_history, None))
             .transpose()?;
         let request_method = request
@@ -216,6 +216,11 @@ pub fn inspect(
         let response = response
             .map(|side| read(side, &server_history, request_method))
             .transpose()?;
+        if request_method == Some("CONNECT")
+            && let (Some(request), Some(response)) = (&mut request, &response)
+        {
+            request.check_connect_request(response);
+        }
         emit(Event::Exchange(Exchange {
             connection: connection.connection,
             stream,

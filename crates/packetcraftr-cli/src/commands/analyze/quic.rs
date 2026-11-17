@@ -50,7 +50,6 @@ impl commands::Spec for Args {
         crate::resources::declare!(settings,self,[
             max_connections:Count @ ActiveState,
             max_quic_buffered_bytes:Bytes @ ActiveState,
-            max_quic_stream_bytes:Bytes @ ActiveState,
             max_pending_packets:Count @ ActiveState,
             max_quic_streams:Count @ ActiveState,
             quic_idle_expiry_ms:Milliseconds @ ActiveState,
@@ -58,6 +57,7 @@ impl commands::Spec for Args {
             max_application_output_bytes:Bytes @ ResultRetention,
         ]);
 
+        self.stream_retention.resources(settings);
         self.limits.resources(
             settings,
             AnalysisStages {

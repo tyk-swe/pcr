@@ -2615,6 +2615,33 @@ fn http3_reconstructs_multiplexed_exchanges_and_hides_header_values_by_default()
 }
 
 #[test]
+fn http3_honors_quic_stream_retention_override() {
+    let capture = capture_path("http3-demo.pcapng");
+    let keys = capture_path("http3-demo.keys");
+    for (limit, data_bytes, complete) in [(32, 0, false), (64, 23, true)] {
+        let limit = limit.to_string();
+        let args = [
+            "--output",
+            "json",
+            "analyze",
+            "http3",
+            capture.to_str().unwrap(),
+            "--keylog",
+            keys.to_str().unwrap(),
+            "--stream",
+            "0",
+            "--max-quic-stream-bytes",
+            &limit,
+        ];
+        let report: serde_json::Value =
+            serde_json::from_str(&assert_success(&run(&args), &args)).unwrap();
+        let response = &report["result"]["exchanges"][0]["response"];
+        assert_eq!(response["data_bytes"], data_bytes);
+        assert_eq!(response["complete"], complete);
+    }
+}
+
+#[test]
 fn http3_streaming_summary_reports_capture_loss_separately_from_recovered_exchanges() {
     let mut capture = std::fs::read(capture_path("http3-demo.pcapng")).unwrap();
     let last_block = u32::from_le_bytes(capture[capture.len() - 4..].try_into().unwrap()) as usize;

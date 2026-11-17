@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v20",
+  "schema": "packetcraftr.output/v21",
   "command": "differential",
   "mode": "stream",
   "sequence": 1,
@@ -9,6 +9,7 @@
     "variant": "baseline",
     "attempt_seq": 0,
     "answered": true,
+    "rewritten": false,
     "packets_sent": 1,
     "payload_sha256": "15e509379becbbdd0e4bbc3e71f8755e732e8563697597c9b312f34d1b107312",
     "reply": {

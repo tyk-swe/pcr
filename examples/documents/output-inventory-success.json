@@ -1,0 +1,60 @@
+{
+  "schema": "packetcraftr.output/v21",
+  "command": "inventory",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "frames_read": 1,
+    "hosts": [
+      {
+        "address": "192.0.2.53",
+        "mac_addresses": [],
+        "protocols": [
+          "dns",
+          "ipv4",
+          "udp"
+        ],
+        "observed_ports": [
+          {
+            "transport": "udp",
+            "port": 53
+          }
+        ],
+        "frames_sent": 1,
+        "frames_received": 0
+      },
+      {
+        "address": "198.51.100.8",
+        "mac_addresses": [],
+        "protocols": [
+          "dns",
+          "ipv4",
+          "udp"
+        ],
+        "observed_ports": [
+          {
+            "transport": "udp",
+            "port": 49152
+          }
+        ],
+        "frames_sent": 0,
+        "frames_received": 1
+      }
+    ],
+    "protocols": [
+      {
+        "protocol": "dns",
+        "frames": 1
+      },
+      {
+        "protocol": "ipv4",
+        "frames": 1
+      },
+      {
+        "protocol": "udp",
+        "frames": 1
+      }
+    ]
+  },
+  "diagnostics": []
+}

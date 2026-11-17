@@ -2225,3 +2225,301 @@ fn security_modes_observe_each_frame_and_finish_their_run() {
         60
     );
 }
+
+#[test]
+fn report_writes_a_bundle_that_binds_its_inputs() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let html = directory.path().join("assessment.html");
+    let bundle_path = directory.path().join("bundle.json");
+    let scan = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/documents/output-scan-success.json");
+    let html_arg = html.to_string_lossy().into_owned();
+    let bundle_arg = bundle_path.to_string_lossy().into_owned();
+    let scan_arg = scan.to_string_lossy().into_owned();
+    let args = [
+        "analyze",
+        "report",
+        scan_arg.as_str(),
+        "--html",
+        html_arg.as_str(),
+        "--bundle",
+        bundle_arg.as_str(),
+    ];
+    let output = run(&args);
+    assert_success(&output, &args);
+    let bundle: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&bundle_path).expect("bundle written"))
+            .expect("bundle JSON");
+    assert_eq!(bundle["schema"], "packetcraftr.bundle/v1");
+    assert_eq!(
+        bundle["report"]["findings"][0]["rule_id"],
+        "engagement.scan.summary"
+    );
+    let parsed = packetcraftr_core::security::bundle::Bundle::parse(
+        &std::fs::read(&bundle_path).expect("bundle bytes"),
+    )
+    .expect("bundle validates against its inputs digest");
+    assert_eq!(parsed.sources.len(), 1);
+    let page = std::fs::read_to_string(&html).expect("html written");
+    assert!(page.contains("engagement.scan.summary"), "{page}");
+}
+
+#[test]
+fn scan_timing_conflicts_and_seeded_order_is_reproducible() {
+    let conflict = run(&[
+        "network",
+        "scan",
+        "127.0.0.1",
+        "--list",
+        "--timing",
+        "normal",
+        "--rate",
+        "5",
+    ]);
+    assert_eq!(conflict.status.code(), Some(2));
+
+    let listed = |seed: &str| {
+        let args = [
+            "network",
+            "scan",
+            "127.0.0.1",
+            "--list",
+            "--ports",
+            "1-16",
+            "--shuffle-seed",
+            seed,
+        ];
+        let output = run(&args);
+        let text = assert_success(&output, &args);
+        text.lines()
+            .filter(|line| line.starts_with("port tcp/"))
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(listed("42"), listed("42"));
+    let seed_args = [
+        "--output",
+        "json",
+        "network",
+        "scan",
+        "127.0.0.1",
+        "--list",
+        "--ports",
+        "1-4",
+        "--shuffle-seed",
+        "42",
+    ];
+    let seed_output = run(&seed_args);
+    let seed_text = assert_success(&seed_output, &seed_args);
+    let seed_report: serde_json::Value = serde_json::from_str(&seed_text).expect("JSON list");
+    assert_eq!(seed_report["result"]["shuffle_seed"], 42);
+    assert_ne!(listed("42"), listed("7"));
+    let mut sorted = listed("42");
+    sorted.sort_by_key(|line| {
+        line.trim_start_matches("port tcp/")
+            .split(' ')
+            .next()
+            .unwrap()
+            .parse::<u16>()
+            .unwrap()
+    });
+    assert_eq!(sorted.len(), 16);
+    assert!(sorted[0].starts_with("port tcp/1 "));
+    assert!(sorted[15].starts_with("port tcp/16 "));
+}
+
+#[test]
+fn report_rejects_identical_html_and_bundle_paths() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    std::fs::create_dir(directory.path().join("sub")).expect("subdirectory");
+    let same = directory.path().join("sub").join("..").join("same.out");
+    let scan = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/documents/output-scan-success.json");
+    let same_arg = same.to_string_lossy().into_owned();
+    let scan_arg = scan.to_string_lossy().into_owned();
+    let output = run(&[
+        "analyze",
+        "report",
+        scan_arg.as_str(),
+        "--html",
+        same_arg.as_str(),
+        "--bundle",
+        same_arg.as_str(),
+    ]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        !directory.path().join("same.out").exists(),
+        "no output may be published on rejection"
+    );
+
+    #[cfg(unix)]
+    {
+        let real = directory.path().join("real");
+        std::fs::create_dir_all(real.join("sub")).expect("real subdirectory");
+        std::os::unix::fs::symlink(real.join("sub"), directory.path().join("link"))
+            .expect("symlink");
+        let html = real.join("report.out");
+        let bundle = directory.path().join("link").join("..").join("report.out");
+        let html_arg = html.to_string_lossy().into_owned();
+        let bundle_arg = bundle.to_string_lossy().into_owned();
+        let output = run(&[
+            "analyze",
+            "report",
+            scan_arg.as_str(),
+            "--html",
+            html_arg.as_str(),
+            "--bundle",
+            bundle_arg.as_str(),
+        ]);
+        assert_eq!(output.status.code(), Some(2));
+        assert!(
+            !html.exists(),
+            "symlink aliases must be rejected before staging"
+        );
+    }
+}
+
+#[test]
+fn inventory_ties_macs_only_to_arp_senders() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let build = |name: &str, packet: &str| {
+        let path = directory.path().join(name);
+        let args = [
+            "--output",
+            "pcapng",
+            "packet",
+            "build",
+            "--packet",
+            packet,
+            "--link-type",
+            "ethernet",
+        ];
+        let output = run(&args);
+        assert_success(&output, &args);
+        std::fs::write(&path, &output.stdout).expect("write capture");
+        path.to_string_lossy().into_owned()
+    };
+    let inventory = |capture: &str| {
+        let args = ["analyze", "inventory", capture];
+        let output = run(&args);
+        assert_success(&output, &args)
+    };
+    let arp = build(
+        "arp.pcapng",
+        "ethernet(src=02:00:00:00:00:01,dst=ff:ff:ff:ff:ff:ff)/arp(operation=1,sender_hardware=02:00:00:00:00:01,sender_protocol=192.0.2.2,target_hardware=00:00:00:00:00:00,target_protocol=192.0.2.1)",
+    );
+    assert!(
+        inventory(&arp).contains("host=192.0.2.2 mac=02:00:00:00:00:01"),
+        "ARP sender mapping is established evidence"
+    );
+    let routed = build(
+        "routed.pcapng",
+        "ethernet(src=02:00:00:00:00:09,dst=02:00:00:00:00:01)/ipv4(src=198.51.100.7,dst=192.0.2.2)/udp(sport=40000,dport=9999)/raw(text=hi)",
+    );
+    let probe = build(
+        "probe.pcapng",
+        "ethernet(src=02:00:00:00:00:01,dst=ff:ff:ff:ff:ff:ff)/arp(operation=1,sender_hardware=02:00:00:00:00:01,sender_protocol=0.0.0.0,target_hardware=00:00:00:00:00:00,target_protocol=192.0.2.1)",
+    );
+    assert!(
+        inventory(&probe).contains("hosts=0"),
+        "an ARP probe claims no address yet"
+    );
+    let text = inventory(&routed);
+    assert!(
+        text.contains("host=198.51.100.7 mac=-"),
+        "a routed frame must not attribute the router MAC, got:\n{text}"
+    );
+}
+
+#[test]
+fn scan_resource_diagnostics_report_the_timing_preset() {
+    let args = [
+        "--output",
+        "json",
+        "--resource-diagnostics",
+        "network",
+        "scan",
+        "127.0.0.1",
+        "--connect",
+        "--ports",
+        "1",
+        "--timing",
+        "fast",
+    ];
+    let output = run(&args);
+    let text = assert_success(&output, &args);
+    let report: serde_json::Value = serde_json::from_str(&text).expect("JSON report");
+    let settings = report["resources"]["settings"]
+        .as_array()
+        .expect("settings");
+    let value = |name: &str| {
+        settings
+            .iter()
+            .find(|setting| setting["name"] == name)
+            .map(|setting| setting["value"].clone())
+    };
+    assert_eq!(value("--max-in-flight"), Some(serde_json::json!(16)));
+    assert_eq!(value("--timeout-ms"), Some(serde_json::json!(500)));
+}
+
+#[test]
+fn passive_inventory_reports_only_observed_hosts_and_ports() {
+    let capture = capture_path("dns-response.pcap");
+    let capture = capture.to_string_lossy().into_owned();
+    let args = ["--output", "json", "analyze", "inventory", capture.as_str()];
+    let output = run(&args);
+    let text = assert_success(&output, &args);
+    let report: serde_json::Value = serde_json::from_str(&text).expect("JSON report");
+    assert_eq!(report["command"], "inventory");
+    let hosts = report["result"]["hosts"].as_array().expect("hosts");
+    assert_eq!(hosts.len(), 2);
+    let server = hosts
+        .iter()
+        .find(|host| host["address"] == "192.0.2.53")
+        .expect("DNS server host");
+    assert_eq!(server["frames_sent"], 1);
+    assert_eq!(server["observed_ports"][0]["transport"], "udp");
+    assert_eq!(server["observed_ports"][0]["port"], 53);
+    assert!(
+        server["protocols"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|protocol| protocol == "dns")
+    );
+}
+
+#[test]
+fn scope_denies_an_excluded_destination_before_route_lookup() {
+    let scope =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/documents/scope.json");
+    assert!(
+        scope.is_file(),
+        "example scope missing: {}",
+        scope.display()
+    );
+    let scope = scope.to_string_lossy().into_owned();
+
+    let args = ["network", "preflight", "--scope-file", scope.as_str()];
+    let output = run(&args);
+    let text = assert_success(&output, &args);
+    assert!(
+        text.contains("scope label=lab-segment digest="),
+        "preflight should name the validated scope, got:\n{text}"
+    );
+    assert!(text.contains("permission=not_probed"), "{text}");
+
+    let args = [
+        "--output",
+        "json",
+        "network",
+        "plan",
+        "--packet",
+        "ipv4(dst=192.0.2.1)/udp(dport=53)",
+        "--scope-file",
+        scope.as_str(),
+    ];
+    let output = run(&args);
+    assert_eq!(output.status.code(), Some(6), "{}", stdout(&output));
+    assert_error(&output, "policy.destination_not_allowed");
+}

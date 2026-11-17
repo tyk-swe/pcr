@@ -87,7 +87,7 @@ impl crate::commands::Spec for Args {
         ]);
         self.timeout.resources(settings);
         self.limits.resources(settings);
-        self.budgets.resources(settings);
+        self.budgets.resources_with_scope(settings, &self.scope);
         self.tree.resources(settings);
     }
 
@@ -160,7 +160,8 @@ pub(super) fn run(invocation: &crate::invocation::Invocation, args: Args) -> Res
     } else {
         None
     };
-    let policy = args.budgets.into_policy();
+    let mut policy = args.budgets.into_policy();
+    args.scope.apply_to(&mut policy);
     let files = args
         .write
         .map(|path| {

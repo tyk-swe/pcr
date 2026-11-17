@@ -72,7 +72,7 @@ impl crate::commands::Spec for Args {
             probe_max_read_bytes: Bytes @ ResultRetention,
         ]);
         self.tls.resources(settings);
-        self.policy.budgets.resources(settings);
+        self.policy.resources(settings);
     }
 
     fn run(

@@ -82,7 +82,7 @@ impl crate::commands::Spec for Args {
         crate::resources::declare!(settings, self, [max_gap_ms: Milliseconds @ Operation]);
         self.duration.resources(settings);
         self.reader.resources(settings);
-        self.policy.budgets.resources(settings);
+        self.policy.resources(settings);
     }
 
     fn run(

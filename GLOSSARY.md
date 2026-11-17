@@ -33,3 +33,13 @@ _Avoid_: Server, listener, agent
 **Canary**:
 The unique marker carried in one attempt payload that ties a sent Variant to a Responder reception record or reply.
 _Avoid_: Token, cookie, probe ID
+
+### Authorized testing
+
+**Scope**:
+The operator declared boundary of one engagement, naming the destinations, exclusions, policy opt-ins, and budgets a live workflow may use. A Scope only narrows what command flags allow.
+_Avoid_: Allowlist, profile, config
+
+**Evidence bundle**:
+One self-contained record of a finished assessment that embeds its report and binds every input result, and the Scope when one was used, by digest.
+_Avoid_: Export, archive, dump

@@ -46,6 +46,10 @@ pub(crate) struct TimeoutArgs {
 }
 
 impl TimeoutArgs {
+    pub(crate) const fn from_millis(timeout_ms: u64) -> Self {
+        Self { timeout_ms }
+    }
+
     pub(crate) const fn timeout(&self) -> Duration {
         Duration::from_millis(self.timeout_ms)
     }

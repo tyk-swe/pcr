@@ -313,6 +313,9 @@ impl<'a> Reader<'a> {
             .get(self.position..end)
             .ok_or(Failure::Truncated)?;
         self.position = end;
+        if !compressed && length > limit.bytes() {
+            return Err(limit.exceeded());
+        }
         work(length)?;
         if compressed {
             return huffman::decode(data, limit.bytes(), &mut || work(0), |error| match error {
@@ -320,9 +323,6 @@ impl<'a> Reader<'a> {
                 _ => Failure::Invalid,
             })
             .map(Bytes::from);
-        }
-        if length > limit.bytes() {
-            return Err(limit.exceeded());
         }
         Ok(Bytes::copy_from_slice(data))
     }

@@ -194,33 +194,13 @@ pub fn inspect(
     }))?;
     for (stream, [request, response]) in exchanges {
         session::check(deadline)?;
-        let mut remaining = limits.max_exchange_bytes;
-        let mut read = |side: &quic::Stream, history: &qpack::History, request_method| {
-            message::read(
-                side,
-                history,
-                limits,
-                request_method,
-                connect_enabled,
-                &mut remaining,
-                &mut budget,
-            )
-        };
-        let mut request = request
-            .map(|side| read(side, &client_history, None))
-            .transpose()?;
-        let request_method = request
-            .as_ref()
-            .and_then(|side| side.header_sections.first())
-            .and_then(|header| header.method.as_deref());
-        let response = response
-            .map(|side| read(side, &server_history, request_method))
-            .transpose()?;
-        if request_method == Some("CONNECT")
-            && let (Some(request), Some(response)) = (&mut request, &response)
-        {
-            request.check_connect_request(response);
-        }
+        let [request, response] = message::read_pair(
+            [request, response],
+            [&client_history, &server_history],
+            limits,
+            connect_enabled,
+            &mut budget,
+        )?;
         emit(Event::Exchange(Exchange {
             connection: connection.connection,
             stream,

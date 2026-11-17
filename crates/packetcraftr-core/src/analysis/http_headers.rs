@@ -69,6 +69,14 @@ const FORBIDDEN_TRAILERS: &[&[u8]] = &[
     b"www-authenticate",
 ];
 
+pub(crate) fn final_status_forbids_trailers(status: u16) -> bool {
+    matches!(status, 204 | 304)
+}
+
+pub(crate) fn final_status_forbids_content(status: u16) -> bool {
+    status == 205 || final_status_forbids_trailers(status)
+}
+
 fn is_pseudo(name: &[u8]) -> bool {
     name.first() == Some(&b':')
 }

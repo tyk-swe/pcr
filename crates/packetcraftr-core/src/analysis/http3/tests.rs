@@ -579,12 +579,12 @@ fn checks_extended_connect_against_observed_server_settings() {
     }
 }
 
-fn client_critical_issues(streams: Vec<quic::Stream>) -> Vec<Code> {
+fn client_critical_issues(streams: Vec<quic::Stream>, limits: Limits) -> Vec<Code> {
     let mut issues = Vec::new();
     inspect(
         &connection(streams),
         None,
-        Limits::default(),
+        limits,
         &Deadline::new(Duration::MAX),
         &mut |event| {
             if let Event::Connection(connection) = event {
@@ -609,7 +609,7 @@ fn reports_qpack_stream_closure_even_at_instruction_boundaries() {
         let mut control = stream(2, Client, b"\0\x04\0");
         control.complete = false;
         control.final_size = None;
-        let issues = client_critical_issues(vec![control, qpack]);
+        let issues = client_critical_issues(vec![control, qpack], Limits::default());
         let expected = if kind == 2 {
             Code::ClosedQpackEncoderStream
         } else {
@@ -631,8 +631,11 @@ fn reports_duplicate_qpack_decoder_streams_from_one_peer() {
     control.complete = false;
     control.final_size = None;
     let streams = vec![control, open(6, Client), open(7, Server)];
-    assert!(client_critical_issues(streams.clone()).is_empty());
-    let issues = client_critical_issues([streams, vec![open(10, Client)]].concat());
+    assert!(client_critical_issues(streams.clone(), Limits::default()).is_empty());
+    let issues = client_critical_issues(
+        [streams, vec![open(10, Client)]].concat(),
+        Limits::default(),
+    );
     assert_eq!(issues, vec![Code::DuplicateCriticalStream]);
 }
 
@@ -679,15 +682,27 @@ fn rejects_trailers_on_bodyless_statuses() {
 #[test]
 fn only_successful_connect_disallows_later_request_headers() {
     use quic::Direction::{Client, Server};
-    let headers = b"\x01\x0a\0\0\xcf\x50\x05a:443";
+    let headers = b"\x01\x0b\0\0\xcf\x50\x05a:443\xc4";
     let data = b"\0\x01x";
     let trailers = b"\x01\x06\0\0\x21x\x01y";
-    for (status, extra_headers, complete) in [
-        (0xd9, b"".as_slice(), true),
-        (0xd9, trailers.as_slice(), false),
-        (0xdb, trailers.as_slice(), true),
+    for (status, before_data, data, after_data, complete) in [
+        (0xd9, b"".as_slice(), data.as_slice(), b"".as_slice(), true),
+        (
+            0xd9,
+            trailers.as_slice(),
+            data.as_slice(),
+            b"".as_slice(),
+            false,
+        ),
+        (
+            0xdb,
+            b"".as_slice(),
+            b"".as_slice(),
+            trailers.as_slice(),
+            true,
+        ),
     ] {
-        let request = [headers.as_slice(), data, extra_headers].concat();
+        let request = [headers.as_slice(), before_data, data, after_data].concat();
         let response = [1, 3, 0, 0, status];
         let result = exchanges(
             vec![stream(0, Client, &request), stream(0, Server, &response)],
@@ -695,26 +710,54 @@ fn only_successful_connect_disallows_later_request_headers() {
         );
         let side = result[0].request.as_ref().unwrap();
         assert_eq!(side.complete, complete);
-        assert_eq!(side.data_bytes, 1);
+        assert_eq!(side.data_bytes, u64::from(!data.is_empty()));
         if !complete {
             assert_eq!(side.issues.len(), 1);
             assert_eq!(side.issues[0].code, Code::InvalidFramePlacement);
-            assert_eq!(
-                side.issues[0].offset,
-                Some((headers.len() + data.len()) as u64)
-            );
-            assert_eq!(side.header_sections[1].kind, SectionKind::Unclassified);
+            assert_eq!(side.issues[0].offset, Some(headers.len() as u64));
+            assert_eq!(side.header_sections.len(), 1);
+        } else if status == 0xdb {
+            assert_eq!(side.header_sections[1].kind, SectionKind::Trailers);
         }
     }
 }
 
 #[test]
+fn illegal_tunnel_headers_do_not_spend_the_response_header_budget() {
+    use quic::Direction::{Client, Server};
+    let headers = b"\x01\x0a\0\0\xcf\x50\x05a:443";
+    let trailer = b"\x01\x06\0\0\x21x\x01y";
+    let request = [headers.as_slice(), &trailer.repeat(4), b"\0\x01x"].concat();
+    let response = b"\x01\x03\0\0\xd9";
+    let result = exchanges(
+        vec![stream(0, Client, &request), stream(0, Server, response)],
+        Limits {
+            max_exchange_bytes: 300,
+            ..Limits::default()
+        },
+    );
+    let request = result[0].request.as_ref().unwrap();
+    let response = result[0].response.as_ref().unwrap();
+    assert!(response.complete);
+    assert_eq!(response.header_sections[0].status, Some(200));
+    assert_eq!(request.data_bytes, 1);
+    assert!(!request.complete);
+    assert_eq!(request.issues.len(), 4);
+    assert!(
+        request
+            .issues
+            .iter()
+            .all(|issue| issue.code == Code::InvalidFramePlacement)
+    );
+}
+
+#[test]
 fn classifies_encoder_capacity_violations_separately_from_history_limits() {
     use quic::Direction::{Client, Server};
-    let with_instructions = |capacity: u8, encoder: &[u8], limit| {
+    let with_instructions = |capacity: u8, encoder: &[u8], limits| {
         let streams = vec![
             stream(2, Client, b"\0\x04\0"),
-            stream(3, Server, &[0, 4, 2, 1, capacity]),
+            stream(3, Server, &[0, 4, 3, 1, 0x40, capacity]),
             stream(6, Client, encoder),
         ]
         .into_iter()
@@ -724,26 +767,10 @@ fn classifies_encoder_capacity_violations_separately_from_history_limits() {
             ..stream
         })
         .collect();
-        let mut issues = Vec::new();
-        inspect(
-            &connection(streams),
-            None,
-            Limits {
-                max_qpack_history_bytes: limit,
-                ..Limits::default()
-            },
-            &Deadline::new(Duration::MAX),
-            &mut |event| {
-                if let Event::Connection(connection) = event {
-                    issues.extend(connection.client.issues.into_iter().map(|issue| issue.code));
-                }
-                Ok(())
-            },
-        )
-        .unwrap();
-        issues
+        client_critical_issues(streams, limits)
     };
-    assert!(with_instructions(0, b"\x02", 1024).is_empty());
+    let limits = Limits::default();
+    assert!(with_instructions(0, b"\x02", limits).is_empty());
     // Capacity 34 leaves two bytes for the name and value of an entry.
     for instructions in [
         b"\x02\x3f\x03\x43abc\0".as_slice(),
@@ -752,13 +779,34 @@ fn classifies_encoder_capacity_violations_separately_from_history_limits() {
         b"\x02\x3f\x03\x41x\x82\x00\x3f",
     ] {
         assert_eq!(
-            with_instructions(34, instructions, 1024),
+            with_instructions(34, instructions, limits),
             [Code::QpackEncoderError]
         );
     }
     let valid = b"\x02\x3f\x03\x41x\x01y";
-    assert!(with_instructions(34, valid, 1024).is_empty());
-    assert_eq!(with_instructions(34, valid, 32), [Code::Limit]);
+    assert!(with_instructions(34, valid, limits).is_empty());
+    assert_eq!(
+        with_instructions(
+            34,
+            valid,
+            Limits {
+                max_qpack_history_bytes: 32,
+                ..limits
+            }
+        ),
+        [Code::Limit]
+    );
+    let limits = Limits {
+        max_steps: 24,
+        ..limits
+    };
+    let small_table = [b"\x02\x3f\x03\x41x\x1e".as_slice(), &[b'y'; 30]].concat();
+    let large_table = [b"\x02\x3f\x20\x41x\x1e".as_slice(), &[b'y'; 30]].concat();
+    assert_eq!(
+        with_instructions(34, &small_table, limits),
+        [Code::QpackEncoderError]
+    );
+    assert_eq!(with_instructions(63, &large_table, limits), [Code::Limit]);
 }
 
 #[test]
@@ -774,5 +822,8 @@ fn rejects_encoder_instructions_when_peer_capacity_is_zero() {
         open(3, Server, b"\0\x04\0"),
         open(6, Client, b"\x02\x20"),
     ];
-    assert_eq!(client_critical_issues(streams), [Code::QpackEncoderError]);
+    assert_eq!(
+        client_critical_issues(streams, Limits::default()),
+        [Code::QpackEncoderError]
+    );
 }

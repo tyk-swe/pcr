@@ -20,10 +20,10 @@ cargo run --quiet --locked -p packetcraftr-cli --no-default-features -- --output
 68656c6c6f
 ```
 
-Use the binary Cargo just built to dissect the bundled DNS response.
+Dissect the bundled DNS response with the same build.
 
 ```sh
-./target/debug/packetcraftr files read examples/captures/dns-response.pcap --dissect
+cargo run --quiet --locked -p packetcraftr-cli --no-default-features -- files read examples/captures/dns-response.pcap --dissect
 ```
 
 ## Build options
@@ -43,15 +43,15 @@ libpcap at runtime (for example `libpcap-dev` on Debian/Ubuntu). Windows Layer 2
 uses Npcap; the release workflow targets Npcap 1.88. Live raw sockets and capture
 need the permissions granted by the operating system.
 
-The commands above use Cargo's development profile and write
+By default, the commands above use Cargo's development profile and write
 `target/debug/packetcraftr` (`.exe` on Windows). Add `--release` for optimized
 binaries in `target/release/`; release builds retain overflow checks. Release
 archives distinguish `all-features` from `pcap-free` (native routes and Layer 3).
 
 ## More offline examples
 
-After building, put `target/debug` on your PATH or replace `packetcraftr` below
-with the binary's path:
+After building, add the directory containing `packetcraftr` to your PATH or use
+the binary's path in the commands below.
 
 ```sh
 packetcraftr --help

@@ -90,7 +90,7 @@ class CheckDocumentsTests(unittest.TestCase):
         problems = self.check({
             "examples/documents/indicators.json": '{"schema": "packetcraftr.indicators/v1"}',
             contract: 'pub const OUTPUT_SCHEMA: &str = "packetcraftr.output/v19";\n'
-                      'pub const OUTPUT_SCHEMA: &str = "packetcraftr.output/v20";\n',
+                      'pub const OUTPUT_SCHEMA: &str = "packetcraftr.output/v20"; // next version\n',
         })
         self.assertEqual(len(problems), 1, problems)
         self.assertIn(contract, problems[0])

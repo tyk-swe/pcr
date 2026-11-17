@@ -255,6 +255,14 @@ fn engagement(
             .map(Engagement::Traceroute)
             .map_err(|error| invalid(error.to_string())),
     }?;
+    if let Engagement::Traceroute(trace) = &typed
+        && trace.summary.is_none()
+        && trace.completion.is_none()
+    {
+        return Err(invalid(
+            "single-path traceroute results must carry their completion",
+        ));
+    }
     Ok(summarize(command, typed, &diagnostics))
 }
 
@@ -657,6 +665,14 @@ mod tests {
         limited["diagnostics"] = serde_json::json!([{"code": "exchange.capture_frame_limit"}]);
         let imported = report(&serde_json::to_vec(&limited).unwrap()).unwrap();
         assert!(!imported.completeness.complete);
+
+        let mut no_completion: serde_json::Value =
+            serde_json::from_slice(&read_example("output-traceroute-success.json")).unwrap();
+        no_completion["result"]
+            .as_object_mut()
+            .unwrap()
+            .remove("completion");
+        assert!(report(&serde_json::to_vec(&no_completion).unwrap()).is_err());
 
         let build = read_example("output-build-success.json");
         assert!(report(&build).is_err());

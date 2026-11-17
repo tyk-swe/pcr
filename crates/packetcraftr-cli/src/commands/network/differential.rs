@@ -73,7 +73,7 @@ impl crate::commands::Spec for Args {
         self.timeout.resources(settings);
         self.duration.resources(settings);
         self.limits.resources(settings);
-        self.policy.budgets.resources(settings);
+        self.policy.resources(settings);
     }
 
     fn run(

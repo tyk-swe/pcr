@@ -494,6 +494,14 @@ fn summarize(command: &str, result: Engagement) -> Report {
                 "undecoded",
                 serde_json::json!(trace.undecoded.len()),
             );
+            if matches!(
+                trace.completion.as_deref(),
+                Some("maximum_hops" | "timeout")
+            ) {
+                report
+                    .completeness
+                    .note("traceroute ended before reaching its destination");
+            }
             for (key, value) in [
                 ("target", &trace.target),
                 ("destination", &trace.destination),
@@ -616,6 +624,12 @@ mod tests {
         assert_eq!(multipath.findings[0].evidence["answered_probes"], 6);
         assert_eq!(multipath.findings[0].evidence["completions"], 2);
         assert!(multipath.completeness.complete);
+
+        let mut partial: serde_json::Value =
+            serde_json::from_slice(&read_example("output-traceroute-success.json")).unwrap();
+        partial["result"]["completion"] = serde_json::json!("maximum_hops");
+        let imported = report(&serde_json::to_vec(&partial).unwrap()).unwrap();
+        assert!(!imported.completeness.complete);
 
         let build = read_example("output-build-success.json");
         assert!(report(&build).is_err());

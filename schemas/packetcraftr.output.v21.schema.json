@@ -10569,6 +10569,10 @@
         },
         "ip_protocols": {
           "$ref": "#/$defs/scanIpProtocolSelection"
+        },
+        "shuffle_seed": {
+          "$ref": "#/$defs/uint64",
+          "description": "The seed the listed endpoint order was shuffled from; absent for the selected order."
         }
       },
       "additionalProperties": true
@@ -10606,6 +10610,10 @@
         },
         "ip_protocols": {
           "$ref": "#/$defs/scanIpProtocolSelection"
+        },
+        "shuffle_seed": {
+          "$ref": "#/$defs/uint64",
+          "description": "The seed the listed endpoint order was shuffled from; absent for the selected order."
         }
       },
       "additionalProperties": true

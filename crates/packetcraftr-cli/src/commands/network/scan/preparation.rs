@@ -202,6 +202,7 @@ pub(super) fn prepare(
             family,
             max_targets,
             max_duration: duration.max_duration(),
+            shuffle_seed,
             policy,
         }));
     }

@@ -2297,6 +2297,22 @@ fn scan_timing_conflicts_and_seeded_order_is_reproducible() {
             .collect::<Vec<_>>()
     };
     assert_eq!(listed("42"), listed("42"));
+    let seed_args = [
+        "--output",
+        "json",
+        "network",
+        "scan",
+        "127.0.0.1",
+        "--list",
+        "--ports",
+        "1-4",
+        "--shuffle-seed",
+        "42",
+    ];
+    let seed_output = run(&seed_args);
+    let seed_text = assert_success(&seed_output, &seed_args);
+    let seed_report: serde_json::Value = serde_json::from_str(&seed_text).expect("JSON list");
+    assert_eq!(seed_report["result"]["shuffle_seed"], 42);
     assert_ne!(listed("42"), listed("7"));
     let mut sorted = listed("42");
     sorted.sort_by_key(|line| {

@@ -87,7 +87,7 @@ impl crate::commands::Spec for Args {
         ]);
         self.timeout.resources(settings);
         self.limits.resources(settings);
-        self.budgets.resources(settings);
+        self.budgets.resources_with_scope(settings, &self.scope);
         self.tree.resources(settings);
     }
 

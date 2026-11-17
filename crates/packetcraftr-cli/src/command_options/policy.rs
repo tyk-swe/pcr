@@ -182,6 +182,18 @@ impl IdentificationPolicyArgs {
     }
 }
 
+impl NumericPolicyArgs {
+    pub(crate) fn resources(&self, settings: &mut Settings<'_>) {
+        self.budgets.resources_with_scope(settings, &self.scope);
+    }
+}
+
+impl IdentificationPolicyArgs {
+    pub(crate) fn resources(&self, settings: &mut Settings<'_>) {
+        self.budgets.resources_with_scope(settings, &self.scope);
+    }
+}
+
 impl HostnameResolutionArgs {
     pub(crate) fn resources(&self, settings: &mut Settings<'_>) {
         declare!(settings, self, [max_resolved_addresses: Count @ Operation]);
@@ -189,6 +201,35 @@ impl HostnameResolutionArgs {
 }
 
 impl TrafficBudgetArgs {
+    pub(crate) fn resources_with_scope(&self, settings: &mut Settings<'_>, scope: &ScopeArgs) {
+        let Some(scope) = scope.scope() else {
+            self.resources(settings);
+            return;
+        };
+        let max_packets = scope
+            .max_packets
+            .map_or(self.max_packets, |ceiling| self.max_packets.min(ceiling));
+        let max_bytes = scope
+            .max_bytes
+            .map_or(self.max_bytes, |ceiling| self.max_bytes.min(ceiling));
+        settings.declare(crate::resources::Field {
+            id: "max_packets",
+            value: crate::resources::SettingValue::setting_value(&max_packets),
+            unit: crate::resources::Unit::Count,
+            stage: crate::resources::Stage::Operation,
+            enabled: crate::resources::Enabled::Fixed(true),
+            preset: None,
+        });
+        settings.declare(crate::resources::Field {
+            id: "max_bytes",
+            value: crate::resources::SettingValue::setting_value(&max_bytes),
+            unit: crate::resources::Unit::Bytes,
+            stage: crate::resources::Stage::Operation,
+            enabled: crate::resources::Enabled::Fixed(true),
+            preset: None,
+        });
+    }
+
     pub(crate) fn resources(&self, settings: &mut Settings<'_>) {
         declare!(settings, self, [
             max_packets: Count @ Operation,
@@ -200,14 +241,14 @@ impl TrafficBudgetArgs {
 impl SendPolicyArgs {
     pub(crate) fn resources(&self, settings: &mut Settings<'_>) {
         self.hostname_resolution.resources(settings);
-        self.budgets.resources(settings);
+        self.budgets.resources_with_scope(settings, &self.scope);
     }
 }
 
 impl HostnamePolicyArgs {
     pub(crate) fn resources(&self, settings: &mut Settings<'_>) {
         self.hostname_resolution.resources(settings);
-        self.budgets.resources(settings);
+        self.budgets.resources_with_scope(settings, &self.scope);
     }
 }
 

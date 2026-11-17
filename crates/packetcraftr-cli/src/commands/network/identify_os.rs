@@ -106,7 +106,7 @@ impl crate::commands::Spec for Args {
             max_queue_frames: Count @ NativeCapture, max_captured_bytes: Bytes @ NativeCapture,
             snap_length: Bytes @ NativeCapture, max_undecoded: Count @ ResultRetention,
         ]);
-        self.policy.budgets.resources(settings);
+        self.policy.resources(settings);
     }
 
     fn run(

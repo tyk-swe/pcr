@@ -314,6 +314,8 @@ commands! {
     /// Inventory hosts, protocols, and observed ports in a capture file.
     #[command(after_long_help = analyze::inventory::arguments::AFTER_LONG_HELP)]
     Inventory(analyze::inventory::arguments::Args) = "inventory" => ("analyze", "inventory", 44),
+    /// Reconstruct HTTP/3 exchanges from an encrypted QUIC capture.
+    Http3(analyze::http3::Args) = "http3" => ("analyze", "http3", 45),
 }
 
 /// Workflow placement and compact identifiers used in machine output.

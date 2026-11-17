@@ -2523,3 +2523,129 @@ fn scope_denies_an_excluded_destination_before_route_lookup() {
     assert_eq!(output.status.code(), Some(6), "{}", stdout(&output));
     assert_error(&output, "policy.destination_not_allowed");
 }
+
+#[test]
+fn http3_reconstructs_multiplexed_exchanges_and_hides_header_values_by_default() {
+    let capture = capture_path("http3-demo.pcapng");
+    let keys = capture_path("http3-demo.keys");
+    let analyze = [
+        "analyze",
+        "http3",
+        capture.to_str().unwrap(),
+        "--keylog",
+        keys.to_str().unwrap(),
+    ];
+    let args = [&["--output", "json"][..], &analyze].concat();
+    let report: serde_json::Value =
+        serde_json::from_str(&assert_success(&run(&args), &args)).unwrap();
+    let result = &report["result"];
+    let exchanges = result["exchanges"].as_array().unwrap();
+    assert_eq!(exchanges.len(), 2);
+    assert_eq!(result["connections"][0]["client"]["encoder_inserts"], 1);
+    assert_eq!(result["connections"][0]["transport_incomplete"], false);
+    let first = &exchanges[0];
+    assert_eq!(first["stream"], 0);
+    let request = &first["request"]["header_sections"][0];
+    assert_eq!(request["method"], "GET");
+    assert_eq!(request["required_insert_count"], 1);
+    assert!(
+        request["fields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|field| field.get("value").is_none())
+    );
+    let response = &first["response"];
+    assert_eq!(response["data_frames"], 1);
+    assert_eq!(response["data_bytes"], b"synthetic response body".len());
+    let sections = response["header_sections"].as_array().unwrap();
+    assert_eq!(sections[0]["status"], 103);
+    assert_eq!(sections[1]["status"], 200);
+    assert_eq!(sections[2]["kind"], "trailers");
+    assert_eq!(
+        exchanges[1]["response"]["header_sections"][0]["status"],
+        204
+    );
+
+    let args = [
+        &["--output", "ndjson"][..],
+        &analyze,
+        &["--stream", "0", "--include-header-values"],
+    ]
+    .concat();
+    let stream = assert_success(&run(&args), &args);
+    let events: Vec<serde_json::Value> = stream
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    let [connection, exchange, terminal] = events.as_slice() else {
+        panic!("expected connection, exchange and complete events")
+    };
+    assert_eq!(connection["event"], "http3_connection");
+    assert_eq!(exchange["event"], "http3_exchange");
+    let selected = &exchange["result"]["exchange"];
+    let fields = selected["request"]["header_sections"][0]["fields"]
+        .as_array()
+        .unwrap();
+    assert!(
+        fields
+            .iter()
+            .any(|field| field["name"] == ":path" && field["value"] == "/private-demo")
+    );
+    let trailer = &selected["response"]["header_sections"][2]["fields"][0];
+    assert_eq!(trailer["value_hex"], "ff");
+    assert_eq!(terminal["event"], "complete");
+    assert_eq!(terminal["result"]["summary"]["exchanges"], 1);
+    assert!(!stream.contains("synthetic response body"));
+
+    let text = assert_success(&run(&analyze), &analyze);
+    assert!(text.contains("request GET offset=0"));
+    assert!(text.contains("response 200"));
+    assert!(!text.contains("/private-demo"));
+
+    let args = [
+        &["--output", "json"][..],
+        &analyze,
+        &["--max-application-output-bytes", "1"],
+    ]
+    .concat();
+    let output = run(&args);
+    assert!(!output.status.success());
+    assert!(stdout(&output).contains("application output exceeds --max-application-output-bytes"));
+}
+
+#[test]
+fn http3_streaming_summary_reports_capture_loss_separately_from_recovered_exchanges() {
+    let mut capture = std::fs::read(capture_path("http3-demo.pcapng")).unwrap();
+    let last_block = u32::from_le_bytes(capture[capture.len() - 4..].try_into().unwrap()) as usize;
+    let original_length = capture.len() - last_block + 24;
+    let field = &mut capture[original_length..original_length + 4];
+    let wire_bytes = u32::from_le_bytes(field.try_into().unwrap());
+    field.copy_from_slice(&(wire_bytes + 1).to_le_bytes());
+    let file = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(file.path(), capture).unwrap();
+    let keys = capture_path("http3-demo.keys");
+    let args = [
+        "--output",
+        "ndjson",
+        "analyze",
+        "http3",
+        file.path().to_str().unwrap(),
+        "--keylog",
+        keys.to_str().unwrap(),
+    ];
+    let output = assert_success(&run(&args), &args);
+    let records: Vec<serde_json::Value> = output
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert!(
+        records
+            .iter()
+            .any(|record| record["event"] == "http3_exchange"
+                && record["result"]["exchange"]["response"]["complete"] == true)
+    );
+    let terminal = records.last().unwrap();
+    assert_eq!(terminal["event"], "complete");
+    assert_eq!(terminal["result"]["summary"]["input_incomplete"], true);
+}

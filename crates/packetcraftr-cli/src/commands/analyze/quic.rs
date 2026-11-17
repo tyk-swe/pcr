@@ -1,5 +1,5 @@
 pub(crate) mod arguments;
-mod keylog;
+pub(super) mod keylog;
 mod live;
 mod output;
 mod rendering;

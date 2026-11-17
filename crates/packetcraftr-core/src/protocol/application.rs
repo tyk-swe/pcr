@@ -3,9 +3,11 @@
 
 pub mod dhcp;
 pub mod dns;
+pub(crate) mod header_compression;
 pub mod http;
 pub mod http2;
 pub mod ntp;
+pub(crate) mod qpack;
 pub mod syslog;
 pub mod tftp;
 pub mod tls;

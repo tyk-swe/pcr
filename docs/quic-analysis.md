@@ -1,6 +1,6 @@
 # QUIC transport analysis
 
-`packetcraftr analyze quic` analyzes QUIC v1 and v2 from PCAP, PCAPNG, stdin, or native live capture. It authenticates and decrypts Initial packets without endpoint secrets. NSS-format TLS key logs enable Handshake, 0-RTT, and 1-RTT decryption with AES-128-GCM, AES-256-GCM, or ChaCha20-Poly1305. HTTP/3 and QPACK decoding are outside this engine.
+`packetcraftr analyze quic` analyzes QUIC v1 and v2 from PCAP, PCAPNG, stdin, or native live capture. It authenticates and decrypts Initial packets without endpoint secrets. NSS-format TLS key logs enable Handshake, 0-RTT, and 1-RTT decryption with AES-128-GCM, AES-256-GCM, or ChaCha20-Poly1305. Use [`analyze http3`](http3-analysis.md) to reconstruct HTTP/3 exchanges from the same capture and key log.
 
 ```sh
 packetcraftr analyze quic capture.pcapng --keylog session.keys

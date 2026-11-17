@@ -60,10 +60,13 @@ packetcraftr analyze dns examples/captures/dns-response.pcap
 packetcraftr analyze http examples/captures/http-stream.pcap
 packetcraftr --output json files read examples/captures/protocol-mqtt.pcap --field frame.number
 packetcraftr analyze quic examples/captures/quic-demo-v1.pcap --keylog examples/captures/quic-demo.keys
+packetcraftr analyze http3 examples/captures/http3-demo.pcapng --keylog examples/captures/http3-demo.keys
 ```
 
 See [QUIC transport analysis](docs/quic-analysis.md) for offline and live
-decryption, key logs, stream export, and bounded diagnostics.
+decryption, key logs, stream export, and bounded diagnostics. See
+[HTTP/3 exchange reconstruction](docs/http3-analysis.md) for request and response
+analysis with QPACK and stream offsets.
 
 Use `--help` on a command for all options, defaults, prerequisites, and output
 formats. `-h` shows a shorter guide. The protocol fixture manifest at

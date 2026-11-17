@@ -46,7 +46,7 @@
     },
     "sources": []
   },
-  "schema": "packetcraftr.output/v21",
+  "schema": "packetcraftr.output/v22",
   "sequence": 0,
   "status": "success"
 }

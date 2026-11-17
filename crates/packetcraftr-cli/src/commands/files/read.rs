@@ -66,7 +66,6 @@ impl crate::commands::Spec for Args {
         crate::output::contract::Format::Pcap,
         crate::output::contract::Format::PcapNg,
     ];
-    const CANCELLATION: bool = true;
     const OFFLINE: bool = true;
 
     fn resources(&self, settings: &mut crate::resources::Settings<'_>) {

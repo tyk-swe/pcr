@@ -127,7 +127,7 @@ def main() -> int:
     args = parser.parse_args()
     try:
         problems = check_documents(args.root.resolve())
-    except CheckError as error:
+    except (CheckError, OSError, ValueError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
     for problem in problems:

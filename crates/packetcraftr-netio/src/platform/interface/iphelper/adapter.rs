@@ -1,7 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#![allow(unsafe_code)]
+#![allow(
+    unsafe_code,
+    reason = "Windows adapter lists are traversed as raw IP_ADAPTER_ADDRESSES pointers"
+)]
 
 use std::{
     mem::{align_of, size_of},

@@ -155,6 +155,14 @@ class CheckCouplingTests(unittest.TestCase):
         measured = coupling.inventory(root)
         self.assertEqual(measured["manual_cancellation_polls"], 6)
 
+    def test_cancellation_polls_require_a_word_boundary(self):
+        sources = {
+            Path("crates/packetcraftr-cli/src/a.rs"):
+                "fn f() { api.check()?; multi.check()?; i.check()?; "
+                "invocation.check()?; self.i.check()?; }",
+        }
+        self.assertEqual(coupling.cancellation_polls(sources), 3)
+
     def test_repository_stays_under_ceilings(self):
         measured = coupling.inventory()
         for name, value in measured.items():

@@ -9,14 +9,15 @@ use packetcraftr_core::registry::Registry;
 
 use crate::client::admission::approve_operation;
 use crate::clock::Clock;
-use crate::engine::execution::{Context, Executor, Shared};
+use crate::engine::execution::{Context, Shared};
+use crate::exchange::WorkflowExecutor;
 use crate::policy::{Authorizer, DnsOperation, LimitOverflow, Operation, WireLimits};
+use crate::providers::{PacketProviders, TcpProviders};
 use crate::target::ResolveTarget;
 use crate::{Sink, Stats};
 use packetcraftr_core::error::BoundaryError;
 
 use super::engine::PreparedOperation;
-use super::executor::{Exchange, TcpQuerier};
 use super::plan::batch_limits;
 use super::report::Observed;
 use super::{Error, QueryType};
@@ -347,18 +348,18 @@ impl Collector {
 const FIRST_ATTEMPT: u32 = 1;
 
 /// Authorizes the combined worst-case traffic limits before discovery.
-pub(super) fn run<A, E, C, F>(
+pub(super) fn run<A, P, C, F>(
     prepared: Prepared<'_>,
     authorizer: &mut A,
     registry: &Registry,
-    executor: &mut E,
+    executor: &mut WorkflowExecutor<'_, P, C>,
     clock: &mut C,
     deadline: &mut Deadline,
     mut observe: F,
 ) -> Result<Report, Error>
 where
     A: Authorizer + ResolveTarget,
-    E: Executor<Exchange> + TcpQuerier,
+    P: PacketProviders + TcpProviders,
     C: Clock,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {

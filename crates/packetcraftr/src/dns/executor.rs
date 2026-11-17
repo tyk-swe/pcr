@@ -74,11 +74,6 @@ pub(crate) struct TcpEvidence {
     pub(crate) response: super::tcp::Response,
 }
 
-pub(crate) trait TcpQuerier {
-    /// Expected socket and framing failures are typed data, so normal retry precedence applies.
-    fn query(&mut self, query: &TcpQuery) -> Result<TcpEvidence, super::tcp::Error>;
-}
-
 const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
     packetcraftr_core::error::Code::CliDnsExecutor,
     "use one bounded UDP DNS query and retain at least one response",
@@ -178,8 +173,9 @@ impl<P: PacketProviders, K: Clock> Executor<Exchange> for WorkflowExecutor<'_, P
 }
 
 /// Kernel TCP honors no route override: `Request::validate` refuses them before any query.
-impl<P: TcpProviders, K: Clock> TcpQuerier for WorkflowExecutor<'_, P, K> {
-    fn query(&mut self, query: &TcpQuery) -> Result<TcpEvidence, super::tcp::Error> {
+impl<P: TcpProviders, K: Clock> WorkflowExecutor<'_, P, K> {
+    /// Expected socket and framing failures are typed data, so normal retry precedence applies.
+    pub(crate) fn query_tcp(&mut self, query: &TcpQuery) -> Result<TcpEvidence, super::tcp::Error> {
         let response = super::tcp::query_with_clock(
             super::tcp::Request {
                 endpoint: query.endpoint,

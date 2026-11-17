@@ -108,6 +108,21 @@ class CheckDocumentsTests(unittest.TestCase):
                     "examples/documents/indicators.yaml": "schema: packetcraftr.indicators/v1\n",
                 })
 
+    def test_main_reports_missing_files_without_a_traceback(self):
+        import contextlib
+        import io
+        import sys
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as empty:
+            stderr = io.StringIO()
+            with patch.object(sys, "argv", ["check_documents", "--root", empty]):
+                with contextlib.redirect_stderr(stderr):
+                    result = documents.main()
+        self.assertEqual(result, 2)
+        self.assertTrue(stderr.getvalue().startswith("error:"))
+        self.assertNotIn("Traceback", stderr.getvalue())
+
     def test_adr_hash_drift_fails(self):
         problems = self.check({
             "examples/documents/indicators.json": '{"schema": "packetcraftr.indicators/v1"}',

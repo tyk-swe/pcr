@@ -42,8 +42,7 @@ impl commands::Spec for Args {
             example: "examples/documents/quic-event.json",
         },
     ];
-    const FORMATS: &'static [Format] = &[Format::Text, Format::Json, Format::Ndjson];
-    const CANCELLATION: bool = true;
+    const FORMATS: &'static [Format] = crate::output::contract::TEXT_JSON_NDJSON;
     fn run_time(&self) -> Option<&dyn crate::command_options::Bounded> {
         Some(&self.limits)
     }

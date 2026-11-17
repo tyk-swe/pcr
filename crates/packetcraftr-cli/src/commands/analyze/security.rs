@@ -132,7 +132,6 @@ macro_rules! capture_spec {
         impl Spec for $ty {
             const PUBLISHED: &'static [PublishedType] = $published;
             const FORMATS: &'static [Format] = crate::output::contract::TEXT_JSON_NDJSON;
-            const CANCELLATION: bool = true;
             const OFFLINE: bool = true;
             fn run_time(&self) -> Option<&dyn Bounded> {
                 Some(&self.capture.limits)
@@ -231,7 +230,6 @@ impl Spec for Hunt {
         },
     ];
     const FORMATS: &'static [Format] = crate::output::contract::TEXT_JSON_NDJSON;
-    const CANCELLATION: bool = true;
     const OFFLINE: bool = true;
     fn run_time(&self) -> Option<&dyn Bounded> {
         Some(&self.capture.limits)

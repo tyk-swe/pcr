@@ -72,7 +72,6 @@ impl crate::commands::Spec for Args {
         crate::output::contract::Format::Pcap,
         crate::output::contract::Format::PcapNg,
     ];
-    const CANCELLATION: bool = true;
 
     fn run_time(&self) -> Option<&dyn crate::command_options::Bounded> {
         Some(&self.duration)

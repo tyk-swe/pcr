@@ -1,7 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#![allow(unsafe_code)]
+#![allow(
+    unsafe_code,
+    reason = "Npcap frame injection goes through the pcap_sendpacket FFI call"
+)]
 
 use crate::platform::common::npcap::{
     abi::SEND_SNAPSHOT_LENGTH,

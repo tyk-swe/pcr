@@ -25,17 +25,17 @@ def rust_code_lines(text: str) -> int:
 
 def python_code_lines(text: str) -> int:
     count = 0
-    in_docstring = False
+    docstring_marker: str | None = None
     for line in text.splitlines():
         stripped = line.strip()
-        if in_docstring:
-            if '"""' in stripped or "'''" in stripped:
-                in_docstring = False
+        if docstring_marker is not None:
+            if docstring_marker in stripped:
+                docstring_marker = None
             continue
         if stripped.startswith('"""') or stripped.startswith("'''"):
             marker = stripped[:3]
             if stripped.count(marker) < 2:
-                in_docstring = True
+                docstring_marker = marker
             continue
         code = line.split("#")[0].strip()
         if code and code not in CLOSING_ONLY:

@@ -108,7 +108,6 @@ impl Spec for AuditTls {
         },
     ];
     const FORMATS: &'static [Format] = crate::output::contract::TEXT_JSON_NDJSON;
-    const CANCELLATION: bool = true;
     fn run_time(&self) -> Option<&dyn Bounded> {
         Some(&self.connection)
     }
@@ -154,7 +153,6 @@ impl Spec for AuditHttp {
         },
     ];
     const FORMATS: &'static [Format] = crate::output::contract::TEXT_JSON_NDJSON;
-    const CANCELLATION: bool = true;
     fn run_time(&self) -> Option<&dyn Bounded> {
         Some(&self.connection)
     }

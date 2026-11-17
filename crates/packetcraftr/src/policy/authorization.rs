@@ -378,7 +378,7 @@ mod tests {
         struct Late(Cancellation);
         impl Resolver for Late {
             fn resolve(&self, _: &Hostname, _: usize) -> Result<Vec<IpAddr>, TargetError> {
-                unreachable!()
+                unreachable!("test resolver is only called through resolve_controlled")
             }
 
             fn resolve_controlled(

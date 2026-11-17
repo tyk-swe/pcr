@@ -1,7 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#![allow(unsafe_code)]
+#![allow(
+    unsafe_code,
+    reason = "Npcap capture reads packets through dynamically loaded pcap function pointers"
+)]
 
 use packetcraftr_core::clock::{Clock, SystemClock};
 use std::{

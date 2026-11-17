@@ -42,7 +42,6 @@ impl Spec for Assessment {
         example: "examples/documents/output-report-success.json",
     }];
     const FORMATS: &'static [Format] = crate::output::contract::TEXT_JSON;
-    const CANCELLATION: bool = true;
     const OFFLINE: bool = true;
     fn resources(&self, s: &mut Settings<'_>) {
         self.bounds.resources(s);

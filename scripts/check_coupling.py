@@ -80,7 +80,7 @@ CONST_PATTERN = re.compile(
 )
 
 
-POLL_PATTERN = re.compile(r"(?:invocation|control|cancellation|i)\.check(?:_interrupted)?\(")
+POLL_PATTERN = re.compile(r"\b(?:invocation|control|cancellation|i)\.check(?:_interrupted)?\(")
 
 
 def cancellation_polls(sources: dict[Path, str]) -> int:

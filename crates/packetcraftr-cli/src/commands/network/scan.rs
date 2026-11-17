@@ -94,7 +94,6 @@ impl crate::commands::Spec for Args {
     ];
     const FORMATS: &'static [crate::output::contract::Format] =
         crate::output::contract::TEXT_JSON_NDJSON;
-    const CANCELLATION: bool = true;
 
     fn run_time(&self) -> Option<&dyn crate::command_options::Bounded> {
         Some(&self.duration)

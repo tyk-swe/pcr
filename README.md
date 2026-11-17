@@ -6,11 +6,30 @@ packet transmission, capture, and injection. The workspace contains the
 runtime-neutral `packetcraftr-core`, provider boundary `packetcraftr-netio`,
 workflow library `packetcraftr`, and `packetcraftr-cli` binary.
 
-## Build
+## Offline quick start
 
-Use the Rust toolchain pinned in `rust-toolchain.toml` and a native C compiler.
+From the repository root, use the Rust toolchain pinned in `rust-toolchain.toml`
+and a native C compiler to build the CLI and print the bytes for `hello` in hex.
+Both examples run without elevated privileges.
+
+```sh
+cargo run --quiet --locked -p packetcraftr-cli --no-default-features -- --output hex packet build --packet 'raw(text=hello)'
+```
+
+```text
+68656c6c6f
+```
+
+Dissect the bundled DNS response with the same build.
+
+```sh
+cargo run --quiet --locked -p packetcraftr-cli --no-default-features -- files read examples/captures/dns-response.pcap --dissect
+```
+
+## Build options
+
 Run these commands from the repository root. Keep `--locked` to use the checked-in
-dependency versions; add `--offline` when those dependencies are already cached.
+dependency versions. Add `--offline` when those dependencies are already cached.
 
 | Build | Command | Capabilities and prerequisites |
 | --- | --- | --- |
@@ -22,29 +41,29 @@ dependency versions; add `--offline` when those dependencies are already cached.
 Linux and macOS Layer 2 builds need libpcap development headers/libraries and
 libpcap at runtime (for example `libpcap-dev` on Debian/Ubuntu). Windows Layer 2
 uses Npcap; the release workflow targets Npcap 1.88. Live raw sockets and capture
-need the permissions granted by the operating system. Offline examples below do
-not require elevated privileges.
+need the permissions granted by the operating system.
 
-The commands above use Cargo's development profile and write
+By default, the commands above use Cargo's development profile and write
 `target/debug/packetcraftr` (`.exe` on Windows). Add `--release` for optimized
 binaries in `target/release/`; release builds retain overflow checks. Release
 archives distinguish `all-features` from `pcap-free` (native routes and Layer 3).
 
-## Try it offline
+## More offline examples
 
-After building, put `target/debug` on your PATH or replace `packetcraftr` below
-with the binary's path:
+After building, add the directory containing `packetcraftr` to your PATH or use
+the binary's path in the commands below.
 
 ```sh
 packetcraftr --help
-packetcraftr packet build --packet 'raw(text=hello)'
 packetcraftr --output hex packet build --packet-file examples/documents/packet-dns-response.json
-packetcraftr files read examples/captures/dns-response.pcap --dissect
 packetcraftr analyze dns examples/captures/dns-response.pcap
 packetcraftr analyze http examples/captures/http-stream.pcap
-packetcraftr analyze quic examples/captures/quic-demo-v1.pcap --keylog examples/captures/quic-demo.keys
 packetcraftr --output json files read examples/captures/protocol-mqtt.pcap --field frame.number
+packetcraftr analyze quic examples/captures/quic-demo-v1.pcap --keylog examples/captures/quic-demo.keys
 ```
+
+See [QUIC transport analysis](docs/quic-analysis.md) for offline and live
+decryption, key logs, stream export, and bounded diagnostics.
 
 Use `--help` on a command for all options, defaults, prerequisites, and output
 formats. `-h` shows a shorter guide. The protocol fixture manifest at
@@ -77,5 +96,3 @@ text output only.
 
 PacketcraftR is licensed under [AGPL-3.0-only](LICENSE). Third-party attribution
 is listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-
-See [QUIC transport analysis](docs/quic-analysis.md) for offline and live decryption, key logs, stream export, and bounded diagnostics.

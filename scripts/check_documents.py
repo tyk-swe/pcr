@@ -10,6 +10,7 @@ from pathlib import Path
 import re
 import sys
 
+import check_output_schema
 from script_support import read_json
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -104,12 +105,16 @@ def check_documents(root: Path = ROOT) -> list[str]:
         if (root / first).read_bytes() != (root / second).read_bytes():
             problems.append(f"{first} and {second} must stay byte-identical")
 
-    forwarding = (root / "examples/consumers/forwarding.py").read_text()
-    consumer = re.search(r'^SCHEMA = "([^"]+)"', forwarding, re.M)
-    security = (root / "crates/packetcraftr-core/src/security.rs").read_text()
-    emitted = re.search(r'pub const OUTPUT_SCHEMA: &str = "([^"]+)";', security)
-    if consumer is None or emitted is None or consumer.group(1) != emitted.group(1):
-        problems.append("examples/consumers/forwarding.py SCHEMA disagrees with OUTPUT_SCHEMA")
+    security = (root / check_output_schema.CONTRACT).read_text()
+    try:
+        emitted = check_output_schema.read_identity(security)
+    except check_output_schema.CheckError as error:
+        problems.append(str(error))
+    else:
+        forwarding = (root / "examples/consumers/forwarding.py").read_text()
+        consumer = re.search(r'^SCHEMA = "([^"]+)"', forwarding, re.M)
+        if consumer is None or consumer.group(1) != emitted.identifier:
+            problems.append("examples/consumers/forwarding.py SCHEMA disagrees with OUTPUT_SCHEMA")
 
     historical, digest = HISTORICAL
     actual = hashlib.sha256((root / historical).read_bytes()).hexdigest()

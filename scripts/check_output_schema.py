@@ -21,7 +21,7 @@ RELEASE_ASSETS = 'scripts/release-assets.json'
 REGISTRY = 'published registry (Spec::PUBLISHED rows under crates/packetcraftr-cli/src)'
 CLI_SRC = 'crates/packetcraftr-cli/src'
 RUNTIME_IDENTIFIER = re.compile(
-    r'^pub const OUTPUT_SCHEMA: &str = "(packetcraftr\.output/v([1-9][0-9]*))";$', re.MULTILINE)
+    r'^pub const OUTPUT_SCHEMA: &str = "(packetcraftr\.output/v([1-9][0-9]*))";[ \t]*$', re.MULTILINE)
 OUTPUT_SCHEMA_ASSET = re.compile(r'^schemas/(?:historical/)?packetcraftr\.output\.')
 RUNTIME_TIMEOUT_SECONDS = 60
 MAX_PROBLEMS_PER_DOCUMENT = 5
@@ -71,7 +71,7 @@ RUNTIME_COMMANDS = (
 
 
 def read_identity(contract_source: str) -> Identity:
-    matches = RUNTIME_IDENTIFIER.findall(contract_source)
+    matches = RUNTIME_IDENTIFIER.findall(blank_comments(contract_source))
     if len(matches) != 1:
         raise CheckError(f'expected exactly one `pub const OUTPUT_SCHEMA` output identifier in {CONTRACT}')
     identifier, version = matches[0]

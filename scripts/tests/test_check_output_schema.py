@@ -48,6 +48,13 @@ class IdentityTests(unittest.TestCase):
             with self.subTest(source=source), self.assertRaises(checker.CheckError):
                 checker.read_identity(source)
 
+    def test_only_the_active_schema_declaration_counts(self):
+        source = ('/*\npub const OUTPUT_SCHEMA: &str = "packetcraftr.output/v6";\n*/\n'
+                  'pub const OUTPUT_SCHEMA: &str = "packetcraftr.output/v7";')
+        for suffix in (' \t', ' // current', ' /* current */'):
+            with self.subTest(suffix=suffix):
+                self.assertEqual(checker.read_identity(source + suffix), IDENTITY)
+
     def test_agreeing_schema_identity_passes(self):
         self.assertEqual(checker.check_identity(SCHEMA, IDENTITY), [])
 

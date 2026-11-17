@@ -85,6 +85,27 @@ class CheckDocumentsTests(unittest.TestCase):
         })
         self.assertTrue(any("byte-identical" in problem for problem in problems))
 
+    def test_duplicate_runtime_identifier_is_reported_at_its_source(self):
+        contract = "crates/packetcraftr-core/src/security.rs"
+        problems = self.check({
+            "examples/documents/indicators.json": '{"schema": "packetcraftr.indicators/v1"}',
+            contract: 'pub const OUTPUT_SCHEMA: &str = "packetcraftr.output/v19";\n'
+                      'pub const OUTPUT_SCHEMA: &str = "packetcraftr.output/v20";\n',
+        })
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn(contract, problems[0])
+        self.assertIn("OUTPUT_SCHEMA", problems[0])
+
+    def test_forwarding_schema_mismatch_is_reported_at_the_consumer(self):
+        consumer = "examples/consumers/forwarding.py"
+        problems = self.check({
+            "examples/documents/indicators.json": '{"schema": "packetcraftr.indicators/v1"}',
+            consumer: 'SCHEMA = "packetcraftr.output/v20"\n',
+        })
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn(consumer, problems[0])
+        self.assertIn("OUTPUT_SCHEMA", problems[0])
+
     def test_yaml_documents_are_validated_without_test_sources(self):
         for name in ("packet-raw.yaml", "new.yaml", "new.yml"):
             with self.subTest(name=name):

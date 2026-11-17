@@ -296,6 +296,14 @@ fn summarize(command: &str, result: Engagement, diagnostics: &[String]) -> Repor
     };
     match &result {
         Engagement::Scan(scan) => {
+            if diagnostics
+                .iter()
+                .any(|code| code == "capture.evidence_incomplete")
+            {
+                report
+                    .completeness
+                    .note("scan capture evidence is incomplete, later frames were not retained");
+            }
             put(
                 &mut summary,
                 "endpoints",
@@ -630,6 +638,13 @@ mod tests {
                 error.message
             );
         }
+
+        let mut capture_limited: serde_json::Value =
+            serde_json::from_slice(&read_example("output-scan-success.json")).unwrap();
+        capture_limited["diagnostics"] =
+            serde_json::json!([{"code": "capture.evidence_incomplete"}]);
+        let imported = report(&serde_json::to_vec(&capture_limited).unwrap()).unwrap();
+        assert!(!imported.completeness.complete);
 
         let mut incomplete: serde_json::Value =
             serde_json::from_slice(&read_example("output-scan-success.json")).unwrap();

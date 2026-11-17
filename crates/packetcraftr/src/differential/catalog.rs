@@ -90,12 +90,12 @@ const CATALOG: &[Variant] = &[
     },
     Variant {
         id: "ip-fragmented",
-        hypothesis: "An IPv4 datagram split into two in-order fragments is reassembled and accepted",
+        hypothesis: "An IPv4 datagram split into two in-order fragments with a zero UDP checksum is reassembled and accepted",
         kind: Kind::Fragmented { reordered: false },
     },
     Variant {
         id: "ip-fragmented-reordered",
-        hypothesis: "An IPv4 datagram whose second fragment arrives first is reassembled and accepted",
+        hypothesis: "An IPv4 datagram whose second fragment arrives first, with a zero UDP checksum, is reassembled and accepted",
         kind: Kind::Fragmented { reordered: true },
     },
     Variant {

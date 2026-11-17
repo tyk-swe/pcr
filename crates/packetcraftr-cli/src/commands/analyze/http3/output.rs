@@ -10,6 +10,8 @@ use crate::output::{contract, published_enum, stream::StreamRecord};
 published_enum! { pub(super) enum Code from http3::Code {
     MissingControlStream => "missing_control_stream",
     ClosedControlStream => "closed_control_stream",
+    ClosedQpackEncoderStream => "closed_qpack_encoder_stream",
+    ClosedQpackDecoderStream => "closed_qpack_decoder_stream",
     DuplicateCriticalStream => "duplicate_critical_stream",
     MissingSettings => "missing_settings",
     InvalidSettings => "invalid_settings",
@@ -27,7 +29,11 @@ published_enum! { pub(super) enum Code from http3::Code {
     InvalidFramePlacement => "invalid_frame_placement",
     InvalidHeaders => "invalid_headers",
     ContentLengthMismatch => "content_length_mismatch",
+    UnexpectedResponseContent => "unexpected_response_content",
+    ExtendedConnectDisabled => "extended_connect_disabled",
+    ExtendedConnectSettingsUnavailable => "extended_connect_settings_unavailable",
     MissingInitialHeaders => "missing_initial_headers",
+    MissingFinalResponse => "missing_final_response",
     Limit => "limit",
 } }
 

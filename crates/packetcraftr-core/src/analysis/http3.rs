@@ -35,6 +35,8 @@ impl Default for Limits {
 pub enum Code {
     MissingControlStream,
     ClosedControlStream,
+    ClosedQpackEncoderStream,
+    ClosedQpackDecoderStream,
     DuplicateCriticalStream,
     MissingSettings,
     InvalidSettings,
@@ -52,7 +54,11 @@ pub enum Code {
     InvalidFramePlacement,
     InvalidHeaders,
     ContentLengthMismatch,
+    UnexpectedResponseContent,
+    ExtendedConnectDisabled,
+    ExtendedConnectSettingsUnavailable,
     MissingInitialHeaders,
+    MissingFinalResponse,
     Limit,
 }
 
@@ -179,6 +185,7 @@ pub fn inspect(
     let mut server = server.settings(&mut budget)?;
     let client_history = client.history(server.report.max_table_capacity, limits, &mut budget)?;
     let server_history = server.history(client.report.max_table_capacity, limits, &mut budget)?;
+    let connect_enabled = server.connect_enabled;
     emit(Event::Connection(Connection {
         transport: connection,
         transport_incomplete,
@@ -194,6 +201,7 @@ pub fn inspect(
                 history,
                 limits,
                 request_method,
+                connect_enabled,
                 &mut remaining,
                 &mut budget,
             )

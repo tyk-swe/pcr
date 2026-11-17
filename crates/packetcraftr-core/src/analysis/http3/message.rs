@@ -15,7 +15,9 @@ const MAX_ISSUES: usize = 64;
 
 enum Stage {
     Initial,
-    Body,
+    Informational,
+    Body { content_forbidden: bool },
+    Tunnel,
     Trailers,
     Unknown,
 }
@@ -31,6 +33,7 @@ pub(super) fn read(
     history: &qpack::History,
     limits: Limits,
     request_method: Option<&str>,
+    connect_enabled: Option<bool>,
     remaining: &mut usize,
     work: &mut Work<'_>,
 ) -> Result<Side, BoundaryError> {
@@ -80,9 +83,23 @@ pub(super) fn read(
                 side.data_frames += 1;
                 side.data_bytes += frame.data.len() as u64;
                 side.first_data_offset.get_or_insert(offset);
-                if matches!(stage, Stage::Initial | Stage::Trailers) {
+                if matches!(
+                    stage,
+                    Stage::Initial | Stage::Informational | Stage::Trailers
+                ) {
                     side.issue(Code::InvalidFramePlacement, Some(offset));
+                } else if matches!(
+                    stage,
+                    Stage::Body {
+                        content_forbidden: true
+                    }
+                ) && !frame.data.is_empty()
+                {
+                    side.issue(Code::UnexpectedResponseContent, Some(offset));
                 }
+            }
+            1 if matches!(stage, Stage::Tunnel) => {
+                side.issue(Code::InvalidFramePlacement, Some(offset));
             }
             1 => {
                 let Some(bytes) = remaining.checked_sub(SECTION_CHARGE) else {
@@ -117,10 +134,16 @@ pub(super) fn read(
                                         value: field.value,
                                     })
                                     .collect();
-                                match classify(&mut section, &mut stage, stream.direction) {
+                                match classify(
+                                    &mut section,
+                                    &mut stage,
+                                    stream.direction,
+                                    request_method,
+                                    connect_enabled,
+                                ) {
                                     Ok(Some(length)) => declared_length = Some(length),
                                     Ok(None) => {}
-                                    Err(()) => side.issue(Code::InvalidHeaders, Some(offset)),
+                                    Err(code) => side.issue(code, Some(offset)),
                                 }
                             }
                             Err(qpack::Failure::Interrupted(error)) => return Err(error),
@@ -135,23 +158,28 @@ pub(super) fn read(
                     Err(qpack::Failure::Interrupted(error)) => return Err(error),
                     Err(error) => {
                         side.issue(qpack_code(error), Some(offset));
-                        stage = match stage {
-                            Stage::Body | Stage::Trailers => Stage::Trailers,
-                            _ => Stage::Unknown,
-                        };
+                        if matches!(stage, Stage::Initial) && stream.direction == Direction::Client
+                        {
+                            section.kind = SectionKind::Request;
+                        }
+                        stage = after_unreadable_headers(&stage, stream.direction);
                     }
                 }
                 side.header_sections.push(section);
             }
             2..=4 | 6..=9 | 13 => side.issue(Code::InvalidFramePlacement, Some(offset)),
-            5 if stream.direction == Direction::Client => {
+            5 if stream.direction == Direction::Client || matches!(stage, Stage::Tunnel) => {
                 side.issue(Code::InvalidFramePlacement, Some(offset));
             }
             _ => {}
         }
     }
-    if stream.complete && matches!(stage, Stage::Initial) {
-        side.issue(Code::MissingInitialHeaders, None);
+    if stream.complete {
+        match stage {
+            Stage::Initial => side.issue(Code::MissingInitialHeaders, None),
+            Stage::Informational => side.issue(Code::MissingFinalResponse, None),
+            _ => {}
+        }
     }
     if let Some(length) = declared_length {
         let successful_connect = request_method == Some("CONNECT")
@@ -168,8 +196,9 @@ pub(super) fn read(
             side.issue(Code::ContentLengthMismatch, Some(length.offset));
         }
     }
-    side.complete =
-        stream.complete && matches!(stage, Stage::Body | Stage::Trailers) && side.issues.is_empty();
+    side.complete = stream.complete
+        && matches!(stage, Stage::Body { .. } | Stage::Tunnel | Stage::Trailers)
+        && side.issues.is_empty();
     Ok(side)
 }
 
@@ -192,11 +221,23 @@ fn qpack_code(error: qpack::Failure) -> Code {
     }
 }
 
+fn after_unreadable_headers(stage: &Stage, direction: Direction) -> Stage {
+    match stage {
+        Stage::Initial if direction == Direction::Client => Stage::Body {
+            content_forbidden: false,
+        },
+        Stage::Body { .. } | Stage::Trailers => Stage::Trailers,
+        _ => Stage::Unknown,
+    }
+}
+
 fn classify(
     section: &mut HeaderSection,
     stage: &mut Stage,
     direction: Direction,
-) -> Result<Option<DeclaredLength>, ()> {
+    request_method: Option<&str>,
+    connect_enabled: Option<bool>,
+) -> Result<Option<DeclaredLength>, Code> {
     let fields = section
         .fields
         .iter()
@@ -209,33 +250,43 @@ fn classify(
             }
             return Ok(None);
         }
-        Stage::Trailers => return Err(()),
-        Stage::Body => {
+        Stage::Trailers | Stage::Tunnel => return Err(Code::InvalidHeaders),
+        Stage::Body { .. } => {
             *stage = Stage::Trailers;
             FieldRole::Trailer
         }
         Stage::Initial if direction == Direction::Client => FieldRole::Request,
-        Stage::Initial => FieldRole::Response,
+        Stage::Initial | Stage::Informational => FieldRole::Response,
     };
     let meta = match http_headers::validate(role, fields) {
         Ok(meta) if meta.status != Some(101) => meta,
         _ => {
-            if matches!(stage, Stage::Initial) {
-                *stage = Stage::Unknown;
-            }
-            return Err(());
+            *stage = after_unreadable_headers(stage, direction);
+            return Err(Code::InvalidHeaders);
         }
     };
     section.status = meta.status;
     section.kind = match (role, meta.status) {
         (FieldRole::Trailer, _) => SectionKind::Trailers,
-        (FieldRole::Response, Some(100..=199)) => SectionKind::Informational,
-        (FieldRole::Response, _) => {
-            *stage = Stage::Body;
+        (FieldRole::Response, Some(100..=199)) => {
+            *stage = Stage::Informational;
+            SectionKind::Informational
+        }
+        (FieldRole::Response, status) => {
+            *stage = if request_method == Some("CONNECT") && matches!(status, Some(200..=299)) {
+                Stage::Tunnel
+            } else {
+                Stage::Body {
+                    content_forbidden: request_method == Some("HEAD")
+                        || matches!(status, Some(204 | 304)),
+                }
+            };
             SectionKind::Response
         }
         (FieldRole::Request, _) => {
-            *stage = Stage::Body;
+            *stage = Stage::Body {
+                content_forbidden: false,
+            };
             section.method = meta
                 .method
                 .as_deref()
@@ -244,6 +295,13 @@ fn classify(
             SectionKind::Request
         }
     };
+    if meta.protocol {
+        match connect_enabled {
+            Some(true) => {}
+            Some(false) => return Err(Code::ExtendedConnectDisabled),
+            None => return Err(Code::ExtendedConnectSettingsUnavailable),
+        }
+    }
     Ok(meta.content_length.map(|bytes| DeclaredLength {
         bytes,
         offset: section.offset,

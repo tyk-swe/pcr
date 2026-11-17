@@ -20834,6 +20834,8 @@
           "enum": [
             "missing_control_stream",
             "closed_control_stream",
+            "closed_qpack_encoder_stream",
+            "closed_qpack_decoder_stream",
             "duplicate_critical_stream",
             "missing_settings",
             "invalid_settings",
@@ -20851,7 +20853,11 @@
             "invalid_frame_placement",
             "invalid_headers",
             "content_length_mismatch",
+            "unexpected_response_content",
+            "extended_connect_disabled",
+            "extended_connect_settings_unavailable",
             "missing_initial_headers",
+            "missing_final_response",
             "limit"
           ]
         },

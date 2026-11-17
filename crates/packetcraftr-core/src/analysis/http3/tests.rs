@@ -462,3 +462,199 @@ fn open_critical_streams_do_not_mask_a_transport_gap() {
         assert_eq!(observed, Some(expected));
     }
 }
+
+#[test]
+fn rejects_nonempty_data_on_bodyless_responses() {
+    use quic::Direction::{Client, Server};
+    let head = b"\x01\x08\0\0\xd2\xd7\xc1\x50\x01a";
+    let cases = [
+        (None, b"\x01\x04\0\0\xff\x01".as_slice()),
+        (None, b"\x01\x03\0\0\xda".as_slice()),
+        (Some(head.as_slice()), b"\x01\x03\0\0\xd9".as_slice()),
+    ];
+    for (request, headers) in cases {
+        for (data, complete) in [(b"\0\0".as_slice(), true), (b"\0\x01x", false)] {
+            let response = [headers, data].concat();
+            let streams = request
+                .map(|bytes| stream(0, Client, bytes))
+                .into_iter()
+                .chain([stream(0, Server, &response)])
+                .collect();
+            let result = exchanges(streams, Limits::default());
+            let side = result[0].response.as_ref().unwrap();
+            assert_eq!(side.complete, complete, "{:?}", side.issues);
+            assert_eq!(side.data_bytes, u64::from(!complete));
+            if !complete {
+                assert_eq!(side.issues.len(), 1);
+                assert_eq!(side.issues[0].code, Code::UnexpectedResponseContent);
+                assert_eq!(side.issues[0].offset, Some(headers.len() as u64));
+            }
+        }
+    }
+}
+
+#[test]
+fn recognizes_request_trailers_after_unavailable_initial_headers() {
+    use quic::Direction::Client;
+    let request = b"\x01\x03\x02\0\x80\0\x01x\x01\x06\0\0\x21x\x01y";
+    let result = exchanges(vec![stream(0, Client, request)], Limits::default());
+    let side = result[0].request.as_ref().unwrap();
+    assert!(!side.complete);
+    assert_eq!(side.header_sections[1].kind, SectionKind::Trailers);
+    assert_eq!(side.header_sections[1].fields[0].value.as_ref(), b"y");
+    assert_eq!(side.data_bytes, 1);
+    assert_eq!(side.issues.len(), 1);
+    assert_eq!(side.issues[0].code, Code::QpackUnavailable);
+}
+
+#[test]
+fn rejects_headers_on_successful_connect_responses_and_keeps_tunnel_data() {
+    use quic::Direction::{Client, Server};
+    let connect = b"\x01\x0a\0\0\xcf\x50\x05a:443";
+    let tail = b"\x01\x06\0\0\x21x\x01y";
+    for (status, trailers, complete) in
+        [(0xd9, false, true), (0xd9, true, false), (0xdb, true, true)]
+    {
+        let mut response = vec![1, 3, 0, 0, status, 0, 1, b'x'];
+        if trailers {
+            response.extend_from_slice(tail);
+        }
+        let result = exchanges(
+            vec![stream(0, Client, connect), stream(0, Server, &response)],
+            Limits::default(),
+        );
+        assert!(result[0].request.as_ref().unwrap().complete);
+        let side = result[0].response.as_ref().unwrap();
+        assert_eq!(side.complete, complete, "{:?}", side.issues);
+        assert_eq!(side.data_bytes, 1);
+        if trailers && complete {
+            assert_eq!(side.header_sections[1].kind, SectionKind::Trailers);
+        } else if !complete {
+            assert!(
+                side.issues
+                    .iter()
+                    .any(|issue| issue.code == Code::InvalidFramePlacement
+                        && issue.offset == Some(8))
+            );
+            assert!(
+                side.header_sections
+                    .iter()
+                    .all(|section| section.kind != SectionKind::Trailers)
+            );
+        }
+    }
+}
+
+#[test]
+fn checks_extended_connect_against_observed_server_settings() {
+    use quic::Direction::{Client, Server};
+    let request = b"\x01\x15\0\0\xcf\xd7\xc1\x50\x01a\x27\x02:protocol\x01x";
+    for (settings, expected) in [
+        (Some(b"\0\x04\x02\x08\x01".as_slice()), None),
+        (
+            Some(b"\0\x04\x02\x08\0".as_slice()),
+            Some(Code::ExtendedConnectDisabled),
+        ),
+        (
+            Some(b"\0\x04\0".as_slice()),
+            Some(Code::ExtendedConnectDisabled),
+        ),
+        (
+            Some(b"\0\x04\x02\x08\x02".as_slice()),
+            Some(Code::ExtendedConnectSettingsUnavailable),
+        ),
+        (None, Some(Code::ExtendedConnectSettingsUnavailable)),
+    ] {
+        let mut streams = vec![stream(0, Client, request)];
+        if let Some(settings) = settings {
+            streams.push(stream(3, Server, settings));
+        }
+        let result = exchanges(streams, Limits::default());
+        let side = result[0].request.as_ref().unwrap();
+        assert_eq!(side.complete, expected.is_none(), "{:?}", side.issues);
+        assert_eq!(side.issues.len(), usize::from(expected.is_some()));
+        assert_eq!(side.issues.first().map(|issue| issue.code), expected);
+        assert_eq!(side.header_sections[0].method.as_deref(), Some("CONNECT"));
+    }
+}
+
+fn client_critical_issues(streams: Vec<quic::Stream>) -> Vec<Code> {
+    let mut issues = Vec::new();
+    inspect(
+        &connection(streams),
+        None,
+        Limits::default(),
+        &Deadline::new(Duration::MAX),
+        &mut |event| {
+            if let Event::Connection(connection) = event {
+                issues.extend(connection.client.issues.into_iter().map(|issue| issue.code));
+            }
+            Ok(())
+        },
+    )
+    .unwrap();
+    issues
+}
+
+#[test]
+fn reports_qpack_stream_closure_even_at_instruction_boundaries() {
+    use quic::Direction::Client;
+    for (kind, reset) in [(2, false), (3, false), (2, true), (3, true)] {
+        let mut qpack = stream(6, Client, &[kind]);
+        if reset {
+            qpack.complete = false;
+            qpack.reset_error = Some(0x104);
+        }
+        let mut control = stream(2, Client, b"\0\x04\0");
+        control.complete = false;
+        control.final_size = None;
+        let issues = client_critical_issues(vec![control, qpack]);
+        let expected = if kind == 2 {
+            Code::ClosedQpackEncoderStream
+        } else {
+            Code::ClosedQpackDecoderStream
+        };
+        assert_eq!(issues, vec![expected]);
+    }
+}
+
+#[test]
+fn reports_duplicate_qpack_decoder_streams_from_one_peer() {
+    use quic::Direction::{Client, Server};
+    let open = |id, direction| quic::Stream {
+        complete: false,
+        final_size: None,
+        ..stream(id, direction, b"\x03")
+    };
+    let mut control = stream(2, Client, b"\0\x04\0");
+    control.complete = false;
+    control.final_size = None;
+    let streams = vec![control, open(6, Client), open(7, Server)];
+    assert!(client_critical_issues(streams.clone()).is_empty());
+    let issues = client_critical_issues([streams, vec![open(10, Client)]].concat());
+    assert_eq!(issues, vec![Code::DuplicateCriticalStream]);
+}
+
+#[test]
+fn distinguishes_missing_final_response_from_missing_initial_headers() {
+    use quic::Direction::Server;
+    let mut open = stream(8, Server, b"\x01\x03\0\0\xd8");
+    open.complete = false;
+    open.final_size = None;
+    let result = exchanges(
+        vec![
+            stream(0, Server, b""),
+            stream(4, Server, b"\x01\x03\0\0\xd8"),
+            open,
+        ],
+        Limits::default(),
+    );
+    let empty = result[0].response.as_ref().unwrap();
+    assert_eq!(empty.issues[0].code, Code::MissingInitialHeaders);
+    let closed = result[1].response.as_ref().unwrap();
+    assert!(!closed.complete);
+    assert_eq!(closed.header_sections[0].status, Some(103));
+    assert_eq!(closed.issues.len(), 1);
+    assert_eq!(closed.issues[0].code, Code::MissingFinalResponse);
+    assert!(result[2].response.as_ref().unwrap().issues.is_empty());
+}

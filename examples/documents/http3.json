@@ -1,0 +1,209 @@
+{
+  "schema": "packetcraftr.output/v22",
+  "command": "http3",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "connections": [
+      {
+        "connection": 0,
+        "scope": {
+          "id": 0,
+          "interface": 0,
+          "encapsulation": []
+        },
+        "version": 1798521807,
+        "client_endpoint": {
+          "address": "192.0.2.1",
+          "port": 55555
+        },
+        "server_endpoint": {
+          "address": "198.51.100.1",
+          "port": 443
+        },
+        "first_frame": 1,
+        "last_frame": 7,
+        "source_frames": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "source_frames_omitted": 0,
+        "pending_packets": 0,
+        "transport_incomplete": false,
+        "client": {
+          "control_stream": 2,
+          "encoder_stream": 6,
+          "max_table_capacity": 128,
+          "qpack_blocked_streams": 4,
+          "encoder_inserts": 1,
+          "issues": []
+        },
+        "server": {
+          "control_stream": 3,
+          "max_table_capacity": 128,
+          "qpack_blocked_streams": 4,
+          "encoder_inserts": 0,
+          "issues": []
+        }
+      }
+    ],
+    "exchanges": [
+      {
+        "connection": 0,
+        "stream": 0,
+        "request": {
+          "complete": true,
+          "prefix_bytes": 21,
+          "header_sections": [
+            {
+              "kind": "request",
+              "offset": 0,
+              "encoded_bytes": 19,
+              "required_insert_count": 1,
+              "method": "GET",
+              "fields": [
+                {
+                  "name": ":method"
+                },
+                {
+                  "name": ":scheme"
+                },
+                {
+                  "name": ":path"
+                },
+                {
+                  "name": ":authority"
+                }
+              ]
+            }
+          ],
+          "data_frames": 0,
+          "data_bytes": 0,
+          "issues": [],
+          "issues_omitted": 0
+        },
+        "response": {
+          "complete": true,
+          "prefix_bytes": 48,
+          "header_sections": [
+            {
+              "kind": "informational",
+              "offset": 0,
+              "encoded_bytes": 3,
+              "required_insert_count": 0,
+              "status": 103,
+              "fields": [
+                {
+                  "name": ":status"
+                }
+              ]
+            },
+            {
+              "kind": "response",
+              "offset": 5,
+              "encoded_bytes": 3,
+              "required_insert_count": 0,
+              "status": 200,
+              "fields": [
+                {
+                  "name": ":status"
+                }
+              ]
+            },
+            {
+              "kind": "trailers",
+              "offset": 35,
+              "encoded_bytes": 11,
+              "required_insert_count": 0,
+              "fields": [
+                {
+                  "name": "x-test"
+                }
+              ]
+            }
+          ],
+          "data_frames": 1,
+          "data_bytes": 23,
+          "first_data_offset": 10,
+          "issues": [],
+          "issues_omitted": 0
+        }
+      },
+      {
+        "connection": 0,
+        "stream": 4,
+        "request": {
+          "complete": true,
+          "prefix_bytes": 21,
+          "header_sections": [
+            {
+              "kind": "request",
+              "offset": 0,
+              "encoded_bytes": 19,
+              "required_insert_count": 0,
+              "method": "GET",
+              "fields": [
+                {
+                  "name": ":method"
+                },
+                {
+                  "name": ":scheme"
+                },
+                {
+                  "name": ":path"
+                },
+                {
+                  "name": ":authority"
+                }
+              ]
+            }
+          ],
+          "data_frames": 0,
+          "data_bytes": 0,
+          "issues": [],
+          "issues_omitted": 0
+        },
+        "response": {
+          "complete": true,
+          "prefix_bytes": 6,
+          "header_sections": [
+            {
+              "kind": "response",
+              "offset": 0,
+              "encoded_bytes": 4,
+              "required_insert_count": 0,
+              "status": 204,
+              "fields": [
+                {
+                  "name": ":status"
+                }
+              ]
+            }
+          ],
+          "data_frames": 0,
+          "data_bytes": 0,
+          "issues": [],
+          "issues_omitted": 0
+        }
+      }
+    ],
+    "summary": {
+      "frames_read": 7,
+      "input_incomplete": false,
+      "connections": 1,
+      "exchanges": 2,
+      "unknown_alpn": 0,
+      "skipped_alpn": 0,
+      "quic_limit_hits": 0,
+      "quic_evictions": 0,
+      "quic_unassociated_packets": 0,
+      "keylog_records_rejected": 0
+    }
+  },
+  "diagnostics": []
+}

@@ -114,6 +114,26 @@ class DocumentValidationTests(unittest.TestCase):
         self.assertIn('cli.invented', problems[0])
         self.assertEqual(checker.code_problems('doc', document, {'cli.invented'}), [])
 
+    def test_http3_issues_require_a_published_code(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / 'crates/mini/src/output.rs'
+            source.parent.mkdir(parents=True)
+            source.write_text(
+                'published_enum! { pub(super) enum Code from http3::Code {\n'
+                '    Known => "known_issue",\n'
+                '} }\n'
+                'const OTHER: &str = "unpublished_issue";\n')
+            published = checker.published_codes(root)
+        document = dict(VALID, command='http3', result={
+            'exchange': {'request': {'issues': [
+                {'code': 'known_issue'}, {'code': 'unpublished_issue'},
+            ]}},
+        })
+        self.assertEqual(checker.code_problems('doc', document, published), [
+            "doc: /result/exchange/request/issues/1/code: unpublished code 'unpublished_issue'",
+        ])
+
     def test_wrong_identity_document_is_rejected(self):
         problems = checker.document_problems(
             self.validator, 'doc', dict(VALID, schema='packetcraftr.output/v1'))
@@ -266,7 +286,17 @@ class RegistryTests(unittest.TestCase):
 
     def test_agreeing_registry_passes(self):
         root = self.workspace(REGISTRY_SOURCE)
-        self.assertEqual(checker.registry_problems(root, REGISTRY_SCHEMA, checker.load_jsonschema()), [])
+        self.assertEqual(checker.registry_problems(root, REGISTRY_SCHEMA, checker.load_jsonschema(), set()), [])
+
+    def test_registered_examples_outside_output_glob_require_published_codes(self):
+        relative = 'examples/documents/build.json'
+        root = self.workspace(REGISTRY_SOURCE.replace('examples/documents/output-build-success.json', relative))
+        (root / relative).write_text(json.dumps({
+            'command': 'build', 'status': 'success', 'result': {'code': 'cli.unpublished'},
+        }))
+        self.assertEqual(checker.registry_problems(root, REGISTRY_SCHEMA, checker.load_jsonschema(), set()), [
+            f"{relative}: /result/code: unpublished code 'cli.unpublished'",
+        ])
 
     def test_registry_ignores_comments_and_test_only_records(self):
         root = self.workspace(REGISTRY_SOURCE + '\n/*\n' + REGISTRY_SOURCE + '\n*/\n')
@@ -286,22 +316,22 @@ impl StreamRecord for CommentedRecord {
 }
 */
 ''')
-        self.assertEqual(checker.registry_problems(root, REGISTRY_SCHEMA, checker.load_jsonschema()), [])
+        self.assertEqual(checker.registry_problems(root, REGISTRY_SCHEMA, checker.load_jsonschema(), set()), [])
         output.write_text(source.replace('pub struct Report {}', '/* pub struct Report {} */'))
-        problems = checker.registry_problems(root, REGISTRY_SCHEMA, checker.load_jsonschema())
+        problems = checker.registry_problems(root, REGISTRY_SCHEMA, checker.load_jsonschema(), set())
         self.assertEqual(len(problems), 1)
         self.assertIn('rust type crate::output::build::Report is not defined', problems[0])
 
     def test_reports_unused_schema_definitions(self):
         root = self.workspace(REGISTRY_SOURCE.replace('buildSuccess"', 'goneSuccess"'))
-        problems = checker.registry_problems(root, REGISTRY_SCHEMA, checker.load_jsonschema())
+        problems = checker.registry_problems(root, REGISTRY_SCHEMA, checker.load_jsonschema(), set())
         self.assertTrue(any('no such schema definition' in problem for problem in problems))
         self.assertTrue(any('buildSuccess claims' in problem for problem in problems))
 
     def test_unregistered_stream_type_is_reported(self):
         source = REGISTRY_SOURCE.replace('"crate::output::build::PacketEvent", ', '')
         root = self.workspace(source)
-        problems = checker.registry_problems(root, REGISTRY_SCHEMA, checker.load_jsonschema())
+        problems = checker.registry_problems(root, REGISTRY_SCHEMA, checker.load_jsonschema(), set())
         self.assertTrue(any('PacketEvent' in problem for problem in problems))
 
     def registered_at(self, module):
@@ -311,7 +341,7 @@ impl StreamRecord for CommentedRecord {
         path = root / checker.CLI_SRC / f'{relative}.rs'
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text('pub struct Report {}\n')
-        return checker.registry_problems(root, REGISTRY_SCHEMA, checker.load_jsonschema())
+        return checker.registry_problems(root, REGISTRY_SCHEMA, checker.load_jsonschema(), set())
 
     def test_published_type_in_a_command_output_module_passes(self):
         self.assertEqual(self.registered_at('crate::commands::packet::build::output'), [])

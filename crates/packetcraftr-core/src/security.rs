@@ -13,7 +13,7 @@ pub mod scan;
 /// Output contract identifier that PacketcraftR emits and that security inputs
 /// accept. Identifiers are never reused; see
 /// docs/adr/0003-never-reuse-output-contract-identifiers.md.
-pub const OUTPUT_SCHEMA: &str = "packetcraftr.output/v21";
+pub const OUTPUT_SCHEMA: &str = "packetcraftr.output/v22";
 /// Releases 0.3.0 to 0.5.0-beta.2 and later unreleased builds each emitted this
 /// identifier with a different schema, so no single schema can validate it.
 pub const AMBIGUOUS_OUTPUT_SCHEMA: &str = "packetcraftr.output/v1";

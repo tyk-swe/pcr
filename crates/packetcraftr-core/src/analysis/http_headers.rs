@@ -294,7 +294,8 @@ pub(crate) fn validate<'a>(
                     || authority
                         .rsplit(|b| *b == b':')
                         .next()
-                        .is_none_or(|port| port.is_empty() || !port.iter().all(u8::is_ascii_digit))
+                        .and_then(|port| std::str::from_utf8(port).ok())
+                        .is_none_or(|port| port.parse::<u16>().is_err())
                 {
                     return Err("CONNECT authority requires a valid host and explicit port");
                 }
@@ -328,14 +329,35 @@ pub(crate) fn validate<'a>(
 pub(crate) fn response_status<'a>(
     fields: impl IntoIterator<Item = (&'a Bytes, &'a Bytes)>,
 ) -> Option<u16> {
-    let mut statuses = fields
-        .into_iter()
-        .filter_map(|(name, value)| (name.as_ref() == b":status").then_some(value));
-    let value = statuses.next()?;
-    if statuses.next().is_some() {
-        return None;
+    parse_status(unique_value(fields, b":status")?).ok()
+}
+
+pub(crate) fn recover<'a>(
+    role: FieldRole,
+    fields: impl IntoIterator<Item = (&'a Bytes, &'a Bytes)>,
+) -> Meta {
+    let mut meta = Meta::default();
+    match role {
+        FieldRole::Request => {
+            meta.method = unique_value(fields, b":method")
+                .filter(|value| !value.is_empty() && value.iter().all(|b| token(*b)))
+                .cloned();
+        }
+        FieldRole::Response => meta.status = response_status(fields),
+        FieldRole::Trailer => {}
     }
-    parse_status(value).ok()
+    meta
+}
+
+fn unique_value<'a>(
+    fields: impl IntoIterator<Item = (&'a Bytes, &'a Bytes)>,
+    target: &[u8],
+) -> Option<&'a Bytes> {
+    let mut values = fields
+        .into_iter()
+        .filter_map(|(name, value)| (name.as_ref() == target).then_some(value));
+    let value = values.next()?;
+    values.next().is_none().then_some(value)
 }
 
 fn parse_status(value: &[u8]) -> Result<u16, &'static str> {

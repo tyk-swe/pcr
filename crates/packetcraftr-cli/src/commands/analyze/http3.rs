@@ -22,6 +22,9 @@ use crate::resources::{Enabled, Settings};
 use super::quic::{arguments::StreamRetentionArgs, keylog};
 use output::{Event, Report, Summary, Terminal};
 
+// Aggregate items are nested inside the envelope, result object and evidence array.
+const REPORT_ITEM_DEPTH: usize = 3;
+
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
     #[arg(help = "PCAP/PCAPNG input; - reads redirected stdin. gzip and Zstd are detected.")]
@@ -47,7 +50,7 @@ pub(crate) struct Args {
         help = "Include decoded header values, which can contain sensitive information"
     )]
     include_header_values: bool,
-    #[arg(long, default_value_t = 64 * 1024 * 1024, help = "Maximum serialized HTTP/3 evidence bytes")]
+    #[arg(long, default_value_t = 64 * 1024 * 1024, help = "Maximum rendered HTTP/3 evidence bytes")]
     max_application_output_bytes: usize,
     #[command(flatten)]
     stream_retention: StreamRetentionArgs,
@@ -130,7 +133,8 @@ fn run(args: &Args, invocation: &Invocation) -> Result<(), CliError> {
         args,
         deadline: &deadline,
         output: offline_analysis::EventOutput::new(invocation, budget.get()),
-        retained: Vec::new(),
+        connections: Vec::new(),
+        exchanges: Vec::new(),
         summary: Summary::default(),
     };
     let run = analysis::run(&mut reader, setup.registry.clone(), &options, |record| {
@@ -165,7 +169,11 @@ fn run(args: &Args, invocation: &Invocation) -> Result<(), CliError> {
         Terminal {
             summary: state.summary,
         },
-        |terminal| Report::new(state.retained, terminal.summary),
+        |terminal| Report {
+            connections: state.connections,
+            exchanges: state.exchanges,
+            summary: terminal.summary,
+        },
         rendering::summary,
     )
 }
@@ -174,7 +182,8 @@ struct State<'a> {
     args: &'a Args,
     deadline: &'a Deadline,
     output: offline_analysis::EventOutput<'a>,
-    retained: Vec<Event>,
+    connections: Vec<output::Connection>,
+    exchanges: Vec<output::Exchange>,
     summary: Summary,
 }
 
@@ -231,7 +240,22 @@ impl State<'_> {
                 }
             }
         };
-        self.output
-            .emit(event, &mut self.retained, rendering::event)
+        match self.output.format() {
+            Format::Json => match event {
+                Event::Connection { connection } => self.output.retain_pretty_item(
+                    *connection,
+                    &mut self.connections,
+                    REPORT_ITEM_DEPTH,
+                ),
+                Event::Exchange { exchange } => self.output.retain_pretty_item(
+                    *exchange,
+                    &mut self.exchanges,
+                    REPORT_ITEM_DEPTH,
+                ),
+            },
+            Format::Ndjson => self.output.emit_ndjson(event),
+            Format::Text => self.output.emit_text(&rendering::event(&event)),
+            other => other.unreachable(),
+        }
     }
 }

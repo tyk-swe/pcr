@@ -2,8 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use super::model::Header;
-use crate::{analysis::http_headers, protocol::application::http::token};
-use bytes::Bytes;
+use crate::analysis::http_headers;
 
 pub(crate) use http_headers::{FieldRole, Meta};
 pub(super) use http_headers::{
@@ -19,22 +18,8 @@ pub(crate) fn validate(role: FieldRole, fields: &[Header]) -> Result<Meta, &'sta
     Ok(meta)
 }
 
-/// Recover only an unambiguous, syntactically valid response status after
-/// other header semantics failed, so informational/final sequencing survives.
-pub(crate) fn response_status(fields: &[Header]) -> Option<u16> {
-    http_headers::response_status(fields.iter().map(|field| (&field.name, &field.value)))
-}
-
-/// Preserve method-dependent response semantics after unrelated field errors.
-pub(crate) fn request_method(fields: &[Header]) -> Option<Bytes> {
-    let mut methods = fields
-        .iter()
-        .filter(|field| field.name.as_ref() == b":method");
-    let value = &methods.next()?.value;
-    if methods.next().is_some() || value.is_empty() || !value.iter().all(|b| token(*b)) {
-        return None;
-    }
-    Some(value.clone())
+pub(crate) fn recover(role: FieldRole, fields: &[Header]) -> Meta {
+    http_headers::recover(role, fields.iter().map(|field| (&field.name, &field.value)))
 }
 
 #[cfg(test)]

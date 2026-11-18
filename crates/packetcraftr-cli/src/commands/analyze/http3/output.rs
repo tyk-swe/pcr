@@ -275,23 +275,6 @@ pub(super) struct Report {
     pub summary: Summary,
 }
 
-impl Report {
-    pub(super) fn new(events: Vec<Event>, summary: Summary) -> Self {
-        let (mut connections, mut exchanges) = (Vec::new(), Vec::new());
-        for event in events {
-            match event {
-                Event::Connection { connection } => connections.push(*connection),
-                Event::Exchange { exchange } => exchanges.push(*exchange),
-            }
-        }
-        Self {
-            connections,
-            exchanges,
-            summary,
-        }
-    }
-}
-
 #[derive(Serialize)]
 #[serde(untagged)]
 pub(super) enum Event {

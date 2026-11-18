@@ -61,7 +61,8 @@ RUNTIME_COMMANDS = (
     RuntimeCommand(('--output', 'json', 'analyze', 'dns', 'examples/captures/dns-response.pcap'), True),
     RuntimeCommand(('--output', 'ndjson', 'analyze', 'http', 'examples/captures/http-stream.pcap'), True),
     RuntimeCommand(('--output', 'json', 'analyze', 'http3', 'examples/captures/http3-demo.pcapng',
-                    '--keylog', 'examples/captures/http3-demo.keys'), True),
+                    '--keylog', 'examples/captures/http3-demo.keys',
+                    '--max-quic-stream-bytes', '32'), True),
     RuntimeCommand(('--output', 'ndjson', 'analyze', 'http3', 'examples/captures/http3-demo.pcapng',
                     '--keylog', 'examples/captures/http3-demo.keys', '--include-header-values'), True),
     RuntimeCommand(('--output', 'json', 'analyze', 'stats', 'examples/captures/dns-response.pcap'), True),
@@ -146,6 +147,8 @@ def parsed_records(label: str, text: str, ndjson: bool) -> tuple[list[tuple[str,
 
 CODE_PATTERN = re.compile(r'^[a-z]+\.[a-z0-9_.]+$')
 CODE_LITERAL = re.compile(r'"((?:[a-z][a-z0-9]*)\.[a-z0-9_.]+)"')
+HTTP3_CODE_ENUM = re.compile(r'published_enum!\s*\{[^{}]*\benum Code from http3::Code\s*\{([^{}]*)\}')
+ENUM_VALUE = re.compile(r'=>\s*"([a-z][a-z0-9_]*)"')
 
 
 def published_codes(root: Path) -> set[str]:
@@ -161,22 +164,25 @@ def published_codes(root: Path) -> set[str]:
             continue
         text = blank_comments(without_test_items(path.read_text(encoding='utf-8', errors='replace')))
         codes.update(CODE_LITERAL.findall(text))
+        if declaration := HTTP3_CODE_ENUM.search(text):
+            codes.update(ENUM_VALUE.findall(declaration[1]))
     return codes
 
 
 def code_problems(label: str, record: Any, published: set[str]) -> list[str]:
     problems: list[str] = []
+    http3 = isinstance(record, dict) and record.get('command') == 'http3'
 
-    def walk(node: Any, trail: str) -> None:
+    def walk(node: Any, trail: str, issue: bool = False) -> None:
         if isinstance(node, dict):
             code = node.get('code')
-            if isinstance(code, str) and CODE_PATTERN.match(code) and code not in published:
+            if isinstance(code, str) and (issue or CODE_PATTERN.match(code)) and code not in published:
                 problems.append(f'{label}: {trail}/code: unpublished code {code!r}')
             for key, value in node.items():
                 walk(value, f'{trail}/{key}')
         elif isinstance(node, list):
             for index, value in enumerate(node):
-                walk(value, f'{trail}/{index}')
+                walk(value, f'{trail}/{index}', http3 and trail.endswith('/issues'))
 
     walk(record, '')
     return problems[:MAX_PROBLEMS_PER_DOCUMENT]
@@ -192,10 +198,14 @@ def validated(validator: Any, label: str, text: str, ndjson: bool,
     return problems
 
 
-def example_problems(root: Path, validator: Any, published: set[str]) -> list[str]:
+def output_example_paths(root: Path) -> list[Path]:
     documents = root / 'examples' / 'documents'
-    paths = sorted([*documents.glob('output-*.json'), *documents.glob('output-*.ndjson')])
-    problems = [] if paths else [f'{documents}: no output examples found']
+    return sorted([*documents.glob('output-*.json'), *documents.glob('output-*.ndjson')])
+
+
+def example_problems(root: Path, validator: Any, published: set[str]) -> list[str]:
+    paths = output_example_paths(root)
+    problems = [] if paths else [f'{root / "examples/documents"}: no output examples found']
     for path in paths:
         text = path.read_bytes().decode('utf-8')
         problems.extend(validated(validator, str(path.relative_to(root)), text,
@@ -326,7 +336,7 @@ def _type_defined(root: Path, rust_type: str, sources: dict[Path, str]) -> bool:
     return any(pattern.search(sources.get(path, '')) for path in candidates)
 
 
-def registry_problems(root: Path, schema: Any, jsonschema: Any) -> list[str]:
+def registry_problems(root: Path, schema: Any, jsonschema: Any, published: set[str]) -> list[str]:
     """The contract registry must agree with the schema, sources, and examples."""
     problems: list[str] = []
     sources = {path: blank_comments(without_test_items(path.read_text(encoding='utf-8')))
@@ -336,6 +346,7 @@ def registry_problems(root: Path, schema: Any, jsonschema: Any) -> list[str]:
         return [f'{REGISTRY}: no PublishedType rows found']
     definitions = schema.get('$defs', {})
     examples: dict[str, list[Any]] = {}
+    output_examples = set(output_example_paths(root))
 
     def example_records(relative: str) -> list[Any]:
         if relative not in examples:
@@ -344,9 +355,12 @@ def registry_problems(root: Path, schema: Any, jsonschema: Any) -> list[str]:
                 examples[relative] = []
             else:
                 text = path.read_text(encoding='utf-8')
-                examples[relative] = [strict_json(line) for line in text.splitlines()
-                                       if line.strip()] if relative.endswith('.ndjson') \
-                    else [strict_json(text)]
+                records, parse_problems = parsed_records(relative, text, path.suffix == '.ndjson')
+                examples[relative] = [record for _, record in records]
+                if path not in output_examples:
+                    problems.extend(parse_problems)
+                    for label, record in records:
+                        problems.extend(code_problems(label, record, published))
         return examples[relative]
 
     claimed: dict[str, set[str]] = {}
@@ -401,8 +415,8 @@ def check(root: Path, binary: Path | None = None) -> list[str]:
     problems = check_identity(schema, identity)
     problems.extend(check_release_assets(read_json(root / RELEASE_ASSETS)['source_assets'], identity))
     validator = load_validator(schema)
-    problems.extend(registry_problems(root, schema, load_jsonschema()))
     published = published_codes(root)
+    problems.extend(registry_problems(root, schema, load_jsonschema(), published))
     problems.extend(example_problems(root, validator, published))
     if binary is not None:
         problems.extend(runtime_problems(binary, root, validator, published))

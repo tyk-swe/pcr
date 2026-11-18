@@ -60,6 +60,14 @@ enum Reference {
     Name(u64, Bytes),
 }
 
+impl Reference {
+    fn index(&self) -> u64 {
+        match self {
+            Self::Indexed(index) | Self::Name(index, _) => *index,
+        }
+    }
+}
+
 #[derive(Debug)]
 enum Line {
     Field(Field),
@@ -118,9 +126,7 @@ impl Line {
             Self::Relative(reference) => (reference, false),
             Self::PostBase(reference) => (reference, true),
         };
-        let relative = match reference {
-            Reference::Indexed(index) | Reference::Name(index, _) => *index,
-        };
+        let relative = reference.index();
         let absolute = if post_base {
             base.checked_add(relative)?
         } else {
@@ -146,6 +152,11 @@ pub(crate) struct Section {
     pub size: usize,
 }
 
+enum Candidate {
+    Section(Section),
+    Oversized,
+}
+
 pub(crate) fn decode(
     input: &[u8],
     history: &History,
@@ -162,6 +173,14 @@ pub(crate) fn decode(
         work(1)?;
         let maximum = remaining.checked_sub(32).ok_or(Failure::Limit)?;
         let line = Line::read(&mut reader, maximum, work)?;
+        let exceeds_required = match &line {
+            Line::PostBase(reference) => !negative || reference.index() > delta,
+            Line::Relative(reference) => !negative && reference.index() < delta,
+            Line::Field(_) => false,
+        };
+        if exceeds_required {
+            return Err(Failure::Invalid);
+        }
         remaining = remaining
             .checked_sub(line.minimum_size())
             .ok_or(Failure::Limit)?;
@@ -207,15 +226,19 @@ pub(crate) fn decode(
             required.checked_add(delta)
         };
         let Some(base) = base else { continue };
-        let Some(section) = resolve(&lines, history, maximum, base, required, work)? else {
+        let Some(candidate) = resolve(&lines, history, maximum, base, required, work)? else {
             continue;
         };
         if selected.is_some() {
             return Err(Failure::Ambiguous);
         }
-        selected = Some(section);
+        selected = Some(candidate);
     }
-    selected.ok_or(Failure::Unavailable)
+    match selected {
+        Some(Candidate::Section(section)) => Ok(section),
+        Some(Candidate::Oversized) => Err(Failure::Limit),
+        None => Err(Failure::Unavailable),
+    }
 }
 
 fn resolve(
@@ -225,7 +248,7 @@ fn resolve(
     base: u64,
     required: u64,
     work: &mut Work<'_>,
-) -> Result<Option<Section>, Failure> {
+) -> Result<Option<Candidate>, Failure> {
     let mut fields = Vec::new();
     let mut largest = 0;
     let mut size = 0;
@@ -244,13 +267,13 @@ fn resolve(
         return Ok(None);
     }
     if size > maximum {
-        return Err(Failure::Limit);
+        return Ok(Some(Candidate::Oversized));
     }
-    Ok(Some(Section {
+    Ok(Some(Candidate::Section(Section {
         fields,
         required_insert_count: required,
         size,
-    }))
+    })))
 }
 
 #[derive(Clone, Copy)]

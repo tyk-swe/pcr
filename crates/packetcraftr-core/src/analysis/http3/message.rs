@@ -221,6 +221,9 @@ impl<'a> Message<'a> {
                     side.issue(Code::InvalidFramePlacement, Some(offset));
                 }
                 1 => {
+                    if matches!(stage, Stage::Trailers) {
+                        side.issue(Code::InvalidFramePlacement, Some(offset));
+                    }
                     let Some(bytes) = remaining.checked_sub(SECTION_CHARGE) else {
                         side.issue(Code::Limit, Some(offset));
                         return Ok(Progress::Finished);
@@ -236,9 +239,6 @@ impl<'a> Message<'a> {
                         status: None,
                         fields: Vec::new(),
                     };
-                    if matches!(stage, Stage::Trailers) {
-                        side.issue(Code::InvalidFramePlacement, Some(offset));
-                    }
                     match qpack::decode(frame.data, history, maximum, &mut |cost| work.step(cost)) {
                         Ok(decoded) => {
                             *remaining -= decoded.size;
@@ -308,22 +308,16 @@ impl<'a> Message<'a> {
             }
         }
         if let Some(length) = declared_length {
-            let successful_connect = request_method == Some("CONNECT")
-                && length
-                    .status
-                    .is_some_and(|status| (200..300).contains(&status));
-            let body_length_applies = length.status.is_none()
-                || (length.status != Some(304)
-                    && request_method != Some("HEAD")
-                    && (request_method.is_some() || side.data_bytes > 0));
             let content_bytes = if matches!(stage, Stage::Tunnel) {
                 0
             } else {
                 side.data_bytes
             };
-            if successful_connect {
-                side.issue(Code::InvalidHeaders, Some(length.offset));
-            } else if stream.complete && body_length_applies && content_bytes != length.bytes {
+            let body_length_applies = length.status.is_none()
+                || (length.status != Some(304)
+                    && request_method != Some("HEAD")
+                    && (request_method.is_some() || side.data_bytes > 0));
+            if stream.complete && body_length_applies && content_bytes != length.bytes {
                 side.issue(Code::ContentLengthMismatch, Some(length.offset));
             }
         }
@@ -371,15 +365,17 @@ fn classify(
     request_method: Option<&str>,
     connect_enabled: Option<bool>,
 ) -> Result<Option<DeclaredLength>, Code> {
-    let fields = section
-        .fields
-        .iter()
-        .map(|field| (&field.name, &field.value));
+    let fields = || {
+        section
+            .fields
+            .iter()
+            .map(|field| (&field.name, &field.value))
+    };
     let role = match stage {
         Stage::Unknown => {
             if direction == Direction::Server {
                 section.status =
-                    http_headers::response_status(fields).filter(|status| *status != 101);
+                    http_headers::response_status(fields()).filter(|status| *status != 101);
             }
             return Ok(None);
         }
@@ -393,31 +389,32 @@ fn classify(
         Stage::Initial if direction == Direction::Client => FieldRole::Request,
         Stage::Initial | Stage::Informational => FieldRole::Response,
     };
-    let meta = match http_headers::validate(role, fields) {
-        Ok(meta) if meta.status != Some(101) => meta,
-        _ => {
-            *stage = after_unreadable_headers(stage, direction);
-            return Err(Code::InvalidHeaders);
-        }
+    let (meta, malformed) = match http_headers::validate(role, fields()) {
+        Ok(meta) if meta.status != Some(101) => (meta, false),
+        _ => (http_headers::recover(role, fields()), true),
     };
-    section.status = meta.status;
-    section.kind = match (role, meta.status) {
+    section.status = meta.status.filter(|status| *status != 101);
+    section.kind = match (role, section.status) {
         (FieldRole::Trailer, _) => SectionKind::Trailers,
         (FieldRole::Response, Some(100..=199)) => {
             *stage = Stage::Informational;
             SectionKind::Informational
         }
-        (FieldRole::Response, status) => {
-            *stage = if request_method == Some("CONNECT") && matches!(status, Some(200..=299)) {
+        (FieldRole::Response, Some(status)) => {
+            *stage = if request_method == Some("CONNECT") && (200..=299).contains(&status) {
                 Stage::Tunnel
             } else {
                 Stage::Body {
                     content_forbidden: request_method == Some("HEAD")
-                        || status.is_some_and(final_status_forbids_content),
-                    trailers_forbidden: status.is_some_and(final_status_forbids_trailers),
+                        || final_status_forbids_content(status),
+                    trailers_forbidden: final_status_forbids_trailers(status),
                 }
             };
             SectionKind::Response
+        }
+        (FieldRole::Response, None) => {
+            *stage = Stage::Unknown;
+            SectionKind::Unclassified
         }
         (FieldRole::Request, _) => {
             section.method = meta
@@ -436,6 +433,9 @@ fn classify(
             SectionKind::Request
         }
     };
+    if malformed || (matches!(stage, Stage::Tunnel) && meta.content_length.is_some()) {
+        return Err(Code::InvalidHeaders);
+    }
     if meta.protocol {
         match connect_enabled {
             Some(true) => {}

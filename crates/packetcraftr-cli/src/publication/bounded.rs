@@ -4,6 +4,7 @@
 use std::io::{self, Write};
 
 use serde::Serialize;
+use serde_json::ser::{Formatter, PrettyFormatter};
 
 use super::json::serialization_error;
 use crate::errors::CliError;
@@ -90,14 +91,42 @@ impl<W: Write> Write for Limited<W> {
 pub(crate) fn bounded_json_len(
     value: &impl Serialize,
     limit: usize,
-    formatter: impl serde_json::ser::Formatter,
+    formatter: impl Formatter,
 ) -> Result<usize, BoundedJsonError> {
     let mut counter = Limited::counter(limit);
-    value.serialize(&mut serde_json::Serializer::with_formatter(
-        &mut counter,
-        formatter,
-    ))?;
+    serialize(value, &mut counter, formatter)?;
     Ok(limit - counter.remaining)
+}
+
+pub(crate) fn bounded_pretty_item_len(
+    value: &impl Serialize,
+    limit: usize,
+    depth: usize,
+    first: bool,
+) -> Result<usize, BoundedJsonError> {
+    let mut formatter = PrettyFormatter::new();
+    for _ in 0..depth {
+        formatter
+            .begin_array(&mut io::sink())
+            .map_err(serde_json::Error::io)?;
+    }
+    let mut counter = Limited::counter(limit);
+    formatter
+        .begin_array_value(&mut counter, first)
+        .map_err(serde_json::Error::io)?;
+    serialize(value, &mut counter, formatter)?;
+    Ok(limit - counter.remaining)
+}
+
+fn serialize(
+    value: &impl Serialize,
+    counter: &mut Limited<io::Sink>,
+    formatter: impl Formatter,
+) -> Result<(), BoundedJsonError> {
+    value.serialize(&mut serde_json::Serializer::with_formatter(
+        counter, formatter,
+    ))?;
+    Ok(())
 }
 
 #[cfg(test)]

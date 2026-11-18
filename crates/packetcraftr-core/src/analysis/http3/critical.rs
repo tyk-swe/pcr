@@ -64,30 +64,20 @@ impl<'a> Streams<'a> {
                 .collect(),
             ..CriticalStreams::default()
         };
-        let result = match self.control.first {
-            _ if self.control.duplicate => Ok(None),
-            None => Err(Code::MissingControlStream),
-            Some((stream, _)) if conflicting(stream) => Err(Code::ConflictingStream),
-            Some((stream, offset)) => match settings(&prefix(stream)[offset..], work) {
-                Ok(settings) => Ok(Some(settings)),
-                Err(qpack::Failure::Interrupted(error)) => return Err(error),
-                Err(qpack::Failure::Limit) => Err(Code::Limit),
-                Err(qpack::Failure::Truncated) if !stream.complete => Err(Code::MissingSettings),
-                Err(_) => Err(Code::InvalidSettings),
-            },
+        let (settings, issue) = match self.control.first {
+            _ if self.control.duplicate => (None, None),
+            None => (None, Some(Code::MissingControlStream)),
+            Some((stream, _)) if conflicting(stream) => (None, Some(Code::ConflictingStream)),
+            Some((stream, offset)) => read_control(stream, offset, work)?,
         };
-        let connect_enabled = match result {
-            Ok(Some(settings)) => {
-                report.max_table_capacity = Some(settings.capacity);
-                report.qpack_blocked_streams = Some(settings.blocked_streams);
-                Some(settings.connect_enabled)
-            }
-            Err(code) => {
-                report.issues.push(Issue { code, offset: None });
-                None
-            }
-            Ok(None) => None,
-        };
+        if let Some(code) = issue {
+            report.issues.push(Issue { code, offset: None });
+        }
+        let connect_enabled = settings.map(|settings| {
+            report.max_table_capacity = Some(settings.capacity);
+            report.qpack_blocked_streams = Some(settings.blocked_streams);
+            settings.connect_enabled
+        });
         Ok(Context {
             report,
             connect_enabled,
@@ -156,9 +146,28 @@ struct Settings {
     connect_enabled: bool,
 }
 
-fn settings(input: &[u8], work: &mut Work<'_>) -> Result<Settings, qpack::Failure> {
-    let mut control = Reader::new(input);
-    let settings_frame = frame(&mut control).map_err(|_| qpack::Failure::Truncated)?;
+fn read_control(
+    stream: &Stream,
+    offset: usize,
+    work: &mut Work<'_>,
+) -> Result<(Option<Settings>, Option<Code>), BoundaryError> {
+    let mut control = Reader::new(&prefix(stream)[offset..]);
+    let (settings, error) = match settings(&mut control, work) {
+        Ok(settings) => (Some(settings), check_control_tail(&mut control, work).err()),
+        Err(error) => (None, Some(error)),
+    };
+    let issue = match error {
+        None => None,
+        Some(qpack::Failure::Interrupted(error)) => return Err(error),
+        Some(qpack::Failure::Limit) => Some(Code::Limit),
+        Some(qpack::Failure::Truncated) if !stream.complete => Some(Code::MissingSettings),
+        Some(_) => Some(Code::InvalidSettings),
+    };
+    Ok((settings, issue))
+}
+
+fn settings(control: &mut Reader<'_>, work: &mut Work<'_>) -> Result<Settings, qpack::Failure> {
+    let settings_frame = frame(control).map_err(|_| qpack::Failure::Truncated)?;
     if settings_frame.kind != 4 {
         return Err(qpack::Failure::Invalid);
     }
@@ -180,14 +189,18 @@ fn settings(input: &[u8], work: &mut Work<'_>) -> Result<Settings, qpack::Failur
             _ => {}
         }
     }
+    Ok(settings)
+}
+
+fn check_control_tail(control: &mut Reader<'_>, work: &mut Work<'_>) -> Result<(), qpack::Failure> {
     while control.left() > 0 {
         work.step(1)?;
-        let Ok(frame) = frame(&mut control) else {
+        let Ok(frame) = frame(control) else {
             break;
         };
         if matches!(frame.kind, 0..=2 | 4..=6 | 8 | 9) {
             return Err(qpack::Failure::Invalid);
         }
     }
-    Ok(settings)
+    Ok(())
 }

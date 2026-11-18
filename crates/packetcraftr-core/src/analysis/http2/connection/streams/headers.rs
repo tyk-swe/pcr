@@ -8,7 +8,7 @@ use crate::analysis::http_headers::{final_status_forbids_content, final_status_f
 use crate::analysis::http2::Error;
 use crate::analysis::http2::IssueCode;
 use crate::analysis::http2::budget;
-use crate::analysis::http2::headers::{FieldRole, validate};
+use crate::analysis::http2::headers::{FieldRole, recover, validate};
 use crate::analysis::http2::model::{Certainty, IssueScope, Status};
 use crate::analysis::http2::side::Side;
 use crate::analysis::http2::stream::{Decoded, HeaderSection, Phase as StreamPhase};
@@ -323,19 +323,7 @@ impl ConnectionState {
                     .evidence(block.clone(), block_sources.clone()),
                 )?;
                 failure = Some(Status::Malformed);
-                super::super::super::headers::Meta {
-                    method: if role == FieldRole::Request {
-                        super::super::super::headers::request_method(&headers)
-                    } else {
-                        None
-                    },
-                    status: if role == FieldRole::Response {
-                        super::super::super::headers::response_status(&headers)
-                    } else {
-                        None
-                    },
-                    ..Default::default()
-                }
+                recover(role, &headers)
             }
         };
         if side == Side::Server

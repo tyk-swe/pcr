@@ -165,6 +165,11 @@ fn distinguishes_missing_and_wrapped_qpack_history_while_decoding_static_section
     assert_eq!(field.value.as_ref(), b"a");
 
     let wrapped = b"\x02\x3f\x21\x41x\x01a\x41x\x01b\x41x\x01c\x41x\x01d\x41x\x01e";
+    let uneven = b"\x02\x3f\x21\x41x\x02aa\x41x\x01b\x41x\x01c\x41x\x01d\x41x\x01e";
+    let limit = Limits {
+        max_header_section_bytes: 201,
+        ..Limits::default()
+    };
     for (encoder, limits, expected) in [
         (
             b"\x02\x3f\x21".as_slice(),
@@ -172,6 +177,8 @@ fn distinguishes_missing_and_wrapped_qpack_history_while_decoding_static_section
             Code::QpackUnavailable,
         ),
         (wrapped.as_slice(), Limits::default(), Code::QpackAmbiguous),
+        (b"\x02\x3f\x21\x41x\x02aa".as_slice(), limit, Code::Limit),
+        (uneven.as_slice(), limit, Code::QpackAmbiguous),
         (
             wrapped.as_slice(),
             Limits {
@@ -188,6 +195,22 @@ fn distinguishes_missing_and_wrapped_qpack_history_while_decoding_static_section
         let static_request = result[1].request.as_ref().unwrap();
         assert!(static_request.complete);
         assert_eq!(static_request.header_sections[0].kind, SectionKind::Request);
+    }
+}
+
+#[test]
+fn rejects_references_at_or_above_the_required_insert_count_without_history() {
+    use quic::Direction::Client;
+    for headers in [
+        b"\x01\x03\x02\0\x10".as_slice(),
+        b"\x01\x05\x02\x01\0\x01x",
+        b"\x01\x03\x02\x80\x11",
+        b"\x01\x03\x02\x01\x80",
+    ] {
+        let result = exchanges(vec![stream(0, Client, headers)], Limits::default());
+        let issues = &result[0].request.as_ref().unwrap().issues;
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0].code, Code::QpackInvalid);
     }
 }
 
@@ -265,9 +288,38 @@ fn distinguishes_an_uninspected_stream_from_invalid_or_misplaced_headers() {
 }
 
 #[test]
+fn reports_headers_after_trailers_when_the_evidence_budget_is_exhausted() {
+    use quic::Direction::Client;
+    let head = b"\x01\x08\0\0\xd1\xd7\xc1\x50\x01a";
+    let trailers = b"\x01\x06\0\0\x21x\x01y";
+    let request = [head.as_slice(), trailers, trailers].concat();
+    let result = exchanges(
+        vec![stream(0, Client, &request)],
+        Limits {
+            max_exchange_bytes: 360,
+            ..Limits::default()
+        },
+    );
+    let side = result[0].request.as_ref().unwrap();
+    assert_eq!(side.header_sections.len(), 2);
+    assert_eq!(side.header_sections[1].kind, SectionKind::Trailers);
+    let issues: Vec<_> = side
+        .issues
+        .iter()
+        .map(|issue| (issue.code, issue.offset))
+        .collect();
+    let offset = Some((head.len() + trailers.len()) as u64);
+    assert_eq!(
+        issues,
+        [(Code::InvalidFramePlacement, offset), (Code::Limit, offset)]
+    );
+}
+
+#[test]
 fn recovers_qpack_sections_across_duplicate_insertion_and_eviction() {
     use quic::Direction::{Client, Server};
-    // RFC 9204 Appendix B.2–B.5 (June 2022) supplies the encoder bytes and references.
+    // Encoder bytes and references from RFC 9204 Appendix B.2–B.5 (June 2022).
+    // See the IETF Trust Revised BSD terms in THIRD_PARTY_NOTICES.md.
     let settings = b"\0\x04\x05\x01\x40\xdc\x07\x02";
     let encoder = b"\x02\x3f\xbd\x01\xc0\x0fwww.example.com\xc1\x0c/sample/path\x4acustom-key\x0ccustom-value\x02\x81\x0dcustom-value2";
     let exchanges = exchanges(
@@ -369,6 +421,32 @@ fn retains_a_decoded_status_after_an_unavailable_header_section() {
 }
 
 #[test]
+fn retains_decoded_methods_and_statuses_after_unrelated_field_errors() {
+    use quic::Direction::{Client, Server};
+    let head = b"\x01\x0c\0\0\xd2\xd7\xc1\x50\x01a\x21X\x01y";
+    let result = exchanges(
+        vec![
+            stream(0, Client, head),
+            stream(0, Server, b"\x01\x03\0\0\xd9\0\x01x"),
+            stream(4, Server, b"\x01\x07\0\0\xd8\x21X\x01y"),
+        ],
+        Limits::default(),
+    );
+    let request = result[0].request.as_ref().unwrap();
+    assert_eq!(request.header_sections[0].method.as_deref(), Some("HEAD"));
+    assert_eq!(request.issues[0].code, Code::InvalidHeaders);
+    let response = result[0].response.as_ref().unwrap();
+    assert_eq!(response.issues[0].code, Code::UnexpectedResponseContent);
+
+    let response = result[1].response.as_ref().unwrap();
+    let section = &response.header_sections[0];
+    assert_eq!(section.status, Some(103));
+    assert_eq!(section.kind, SectionKind::Informational);
+    assert_eq!(response.issues[0].code, Code::InvalidHeaders);
+    assert_eq!(response.issues[1].code, Code::MissingFinalResponse);
+}
+
+#[test]
 fn rejects_invalid_request_targets_and_accepts_equivalent_authorities() {
     use quic::Direction::Client;
     let run = |fields: &[u8]| {
@@ -380,6 +458,8 @@ fn rejects_invalid_request_targets_and_accepts_equivalent_authorities() {
         (b"\0\0\xd1\xd7\x51\x03/%Q\x50\x01a".as_slice(), false),
         (b"\0\0\xd1\xd7\xc1\x50\x01a\x24host\x01b", false),
         (b"\0\0\xd1\xd7\xc1\x50\x01a\x24host\x05A:443", true),
+        (b"\0\0\xcf\x50\x07a:65535", true),
+        (b"\0\0\xcf\x50\x07a:65536", false),
     ] {
         let result = run(fields);
         let side = result[0].request.as_ref().unwrap();
@@ -392,6 +472,47 @@ fn rejects_invalid_request_targets_and_accepts_equivalent_authorities() {
             );
         }
     }
+}
+
+#[test]
+fn retains_settings_for_qpack_after_a_duplicate_settings_frame() {
+    use quic::Direction::{Client, Server};
+    let mut control = stream(3, Server, b"\0\x04\x05\x01\x40\x40\x07\x01\x04\0");
+    control.complete = false;
+    control.final_size = None;
+    let input = connection(vec![
+        control,
+        stream(6, Client, b"\x02\x3f\x21\x41x\x01a"),
+        stream(0, Client, b"\x01\x09\x02\x80\xd1\xd7\xc1\x50\x01a\x10"),
+    ]);
+    let mut server = None;
+    let mut request = None;
+    inspect(
+        &input,
+        None,
+        Limits::default(),
+        &Deadline::new(Duration::MAX),
+        &mut |event| {
+            match event {
+                Event::Connection(connection) => server = Some(connection.server),
+                Event::Exchange(exchange) => request = exchange.request,
+            }
+            Ok(())
+        },
+    )
+    .unwrap();
+    let server = server.unwrap();
+    assert_eq!(server.max_table_capacity, Some(64));
+    assert_eq!(server.qpack_blocked_streams, Some(1));
+    assert_eq!(server.issues.len(), 1);
+    assert_eq!(server.issues[0].code, Code::InvalidSettings);
+    let request = request.unwrap();
+    assert!(request.complete, "{:?}", request.issues);
+    assert_eq!(request.header_sections[0].required_insert_count, Some(1));
+    assert_eq!(
+        request.header_sections[0].fields.last().unwrap().value,
+        b"a"[..]
+    );
 }
 
 #[test]
@@ -544,6 +665,33 @@ fn rejects_headers_on_successful_connect_responses_and_keeps_tunnel_data() {
             );
         }
     }
+}
+
+#[test]
+fn reports_forbidden_connect_content_length_before_a_truncated_tunnel_frame() {
+    use quic::Direction::{Client, Server};
+    let request = b"\x01\x0a\0\0\xcf\x50\x05a:443";
+    let mut response = stream(0, Server, b"\x01\x06\0\0\xd9\x54\x011\0\x02x");
+    response.complete = false;
+    response.final_size = None;
+    let result = exchanges(
+        vec![stream(0, Client, request), response],
+        Limits::default(),
+    );
+    let response = result[0].response.as_ref().unwrap();
+    assert_eq!(response.header_sections[0].status, Some(200));
+    let issues: Vec<_> = response
+        .issues
+        .iter()
+        .map(|issue| (issue.code, issue.offset))
+        .collect();
+    assert_eq!(
+        issues,
+        [
+            (Code::InvalidHeaders, Some(0)),
+            (Code::TruncatedFrame, Some(8))
+        ]
+    );
 }
 
 #[test]

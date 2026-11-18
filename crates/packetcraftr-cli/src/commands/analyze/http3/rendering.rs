@@ -3,16 +3,17 @@
 
 use crate::errors::CliError;
 use crate::invocation::Invocation;
-use crate::terminal::write_stdout_line;
+use crate::terminal::{push_stdout_line, write_stdout_line};
 
 use super::output::{Event, Issue, Side, Terminal};
 
-pub(super) fn event(invocation: &Invocation, event: &Event) -> Result<(), CliError> {
+pub(super) fn event(event: &Event) -> String {
+    let mut block = String::new();
     match event {
         Event::Connection { connection } => {
-            write_stdout_line(
-                invocation,
-                format_args!(
+            push_stdout_line(
+                &mut block,
+                &format!(
                     "HTTP/3 connection={} QUIC version={:#010x} capture frames={}..{} transport_incomplete={}",
                     connection.connection,
                     connection.version,
@@ -20,46 +21,47 @@ pub(super) fn event(invocation: &Invocation, event: &Event) -> Result<(), CliErr
                     connection.last_frame,
                     connection.transport_incomplete
                 ),
-            )?;
+            );
             for (sender, streams) in [
                 ("client", &connection.client),
                 ("server", &connection.server),
             ] {
-                write_stdout_line(
-                    invocation,
-                    format_args!("  {sender} QPACK inserts={}", streams.encoder_inserts),
-                )?;
+                push_stdout_line(
+                    &mut block,
+                    &format!("  {sender} QPACK inserts={}", streams.encoder_inserts),
+                );
                 for issue in &streams.issues {
-                    render_issue(invocation, issue)?;
+                    render_issue(&mut block, issue);
                 }
             }
         }
         Event::Exchange { exchange } => {
-            write_stdout_line(
-                invocation,
-                format_args!(
+            push_stdout_line(
+                &mut block,
+                &format!(
                     "  Exchange connection={} stream={}",
                     exchange.connection, exchange.stream
                 ),
-            )?;
-            side(invocation, "Request", exchange.request.as_ref())?;
-            side(invocation, "Response", exchange.response.as_ref())?;
+            );
+            side(&mut block, "Request", exchange.request.as_ref());
+            side(&mut block, "Response", exchange.response.as_ref());
         }
     }
-    Ok(())
+    block
 }
 
-fn side(invocation: &Invocation, label: &str, side: Option<&Side>) -> Result<(), CliError> {
+fn side(block: &mut String, label: &str, side: Option<&Side>) {
     let Some(side) = side else {
-        return write_stdout_line(invocation, format_args!("    {label} missing from capture"));
+        push_stdout_line(block, &format!("    {label} missing from capture"));
+        return;
     };
-    write_stdout_line(
-        invocation,
-        format_args!(
+    push_stdout_line(
+        block,
+        &format!(
             "    {label} DATA frames={} bytes={} complete={}",
             side.data_frames, side.data_bytes, side.complete
         ),
-    )?;
+    );
     for section in &side.header_sections {
         let kind = section.kind;
         let offset = section.offset;
@@ -69,44 +71,43 @@ fn side(invocation: &Invocation, label: &str, side: Option<&Side>) -> Result<(),
             None => "undecoded",
         };
         match (&section.method, section.status) {
-            (Some(method), _) => write_stdout_line(
-                invocation,
-                format_args!("      {kind} {method} offset={offset} QPACK={coding}"),
+            (Some(method), _) => push_stdout_line(
+                block,
+                &format!("      {kind} {method} offset={offset} QPACK={coding}"),
             ),
-            (_, Some(status)) => write_stdout_line(
-                invocation,
-                format_args!("      {kind} {status} offset={offset} QPACK={coding}"),
+            (_, Some(status)) => push_stdout_line(
+                block,
+                &format!("      {kind} {status} offset={offset} QPACK={coding}"),
             ),
-            _ => write_stdout_line(
-                invocation,
-                format_args!("      {kind} offset={offset} QPACK={coding}"),
+            _ => push_stdout_line(
+                block,
+                &format!("      {kind} offset={offset} QPACK={coding}"),
             ),
-        }?;
+        }
         for field in &section.fields {
             let name = field.name.escape_default();
             match (&field.value, &field.value_hex) {
-                (Some(value), _) => write_stdout_line(
-                    invocation,
-                    format_args!("        {name} = \"{}\"", value.escape_default()),
+                (Some(value), _) => push_stdout_line(
+                    block,
+                    &format!("        {name} = \"{}\"", value.escape_default()),
                 ),
                 (_, Some(value)) => {
-                    write_stdout_line(invocation, format_args!("        {name} = hex:{value}"))
+                    push_stdout_line(block, &format!("        {name} = hex:{value}"));
                 }
-                _ => write_stdout_line(invocation, format_args!("        {name}")),
-            }?;
+                _ => push_stdout_line(block, &format!("        {name}")),
+            }
         }
     }
     for issue in &side.issues {
-        render_issue(invocation, issue)?;
+        render_issue(block, issue);
     }
-    Ok(())
 }
 
-fn render_issue(invocation: &Invocation, issue: &Issue) -> Result<(), CliError> {
+fn render_issue(block: &mut String, issue: &Issue) {
     let code = issue.code;
     match issue.offset {
-        Some(offset) => write_stdout_line(invocation, format_args!("      {code} offset={offset}")),
-        None => write_stdout_line(invocation, format_args!("      {code}")),
+        Some(offset) => push_stdout_line(block, &format!("      {code} offset={offset}")),
+        None => push_stdout_line(block, &format!("      {code}")),
     }
 }
 

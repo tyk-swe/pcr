@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use super::*;
+use bytes::Bytes;
 
 fn field(name: &'static [u8], value: &[u8]) -> Header {
     Header {

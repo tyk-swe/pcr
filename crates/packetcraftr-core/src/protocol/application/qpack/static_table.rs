@@ -1,5 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
+// Table from RFC 9204 Appendix A. Copyright (c) 2022 IETF Trust and the
+// persons identified as authors of the code. All rights reserved.
+// See the IETF Trust Revised BSD terms in THIRD_PARTY_NOTICES.md.
 
 pub(super) const STATIC: &[(&[u8], &[u8])] = &[
     (b":authority", b""),

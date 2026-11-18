@@ -2553,7 +2553,7 @@ fn http3_reconstructs_multiplexed_exchanges_and_hides_header_values_by_default()
             .as_array()
             .unwrap()
             .iter()
-            .all(|field| field.get("value").is_none())
+            .all(|field| field.get("value").is_none() && field.get("value_hex").is_none())
     );
     let response = &first["response"];
     assert_eq!(response["data_frames"], 1);
@@ -2562,6 +2562,10 @@ fn http3_reconstructs_multiplexed_exchanges_and_hides_header_values_by_default()
     assert_eq!(sections[0]["status"], 103);
     assert_eq!(sections[1]["status"], 200);
     assert_eq!(sections[2]["kind"], "trailers");
+    let redacted_trailer = &sections[2]["fields"][0];
+    assert_eq!(redacted_trailer["name"], "x-test");
+    assert!(redacted_trailer.get("value").is_none());
+    assert!(redacted_trailer.get("value_hex").is_none());
     assert_eq!(
         exchanges[1]["response"]["header_sections"][0]["status"],
         204
@@ -2602,16 +2606,58 @@ fn http3_reconstructs_multiplexed_exchanges_and_hides_header_values_by_default()
     assert!(text.contains("request GET offset=0"));
     assert!(text.contains("response 200"));
     assert!(!text.contains("/private-demo"));
+    assert!(!text.contains("hex:ff"));
+}
 
-    let args = [
-        &["--output", "json"][..],
-        &analyze,
-        &["--max-application-output-bytes", "1"],
-    ]
-    .concat();
-    let output = run(&args);
-    assert!(!output.status.success());
-    assert!(stdout(&output).contains("application output exceeds --max-application-output-bytes"));
+#[test]
+fn http3_caps_rendered_application_evidence() {
+    let capture = capture_path("http3-demo.pcapng");
+    let keys = capture_path("http3-demo.keys");
+    for format in ["json", "text"] {
+        let args = [
+            "--output",
+            format,
+            "analyze",
+            "http3",
+            capture.to_str().unwrap(),
+            "--keylog",
+            keys.to_str().unwrap(),
+            "--include-header-values",
+        ];
+        let rendered = assert_success(&run(&args), &args);
+        let evidence_bytes = if format == "json" {
+            ["\"connections\"", "\"exchanges\""]
+                .into_iter()
+                .map(|key| {
+                    let (_, tail) = rendered.split_once(key).unwrap();
+                    let array = &tail[tail.find('[').unwrap()..];
+                    let mut values = serde_json::Deserializer::from_str(array)
+                        .into_iter::<serde::de::IgnoredAny>();
+                    values.next().unwrap().unwrap();
+                    array[1..values.byte_offset() - 1].trim_end().len()
+                })
+                .sum()
+        } else {
+            rendered.split_once("HTTP/3 connections=").unwrap().0.len()
+        };
+
+        let exact = evidence_bytes.to_string();
+        let exact_args = [&args[..], &["--max-application-output-bytes", &exact]].concat();
+        assert_eq!(assert_success(&run(&exact_args), &exact_args), rendered);
+
+        let short = (evidence_bytes - 1).to_string();
+        let short_args = [&args[..], &["--max-application-output-bytes", &short]].concat();
+        let output = run(&short_args);
+        let error = if format == "json" {
+            assert_error(&output, "policy.denied");
+            stdout(&output)
+        } else {
+            assert!(!output.status.success());
+            assert!(stdout(&output).len() < evidence_bytes);
+            String::from_utf8_lossy(&output.stderr).into_owned()
+        };
+        assert!(error.contains("application output exceeds --max-application-output-bytes"));
+    }
 }
 
 #[test]
@@ -2638,6 +2684,15 @@ fn http3_honors_quic_stream_retention_override() {
         let response = &report["result"]["exchanges"][0]["response"];
         assert_eq!(response["data_bytes"], data_bytes);
         assert_eq!(response["complete"], complete);
+        if !complete {
+            assert!(
+                response["issues"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|issue| issue["code"] == "stream_gap")
+            );
+        }
     }
 }
 

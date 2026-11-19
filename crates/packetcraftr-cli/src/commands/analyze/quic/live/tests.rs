@@ -304,7 +304,7 @@ fn quic_exports_remain_in_the_directory_selected_before_input() {
     std::fs::rename(&requested, &original).unwrap();
     std::fs::create_dir(&requested).unwrap();
     exporter.range("range.bin", b"selected directory").unwrap();
-    exporter.finish().unwrap();
+    exporter.finish(usize::MAX).unwrap();
     assert_eq!(
         std::fs::read(original.join("range.bin")).unwrap(),
         b"selected directory"

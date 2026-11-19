@@ -39,6 +39,50 @@ fn empty_captures_yield_zero_frames() {
 }
 
 #[test]
+fn capture_inputs_retry_interrupted_reads() {
+    use std::io::{self, Read, Write};
+
+    use crate::capture_file::compression;
+
+    struct InterruptOnce(bool);
+
+    impl Read for InterruptOnce {
+        fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+            if buffer.is_empty() || std::mem::replace(&mut self.0, true) {
+                return Ok(0);
+            }
+            Err(io::ErrorKind::Interrupted.into())
+        }
+    }
+
+    let expected = frame(1_700_001_000, 123_456_789, 0x11, 32);
+    let bytes = capture(Format::Pcap, std::slice::from_ref(&expected));
+    for format in [
+        compression::Format::None,
+        compression::Format::Gzip,
+        compression::Format::Zstd,
+    ] {
+        let mut output = compression::Output::new(Vec::new(), format).unwrap();
+        output.write_all(&bytes).unwrap();
+        let encoded = output.finish().unwrap();
+        let limits = compression::Limits {
+            max_encoded_bytes: encoded.len() as u64,
+            ..compression::Limits::default()
+        };
+
+        for offset in [4, encoded.len()] {
+            let (before, after) = encoded.split_at(offset);
+            let source = before.chain(InterruptOnce(false)).chain(after);
+            let input = compression::Input::new(source, limits).unwrap();
+            let mut reader = Reader::with_limits(input, ReaderLimits::default()).unwrap();
+
+            assert_eq!(reader.next_frame().unwrap().as_ref(), Some(&expected));
+            assert_eq!(reader.next_frame().unwrap(), None);
+        }
+    }
+}
+
+#[test]
 fn truncation_errors_after_complete_frames() {
     let complete = frame(1_700_001_000, 123_456_789, 0x11, 32);
     let cut_short = frame(1_700_001_001, 987_654_321, 0x22, 32);

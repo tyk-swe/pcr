@@ -193,10 +193,11 @@ class RuntimeValidationTests(unittest.TestCase):
         path = Path(directory) / 'fake-cli'
         success = stdout if stdout is not None else json.dumps(document) + '\n'
         failure = stdout if stdout is not None else json.dumps(dict(document, status=failure_status)) + '\n'
+        stream = stdout if stdout is not None else json.dumps(dict(document, mode='stream', event='complete', sequence=0)) + '\n'
         path.write_text(
             f'#!{sys.executable}\nimport sys\n'
             "failed = 'missing' in sys.argv\n"
-            f'sys.stdout.write({failure!r} if failed else {success!r})\n'
+            f"sys.stdout.write({failure!r} if failed else {stream!r} if 'stream' in sys.argv else {success!r})\n"
             'sys.exit(2 if failed else 0)\n')
         path.chmod(path.stat().st_mode | stat.S_IXUSR)
         return path
@@ -239,15 +240,40 @@ class RuntimeValidationTests(unittest.TestCase):
     def test_ndjson_exit_status_matches_the_final_record(self):
         command = checker.RuntimeCommand(('--output', 'ndjson', 'missing'), succeeds=False)
         validator = checker.load_validator(SCHEMA)
-        success = json.dumps(VALID)
-        error = json.dumps(dict(VALID, status='error'))
+        success = json.dumps(dict(VALID, mode='stream', event='event', sequence=0))
+        error = json.dumps(dict(VALID, mode='stream', status='error', event='error', sequence=1))
+        complete = json.dumps(dict(VALID, mode='stream', event='complete', sequence=0))
         with tempfile.TemporaryDirectory() as directory:
             binary = self.fake_binary(directory, VALID, stdout=f'{success}\n{error}\n')
             self.assertEqual(checker.runtime_problems(binary, Path(directory), validator, set(), (command,)), [])
-            binary = self.fake_binary(directory, VALID, stdout=f'{error}\n{success}\n')
+            binary = self.fake_binary(directory, VALID, stdout=f'{complete}\n')
             problems = checker.runtime_problems(binary, Path(directory), validator, set(), (command,))
         self.assertEqual(len(problems), 1, problems)
-        self.assertIn("missing:2: expected 'error'", problems[0])
+        self.assertIn("missing:1: expected 'error'", problems[0])
+
+    def test_runtime_ndjson_requires_one_terminal_record_at_the_end(self):
+        command = checker.RuntimeCommand(('--output', 'ndjson', 'stream'), succeeds=True)
+        identity = checker.read_identity((ROOT / checker.CONTRACT).read_text(encoding='utf-8'))
+        validator = checker.load_validator(json.loads((ROOT / identity.schema_path).read_text(encoding='utf-8')))
+        examples = ROOT / 'examples/documents'
+        records = {
+            event: json.loads((examples / f'output-read-{event}.json').read_text(encoding='utf-8'))
+            for event in ('event', 'error', 'complete')
+        }
+        published = checker.published_codes(ROOT)
+        with tempfile.TemporaryDirectory() as directory:
+            def problems(*events: str) -> list[str]:
+                stdout = ''.join(json.dumps(records[event]) + '\n' for event in events)
+                binary = self.fake_binary(directory, VALID, stdout=stdout)
+                return checker.runtime_problems(binary, Path(directory), validator, published, (command,))
+
+            self.assertEqual(problems('event', 'complete'), [])
+            for events, message in ((('error', 'complete'), 'terminal event before end of stream'),
+                                    (('event',), 'missing terminal event')):
+                with self.subTest(events=events):
+                    found = problems(*events)
+                    self.assertEqual(len(found), 1, found)
+                    self.assertIn(message, found[0])
 
 
 REGISTRY_SCHEMA = {

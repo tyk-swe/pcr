@@ -201,6 +201,12 @@ def validated(validator: Any, label: str, text: str, ndjson: bool,
             problems.extend(code_problems(record_label, record, published))
     if expected_status is not None and not problems and records:
         record_label, record = records[-1]
+        if ndjson:
+            for earlier_label, earlier in records[:-1]:
+                if isinstance(earlier, dict) and earlier.get('event') in ('complete', 'error'):
+                    return [f'{earlier_label}: terminal event before end of stream']
+            if not isinstance(record, dict) or record.get('event') not in ('complete', 'error'):
+                return [f'{record_label}: missing terminal event']
         status = record.get('status') if isinstance(record, dict) else None
         if status != expected_status:
             problems.append(f'{record_label}: expected {expected_status!r} envelope status, got {status!r}')

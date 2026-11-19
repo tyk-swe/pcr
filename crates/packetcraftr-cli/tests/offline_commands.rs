@@ -83,6 +83,26 @@ fn help_succeeds_with_tool_name() {
 }
 
 #[test]
+fn reference_topics_rejects_machine_output_flags_with_text_output() {
+    for (args, expected) in [
+        (
+            ["reference", "topics", "--resource-diagnostics"].as_slice(),
+            "--resource-diagnostics requires --output json or ndjson",
+        ),
+        (
+            ["reference", "topics", "--output-timeout-ms", "20"].as_slice(),
+            "--output-timeout-ms requires --output ndjson",
+        ),
+    ] {
+        let output = run(args);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(2), "{args:?}: {stderr}");
+        assert!(output.stdout.is_empty(), "{args:?}: {}", stdout(&output));
+        assert!(stderr.contains(expected), "{args:?}: {stderr}");
+    }
+}
+
+#[test]
 fn pcapng_output_can_be_read_back() {
     let args = [
         "--output",

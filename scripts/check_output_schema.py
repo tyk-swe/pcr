@@ -6,6 +6,7 @@ and real CLI stdout agree on one current output contract."""
 from __future__ import annotations
 
 import argparse
+from io import StringIO
 from pathlib import Path
 import re
 import subprocess
@@ -132,7 +133,8 @@ def document_problems(validator: Any, label: str, document: Any) -> list[str]:
 
 
 def parsed_records(label: str, text: str, ndjson: bool) -> tuple[list[tuple[str, Any]], list[str]]:
-    chunks = ([(f'{label}:{number}', line) for number, line in enumerate(text.splitlines(), 1)]
+    chunks = ([(f'{label}:{number}', line)
+               for number, line in enumerate(StringIO(text, newline='\n'), 1)]
               if ndjson else [(label, text)])
     records, problems = [], []
     for record_label, chunk in chunks:

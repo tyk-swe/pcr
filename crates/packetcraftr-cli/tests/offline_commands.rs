@@ -528,6 +528,51 @@ fn capture_field_projection_preserves_rows_across_output_formats() {
 }
 
 #[test]
+fn projection_resource_diagnostics_track_field_selection() {
+    let path = capture_path("dns-response.pcap");
+    let capture = path.to_string_lossy();
+    let read = ["files", "read", capture.as_ref()];
+    let dissect = [
+        "packet",
+        "dissect",
+        "--link-type",
+        "ipv4",
+        "--hex",
+        "4500001c0000000040018eaac0000201c63364020800f7ff00000000",
+    ];
+    let selections = [["--field", "frame.number"].as_slice(), &[]];
+    for (format, command) in [("ndjson", read.as_slice()), ("json", dissect.as_slice())] {
+        for fields in selections {
+            let args = ["--output", format, "--resource-diagnostics"]
+                .into_iter()
+                .chain(command.iter().copied())
+                .chain(fields.iter().copied())
+                .collect::<Vec<_>>();
+            let text = assert_success(&run(&args), &args);
+            let result: serde_json::Value = if format == "ndjson" {
+                serde_json::from_str(text.lines().last().unwrap()).unwrap()
+            } else {
+                serde_json::from_str(&text).unwrap()
+            };
+            assert_eq!(result["status"], "success", "{result}");
+            let selected = !fields.is_empty();
+            assert_eq!(
+                result["result"].get("columns").is_some(),
+                selected,
+                "{result}"
+            );
+            let setting = result["resources"]["settings"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|setting| setting["name"] == "--max-projection-bytes")
+                .expect("projection resource setting");
+            assert_eq!(setting["enabled"], selected, "{args:?}: {setting}");
+        }
+    }
+}
+
+#[test]
 fn projection_ndjson_budget_counts_row_payload_and_rejects_unpublished_rows() {
     let path = capture_path("protocol-mqtt.pcap");
     let capture = path.to_string_lossy().into_owned();

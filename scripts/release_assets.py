@@ -1,6 +1,7 @@
 # Copyright (C) 2026 tyk-swe
 # SPDX-License-Identifier: AGPL-3.0-only
 """Validated inventory for release packaging."""
+import os
 from pathlib import Path, PurePosixPath
 import subprocess
 from typing import NamedTuple
@@ -123,10 +124,10 @@ def generated_inventory(root: Path) -> Inventory:
         path for tree in DERIVED_TREES for path in _tree_files(root, tree)
     ) | frozenset(path.relative_to(root).as_posix() for path in (root / 'schemas').glob('*.json'))
     if (root / '.git').exists():
-        checkout_paths = subprocess.check_output(
+        checkout_paths = os.fsdecode(subprocess.check_output(
             ['git', 'ls-files', '-z', '--cached', '--others', '--exclude-standard', '--',
              *DERIVED_TREES, 'schemas'], cwd=root,
-        ).decode('utf-8').split('\0')
+        )).split('\0')
         discovered &= frozenset(checkout_paths)
     source_assets = frozenset(FIXED_ASSETS) | discovered
     return Inventory(tuple(sorted(source_assets)), tuple(sorted(BUILT_ASSETS)))

@@ -2,8 +2,10 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 import copy
 import json
+import os
 import posixpath
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path, PurePosixPath
@@ -143,6 +145,20 @@ class ReleaseAssetTests(unittest.TestCase):
             self.assertNotIn(ignored, generated.source_assets)
             subprocess.run(['git', 'add', '-f', '--', ignored], cwd=root, check=True)
             self.assertIn(ignored, assets.generated_inventory(root).source_assets)
+
+    @unittest.skipUnless(sys.platform.startswith('linux'), 'needs arbitrary filename bytes')
+    def test_release_inventory_ignores_unrelated_non_utf8_paths(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            subprocess.run(['git', 'init', '--quiet'], cwd=root, check=True)
+            historic = root / 'schemas/historical'
+            historic.mkdir(parents=True)
+            (historic / os.fsdecode(b'local-\xff')).touch()
+            candidate = root / 'schemas/current.schema.json'
+            candidate.touch()
+            inventory = assets.generated_inventory(root)
+            self.assertIn('schemas/current.schema.json', inventory.source_assets)
+            self.assertFalse(any(path.startswith('schemas/historical/') for path in inventory.source_assets))
 
 
 if __name__ == '__main__':

@@ -11,7 +11,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
-from typing import Any, Iterable, NamedTuple
+from typing import Any, Iterable, Literal, NamedTuple
 
 from release_assets import validate_manifest
 from rust_source import blank_comments, is_test_path, without_test_items
@@ -192,12 +192,18 @@ def code_problems(label: str, record: Any, published: set[str]) -> list[str]:
 
 
 def validated(validator: Any, label: str, text: str, ndjson: bool,
-              published: set[str] | None = None) -> list[str]:
+              published: set[str] | None = None, *,
+              expected_status: Literal['success', 'error'] | None = None) -> list[str]:
     records, problems = parsed_records(label, text, ndjson)
     for record_label, record in records:
         problems.extend(document_problems(validator, record_label, record))
         if published is not None:
             problems.extend(code_problems(record_label, record, published))
+    if expected_status is not None and not problems and records:
+        record_label, record = records[-1]
+        status = record.get('status') if isinstance(record, dict) else None
+        if status != expected_status:
+            problems.append(f'{record_label}: expected {expected_status!r} envelope status, got {status!r}')
     return problems
 
 
@@ -236,10 +242,9 @@ def runtime_problems(binary: Path, root: Path, validator: Any, published: set[st
         except UnicodeDecodeError as error:
             problems.append(f'{label}: stdout is not UTF-8: {error}')
             continue
-        problems.extend(validated(validator, label, stdout, 'ndjson' in command.args, published))
+        problems.extend(validated(validator, label, stdout, 'ndjson' in command.args, published,
+                                  expected_status='success' if command.succeeds else 'error'))
     return problems
-
-
 
 
 class PublishedRow(NamedTuple):

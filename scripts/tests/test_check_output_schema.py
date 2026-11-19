@@ -189,13 +189,15 @@ class RuntimeValidationTests(unittest.TestCase):
         checker.RuntimeCommand(('--output', 'json', 'missing'), succeeds=False),
     )
 
-    def fake_binary(self, directory, document, stdout=None):
+    def fake_binary(self, directory, document, stdout=None, *, failure_status: str = 'error'):
         path = Path(directory) / 'fake-cli'
-        body = stdout if stdout is not None else json.dumps(document) + '\n'
+        success = stdout if stdout is not None else json.dumps(document) + '\n'
+        failure = stdout if stdout is not None else json.dumps(dict(document, status=failure_status)) + '\n'
         path.write_text(
             f'#!{sys.executable}\nimport sys\n'
-            f'sys.stdout.write({body!r})\n'
-            "sys.exit(2 if 'missing' in sys.argv else 0)\n")
+            "failed = 'missing' in sys.argv\n"
+            f'sys.stdout.write({failure!r} if failed else {success!r})\n'
+            'sys.exit(2 if failed else 0)\n')
         path.chmod(path.stat().st_mode | stat.S_IXUSR)
         return path
 
@@ -225,6 +227,27 @@ class RuntimeValidationTests(unittest.TestCase):
             problems = checker.runtime_problems(binary, Path(directory), validator, set(), commands)
         self.assertEqual(len(problems), 1)
         self.assertIn('exit', problems[0])
+
+    def test_failure_exit_status_requires_an_error_envelope(self):
+        validator = checker.load_validator(SCHEMA)
+        with tempfile.TemporaryDirectory() as directory:
+            binary = self.fake_binary(directory, VALID, failure_status='success')
+            problems = checker.runtime_problems(binary, Path(directory), validator, set(), self.COMMANDS)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("expected 'error'", problems[0])
+
+    def test_ndjson_exit_status_matches_the_final_record(self):
+        command = checker.RuntimeCommand(('--output', 'ndjson', 'missing'), succeeds=False)
+        validator = checker.load_validator(SCHEMA)
+        success = json.dumps(VALID)
+        error = json.dumps(dict(VALID, status='error'))
+        with tempfile.TemporaryDirectory() as directory:
+            binary = self.fake_binary(directory, VALID, stdout=f'{success}\n{error}\n')
+            self.assertEqual(checker.runtime_problems(binary, Path(directory), validator, set(), (command,)), [])
+            binary = self.fake_binary(directory, VALID, stdout=f'{error}\n{success}\n')
+            problems = checker.runtime_problems(binary, Path(directory), validator, set(), (command,))
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("missing:2: expected 'error'", problems[0])
 
 
 REGISTRY_SCHEMA = {

@@ -13,6 +13,7 @@ import subprocess
 import sys
 from typing import Any, Iterable, NamedTuple
 
+from release_assets import validate_manifest
 from rust_source import blank_comments, is_test_path, without_test_items
 from script_support import read_json, strict_json
 
@@ -414,8 +415,14 @@ def registry_problems(root: Path, schema: Any, jsonschema: Any, published: set[s
 def check(root: Path, binary: Path | None = None) -> list[str]:
     identity = read_identity((root / CONTRACT).read_text(encoding='utf-8'))
     schema = read_json(root / identity.schema_path)
+    if not isinstance(schema, dict):
+        raise CheckError(f'{identity.schema_path}: expected a JSON object')
+    try:
+        inventory = validate_manifest(read_json(root / RELEASE_ASSETS))
+    except ValueError as error:
+        raise CheckError(f'{RELEASE_ASSETS}: {error}') from error
     problems = check_identity(schema, identity)
-    problems.extend(check_release_assets(read_json(root / RELEASE_ASSETS)['source_assets'], identity))
+    problems.extend(check_release_assets(inventory.source_assets, identity))
     validator = load_validator(schema)
     published = published_codes(root)
     problems.extend(registry_problems(root, schema, load_jsonschema(), published))

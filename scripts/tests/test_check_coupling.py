@@ -163,6 +163,24 @@ class CheckCouplingTests(unittest.TestCase):
         }
         self.assertEqual(coupling.cancellation_polls(sources), 3)
 
+    def test_cancellation_polls_preserve_token_boundaries(self):
+        root = self.workspace({
+            "crates/packetcraftr-cli/src/a.rs":
+                "fn first() { return invocation\n    .check(); }\n"
+                "fn second() { return control /* deadline */ . check_interrupted(); }\n",
+        })
+        measured = coupling.inventory(root)
+        self.assertEqual(measured["manual_cancellation_polls"], 2)
+
+    def test_cancellation_polls_ignore_comments_and_strings(self):
+        root = self.workspace({
+            "crates/packetcraftr-cli/src/a.rs":
+                '// invocation.check();\n'
+                'const EXAMPLE: &str = "cancellation.check()";\n',
+        })
+        measured = coupling.inventory(root)
+        self.assertEqual(measured["manual_cancellation_polls"], 0)
+
     def test_repository_stays_under_ceilings(self):
         measured = coupling.inventory()
         for name, value in measured.items():

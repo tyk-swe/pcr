@@ -123,6 +123,21 @@ class CheckCouplingTests(unittest.TestCase):
             any("stale boundary exemption: template.rs" in problem for problem in problems)
         )
 
+    def test_comments_neither_count_as_coupling_nor_keep_exemptions_alive(self):
+        root = self.workspace({
+            "crates/packetcraftr-core/src/protocol/identity.rs":
+                "// layer.downcast_ref::<Tcp>();\n",
+            "crates/mini/src/codec.rs": '/* layer.field("x"); */',
+            "crates/mini/src/plain.rs": '/* layer.field("x"); Instant::now(); */',
+        })
+        measured = coupling.inventory(root)
+        self.assertEqual(measured["downcast_sites"], 0)
+        self.assertEqual(measured["dynamic_field_sites"], 0)
+        self.assertEqual(measured["instant_now"], 0)
+        problems = coupling.allowlist_problems(root)
+        self.assertIn("stale cast allowlist entry: crates/packetcraftr-core/src/protocol/identity.rs", problems)
+        self.assertIn("stale boundary exemption: codec.rs", problems)
+
     def test_duplicate_constant_literals_are_counted(self):
         root = self.workspace({
             "crates/packetcraftr-core/src/protocol/catalog.rs":

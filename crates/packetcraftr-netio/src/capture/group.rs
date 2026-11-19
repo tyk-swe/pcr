@@ -332,10 +332,11 @@ impl<C: Session> Group<C> {
 
 impl<C: Session> Session for Group<C> {
     fn observation_quality(&self) -> super::ObservationQuality {
-        self.snapshot().iter().fold(
-            super::ObservationQuality::NoReportedLoss,
-            |quality, source| quality.combine(source.observation_quality),
-        )
+        self.snapshot()
+            .into_iter()
+            .map(|source| source.observation_quality)
+            .reduce(super::ObservationQuality::combine)
+            .unwrap_or_default()
     }
     fn metadata(&self) -> &Metadata {
         self.sources

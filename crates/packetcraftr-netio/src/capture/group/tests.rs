@@ -151,6 +151,23 @@ fn group(control: &Arc<Control>, expire_ready: bool, queued: bool) -> Group<Capt
         .unwrap();
     group
 }
+
+#[test]
+fn unarmed_group_has_unknown_observation_quality() {
+    let group = Group::<Capture>::new(&GroupRequest::new(
+        vec![Id {
+            index: 1,
+            name: "controlled".into(),
+        }],
+        Limits::default(),
+    ))
+    .unwrap();
+    assert_eq!(
+        group.observation_quality(),
+        crate::capture::ObservationQuality::Unknown
+    );
+}
+
 fn control(control: &Arc<Control>) -> Deadline {
     let clock = Arc::clone(control);
     let origin = Instant::now();

@@ -90,7 +90,15 @@ def check_documents(root: Path = ROOT) -> list[str]:
             claimed.add(schema)
             if schema not in validators:
                 parsed = read_json(schema)
-                validators[schema] = jsonschema.validators.validator_for(parsed)(parsed)
+                shown_schema = schema.relative_to(root)
+                if not isinstance(parsed, (dict, bool)):
+                    raise CheckError(f"{shown_schema}: invalid schema: expected an object or boolean")
+                validator_class = jsonschema.validators.validator_for(parsed)
+                try:
+                    validator_class.check_schema(parsed)
+                except jsonschema.SchemaError as error:
+                    raise CheckError(f"{shown_schema}: invalid schema: {error.message}") from error
+                validators[schema] = validator_class(parsed)
             validator = validators[schema]
             for error in sorted(validator.iter_errors(document), key=lambda error: list(error.path)):
                 where = ".".join(str(part) for part in error.path) or "<root>"

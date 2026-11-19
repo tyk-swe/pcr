@@ -1,6 +1,7 @@
 # Copyright (C) 2026 tyk-swe
 # SPDX-License-Identifier: AGPL-3.0-only
 from contextlib import redirect_stderr
+from copy import deepcopy
 from io import StringIO
 import json
 import stat
@@ -295,6 +296,18 @@ class RegistryTests(unittest.TestCase):
     def test_agreeing_registry_passes(self):
         root = self.workspace(REGISTRY_SOURCE)
         self.assertEqual(checker.registry_problems(root, REGISTRY_SCHEMA, checker.load_jsonschema(), set()), [])
+
+    def test_non_string_command_and_event_declarations_are_diagnosed(self):
+        root = self.workspace(REGISTRY_SOURCE)
+        jsonschema = checker.load_jsonschema()
+        for definition, field, declaration in (
+            ('buildSuccess', 'command', {'const': {}}),
+            ('buildStreamSuccess', 'event', {'enum': ['complete', 1]}),
+        ):
+            schema = deepcopy(REGISTRY_SCHEMA)
+            schema['$defs'][definition]['properties'][field] = declaration
+            with self.subTest(field=field), self.assertRaisesRegex(checker.CheckError, field):
+                checker.registry_problems(root, schema, jsonschema, set())
 
     def test_registered_examples_outside_output_glob_require_published_codes(self):
         relative = 'examples/documents/build.json'

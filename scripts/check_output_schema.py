@@ -290,9 +290,11 @@ def _consts(node: Any, key: str) -> list[str]:
             if name == 'properties' and isinstance(value, dict):
                 target = value.get(key)
                 if isinstance(target, dict):
-                    if 'const' in target:
-                        found.append(target['const'])
-                    found += target.get('enum', [])
+                    constants = [target['const']] if 'const' in target else []
+                    for constant in (*constants, *target.get('enum', [])):
+                        if not isinstance(constant, str):
+                            raise CheckError(f'{key!r} values must be strings')
+                        found.append(constant)
             found += _consts(value, key)
         return sorted(set(found))
     if isinstance(node, list):
@@ -425,7 +427,10 @@ def check(root: Path, binary: Path | None = None) -> list[str]:
     problems.extend(check_release_assets(inventory.source_assets, identity))
     validator = load_validator(schema)
     published = published_codes(root)
-    problems.extend(registry_problems(root, schema, load_jsonschema(), published))
+    try:
+        problems.extend(registry_problems(root, schema, load_jsonschema(), published))
+    except CheckError as error:
+        raise CheckError(f'{identity.schema_path}: {error}') from error
     problems.extend(example_problems(root, validator, published))
     if binary is not None:
         problems.extend(runtime_problems(binary, root, validator, published))

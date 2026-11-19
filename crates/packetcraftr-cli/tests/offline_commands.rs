@@ -3,10 +3,12 @@
 
 #![forbid(unsafe_code)]
 
+use std::ffi::OsStr;
+use std::fmt::Debug;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-fn run(args: &[&str]) -> Output {
+fn run(args: &[impl AsRef<OsStr> + Debug]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_packetcraftr"))
         .args(args)
         .output()
@@ -29,7 +31,7 @@ fn stdout(output: &Output) -> String {
     String::from_utf8_lossy(&output.stdout).into_owned()
 }
 
-fn assert_success(output: &Output, args: &[&str]) -> String {
+fn assert_success(output: &Output, args: &[impl Debug]) -> String {
     let text = stdout(output);
     assert!(
         output.status.success(),
@@ -2226,6 +2228,30 @@ fn security_modes_observe_each_frame_and_finish_their_run() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn security_analysis_reports_capture_paths_with_invalid_utf8() {
+    use std::os::unix::ffi::OsStrExt;
+
+    let directory = tempfile::tempdir().expect("tempdir");
+    let capture = directory.path().join(OsStr::from_bytes(b"dns-\xff.pcap"));
+    std::fs::copy(capture_path("dns-response.pcap"), &capture).expect("copy capture");
+    let args = [
+        OsStr::new("--output"),
+        OsStr::new("json"),
+        OsStr::new("analyze"),
+        OsStr::new("dns-anomalies"),
+        capture.as_os_str(),
+    ];
+    let output = run(&args);
+    let text = assert_success(&output, &args);
+    let report: serde_json::Value = serde_json::from_str(&text).expect("JSON report");
+    assert_eq!(
+        report["result"]["measurements"]["capture"],
+        capture.to_string_lossy().as_ref(),
+    );
+}
+
 #[test]
 fn report_writes_a_bundle_that_binds_its_inputs() {
     let directory = tempfile::tempdir().expect("tempdir");
@@ -2262,6 +2288,53 @@ fn report_writes_a_bundle_that_binds_its_inputs() {
     assert_eq!(parsed.sources.len(), 1);
     let page = std::fs::read_to_string(&html).expect("html written");
     assert!(page.contains("engagement.scan.summary"), "{page}");
+}
+
+#[cfg(unix)]
+#[test]
+fn report_accepts_input_and_output_paths_with_invalid_utf8() {
+    use std::os::unix::ffi::OsStrExt;
+
+    let directory = tempfile::tempdir().expect("tempdir");
+    let source = directory.path().join(OsStr::from_bytes(b"scan-\xff.json"));
+    let html = directory
+        .path()
+        .join(OsStr::from_bytes(b"assessment-\xff.html"));
+    let bundle = directory
+        .path()
+        .join(OsStr::from_bytes(b"bundle-\xff.json"));
+    let scan = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/documents/output-scan-success.json");
+    std::fs::copy(scan, &source).expect("copy scan result");
+    let args = [
+        OsStr::new("--output"),
+        OsStr::new("json"),
+        OsStr::new("analyze"),
+        OsStr::new("report"),
+        source.as_os_str(),
+        OsStr::new("--html"),
+        html.as_os_str(),
+        OsStr::new("--bundle"),
+        bundle.as_os_str(),
+    ];
+    let output = run(&args);
+    let text = assert_success(&output, &args);
+    let report: serde_json::Value = serde_json::from_str(&text).expect("JSON report");
+    let result = &report["result"];
+    assert_eq!(
+        result["findings"][0]["evidence"]["source_file"],
+        source.to_string_lossy().as_ref(),
+    );
+    assert_eq!(
+        result["measurements"]["html"],
+        html.to_string_lossy().as_ref()
+    );
+    assert_eq!(
+        result["measurements"]["bundle"],
+        bundle.to_string_lossy().as_ref(),
+    );
+    assert!(html.is_file(), "HTML report was not written");
+    assert!(bundle.is_file(), "bundle was not written");
 }
 
 #[test]

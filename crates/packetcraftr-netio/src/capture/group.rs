@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use super::{
-    Captured, Limits, Metadata, Provider, Realized, RealizedSettings, Request, Session, Settings,
-    Stats,
+    ARMING, Captured, Limits, Metadata, Provider, Realized, RealizedSettings, Request, Session,
+    Settings, Stats, admit,
 };
 use crate::{Error, interface::Id};
 use packetcraftr_core::clock::{Clock, SystemClock};
@@ -201,7 +201,7 @@ impl<C: Session> Group<C> {
         }
         self.lifecycle = Lifecycle::Armed;
         for index in 0..self.requests.len() {
-            deadline.check_cancelled()?;
+            admit(deadline, ARMING)?;
             let request = &self.requests[index];
             let capture =
                 provider
@@ -221,7 +221,7 @@ impl<C: Session> Group<C> {
                     reason: "activation metadata disagrees with the request",
                 });
             }
-            deadline.check_cancelled()?;
+            admit(deadline, ARMING)?;
         }
         Ok(())
     }

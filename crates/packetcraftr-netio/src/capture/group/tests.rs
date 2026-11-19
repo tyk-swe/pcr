@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use super::*;
-use crate::capture::ObservationQuality;
+use crate::capture::{ObservationQuality, Realized, RealizedSettings, TimestampPrecision};
 use packetcraftr_core::budget::Cancellation;
 use packetcraftr_core::frame::Frame;
 use std::sync::{
@@ -21,6 +21,8 @@ struct Control {
     entered: Mutex<Option<mpsc::SyncSender<()>>>,
     shutdowns: AtomicUsize,
     cancel_on_arm: Option<Cancellation>,
+    expire_on_arm: bool,
+    native: RealizedSettings,
     observation_quality: ObservationQuality,
 }
 
@@ -54,12 +56,15 @@ impl Provider for Backend {
         if let Some(cancellation) = &self.control.cancel_on_arm {
             cancellation.cancel();
         }
+        if self.control.expire_on_arm {
+            self.control.advance(31);
+        }
         Ok(Capture {
             metadata: Metadata {
                 interface: request.interface.clone(),
                 link_type: LinkType(1),
                 snap_length: request.settings.limits.snap_length,
-                native: Default::default(),
+                native: self.control.native,
             },
             control: Arc::clone(&self.control),
             expire_ready: self.expire_ready,
@@ -231,6 +236,88 @@ fn cancelled_activation_shuts_down_returned_source() {
     assert_eq!(observed.shutdowns.load(Ordering::SeqCst), 1);
     drop(group);
     assert_eq!(observed.shutdowns.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn expired_parent_prevents_further_activation_and_shuts_down_returned_source() {
+    let observed = Arc::new(Control {
+        expire_on_arm: true,
+        ..Default::default()
+    });
+    let mut group = Group::new(&GroupRequest::new(
+        (1..=2)
+            .map(|index| Id {
+                index,
+                name: format!("controlled{index}"),
+            })
+            .collect(),
+        Limits::default(),
+    ))
+    .unwrap();
+    let result = group.arm(
+        &Backend {
+            control: Arc::clone(&observed),
+            expire_ready: false,
+            queued: false,
+        },
+        &control(&observed),
+    );
+    assert!(
+        matches!(result, Err(Error::DeadlineExceeded { .. })),
+        "{result:?}"
+    );
+    assert_eq!(group.sources().len(), 1);
+    assert_eq!(observed.shutdowns.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn capture_group_rejects_confirmed_timestamp_precision_mismatch() {
+    let nano = Some(TimestampPrecision::Nano);
+    let micro = Some(TimestampPrecision::Micro);
+    let mut request = GroupRequest::new(
+        vec![Id {
+            index: 1,
+            name: "controlled".into(),
+        }],
+        Limits::default(),
+    );
+    for (requested, effective, valid) in [
+        (None, micro, true),
+        (nano, None, true),
+        (nano, nano, true),
+        (nano, micro, false),
+    ] {
+        request.settings.native.timestamp_precision = requested;
+        let observed = Arc::new(Control {
+            native: RealizedSettings {
+                timestamp_precision: Realized {
+                    requested,
+                    applied: requested,
+                    effective,
+                },
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        let mut group = Group::new(&request).unwrap();
+        let result = group.arm(
+            &Backend {
+                control: Arc::clone(&observed),
+                expire_ready: false,
+                queued: false,
+            },
+            &control(&observed),
+        );
+        if valid {
+            result.unwrap();
+        } else {
+            assert!(
+                matches!(result, Err(Error::CaptureSourceContract { .. })),
+                "{result:?}"
+            );
+            assert_eq!(observed.shutdowns.load(Ordering::SeqCst), 1);
+        }
+    }
 }
 
 #[test]

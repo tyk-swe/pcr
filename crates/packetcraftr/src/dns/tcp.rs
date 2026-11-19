@@ -606,6 +606,65 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn cancellation_while_recording_the_response_preserves_message_bytes() {
+        #[derive(Clone)]
+        struct CancelOnReceive {
+            reads: Arc<AtomicUsize>,
+            cancellation: Cancellation,
+        }
+
+        impl Clock for CancelOnReceive {
+            type Error = std::convert::Infallible;
+
+            fn now(&self) -> Instant {
+                SystemClock.now()
+            }
+
+            fn wall_now(&self) -> SystemTime {
+                if self.reads.load(Ordering::SeqCst) > 0 {
+                    self.cancellation.cancel();
+                }
+                SystemClock.wall_now()
+            }
+
+            fn sleep(&self, delay: Duration, deadline: &Deadline) -> Result<(), Self::Error> {
+                SystemClock.sleep(delay, deadline)
+            }
+        }
+
+        let clock = CancelOnReceive {
+            reads: Arc::new(AtomicUsize::new(0)),
+            cancellation: Cancellation::default(),
+        };
+        let provider = Arc::new(BufferedProvider(Mutex::new(Some(BufferedStream {
+            pending: Vec::new(),
+            response: None,
+            flush_errors: VecDeque::new(),
+            cancellation: None,
+            reads: Arc::clone(&clock.reads),
+        }))));
+        let result = query_with_clock(
+            Request {
+                endpoint: SocketAddr::from(([127, 0, 0, 1], 53)),
+                query: QUERY,
+                timeout: Duration::from_secs(2),
+                cancellation: Some(&clock.cancellation),
+                max_message_bytes: 512,
+            },
+            provider,
+            &clock,
+        );
+        assert!(matches!(
+            result.unwrap_err(),
+            Error::Cancelled {
+                phase: Phase::ReadMessage,
+                transferred,
+                ..
+            } if transferred == QUERY.len()
+        ));
+    }
+
     /// Advances one millisecond on every read.
     #[derive(Clone)]
     struct Ticking {

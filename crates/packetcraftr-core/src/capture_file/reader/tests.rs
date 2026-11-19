@@ -1,11 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::io::Cursor;
+use std::io::{self, Cursor, Read};
 use std::time::{Duration, UNIX_EPOCH};
 
 use super::Reader;
-use crate::capture_file::{Error, Format, ReaderLimits, Writer};
+use crate::capture_file::{Error, Format, ReaderLimits, Writer, compression};
 use crate::frame::{Frame, LinkType};
 
 fn frame(seconds: u64, nanoseconds: u32, fill: u8, length: usize) -> Frame {
@@ -25,6 +25,17 @@ fn capture(format: Format, frames: &[Frame]) -> Vec<u8> {
     writer.into_inner()
 }
 
+struct FailOnce(Option<io::ErrorKind>);
+
+impl Read for FailOnce {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        if buffer.is_empty() {
+            return Ok(0);
+        }
+        self.0.take().map_or(Ok(0), |kind| Err(kind.into()))
+    }
+}
+
 #[test]
 fn empty_captures_yield_zero_frames() {
     for format in [Format::Pcap, Format::PcapNg] {
@@ -40,20 +51,7 @@ fn empty_captures_yield_zero_frames() {
 
 #[test]
 fn capture_inputs_retry_interrupted_reads() {
-    use std::io::{self, Read, Write};
-
-    use crate::capture_file::compression;
-
-    struct InterruptOnce(bool);
-
-    impl Read for InterruptOnce {
-        fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
-            if buffer.is_empty() || std::mem::replace(&mut self.0, true) {
-                return Ok(0);
-            }
-            Err(io::ErrorKind::Interrupted.into())
-        }
-    }
+    use std::io::Write;
 
     let expected = frame(1_700_001_000, 123_456_789, 0x11, 32);
     let bytes = capture(Format::Pcap, std::slice::from_ref(&expected));
@@ -72,7 +70,9 @@ fn capture_inputs_retry_interrupted_reads() {
 
         for offset in [4, encoded.len()] {
             let (before, after) = encoded.split_at(offset);
-            let source = before.chain(InterruptOnce(false)).chain(after);
+            let source = before
+                .chain(FailOnce(Some(io::ErrorKind::Interrupted)))
+                .chain(after);
             let input = compression::Input::new(source, limits).unwrap();
             let mut reader = Reader::with_limits(input, ReaderLimits::default()).unwrap();
 
@@ -80,6 +80,21 @@ fn capture_inputs_retry_interrupted_reads() {
             assert_eq!(reader.next_frame().unwrap(), None);
         }
     }
+}
+
+#[test]
+fn capture_inputs_report_other_read_errors() {
+    let bytes = capture(Format::Pcap, &[]);
+    let (magic, header) = bytes.split_at(4);
+    let source = magic
+        .chain(FailOnce(Some(io::ErrorKind::PermissionDenied)))
+        .chain(header);
+    let input = compression::Input::new(source, compression::Limits::default()).unwrap();
+
+    assert!(matches!(
+        Reader::with_limits(input, ReaderLimits::default()),
+        Err(Error::Io(_))
+    ));
 }
 
 #[test]

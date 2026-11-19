@@ -83,10 +83,11 @@ impl Spec for Assessment {
                         .note(format!("{}: {reason}", path.display()));
                 }
             }
+            let source_file = path.display().to_string();
             for mut finding in result.findings {
                 redact(&mut finding.evidence);
                 finding.evidence =
-                    serde_json::json!({"source_file":path, "observation":finding.evidence});
+                    serde_json::json!({"source_file":source_file, "observation":finding.evidence});
                 limits
                     .push(&mut report, finding)
                     .map_err(CliError::classified)?;
@@ -105,11 +106,11 @@ impl Spec for Assessment {
         }
         report
             .measurements
-            .insert("html".into(), serde_json::json!(self.html));
+            .insert("html".into(), self.html.display().to_string().into());
         if let Some(bundle) = &self.bundle {
             report
                 .measurements
-                .insert("bundle".into(), serde_json::json!(bundle));
+                .insert("bundle".into(), bundle.display().to_string().into());
         }
         if let Some(scope) = self.scope.scope() {
             report

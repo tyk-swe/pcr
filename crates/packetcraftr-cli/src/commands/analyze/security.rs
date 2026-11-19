@@ -121,7 +121,7 @@ impl Capture {
         // streamed stdin is deliberately not reread to manufacture a source hash.
         report
             .measurements
-            .insert("capture".into(), serde_json::json!(self.path));
+            .insert("capture".into(), self.path.display().to_string().into());
         let mut bounds = self.bounds;
         bounds.max_result_bytes = bounds.max_result_bytes.min(application.max_output_bytes());
         publish(invocation, command, report, bounds)

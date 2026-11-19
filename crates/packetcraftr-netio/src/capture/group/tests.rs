@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use super::*;
+use crate::capture::ObservationQuality;
 use packetcraftr_core::frame::Frame;
 use std::sync::{
     Arc, Condvar, Mutex,
@@ -18,6 +19,7 @@ struct Control {
     changed: Condvar,
     entered: Mutex<Option<mpsc::SyncSender<()>>>,
     shutdowns: AtomicUsize,
+    observation_quality: ObservationQuality,
 }
 
 impl Control {
@@ -111,6 +113,9 @@ impl Session for Capture {
     fn stats(&self) -> Stats {
         Stats::default()
     }
+    fn observation_quality(&self) -> ObservationQuality {
+        self.control.observation_quality
+    }
     fn request_stop(&mut self) -> Result<(), Error> {
         self.control.stop();
         Ok(())
@@ -151,6 +156,39 @@ fn group(control: &Arc<Control>, expire_ready: bool, queued: bool) -> Group<Capt
         .unwrap();
     group
 }
+
+#[test]
+fn group_observation_quality_reflects_available_sources() {
+    let mut group = Group::new(&GroupRequest::new(
+        vec![Id {
+            index: 1,
+            name: "controlled".into(),
+        }],
+        Limits::default(),
+    ))
+    .unwrap();
+    assert_eq!(group.observation_quality(), ObservationQuality::Unknown);
+    let deadline = Deadline::new(Duration::from_secs(5));
+    group
+        .arm(
+            &Backend {
+                control: Arc::new(Control {
+                    observation_quality: ObservationQuality::NoReportedLoss,
+                    ..Default::default()
+                }),
+                expire_ready: false,
+                queued: false,
+            },
+            &deadline,
+        )
+        .unwrap();
+    group.wait_ready(&deadline).unwrap();
+    assert_eq!(
+        group.observation_quality(),
+        ObservationQuality::NoReportedLoss
+    );
+}
+
 fn control(control: &Arc<Control>) -> Deadline {
     let clock = Arc::clone(control);
     let origin = Instant::now();

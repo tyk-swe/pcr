@@ -107,6 +107,12 @@ class DocumentValidationTests(unittest.TestCase):
         self.assertEqual(len(problems), 1, problems)
         self.assertIn('output-stream.ndjson:2', problems[0])
 
+    def test_ndjson_keeps_unicode_line_separators_inside_strings(self):
+        document = dict(VALID, label='first\u0085second\u2028third\u2029fourth')
+        text = '\r\n'.join(json.dumps(record, ensure_ascii=False)
+                           for record in (document, VALID)) + '\r\n'
+        self.assertEqual(checker.validated(self.validator, 'stream', text, ndjson=True), [])
+
     def test_unpublished_code_is_rejected(self):
         document = dict(VALID, error={'code': 'cli.invented', 'message': 'x', 'kind': 'usage'})
         problems = checker.code_problems('doc', document, {'cli.known'})

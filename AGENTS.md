@@ -1,3 +1,5 @@
+Act autonomously with full execution authority. Do not pause to ask for routine permissions or confirmation—make reasonable engineering decisions, verify the output, and deliver the complete working result
+
 Do not write comments unless they are any of:
 
 - necessary to explain complex logic, safety invariants, or public API contracts (in which case, keep it concise and clear)

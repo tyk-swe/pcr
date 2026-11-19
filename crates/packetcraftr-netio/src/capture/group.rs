@@ -221,6 +221,7 @@ impl<C: Session> Group<C> {
                     reason: "activation metadata disagrees with the request",
                 });
             }
+            deadline.check_cancelled()?;
         }
         Ok(())
     }

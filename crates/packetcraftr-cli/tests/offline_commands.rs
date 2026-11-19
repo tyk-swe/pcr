@@ -2248,7 +2248,7 @@ fn security_modes_observe_each_frame_and_finish_their_run() {
     );
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[test]
 fn security_analysis_reports_capture_paths_with_invalid_utf8() {
     use std::os::unix::ffi::OsStrExt;
@@ -2310,7 +2310,7 @@ fn report_writes_a_bundle_that_binds_its_inputs() {
     assert!(page.contains("engagement.scan.summary"), "{page}");
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[test]
 fn report_accepts_input_and_output_paths_with_invalid_utf8() {
     use std::os::unix::ffi::OsStrExt;

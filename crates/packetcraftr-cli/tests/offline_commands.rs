@@ -528,7 +528,7 @@ fn capture_field_projection_preserves_rows_across_output_formats() {
 }
 
 #[test]
-fn projection_resource_diagnostics_track_field_selection() {
+fn read_and_dissect_resource_diagnostics_report_active_rendering_limits() {
     let path = capture_path("dns-response.pcap");
     let capture = path.to_string_lossy();
     let read = ["files", "read", capture.as_ref()];
@@ -561,13 +561,17 @@ fn projection_resource_diagnostics_track_field_selection() {
                 selected,
                 "{result}"
             );
-            let setting = result["resources"]["settings"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .find(|setting| setting["name"] == "--max-projection-bytes")
-                .expect("projection resource setting");
-            assert_eq!(setting["enabled"], selected, "{args:?}: {setting}");
+            let settings = result["resources"]["settings"].as_array().unwrap();
+            for (name, enabled) in [
+                ("--max-projection-bytes", selected),
+                ("--max-tree-bytes", false),
+            ] {
+                let setting = settings
+                    .iter()
+                    .find(|setting| setting["name"] == name)
+                    .unwrap_or_else(|| panic!("missing resource setting {name} in {result}"));
+                assert_eq!(setting["enabled"], enabled, "{args:?}: {setting}");
+            }
         }
     }
 }

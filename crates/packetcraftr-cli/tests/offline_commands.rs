@@ -2297,6 +2297,22 @@ fn security_modes_observe_each_frame_and_finish_their_run() {
     );
 }
 
+#[test]
+fn verbose_security_findings_show_details_on_separate_lines() {
+    let capture = capture_path("beacon-periodic.pcap");
+    let args = ["--verbose", "analyze", "beacons", capture.to_str().unwrap()];
+    let text = assert_success(&run(&args), &args);
+    let lines: Vec<_> = text.lines().collect();
+    assert!(
+        lines.windows(3).any(|lines| {
+            lines[0].starts_with("  frames: [")
+                && lines[1].starts_with("  evidence: {")
+                && lines[2].starts_with("  remediation: ")
+        }),
+        "{text}"
+    );
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 fn security_analysis_reports_capture_paths_with_invalid_utf8() {

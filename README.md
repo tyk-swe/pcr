@@ -26,7 +26,7 @@ Dissect the bundled DNS response with the same build.
 cargo run --quiet --locked -p packetcraftr-cli --no-default-features -- files read examples/captures/dns-response.pcap --dissect
 ```
 
-## Build options
+## Build from source
 
 Run these commands from the repository root. Keep `--locked` to use the checked-in
 dependency versions. Add `--offline` when those dependencies are already cached.
@@ -45,20 +45,32 @@ need the permissions granted by the operating system.
 
 By default, the commands above use Cargo's development profile and write
 `target/debug/packetcraftr` (`.exe` on Windows). Add `--release` for optimized
-binaries in `target/release/`; release builds retain overflow checks. Release
-archives distinguish `all-features` from `pcap-free` (native routes and Layer 3).
+binaries in `target/release/`. Release builds retain overflow checks.
 
-## More offline examples
+## Use a release archive
 
-After building, add the directory containing `packetcraftr` to your PATH or use
-the binary's path in the commands below.
+Choose `pcap-free` for offline work, native routes, and Layer 3, or
+`all-features` for live Layer 2 capture and injection. Unpack the archive and
+open a shell in the directory containing the executable and `examples/`.
+
+## Offline examples
+
+Run these commands from the repository or unpacked release root so the example
+paths resolve. Use the path to the binary if it is outside your PATH, such as
+`./target/debug/packetcraftr` for a source build or `./packetcraftr` in a release.
+
+### Build and inspect packets
 
 ```sh
-packetcraftr --help
 packetcraftr --output hex packet build --packet-file examples/documents/packet-dns-response.json
+packetcraftr --output json files read examples/captures/protocol-mqtt.pcap --field frame.number
+```
+
+### Analyze captures
+
+```sh
 packetcraftr analyze dns examples/captures/dns-response.pcap
 packetcraftr analyze http examples/captures/http-stream.pcap
-packetcraftr --output json files read examples/captures/protocol-mqtt.pcap --field frame.number
 packetcraftr analyze quic examples/captures/quic-demo-v1.pcap --keylog examples/captures/quic-demo.keys
 packetcraftr analyze http3 examples/captures/http3-demo.pcapng --keylog examples/captures/http3-demo.keys
 ```
@@ -68,8 +80,9 @@ decryption, key logs, stream export, and bounded diagnostics. See
 [HTTP/3 exchange reconstruction](docs/http3-analysis.md) for request and response
 analysis with QPACK and stream offsets.
 
-Use `--help` on a command for all options, defaults, prerequisites, and output
-formats. `-h` shows a shorter guide. The protocol fixture manifest at
+### Find fixtures and schemas
+
+The protocol fixture manifest at
 [`examples/captures/protocols.manifest.json`](examples/captures/protocols.manifest.json)
 links synthetic captures to their packet documents and optional decode bindings.
 Public JSON contracts are under [`schemas/`](schemas/), with examples under
@@ -80,6 +93,9 @@ earlier identifier, including the ambiguous `packetcraftr.output/v1`, to its
 schema.
 
 ## Generated references
+
+Run `packetcraftr --help` to list commands. Use `--help` on a command for all
+options, defaults, prerequisites, and output formats. `-h` shows a shorter guide.
 
 ```sh
 packetcraftr reference protocols
@@ -93,9 +109,8 @@ The last command generates Bash, Elvish, Fish, PowerShell, and Zsh completions i
 Regeneration replaces existing regular files atomically per file, preserving
 existing file permissions. All rendering and staged writes complete before
 publication starts. A later publication failure reports the files already
-published; files are not replaced as a single transaction. Symlink, directory,
-and special-file destinations are rejected. Documentation generation supports
-text output only.
+published. Symlink, directory, and special-file destinations are rejected.
+Documentation generation supports text output only.
 
 PacketcraftR is licensed under [AGPL-3.0-only](LICENSE). Third-party attribution
 is listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

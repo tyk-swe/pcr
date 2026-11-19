@@ -2,10 +2,15 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 import copy
 import json
+import posixpath
 import tempfile
 import unittest
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from unittest.mock import patch
+from urllib.parse import unquote, urlsplit
+
+from markdown_it import MarkdownIt
+from markdown_it.tree import SyntaxTreeNode
 
 from support import load_script
 
@@ -70,6 +75,21 @@ class ReleaseAssetTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'must exist'):
                 assets.validate_protocol_fixtures(ROOT, self.inventory)
 
+    def test_packaged_readme_links_resolve_in_the_archive(self):
+        files = frozenset(self.inventory.source_assets + self.inventory.generated_assets)
+        directories = {str(parent) for name in files for parent in PurePosixPath(name).parents}
+        entries = files | directories
+        readme = (ROOT / 'README.md').read_text(encoding='utf-8')
+        for node in SyntaxTreeNode(MarkdownIt().parse(readme)).walk():
+            if node.type != 'link':
+                continue
+            target = urlsplit(node.attrs['href'])
+            if target.scheme or target.netloc or not target.path:
+                continue
+            path = unquote(target.path)
+            with self.subTest(link=path):
+                destinations = directories if path.endswith('/') else entries
+                self.assertTrue(posixpath.normpath(path) in destinations, f'Missing from release: {path}')
 
     def test_checked_in_manifest_matches_the_worktree(self):
         assets.validate_generated(ROOT, self.inventory)

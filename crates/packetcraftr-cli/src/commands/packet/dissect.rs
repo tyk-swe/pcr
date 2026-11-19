@@ -66,7 +66,9 @@ impl crate::commands::Spec for Args {
     const CANCELLATION: bool = false;
 
     fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
-        crate::resources::declare!(settings, self, [max_projection_bytes: Bytes @ ResultRetention]);
+        crate::resources::declare!(settings, self, [
+            max_projection_bytes: Bytes @ ResultRetention if !self.fields.is_empty(),
+        ]);
         self.budget.resources(settings);
         self.tree.resources(settings);
     }

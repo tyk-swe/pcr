@@ -1,5 +1,8 @@
 # Copyright (C) 2026 tyk-swe
 # SPDX-License-Identifier: AGPL-3.0-only
+from contextlib import redirect_stderr
+from copy import deepcopy
+from io import StringIO
 import json
 import stat
 import sys
@@ -294,6 +297,18 @@ class RegistryTests(unittest.TestCase):
         root = self.workspace(REGISTRY_SOURCE)
         self.assertEqual(checker.registry_problems(root, REGISTRY_SCHEMA, checker.load_jsonschema(), set()), [])
 
+    def test_non_string_command_and_event_declarations_are_diagnosed(self):
+        root = self.workspace(REGISTRY_SOURCE)
+        jsonschema = checker.load_jsonschema()
+        for definition, field, declaration in (
+            ('buildSuccess', 'command', {'const': {}}),
+            ('buildStreamSuccess', 'event', {'enum': ['complete', 1]}),
+        ):
+            schema = deepcopy(REGISTRY_SCHEMA)
+            schema['$defs'][definition]['properties'][field] = declaration
+            with self.subTest(field=field), self.assertRaisesRegex(checker.CheckError, field):
+                checker.registry_problems(root, schema, jsonschema, set())
+
     def test_registered_examples_outside_output_glob_require_published_codes(self):
         relative = 'examples/documents/build.json'
         root = self.workspace(REGISTRY_SOURCE.replace('examples/documents/output-build-success.json', relative))
@@ -363,6 +378,35 @@ impl StreamRecord for CommentedRecord {
 class RepositoryTests(unittest.TestCase):
     def test_repository_outputs_match_current_schema(self):
         self.assertEqual(checker.check(ROOT), [])
+
+    def test_malformed_repository_inputs_get_contextual_diagnostics(self):
+        assets = {
+            'schema': 'packetcraftr.release-assets/v1',
+            'source_assets': [IDENTITY.schema_path],
+            'generated_assets': ['BUILD-METADATA.json'],
+        }
+        for path, value in (
+            (IDENTITY.schema_path, []),
+            (checker.RELEASE_ASSETS, {'schema': assets['schema']}),
+            (checker.RELEASE_ASSETS, dict(assets, source_assets=[1])),
+        ):
+            with self.subTest(path=path, value=value), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                inputs = {
+                    checker.CONTRACT: f'pub const OUTPUT_SCHEMA: &str = "{IDENTITY.identifier}";\n',
+                    IDENTITY.schema_path: json.dumps(SCHEMA),
+                    checker.RELEASE_ASSETS: json.dumps(assets),
+                    path: json.dumps(value),
+                }
+                for relative, content in inputs.items():
+                    source = root / relative
+                    source.parent.mkdir(parents=True, exist_ok=True)
+                    source.write_text(content, encoding='utf-8')
+                stderr = StringIO()
+                with redirect_stderr(stderr):
+                    self.assertEqual(checker.main(['--root', directory]), 2)
+                self.assertIn(path, stderr.getvalue())
+                self.assertNotIn('Traceback', stderr.getvalue())
 
 
 if __name__ == '__main__':

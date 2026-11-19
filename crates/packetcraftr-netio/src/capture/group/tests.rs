@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::capture::ObservationQuality;
+use packetcraftr_core::budget::Cancellation;
 use packetcraftr_core::frame::Frame;
 use std::sync::{
     Arc, Condvar, Mutex,
@@ -19,6 +20,7 @@ struct Control {
     changed: Condvar,
     entered: Mutex<Option<mpsc::SyncSender<()>>>,
     shutdowns: AtomicUsize,
+    cancel_on_arm: Option<Cancellation>,
     observation_quality: ObservationQuality,
 }
 
@@ -49,6 +51,9 @@ struct Capture {
 impl Provider for Backend {
     type Capture = Capture;
     fn arm_capture(&self, request: &Request, _: &Deadline) -> Result<Capture, Error> {
+        if let Some(cancellation) = &self.control.cancel_on_arm {
+            cancellation.cancel();
+        }
         Ok(Capture {
             metadata: Metadata {
                 interface: request.interface.clone(),
@@ -196,6 +201,36 @@ fn control(control: &Arc<Control>) -> Deadline {
         origin + Duration::from_secs(clock.advanced.load(Ordering::SeqCst))
     });
     Deadline::new(Duration::from_secs(30)).with_parent(Some(Arc::new(parent)))
+}
+
+#[test]
+fn cancelled_activation_shuts_down_returned_source() {
+    let cancellation = Cancellation::default();
+    let observed = Arc::new(Control {
+        cancel_on_arm: Some(cancellation.clone()),
+        ..Default::default()
+    });
+    let mut group = Group::new(&GroupRequest::new(
+        vec![Id {
+            index: 1,
+            name: "controlled".into(),
+        }],
+        Limits::default(),
+    ))
+    .unwrap();
+    let deadline = control(&observed).with_cancellation(Some(cancellation));
+    let result = group.arm(
+        &Backend {
+            control: Arc::clone(&observed),
+            expire_ready: false,
+            queued: false,
+        },
+        &deadline,
+    );
+    assert!(matches!(result, Err(Error::Cancelled(_))), "{result:?}");
+    assert_eq!(observed.shutdowns.load(Ordering::SeqCst), 1);
+    drop(group);
+    assert_eq!(observed.shutdowns.load(Ordering::SeqCst), 1);
 }
 
 #[test]

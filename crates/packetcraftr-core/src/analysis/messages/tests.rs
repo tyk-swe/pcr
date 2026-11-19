@@ -1558,9 +1558,17 @@ fn capture_clock_includes_time_excluded_frames_without_ip_reassembly() {
 fn physical_capture_clock_accepts_timestamps_beyond_the_reassembly_clock_range() {
     use crate::analysis::{FramePipeline, Options, Plan};
     use crate::frame::{Frame, LinkType};
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     let span = Duration::from_secs(1 << 62);
+    let (Some(start), Some(end)) = (UNIX_EPOCH.checked_sub(span), UNIX_EPOCH.checked_add(span))
+    else {
+        return;
+    };
+    let forward_step = end.duration_since(start).unwrap();
+    if Instant::now().checked_add(forward_step).is_some() {
+        return;
+    }
     let mut pipeline = FramePipeline::new(
         crate::protocol::builtin::registry(),
         Options {
@@ -1570,7 +1578,7 @@ fn physical_capture_clock_accepts_timestamps_beyond_the_reassembly_clock_range()
     )
     .unwrap();
     let mut matched = Vec::new();
-    for (number, timestamp) in [(1, UNIX_EPOCH - span), (2, UNIX_EPOCH + span)] {
+    for (number, timestamp) in [(1, start), (2, end)] {
         let frame = Frame::new(
             Some(timestamp),
             LinkType::ETHERNET,
@@ -1592,7 +1600,7 @@ fn physical_capture_clock_accepts_timestamps_beyond_the_reassembly_clock_range()
 
     let summary = pipeline.finish(Vec::new(), |_| Ok(())).unwrap();
     assert_eq!(matched, [1, 2]);
-    assert_eq!(summary.clock.max_forward_step, span * 2);
+    assert_eq!(summary.clock.max_forward_step, forward_step);
     assert_eq!(summary.clock.max_forward_step_frame, Some(2));
 }
 

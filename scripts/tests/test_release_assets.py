@@ -3,6 +3,7 @@
 import copy
 import json
 import posixpath
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path, PurePosixPath
@@ -126,6 +127,22 @@ class ReleaseAssetTests(unittest.TestCase):
             (root / 'examples/documents/new.txt').write_text('unlisted')
             with self.assertRaisesRegex(ValueError, 'drifted'):
                 assets.load_inventory(root)
+
+    def test_release_inventory_skips_ignored_local_files_but_keeps_package_inputs(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            subprocess.run(['git', 'init', '--quiet'], cwd=root, check=True)
+            (root / '.gitignore').write_text('local.tmp\n')
+            base = root / 'examples/documents'
+            base.mkdir(parents=True)
+            for name in ('local.tmp', 'new.json'):
+                (base / name).touch()
+            candidate, ignored = ('examples/documents/new.json', 'examples/documents/local.tmp')
+            generated = assets.generated_inventory(root)
+            self.assertIn(candidate, generated.source_assets)
+            self.assertNotIn(ignored, generated.source_assets)
+            subprocess.run(['git', 'add', '-f', '--', ignored], cwd=root, check=True)
+            self.assertIn(ignored, assets.generated_inventory(root).source_assets)
 
 
 if __name__ == '__main__':

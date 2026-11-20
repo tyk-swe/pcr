@@ -8,7 +8,6 @@ use crate::analysis::pipeline::FrameRecord;
 use crate::analysis::{StreamTransport, Summary as RunSummary};
 use crate::packet::{MacAddress, Packet};
 use crate::protocol::identity;
-use crate::protocol::link::{Arp, Ethernet};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ObservedPort {
@@ -101,8 +100,8 @@ impl Collector {
         let mut endpoints = None;
         for layer in packet.iter() {
             let network = identity::network_endpoints(layer);
-            let arp = layer.downcast_ref::<Arp>();
-            if (network.is_some() || arp.is_some() || layer.downcast_ref::<Ethernet>().is_some())
+            let arp = identity::arp_message(layer);
+            if (network.is_some() || arp.is_some() || identity::link_addresses(layer).is_some())
                 && let Some(previous) = endpoints.take()
             {
                 self.record_host_protocols(previous, &network_protocols);

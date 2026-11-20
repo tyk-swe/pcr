@@ -40,14 +40,17 @@ class CheckMutationScoreTests(unittest.TestCase):
         self.assertEqual(status, 1)
 
     def test_missing_invalid_and_unfinished_results_fail(self):
-        for overrides in [
-            {"caught": 0, "missed": 0, "unviable": 200},
-            {"caught": -1}, {"caught": True}, {"timeout": None},
-            {"end_time": None},
+        for overrides, reason in [
+            ({"caught": 0, "missed": 0, "unviable": 200}, "No viable mutants"),
+            ({"missed": -1}, "invalid outcome counts"),
+            ({"missed": True}, "invalid outcome counts"),
+            ({"timeout": None}, "invalid outcome counts"),
+            ({"end_time": None}, "incomplete"),
         ]:
             with self.subTest(overrides=overrides):
-                status, _ = self.run_report(**overrides)
+                status, output = self.run_report(**overrides)
                 self.assertEqual(status, 1)
+                self.assertIn(reason, output)
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "outcomes.json"
             for content in [None, "{", "[]"]:

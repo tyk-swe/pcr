@@ -727,23 +727,49 @@ mod tests {
                     if actual == value && maximum == MAX_RESOLVED_ADDRESSES
             ));
         }
-        let constraint = "127.0.0.1".parse().unwrap();
+        let constraint: DestinationConstraint = "127.0.0.1".parse().unwrap();
         for count in [
             0,
+            1,
             MAX_DESTINATION_CONSTRAINTS,
             MAX_DESTINATION_CONSTRAINTS + 1,
         ] {
-            let policy = Policy {
-                allowed_destinations: vec![constraint; count],
-                ..Policy::default()
-            };
-            if count <= MAX_DESTINATION_CONSTRAINTS {
-                assert!(policy.validate().is_ok());
-            } else {
-                assert!(matches!(policy.validate(),
-                    Err(PolicyError::DestinationConstraintLimit { actual, maximum })
-                        if actual == count && maximum == MAX_DESTINATION_CONSTRAINTS
-                ));
+            let constraints = vec![constraint; count];
+            for (minimum, policy) in [
+                (
+                    0,
+                    Policy {
+                        allowed_destinations: constraints.clone(),
+                        ..Policy::default()
+                    },
+                ),
+                (
+                    0,
+                    Policy {
+                        denied_destinations: constraints.clone(),
+                        ..Policy::default()
+                    },
+                ),
+                (
+                    1,
+                    Policy {
+                        required_destination_groups: vec![constraints.clone()],
+                        ..Policy::default()
+                    },
+                ),
+            ] {
+                let result = policy.validate();
+                if (minimum..=MAX_DESTINATION_CONSTRAINTS).contains(&count) {
+                    assert!(result.is_ok(), "{count}");
+                } else {
+                    assert!(
+                        matches!(result,
+                            Err(PolicyError::DestinationConstraintLimit { actual, maximum })
+                                if actual == count && maximum == MAX_DESTINATION_CONSTRAINTS
+                        ),
+                        "{count}"
+                    );
+                }
             }
         }
     }

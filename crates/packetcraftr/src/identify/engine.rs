@@ -32,6 +32,7 @@ impl<P: TcpProviders + UdpProviders, K: Clock> Client<P, K> {
         );
         operation.deadline.check_cancelled()?;
         let plan = request.validate_plan(&self.policy)?;
+        let corpus = request.corpus.validated()?;
         // Obtain entropy before any I/O, so an entropy failure cannot discard
         // earlier probe evidence. Plans without admitted DNS need no entropy.
         let mut dns_identities = plan
@@ -169,7 +170,7 @@ impl<P: TcpProviders + UdpProviders, K: Clock> Client<P, K> {
                     }
                     let observation =
                         observation(probe, *endpoint, &bytes, &reply.bytes, reply.outcome);
-                    let mut identification = request.corpus.identify(probe, &observation);
+                    let mut identification = corpus.identify(probe, &observation);
                     let added_entries = identification.candidates.len() * 2;
                     if added_entries > MAX_RESULT_CANDIDATES - candidate_entries {
                         identification.candidates.clear();

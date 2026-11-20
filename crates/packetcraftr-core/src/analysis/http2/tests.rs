@@ -124,6 +124,7 @@ fn upgrade_offer() -> &'static [u8] {
 struct Rig {
     collector: Collector,
     tracker: Tracker,
+    deadline: Option<crate::budget::Deadline>,
     events: Vec<Event>,
     number: u64,
     generation: u64,
@@ -141,6 +142,7 @@ fn rig_bounded(app: application::Limits, limits: Limits) -> Rig {
     Rig {
         collector: Collector::new(app, [80], limits).unwrap(),
         tracker: Tracker::new(1 << 22, 32).unwrap(),
+        deadline: None,
         events: Vec::new(),
         number: 0,
         generation: 0,
@@ -176,6 +178,7 @@ impl Rig {
                     .unwrap(),
             }),
             number,
+            self.deadline.as_ref(),
             &mut self.events,
         )
     }
@@ -194,7 +197,7 @@ impl Rig {
     fn event(&mut self, event: application::Event) -> &mut Self {
         self.number += 1;
         self.collector
-            .dispatch(event, self.number, &mut self.events)
+            .dispatch(event, self.number, self.deadline.as_ref(), &mut self.events)
             .unwrap();
         self
     }
@@ -2159,11 +2162,7 @@ fn settings_ack_waits_for_peer() {
 #[test]
 fn expired_deadline_stops_analysis() {
     let mut rig = rig();
-    rig.collector = Collector::new(application::Limits::default(), [80], Limits::default())
-        .unwrap()
-        .with_deadline(std::sync::Arc::new(crate::budget::Deadline::immediate(
-            None,
-        )));
+    rig.deadline = Some(crate::budget::Deadline::immediate(None));
     let error = rig.send_on(flow(), CLIENT_PREFACE, 0).unwrap_err();
     assert!(matches!(error, Error::Analysis(_)), "{error:?}");
 }

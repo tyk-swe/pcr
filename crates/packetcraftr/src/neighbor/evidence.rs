@@ -5,7 +5,7 @@ use std::collections::VecDeque;
 
 use bytes::Bytes;
 
-use super::error::{invalid_request, map_io_error, resolution_error};
+use super::error::{FailureEvidence, invalid_request, map_io_error, resolution_error};
 use super::options::Options;
 use super::wire::is_unicast_mac;
 use super::{MAX_VLAN_TAGS, Request as NeighborRequest};
@@ -137,6 +137,14 @@ impl EvidenceBuffer {
 
     pub(super) fn into_evidence(self) -> (Vec<Frame>, bool) {
         (Vec::from(self.frames), self.truncated)
+    }
+
+    pub(super) fn spent(self, attempts: u32) -> FailureEvidence {
+        FailureEvidence {
+            attempts,
+            evidence_truncated: self.truncated,
+            captured: Vec::from(self.frames).into_boxed_slice(),
+        }
     }
 
     fn over_budget(&self, frame_length: usize) -> bool {

@@ -72,7 +72,6 @@ impl crate::commands::Spec for Args {
         crate::output::contract::Format::Pcap,
         crate::output::contract::Format::PcapNg,
     ];
-    const CANCELLATION: bool = true;
 
     fn run_time(&self) -> Option<&dyn crate::command_options::Bounded> {
         Some(&self.duration)
@@ -82,7 +81,7 @@ impl crate::commands::Spec for Args {
         crate::resources::declare!(settings, self, [max_gap_ms: Milliseconds @ Operation]);
         self.duration.resources(settings);
         self.reader.resources(settings);
-        self.policy.budgets.resources(settings);
+        self.policy.resources(settings);
     }
 
     fn run(

@@ -63,7 +63,7 @@ impl Connection {
     }
     fn resources(&self, s: &mut Settings<'_>) {
         self.bounds.resources(s);
-        self.policy.budgets.resources(s);
+        self.policy.resources(s);
         crate::resources::declare!(s, self, [ timeout_ms: Milliseconds @ Operation, max_tls_write_bytes: Bytes @ Operation, max_tls_read_bytes: Bytes @ ActiveState ]);
     }
 }
@@ -108,7 +108,6 @@ impl Spec for AuditTls {
         },
     ];
     const FORMATS: &'static [Format] = crate::output::contract::TEXT_JSON_NDJSON;
-    const CANCELLATION: bool = true;
     fn run_time(&self) -> Option<&dyn Bounded> {
         Some(&self.connection)
     }
@@ -154,7 +153,6 @@ impl Spec for AuditHttp {
         },
     ];
     const FORMATS: &'static [Format] = crate::output::contract::TEXT_JSON_NDJSON;
-    const CANCELLATION: bool = true;
     fn run_time(&self) -> Option<&dyn Bounded> {
         Some(&self.connection)
     }

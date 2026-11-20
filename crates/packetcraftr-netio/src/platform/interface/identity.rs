@@ -1,7 +1,13 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#![cfg_attr(any(target_os = "linux", target_os = "macos"), allow(unsafe_code))]
+#![cfg_attr(
+    any(target_os = "linux", target_os = "macos"),
+    allow(
+        unsafe_code,
+        reason = "interface identity resolves through libc if_nametoindex and if_indextoname"
+    )
+)]
 
 use crate::{Error, interface::Id as InterfaceId};
 

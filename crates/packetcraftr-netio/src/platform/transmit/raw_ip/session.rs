@@ -312,7 +312,7 @@ mod tests {
                 ..decision(LOOPBACK_IFINDEX, destination)
             };
             let Outbound::Layer3(frame) = outbound(&bytes, &route, destination) else {
-                unreachable!();
+                unreachable!("test outbound helper always builds a layer 3 frame");
             };
             assert!(
                 matches!(prepare(frame), Err(Error::InvalidTransmissionFrame { message })

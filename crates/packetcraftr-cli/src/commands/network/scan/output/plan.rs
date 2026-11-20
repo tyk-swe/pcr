@@ -158,6 +158,14 @@ pub struct Plan {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sctp_scan: Option<SctpScan>,
     pub method: Method,
+    /// The timing preset that composed rate, timeout, attempts, and the
+    /// in-flight bound; absent when those flags were used directly.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timing: Option<&'static str>,
+    /// The seed the endpoint order was shuffled from; absent for the
+    /// selected order.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shuffle_seed: Option<u64>,
     /// The catalog behind port names, presets, and `port_hint`s.
     pub port_catalog: DataSet,
     /// Distinct expanded scan endpoints `--exclude-ports` or

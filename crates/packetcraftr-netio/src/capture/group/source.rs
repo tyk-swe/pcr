@@ -23,16 +23,16 @@ impl<C: Session> Owned<C> {
         let valid = capture.source_count() == 1
             && metadata.interface == request.interface
             && metadata.snap_length > 0
-            && metadata.snap_length <= request.limits.snap_length
+            && metadata.snap_length <= request.settings.limits.snap_length
             && native
                 .buffer_size
-                .consistent_with(request.native.buffer_size)
+                .consistent_with(request.settings.native.buffer_size)
             && native
                 .timestamp_source
-                .consistent_with(request.native.timestamp_source)
+                .consistent_with(request.settings.native.timestamp_source)
             && native
                 .timestamp_precision
-                .consistent_with(request.native.timestamp_precision);
+                .consistent_with(request.settings.native.timestamp_precision);
         // Keep reported identity even on a contract failure, while bounding
         // an injected provider's invalid name before copying it.
         let reported_name = if metadata.interface.name.len() > MAX_INTERFACE_NAME_BYTES {
@@ -57,7 +57,7 @@ impl<C: Session> Owned<C> {
             snap_length: metadata.snap_length,
             native: metadata.native,
         };
-        let limits = request.limits;
+        let limits = request.settings.limits;
         Self {
             capture,
             source: Source {

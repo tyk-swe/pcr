@@ -42,11 +42,7 @@ impl CaptureClock {
         }
     }
 
-    pub(super) fn at(
-        &mut self,
-        timestamp: SystemTime,
-        number: u64,
-    ) -> Result<(Instant, Option<Duration>), Error> {
+    pub(super) fn observe(&mut self, timestamp: SystemTime, number: u64) -> Option<Duration> {
         let mut regression = None;
         if let Some(latest) = self.latest_timestamp {
             match timestamp.duration_since(latest) {
@@ -67,6 +63,10 @@ impl CaptureClock {
             self.latest_timestamp
                 .map_or(timestamp, |latest| latest.max(timestamp)),
         );
+        regression
+    }
+
+    pub(super) fn at(&mut self, timestamp: SystemTime, number: u64) -> Result<Instant, Error> {
         let origin = *self.origin.get_or_insert(timestamp);
         let offset = timestamp.duration_since(origin).unwrap_or(Duration::ZERO);
         self.latest = self
@@ -74,7 +74,7 @@ impl CaptureClock {
             .checked_add(offset)
             .ok_or(Error::TimestampRange { number })?
             .max(self.latest);
-        Ok((self.latest, regression))
+        Ok(self.latest)
     }
 
     pub(super) fn report(&self) -> &ClockReport {

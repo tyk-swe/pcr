@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:packetcraftr:scope:v1",
+  "title": "PacketcraftR engagement scope v1",
+  "type": "object",
+  "required": [
+    "schema",
+    "label"
+  ],
+  "properties": {
+    "schema": {
+      "const": "packetcraftr.scope/v1"
+    },
+    "label": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "allowed_destinations": {
+      "type": "array",
+      "maxItems": 1024,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "denied_destinations": {
+      "type": "array",
+      "maxItems": 1024,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "allow_public_destinations": {
+      "type": "boolean"
+    },
+    "allow_hostname_resolution": {
+      "type": "boolean"
+    },
+    "allow_permissive_packets": {
+      "type": "boolean"
+    },
+    "allow_source_spoofing": {
+      "type": "boolean"
+    },
+    "max_packets": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "max_bytes": {
+      "type": "integer",
+      "minimum": 0
+    }
+  },
+  "additionalProperties": false
+}

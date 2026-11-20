@@ -21,6 +21,8 @@ pub struct Policy {
     /// no constraint; entries only narrow permission and never grant access
     /// that the other checks deny.
     pub allowed_destinations: Vec<DestinationConstraint>,
+    pub denied_destinations: Vec<DestinationConstraint>,
+    pub required_destination_groups: Vec<Vec<DestinationConstraint>>,
     pub max_packets_per_operation: u64,
     pub max_bytes_per_operation: u64,
     pub max_resolved_addresses: usize,
@@ -100,6 +102,8 @@ impl Default for Policy {
             allow_permissive_packets: false,
             allow_source_spoofing: false,
             allowed_destinations: Vec::new(),
+            denied_destinations: Vec::new(),
+            required_destination_groups: Vec::new(),
             max_packets_per_operation: DEFAULT_MAX_PACKETS_PER_OPERATION,
             max_bytes_per_operation: DEFAULT_MAX_BYTES_PER_OPERATION,
             max_resolved_addresses: DEFAULT_MAX_RESOLVED_ADDRESSES,
@@ -125,6 +129,13 @@ pub enum Error {
     InvalidDestinationConstraint { value: String, reason: String },
     #[error("destination constraint count {actual} exceeds policy limit {maximum}")]
     DestinationConstraintLimit { actual: usize, maximum: usize },
+    #[error("traffic policy denies destination {destination} excluded by {constraints}")]
+    DestinationDenied {
+        destination: IpAddr,
+        constraints: String,
+    },
+    #[error("engagement scope document is invalid: {reason}")]
+    InvalidScopeDocument { reason: String },
     #[error("traffic policy cannot authorize packet routing semantics: {reason}")]
     InvalidPacketSemantics {
         reason: String,
@@ -193,6 +204,14 @@ impl Classified for Error {
                 packetcraftr_core::error::Code::CliLiveTarget,
                 "declare fewer destination constraints, covering adjacent hosts with one CIDR network where possible",
             ),
+            Self::DestinationDenied { .. } => (
+                packetcraftr_core::error::Code::PolicyDestinationNotAllowed,
+                "choose a destination the engagement scope does not exclude, or amend the scope with approval",
+            ),
+            Self::InvalidScopeDocument { .. } => (
+                packetcraftr_core::error::Code::CliLiveTarget,
+                "provide a packetcraftr.scope/v1 JSON document with a label and IP or canonical CIDR destinations",
+            ),
             Self::InvalidPacketSemantics { .. }
             | Self::WireFrame { .. }
             | Self::UndecodableWire { .. } => {
@@ -234,7 +253,8 @@ impl Classified for Error {
         let kind = match self {
             Self::InvalidAddressLimit { .. }
             | Self::InvalidDestinationConstraint { .. }
-            | Self::DestinationConstraintLimit { .. } => Kind::Usage,
+            | Self::DestinationConstraintLimit { .. }
+            | Self::InvalidScopeDocument { .. } => Kind::Usage,
             _ => Kind::Policy,
         };
         Classification::new(code, kind, Some(remediation))

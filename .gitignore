@@ -1,4 +1,5 @@
 /target/
+/cli-docs/
 
 # Local secrets
 .env
@@ -22,3 +23,4 @@ __pycache__/
 # Local agent settings
 /.claude/settings.local.json
 !crates/packetcraftr/src/audit/test-*.pem
+!crates/packetcraftr-netio/src/tls/test-ca.pem

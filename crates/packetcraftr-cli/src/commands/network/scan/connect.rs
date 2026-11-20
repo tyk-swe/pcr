@@ -18,9 +18,9 @@ pub(super) struct Request {
 pub(super) fn run(
     invocation: &crate::invocation::Invocation,
     request: Request,
-    format: Format,
-    stream: &StreamEncoder,
 ) -> Result<(), CliError> {
+    let format = invocation.format;
+    let stream = &invocation.output;
     let Request {
         followup: request,
         plan,

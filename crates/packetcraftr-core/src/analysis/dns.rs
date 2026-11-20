@@ -4,16 +4,14 @@
 mod transactions;
 
 use super::{
-    FrameRecord, ScopedFlowKey, StreamTransport, Summary as RunSummary,
+    FrameRecord, ScopedFlowKey, StreamTransport, Summary as RunSummary, adapter,
     application::{self, Error, Limits, Retained, TcpSources},
     provenance::{Accumulator, SourceSet},
     scope::Definition,
     session::{self, CollectorNeeds},
 };
-use crate::protocol::identity;
 use crate::{
     error::BoundaryError,
-    field::WireValue,
     protocol::application::dns::{self, Dns},
 };
 use bytes::Bytes;
@@ -158,37 +156,14 @@ impl Collector {
                         .entry(scope.id.get())
                         .or_insert_with(|| scope.clone());
                 }
-                let length = view
-                    .decoded
-                    .packet
-                    .layer(view.layer)
-                    .and_then(identity::udp_length)
-                    .ok_or(Error::Sources {
+                let (range, expected) =
+                    adapter::udp_payload(view.decoded, view.layer).ok_or(Error::Sources {
                         number: record.number,
                     })?;
-                let start = view
-                    .decoded
-                    .layout
-                    .layer(view.layer)
-                    .ok_or(Error::Sources {
-                        number: record.number,
-                    })?
-                    .range
-                    .end;
-                let WireValue::Exact(length) = length else {
-                    return Err(Error::Sources {
-                        number: record.number,
-                    });
-                };
-                let expected = usize::from(length).saturating_sub(8);
-                let end = start
-                    .saturating_add(expected)
-                    .min(view.decoded.frame.bytes().len());
                 // The emitted wire and every decoded name/rdata slice derived
                 // from it must own their bytes; slicing the record would pin
                 // the entire frame allocation behind a few DNS bytes.
-                let start = start.min(end);
-                let wire = Bytes::copy_from_slice(&view.decoded.frame.bytes()[start..end]);
+                let wire = Bytes::copy_from_slice(&view.decoded.frame.bytes()[range]);
                 let sources = record
                     .udp_sources()
                     .ok_or(Error::Sources {
@@ -208,7 +183,7 @@ impl Collector {
                             Status::Incomplete
                         },
                         wire,
-                        declared_length: Some(length.saturating_sub(8)),
+                        declared_length: Some(u16::try_from(expected).unwrap_or(u16::MAX)),
                         framing_bytes: Bytes::new(),
                         dns: None,
                         error: None,

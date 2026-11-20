@@ -56,7 +56,7 @@ impl net::capture::Provider for Backend {
             metadata: net::capture::Metadata {
                 interface: request.interface.clone(),
                 link_type: self.frames[0].link_type,
-                snap_length: request.limits.snap_length,
+                snap_length: request.settings.limits.snap_length,
                 native: net::capture::RealizedSettings::default(),
             },
             keys: self.keys.clone(),
@@ -304,7 +304,7 @@ fn quic_exports_remain_in_the_directory_selected_before_input() {
     std::fs::rename(&requested, &original).unwrap();
     std::fs::create_dir(&requested).unwrap();
     exporter.range("range.bin", b"selected directory").unwrap();
-    exporter.finish().unwrap();
+    exporter.finish(usize::MAX).unwrap();
     assert_eq!(
         std::fs::read(original.join("range.bin")).unwrap(),
         b"selected directory"

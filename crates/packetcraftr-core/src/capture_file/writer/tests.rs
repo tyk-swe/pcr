@@ -167,6 +167,42 @@ fn stream_limits_reject_excess_before_writing() {
 }
 
 #[test]
+fn mapping_reports_wire_length_changes_without_packet_byte_changes() {
+    use crate::capture_file::map_frames;
+
+    let first = frame(1, 0, 0x11, 60);
+    let second = frame(2, 0, 0x22, 60);
+    let adjusted = truncated_frame(1, 0, 0x11, 60);
+    let mut source = Writer::new(Vec::new(), Format::Pcap, LinkType::ETHERNET).unwrap();
+    source.write_frame(&first).unwrap();
+    source.write_frame(&second).unwrap();
+    let mut reader =
+        Reader::with_limits(Cursor::new(source.into_inner()), Default::default()).unwrap();
+    let mut output = Writer::pcapng_with_options(Vec::new(), Default::default()).unwrap();
+
+    let report = map_frames(
+        &mut reader,
+        &mut output,
+        Limits::default(),
+        0,
+        |number, frame| {
+            Ok(if number == 1 {
+                adjusted.clone()
+            } else {
+                frame.clone()
+            })
+        },
+    )
+    .unwrap();
+
+    let (_, written) = read_frames(output.into_inner());
+    assert_eq!(written.len(), 2);
+    assert_same_packet(&written[0], &adjusted);
+    assert_same_packet(&written[1], &second);
+    assert_eq!(report.frames_changed, 1);
+}
+
+#[test]
 fn mapped_interface_speeds_keep_their_values_across_byte_orders() {
     use crate::capture_file::{
         Endianness, Interface, MetadataBlockKind, PcapNgOption, PcapNgOptions, RecordKind,

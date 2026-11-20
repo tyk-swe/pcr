@@ -37,7 +37,6 @@ use crate::error::BoundaryError;
 use budget::{Budget, Context};
 use connection::{ConnectionState, Phase};
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Arc;
 
 use super::{
     FrameRecord, ScopedFlowKey, Summary as RunSummary,
@@ -48,6 +47,12 @@ use super::{
 
 type ConnectionKey = (u64, u64);
 
+struct Fault {
+    status: Status,
+    code: IssueCode,
+    detail: &'static str,
+}
+
 #[cfg(test)]
 thread_local! {
     static FAILURE_LOOKUPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
@@ -57,26 +62,22 @@ thread_local! {
 struct Resources {
     app_limits: application::Limits,
     limits: Limits,
-    deadline: Option<Arc<Deadline>>,
     budget: Budget,
 }
 
 impl Resources {
-    fn context<'a>(&'a mut self, out: &'a mut Vec<Event>) -> Context<'a> {
+    fn context<'a>(
+        &'a mut self,
+        deadline: Option<&'a Deadline>,
+        out: &'a mut Vec<Event>,
+    ) -> Context<'a> {
         Context {
             limits: &self.limits,
             app: &self.app_limits,
-            deadline: self.deadline.as_deref(),
+            deadline,
             budget: &mut self.budget,
             out,
         }
-    }
-
-    fn enforce_deadline(&self) -> Result<(), Error> {
-        if let Some(deadline) = self.deadline.as_deref() {
-            deadline.enforce()?;
-        }
-        Ok(())
     }
 }
 
@@ -103,7 +104,6 @@ impl Collector {
             resources: Resources {
                 app_limits: application,
                 limits,
-                deadline: None,
                 budget: Budget::new(application),
             },
             tcp: TcpSources::new(ports, application),
@@ -114,22 +114,20 @@ impl Collector {
         })
     }
 
-    #[must_use]
-    pub fn with_deadline(mut self, deadline: Arc<Deadline>) -> Self {
-        self.resources.deadline = Some(deadline);
-        self
-    }
-
     pub fn scopes(&self) -> impl Iterator<Item = &Definition> {
         self.tcp.scopes()
     }
 
-    pub fn observe(&mut self, record: &FrameRecord<'_>) -> Result<Vec<Event>, Error> {
+    pub fn observe(
+        &mut self,
+        record: &FrameRecord<'_>,
+        deadline: &Deadline,
+    ) -> Result<Vec<Event>, Error> {
         if self.failed {
             return Err(Error::Failed);
         }
         let mut out = Vec::new();
-        if let Err(error) = self.observe_into(record, &mut out) {
+        if let Err(error) = self.observe_into(record, deadline, &mut out) {
             self.failed = true;
             self.connections.clear();
             self.flow_index.clear();
@@ -142,11 +140,12 @@ impl Collector {
     fn observe_into(
         &mut self,
         record: &FrameRecord<'_>,
+        deadline: &Deadline,
         out: &mut Vec<Event>,
     ) -> Result<(), Error> {
-        self.resources.enforce_deadline()?;
+        deadline.enforce()?;
         for event in self.tcp.observe(record)? {
-            self.dispatch(event, record.number, out)?;
+            self.dispatch(event, record.number, Some(deadline), out)?;
         }
         Ok(())
     }
@@ -155,6 +154,7 @@ impl Collector {
         &mut self,
         event: application::Event,
         number: u64,
+        deadline: Option<&Deadline>,
         out: &mut Vec<Event>,
     ) -> Result<(), Error> {
         match event {
@@ -172,10 +172,10 @@ impl Collector {
                             Status::Evicted,
                             IssueCode::GenerationReplaced,
                             "the TCP tuple was reused for a newer connection",
-                            &mut self.resources.context(out),
+                            &mut self.resources.context(deadline, out),
                         )?;
                     }
-                    conn.finish(&mut self.resources.context(out))?;
+                    conn.finish(&mut self.resources.context(deadline, out))?;
                 }
                 self.associate_flow(delivery.flow.clone(), key);
                 let conn = self.connections.entry(key).or_insert_with(|| {
@@ -185,30 +185,43 @@ impl Collector {
                         delivery.flow.clone(),
                     ))
                 });
-                conn.data(&delivery, number, &mut self.resources.context(out))
+                conn.data(
+                    &delivery,
+                    number,
+                    &mut self.resources.context(deadline, out),
+                )
             }
             application::Event::Gap { flow, .. } => self.fail_flow(
                 &flow,
                 number,
-                Status::Gap,
-                IssueCode::TcpGap,
-                "a TCP sequence gap invalidated the byte stream",
+                Fault {
+                    status: Status::Gap,
+                    code: IssueCode::TcpGap,
+                    detail: "a TCP sequence gap invalidated the byte stream",
+                },
+                deadline,
                 out,
             ),
             application::Event::Conflict { flow, .. } => self.fail_flow(
                 &flow,
                 number,
-                Status::Conflict,
-                IssueCode::TcpConflict,
-                "conflicting TCP retransmissions invalidated the byte stream",
+                Fault {
+                    status: Status::Conflict,
+                    code: IssueCode::TcpConflict,
+                    detail: "conflicting TCP retransmissions invalidated the byte stream",
+                },
+                deadline,
                 out,
             ),
             application::Event::Evicted { flow, .. } => self.fail_flow(
                 &flow,
                 number,
-                Status::Evicted,
-                IssueCode::TcpEvicted,
-                "reassembly state was evicted before the stream completed",
+                Fault {
+                    status: Status::Evicted,
+                    code: IssueCode::TcpEvicted,
+                    detail: "reassembly state was evicted before the stream completed",
+                },
+                deadline,
                 out,
             ),
             application::Event::Closed { flow, reset, .. } => {
@@ -222,9 +235,9 @@ impl Collector {
                     return Ok(());
                 };
                 conn.number = number;
-                conn.close(&flow, reset, &mut self.resources.context(out))?;
+                conn.close(&flow, reset, &mut self.resources.context(deadline, out))?;
                 if matches!(conn.phase, Phase::Dead) {
-                    conn.drain(&mut self.resources.context(out))?;
+                    conn.drain(&mut self.resources.context(deadline, out))?;
                 }
                 Ok(())
             }
@@ -235,9 +248,8 @@ impl Collector {
         &mut self,
         flow: &ScopedFlowKey,
         number: u64,
-        status: Status,
-        code: IssueCode,
-        detail: &'static str,
+        fault: Fault,
+        deadline: Option<&Deadline>,
         out: &mut Vec<Event>,
     ) -> Result<(), Error> {
         let mut keys = [flow, &flow.reverse()].map(|flow| {
@@ -253,7 +265,13 @@ impl Collector {
         {
             if let Some(conn) = self.connections.get_mut(&key) {
                 conn.number = number;
-                conn.terminate(flow, status, code, detail, &mut self.resources.context(out))?;
+                conn.terminate(
+                    flow,
+                    fault.status,
+                    fault.code,
+                    fault.detail,
+                    &mut self.resources.context(deadline, out),
+                )?;
             }
         }
         Ok(())
@@ -286,7 +304,7 @@ impl Collector {
 
     pub fn finish(self, run: &RunSummary) -> Result<(Vec<Event>, Summary), Error> {
         let mut out = Vec::new();
-        let summary = self.finalize(run, |events| {
+        let summary = self.finalize(run, None, |events| {
             out.extend(events);
             Ok(())
         })?;
@@ -296,31 +314,40 @@ impl Collector {
     fn finalize(
         mut self,
         run: &RunSummary,
+        deadline: Option<&Deadline>,
         mut emit: impl FnMut(Vec<Event>) -> Result<(), Error>,
     ) -> Result<Summary, Error> {
         if self.failed {
             return Err(Error::Failed);
         }
-        self.resources.enforce_deadline()?;
+        if let Some(deadline) = deadline {
+            deadline.enforce()?;
+        }
         for event in self
             .tcp
             .trailing(&run.trailing_tcp_events, run.frames_read)?
         {
-            self.resources.enforce_deadline()?;
+            if let Some(deadline) = deadline {
+                deadline.enforce()?;
+            }
             let mut out = Vec::new();
             if !matches!(event, application::Event::Evicted { .. }) {
-                self.dispatch(event, run.frames_read, &mut out)?;
+                self.dispatch(event, run.frames_read, deadline, &mut out)?;
             }
             emit(out)?;
         }
         for mut conn in std::mem::take(&mut self.connections).into_values() {
-            self.resources.enforce_deadline()?;
+            if let Some(deadline) = deadline {
+                deadline.enforce()?;
+            }
             let mut out = Vec::new();
             conn.number = run.frames_read;
-            conn.finish(&mut self.resources.context(&mut out))?;
+            conn.finish(&mut self.resources.context(deadline, &mut out))?;
             emit(out)?;
         }
-        self.resources.enforce_deadline()?;
+        if let Some(deadline) = deadline {
+            deadline.enforce()?;
+        }
         Ok(self.resources.budget.into_summary())
     }
 }
@@ -342,20 +369,21 @@ impl session::Collector for Collector {
         Self::scopes(self).cloned().collect()
     }
 
-    fn observe(&mut self, record: &FrameRecord<'_>) -> Result<Vec<Event>, BoundaryError> {
-        Self::observe(self, record).map_err(BoundaryError::from_error)
+    fn observe(
+        &mut self,
+        record: &FrameRecord<'_>,
+        deadline: &Deadline,
+    ) -> Result<Vec<Event>, BoundaryError> {
+        Self::observe(self, record, deadline).map_err(BoundaryError::from_error)
     }
 
     fn finish(
-        mut self,
+        self,
         run: &RunSummary,
         deadline: &Deadline,
         event_sink: &mut dyn FnMut(Event) -> Result<(), BoundaryError>,
     ) -> Result<Summary, BoundaryError> {
-        self.resources.deadline = Some(Arc::new(
-            deadline.clone().with_parent(self.resources.deadline.take()),
-        ));
-        self.finalize(run, |events| {
+        self.finalize(run, Some(deadline), |events| {
             session::deliver(deadline, events, event_sink).map_err(Error::Output)
         })
         .map_err(BoundaryError::from_error)

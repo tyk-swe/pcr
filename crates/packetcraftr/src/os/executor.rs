@@ -10,7 +10,7 @@ use crate::{
     Client, Stats,
     clock::Clock,
     engine::execution::{Executor, ExecutorFault},
-    exchange::{WorkflowExecutor, WorkflowOverrides},
+    exchange::{WorkflowExecutor, WorkflowStep},
     probe::runner::{Batch, Evidence},
     providers::PacketProviders,
 };
@@ -131,15 +131,13 @@ impl<P: PacketProviders, K: Clock> Executor<Batch<PlannedProbe>> for Native<'_, 
             self.send.clone(),
             self.collection.clone(),
         );
+        let mut step = WorkflowStep::new(batch.timeout, probe.address);
+        if let Some(interface) = probe.interface.clone() {
+            step = step.interface(interface);
+        }
         let aggregate = executor.exchange_for_workflow(
             Template::new(probe.packet()),
-            WorkflowOverrides {
-                timeout: batch.timeout,
-                max_template_packets: 1,
-                destination: probe.address,
-                interface: probe.interface.clone(),
-                max_responses: None,
-            },
+            step,
             &mut |_, sent, response| classify(client.registry(), probe, sent, response).is_some(),
             None,
         )?;
@@ -147,7 +145,7 @@ impl<P: PacketProviders, K: Clock> Executor<Batch<PlannedProbe>> for Native<'_, 
             .spent
             .checked_add_assign(&aggregate.aggregate.stats)
             .map_err(failure)?;
-        Ok(Evidence::from_exchange(batch.permit, aggregate))
+        Ok(batch.evidence(aggregate))
     }
 }
 

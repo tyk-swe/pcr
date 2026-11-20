@@ -180,6 +180,21 @@ pub(super) fn map_io_error(
     }
 }
 
+pub(super) fn spent_io_error(
+    request: &Request,
+    operation: &'static str,
+    error: packetcraftr_netio::Error,
+    spent: FailureEvidence,
+) -> Error {
+    Error::Io {
+        interface: request.interface.name.clone().into_boxed_str(),
+        target: request.target,
+        operation,
+        spent: Some(Box::new(spent)),
+        source: error,
+    }
+}
+
 pub(super) fn invalid_options(message: String) -> Error {
     Error::InvalidOptions {
         message,

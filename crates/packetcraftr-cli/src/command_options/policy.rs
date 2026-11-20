@@ -1,6 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use std::io::Read;
+use std::path::Path;
+
 use clap::Args;
 
 use crate::resources::{Settings, declare};
@@ -46,6 +49,47 @@ pub(crate) struct DestinationAllowlistArgs {
 }
 
 #[derive(Clone, Debug, Args)]
+pub(crate) struct ScopeArgs {
+    /// Engagement scope document (packetcraftr.scope/v1 JSON, regular file).
+    /// A scope only narrows this command's policy and budgets, it never
+    /// grants an opt-in the command flags did not give.
+    #[arg(long, value_name = "PATH", value_parser = load_scope)]
+    scope_file: Option<packetcraftr::policy::Scope>,
+}
+
+impl ScopeArgs {
+    pub(crate) fn apply_to(self, policy: &mut packetcraftr::policy::Policy) {
+        if let Some(scope) = self.scope_file {
+            *policy = scope.narrow(policy);
+        }
+    }
+
+    pub(crate) fn scope(&self) -> Option<&packetcraftr::policy::Scope> {
+        self.scope_file.as_ref()
+    }
+}
+
+fn load_scope(path: &str) -> Result<packetcraftr::policy::Scope, String> {
+    let path = Path::new(path);
+    let metadata = std::fs::metadata(path)
+        .map_err(|error| format!("cannot read scope file {}: {error}", path.display()))?;
+    if !metadata.is_file() {
+        return Err(format!(
+            "scope file {} is not a regular file",
+            path.display()
+        ));
+    }
+    let file = std::fs::File::open(path)
+        .map_err(|error| format!("cannot read scope file {}: {error}", path.display()))?;
+    let limit = packetcraftr::policy::MAX_SCOPE_DOCUMENT_BYTES;
+    let mut bytes = Vec::new();
+    file.take(limit as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| format!("cannot read scope file {}: {error}", path.display()))?;
+    packetcraftr::policy::Scope::parse(&bytes).map_err(|error| error.to_string())
+}
+
+#[derive(Clone, Debug, Args)]
 pub(crate) struct TrafficBudgetArgs {
     /// Maximum packets authorized for one operation.
     #[arg(
@@ -76,6 +120,8 @@ pub(crate) struct SendPolicyArgs {
     destination_allowlist: DestinationAllowlistArgs,
     #[command(flatten)]
     pub(crate) budgets: TrafficBudgetArgs,
+    #[command(flatten)]
+    scope: ScopeArgs,
 }
 
 /// `fuzz` and `replay`: packets addressed numerically, so no hostname
@@ -92,6 +138,8 @@ pub(crate) struct NumericPolicyArgs {
     destination_allowlist: DestinationAllowlistArgs,
     #[command(flatten)]
     pub(crate) budgets: TrafficBudgetArgs,
+    #[command(flatten)]
+    scope: ScopeArgs,
 }
 
 /// `scan`, `traceroute`, and `dns`: a named target, packets built by the
@@ -106,6 +154,8 @@ pub(crate) struct HostnamePolicyArgs {
     destination_allowlist: DestinationAllowlistArgs,
     #[command(flatten)]
     pub(crate) budgets: TrafficBudgetArgs,
+    #[command(flatten)]
+    scope: ScopeArgs,
 }
 
 /// Identification uses numeric endpoints and constructs reviewed requests.
@@ -117,6 +167,8 @@ pub(crate) struct IdentificationPolicyArgs {
     destination_allowlist: DestinationAllowlistArgs,
     #[command(flatten)]
     pub(crate) budgets: TrafficBudgetArgs,
+    #[command(flatten)]
+    scope: ScopeArgs,
 }
 
 impl IdentificationPolicyArgs {
@@ -125,7 +177,20 @@ impl IdentificationPolicyArgs {
         self.public_destination.apply_to(&mut policy);
         self.destination_allowlist.apply_to(&mut policy);
         self.budgets.apply_to(&mut policy);
+        self.scope.apply_to(&mut policy);
         policy
+    }
+}
+
+impl NumericPolicyArgs {
+    pub(crate) fn resources(&self, settings: &mut Settings<'_>) {
+        self.budgets.resources_with_scope(settings, &self.scope);
+    }
+}
+
+impl IdentificationPolicyArgs {
+    pub(crate) fn resources(&self, settings: &mut Settings<'_>) {
+        self.budgets.resources_with_scope(settings, &self.scope);
     }
 }
 
@@ -136,6 +201,35 @@ impl HostnameResolutionArgs {
 }
 
 impl TrafficBudgetArgs {
+    pub(crate) fn resources_with_scope(&self, settings: &mut Settings<'_>, scope: &ScopeArgs) {
+        let Some(scope) = scope.scope() else {
+            self.resources(settings);
+            return;
+        };
+        let max_packets = scope
+            .max_packets
+            .map_or(self.max_packets, |ceiling| self.max_packets.min(ceiling));
+        let max_bytes = scope
+            .max_bytes
+            .map_or(self.max_bytes, |ceiling| self.max_bytes.min(ceiling));
+        settings.declare(crate::resources::Field {
+            id: "max_packets",
+            value: crate::resources::SettingValue::setting_value(&max_packets),
+            unit: crate::resources::Unit::Count,
+            stage: crate::resources::Stage::Operation,
+            enabled: crate::resources::Enabled::Fixed(true),
+            preset: None,
+        });
+        settings.declare(crate::resources::Field {
+            id: "max_bytes",
+            value: crate::resources::SettingValue::setting_value(&max_bytes),
+            unit: crate::resources::Unit::Bytes,
+            stage: crate::resources::Stage::Operation,
+            enabled: crate::resources::Enabled::Fixed(true),
+            preset: None,
+        });
+    }
+
     pub(crate) fn resources(&self, settings: &mut Settings<'_>) {
         declare!(settings, self, [
             max_packets: Count @ Operation,
@@ -147,14 +241,14 @@ impl TrafficBudgetArgs {
 impl SendPolicyArgs {
     pub(crate) fn resources(&self, settings: &mut Settings<'_>) {
         self.hostname_resolution.resources(settings);
-        self.budgets.resources(settings);
+        self.budgets.resources_with_scope(settings, &self.scope);
     }
 }
 
 impl HostnamePolicyArgs {
     pub(crate) fn resources(&self, settings: &mut Settings<'_>) {
         self.hostname_resolution.resources(settings);
-        self.budgets.resources(settings);
+        self.budgets.resources_with_scope(settings, &self.scope);
     }
 }
 
@@ -211,6 +305,7 @@ impl SendPolicyArgs {
         self.source_spoofing.apply_to(&mut policy);
         self.destination_allowlist.apply_to(&mut policy);
         self.budgets.apply_to(&mut policy);
+        self.scope.apply_to(&mut policy);
         policy
     }
 }
@@ -223,6 +318,7 @@ impl NumericPolicyArgs {
         self.source_spoofing.apply_to(&mut policy);
         self.destination_allowlist.apply_to(&mut policy);
         self.budgets.apply_to(&mut policy);
+        self.scope.apply_to(&mut policy);
         policy
     }
 }
@@ -234,6 +330,7 @@ impl HostnamePolicyArgs {
         self.hostname_resolution.apply_to(&mut policy);
         self.destination_allowlist.apply_to(&mut policy);
         self.budgets.apply_to(&mut policy);
+        self.scope.apply_to(&mut policy);
         policy
     }
 }

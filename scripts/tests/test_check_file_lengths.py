@@ -43,6 +43,12 @@ class CheckFileLengthsTests(unittest.TestCase):
         self.assertEqual(lengths.rust_code_lines(RUST), 3)
         self.assertEqual(lengths.python_code_lines(PYTHON), 3)
 
+    def test_mixed_docstring_markers_do_not_close_early(self):
+        double = '"""start\n' + "'''\n" + 'y = 1\nz = 2\n""" close\nx = 1\n'
+        self.assertEqual(lengths.python_code_lines(double), 1)
+        single = "'''start\n" + '"""\n' + "y = 1\nz = 2\n''' close\nx = 1\n"
+        self.assertEqual(lengths.python_code_lines(single), 1)
+
     def test_string_comment_markers_preserve_code(self):
         text = 'fn f() {\n    let open = "/*";\n    let a = 1;\n    let close = "*/";\n}\n'
         self.assertEqual(lengths.rust_code_lines(text), 4)

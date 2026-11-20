@@ -422,9 +422,7 @@ fn frame_value(context: &Context<'_>, which: FrameField) -> Option<field::Value>
             }
             .to_owned(),
         ),
-        FrameField::Truncated => {
-            field::Value::Bool(frame.captured_length() < frame.original_length())
-        }
+        FrameField::Truncated => field::Value::Bool(frame.is_truncated()),
         FrameField::LayerCount => field::Value::Unsigned(visible_layers(context).count() as u64),
         FrameField::Protocols => field::Value::List(
             visible_layers(context)

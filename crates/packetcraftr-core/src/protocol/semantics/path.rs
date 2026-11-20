@@ -84,17 +84,9 @@ pub(super) fn ip_path_at(
         NetworkHeader::V4 {
             source,
             destination,
-            fragment_offset,
-            more_fragments,
             options,
             ..
-        } => ipv4_path(
-            *source,
-            *destination,
-            *fragment_offset,
-            *more_fragments,
-            options,
-        ),
+        } => ipv4_path(*source, *destination, options),
         NetworkHeader::V6 {
             source,
             destination,
@@ -106,11 +98,8 @@ pub(super) fn ip_path_at(
 fn ipv4_path(
     source: std::net::Ipv4Addr,
     header_destination: std::net::Ipv4Addr,
-    fragment_offset: u16,
-    more_fragments: bool,
     options: &Bytes,
 ) -> Result<IpPath, Error> {
-    reject_non_atomic_fragment(BuiltinProtocol::Ipv4.id(), fragment_offset, more_fragments)?;
     let source_route = parse_ipv4_source_routes(options)?;
     let final_destination = IpAddr::V4(source_route.final_destination(header_destination));
     let declared_route_destinations = source_route
@@ -252,5 +241,32 @@ fn wire_u8(
         WireValue::Exact(value) => Ok(*value),
         WireValue::Raw(value) if value.len() == 1 => Ok(value[0]),
         WireValue::Raw(_) => Err(Error::field(protocol, field, Constraint::OneByte)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::network::Ipv4;
+    use std::net::Ipv4Addr;
+
+    #[test]
+    fn ipv4_fragments_keep_their_header_destination() {
+        for (offset, more) in [(0, true), (3, false), (0, false)] {
+            let mut packet = Packet::default();
+            packet.push(Ipv4 {
+                source: Ipv4Addr::new(192, 0, 2, 2),
+                destination: Ipv4Addr::new(198, 51, 100, 9),
+                fragment_offset: offset,
+                more_fragments: more,
+                ..Ipv4::default()
+            });
+            let path = outer_ip_path(&packet).unwrap().expect("path");
+            assert_eq!(
+                path.header_destination,
+                IpAddr::V4(Ipv4Addr::new(198, 51, 100, 9)),
+                "offset {offset} more {more}"
+            );
+        }
     }
 }

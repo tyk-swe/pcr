@@ -6,7 +6,7 @@
 
 use std::io::Read;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant};
 
 use crate::budget::Deadline;
 use crate::capture_file::Reader;
@@ -40,6 +40,7 @@ pub use limits::Limits;
 pub use options::{Options, Plan};
 pub use record::{Conversation, DerivedDatagram, FrameRecord, TcpView, UdpView};
 
+use clock::CaptureClock;
 use dispatch::ReassemblyDispatch;
 use ip::IpDispatch;
 
@@ -190,6 +191,7 @@ pub struct FramePipeline {
     tcp_streams: StreamIndex,
     udp_streams: StreamIndex,
     scopes: Interner,
+    clock: CaptureClock,
     reassembly_dispatch: ReassemblyDispatch,
     ip_dispatch: IpDispatch,
     provenance: Option<crate::analysis::provenance::Tracker>,
@@ -251,6 +253,7 @@ impl FramePipeline {
             tcp_streams: StreamIndex::default(),
             udp_streams: StreamIndex::default(),
             scopes,
+            clock: CaptureClock::new(),
             reassembly_dispatch,
             ip_dispatch,
             provenance,
@@ -281,6 +284,7 @@ impl FramePipeline {
             tcp_streams,
             udp_streams,
             scopes,
+            clock,
             reassembly_dispatch,
             ip_dispatch,
             provenance,
@@ -313,15 +317,16 @@ impl FramePipeline {
             )
             .map_err(|source| Error::Decode { number, source })?;
 
-        // Every physical frame advances capture-global IP state before any
-        // transport indexing or display filter.
         let physical_sources = provenance
             .as_ref()
             .map(|tracker| {
                 tracker.single(crate::analysis::provenance::SourceFrame { number, timestamp })
             })
             .transpose()?;
-        let (derived, clock_regression) = if stages.ip_reassembly {
+        // Advance capture time before transport indexing and filtering.
+        let clock_regression = clock.observe(timestamp, number);
+        let derived = if stages.ip_reassembly {
+            let now = clock.at(timestamp, number)?;
             advance_ip_reassembly(
                 ip_dispatch,
                 &stage,
@@ -329,14 +334,14 @@ impl FramePipeline {
                 PhysicalFrame {
                     decoded: &decoded,
                     number,
-                    timestamp,
+                    now,
                 },
                 &mut ip_sink,
                 provenance,
                 physical_sources.as_ref(),
             )?
         } else {
-            (Vec::new(), None)
+            Vec::new()
         };
         let TransportViews { tcp, udp } = elect_transport_views(&decoded, &derived);
         let mut tcp_view = tcp.as_ref().map(|elected| TcpView {
@@ -459,7 +464,7 @@ impl FramePipeline {
             bytes_read,
             frames_matched: self.frames_matched,
             truncated_frames: self.truncated_frames,
-            clock: self.ip_dispatch.clock_report().clone(),
+            clock: self.clock.report().clone(),
             trailing_tcp_events: self.reassembly_dispatch.flush(),
             ip_reassembly: self.ip_dispatch.report().clone(),
             interfaces,
@@ -476,7 +481,7 @@ struct FrameStage<'a> {
 struct PhysicalFrame<'a> {
     decoded: &'a DecodedPacket,
     number: u64,
-    timestamp: SystemTime,
+    now: Instant,
 }
 
 fn advance_ip_reassembly<I>(
@@ -487,14 +492,14 @@ fn advance_ip_reassembly<I>(
     ip_sink: &mut I,
     provenance: &mut Option<crate::analysis::provenance::Tracker>,
     physical_sources: Option<&crate::analysis::provenance::SourceSet>,
-) -> Result<(Vec<DerivedDatagram>, Option<Duration>), Error>
+) -> Result<Vec<DerivedDatagram>, Error>
 where
     I: FnMut(IpEventRecord) -> Result<(), crate::error::BoundaryError>,
 {
     let PhysicalFrame {
         decoded,
         number,
-        timestamp,
+        now,
     } = frame;
     let emit = |events: Vec<IpEvent>, sink: &mut I| -> Result<(), Error> {
         for event in events {
@@ -505,7 +510,6 @@ where
         Ok(())
     };
 
-    let (now, clock_regression) = ip_dispatch.at(timestamp, number)?;
     let (expired, removed) = ip_dispatch.expire(now);
     emit(expired, ip_sink)?;
     if let Some(tracker) = provenance
@@ -566,7 +570,7 @@ where
         derived_memory_charge = next_derived_memory_charge;
         completed = next_completed;
     }
-    Ok((derived, clock_regression))
+    Ok(derived)
 }
 
 struct ElectedTransport<'a, T> {

@@ -10,10 +10,11 @@ use crate::Stats;
 use crate::client::admission::resolve_selected;
 use crate::clock::{Clock, SystemClock};
 use crate::dns::tcp::{Category as TcpCategory, Error as TcpError};
-use crate::engine::execution::Executor;
 use crate::engine::execution::Receipt;
 use crate::evidence::ExecutionPermit;
+use crate::exchange::WorkflowExecutor;
 use crate::policy::Authorizer;
+use crate::providers::{PacketProviders, TcpProviders};
 use crate::target::ResolveTarget;
 use crate::target::{Family, Target};
 
@@ -21,15 +22,15 @@ use super::super::error::{Error, EvidenceFault};
 use super::super::evidence::{
     ClassifiedAttempt, classify_tcp_response, tcp_failure_evidence, tcp_timeout_evidence,
 };
-use super::super::executor::{Exchange, TcpEvidence, TcpQuerier, TcpQuery};
+use super::super::executor::{TcpEvidence, TcpQuery};
 use super::super::plan::Probe;
 use super::super::{Event, Outcome};
 use super::Retries;
 
-impl<A, E, C, F> Retries<'_, A, E, C, F>
+impl<A, P, C, F> Retries<'_, '_, A, P, C, F>
 where
     A: Authorizer + ResolveTarget,
-    E: Executor<Exchange> + TcpQuerier,
+    P: PacketProviders + TcpProviders,
     C: Clock,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
@@ -176,13 +177,13 @@ struct TcpAttempt {
 }
 
 impl TcpAttempt {
-    fn execute<E: TcpQuerier>(
-        executor: &mut E,
+    fn execute<P: TcpProviders, K: Clock>(
+        executor: &mut WorkflowExecutor<'_, P, K>,
         query: &TcpQuery,
         framed_query_bytes: usize,
     ) -> Self {
         let started = SystemClock.now();
-        let result = executor.query(query);
+        let result = executor.query_tcp(query);
         let boundary_elapsed = started.elapsed();
         let (permit, elapsed, bytes_written) = match &result {
             Ok(evidence) => (

@@ -95,7 +95,6 @@ impl crate::commands::Spec for Args {
         },
     ];
     const FORMATS: &'static [Format] = crate::output::contract::TEXT_JSON_NDJSON;
-    const CANCELLATION: bool = true;
     fn run_time(&self) -> Option<&dyn Bounded> {
         Some(self)
     }
@@ -106,7 +105,7 @@ impl crate::commands::Spec for Args {
             max_queue_frames: Count @ NativeCapture, max_captured_bytes: Bytes @ NativeCapture,
             snap_length: Bytes @ NativeCapture, max_undecoded: Count @ ResultRetention,
         ]);
-        self.policy.budgets.resources(settings);
+        self.policy.resources(settings);
     }
 
     fn run(

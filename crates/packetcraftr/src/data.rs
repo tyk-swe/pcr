@@ -35,7 +35,7 @@ mod tests {
         Dataset {
             name: "port-catalog.json",
             bytes: PORT_CATALOG,
-            schema: None,
+            schema: Some("packetcraftr.port-catalog.v1.schema.json"),
             provenance: Some("port-catalog.provenance.yaml"),
         },
         Dataset {

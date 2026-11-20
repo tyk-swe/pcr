@@ -16,6 +16,7 @@ published_enum! {
         Unanswered => "unanswered",
         Flaky => "flaky",
         NotRun => "not_run",
+        Rewritten => "rewritten",
     }
 }
 
@@ -70,6 +71,7 @@ pub struct Row {
     pub variant: String,
     pub verdict: Verdict,
     pub answered: u64,
+    pub rewritten: u64,
     pub attempts: u64,
 }
 
@@ -79,6 +81,7 @@ impl From<lib::Row> for Row {
             variant: variant_id(row.variant_index),
             verdict: row.verdict.into(),
             answered: row.answered as u64,
+            rewritten: row.rewritten as u64,
             attempts: row.attempts as u64,
         }
     }
@@ -89,6 +92,7 @@ pub struct Attempt {
     pub variant: String,
     pub attempt_seq: u64,
     pub answered: bool,
+    pub rewritten: bool,
     pub packets_sent: u64,
     pub payload_sha256: String,
     pub reply: Option<Captured>,
@@ -102,6 +106,7 @@ impl TryFrom<lib::AttemptEvidence> for Attempt {
             variant: variant_id(attempt.variant_index),
             attempt_seq: u64::from(attempt.attempt_seq),
             answered: attempt.answered,
+            rewritten: attempt.rewritten,
             packets_sent: attempt.packets_sent as u64,
             payload_sha256: lib::hex(&attempt.payload_sha256),
             reply: attempt.reply.map(Captured::try_from).transpose()?,
@@ -152,6 +157,7 @@ pub enum Event {
         variant: String,
         attempt_seq: u64,
         answered: bool,
+        rewritten: bool,
         packets_sent: u64,
         payload_sha256: String,
         reply: Option<Captured>,
@@ -177,6 +183,7 @@ impl TryFrom<lib::Event> for Published<Event> {
                         variant: attempt.variant,
                         attempt_seq: attempt.attempt_seq,
                         answered: attempt.answered,
+                        rewritten: attempt.rewritten,
                         packets_sent: attempt.packets_sent,
                         payload_sha256: attempt.payload_sha256,
                         reply: attempt.reply,

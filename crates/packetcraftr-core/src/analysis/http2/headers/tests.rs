@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use super::*;
+use bytes::Bytes;
 
 fn field(name: &'static [u8], value: &[u8]) -> Header {
     Header {
@@ -25,22 +26,24 @@ fn header_names_require_lowercase_tokens() {
     // Lowercase subset of the HTTP token set from RFC 9110, checked 2026-10-25.
     const LOWERCASE_TOKEN: &[u8] = b"!#$%&'*+-.^_`|~0123456789abcdefghijklmnopqrstuvwxyz";
     for byte in u8::MIN..=u8::MAX {
+        let mut header = field(b"x", b"value");
+        header.name = Bytes::copy_from_slice(&[byte]);
         assert_eq!(
-            check_name(&[byte], false).is_ok(),
+            validate(FieldRole::Trailer, &[header]).is_ok(),
             LOWERCASE_TOKEN.contains(&byte),
             "byte {byte:#04x}"
         );
     }
-    assert!(check_name(b"Name", false).is_err());
+    assert!(validate(FieldRole::Trailer, &[field(b"Name", b"value")]).is_err());
 }
 
 #[test]
 fn pseudo_names_require_lowercase_tokens() {
-    assert!(check_name(b":protocol", true).is_ok());
-    assert!(check_name(b":", true).is_err());
-    assert!(check_name(b":Path", true).is_err());
-    assert!(check_name(b":bad name", true).is_err());
-    assert!(check_name(b"a:b", false).is_err());
+    for name in [b":".as_slice(), b":Path", b":bad name", b"a:b"] {
+        let mut headers = request(b"GET");
+        headers.push(field(name, b"value"));
+        assert!(validate(FieldRole::Request, &headers).is_err(), "{name:?}");
+    }
 }
 
 #[test]

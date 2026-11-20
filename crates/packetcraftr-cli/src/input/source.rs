@@ -137,6 +137,9 @@ impl Polled {
 #[cfg(unix)]
 impl Read for Polled {
     fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        if buffer.is_empty() {
+            return Ok(0);
+        }
         loop {
             let wait = self.next_wait()?;
             if !self.ready_within(wait)? {

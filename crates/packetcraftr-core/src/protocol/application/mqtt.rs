@@ -275,7 +275,7 @@ impl Mqtt {
                 w.put(&self.payload)?;
             }
             12..=14 => {}
-            _ => unreachable!(),
+            _ => unreachable!("validate restricts packet_type to 1..=14"),
         }
         let mut head = Writer::new(NAME, c.remaining_packet_bytes);
         head.u8(self.packet_type << 4 | self.flags)?;
@@ -412,7 +412,7 @@ impl Mqtt {
                 }
             }
             12..=14 => {}
-            _ => unreachable!(),
+            _ => unreachable!("validate restricts packet_type to 1..=14"),
         }
         if (matches!(s.packet_type, 4..=11) || s.packet_type == 3 && s.flags & 6 != 0)
             && s.packet_id == 0

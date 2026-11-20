@@ -18,6 +18,7 @@ pub enum Verdict {
     Unanswered,
     Flaky,
     NotRun,
+    Rewritten,
 }
 
 impl Verdict {
@@ -28,6 +29,7 @@ impl Verdict {
             Self::Unanswered => "unanswered",
             Self::Flaky => "flaky",
             Self::NotRun => "not_run",
+            Self::Rewritten => "rewritten",
         }
     }
 }
@@ -51,6 +53,7 @@ pub struct AttemptEvidence {
     pub variant_index: usize,
     pub attempt_seq: u32,
     pub answered: bool,
+    pub rewritten: bool,
     pub packets_sent: usize,
     pub payload_sha256: [u8; 32],
     pub reply: Option<Frame>,
@@ -61,6 +64,7 @@ pub struct Row {
     pub variant_index: usize,
     pub verdict: Verdict,
     pub answered: usize,
+    pub rewritten: usize,
     pub attempts: usize,
 }
 
@@ -99,16 +103,32 @@ pub fn rows_for(attempts: &[AttemptEvidence]) -> Vec<Row> {
         .iter()
         .enumerate()
         .map(|(variant_index, _)| {
-            let flags: Vec<bool> = attempts
+            let mine: Vec<&AttemptEvidence> = attempts
                 .iter()
                 .filter(|attempt| attempt.variant_index == variant_index)
-                .map(|attempt| attempt.answered)
                 .collect();
+            let answered = mine.iter().filter(|attempt| attempt.answered).count();
+            let rewritten = mine
+                .iter()
+                .filter(|attempt| attempt.rewritten && !attempt.answered)
+                .count();
+            let verdict = if mine.is_empty() {
+                Verdict::NotRun
+            } else if answered == mine.len() {
+                Verdict::Accepted
+            } else if rewritten == mine.len() {
+                Verdict::Rewritten
+            } else if answered + rewritten > 0 {
+                Verdict::Flaky
+            } else {
+                Verdict::Unanswered
+            };
             Row {
                 variant_index,
-                verdict: verdict_for(&flags),
-                answered: flags.iter().filter(|value| **value).count(),
-                attempts: flags.len(),
+                verdict,
+                answered,
+                rewritten,
+                attempts: mine.len(),
             }
         })
         .collect()
@@ -218,7 +238,11 @@ impl ResponderCollector {
 /// Finalizes provisional attempts from Responder reception records. A record
 /// only answers an attempt when the variant, attempt sequence, and received
 /// payload digest all match what was sent, and, for spoofed Campaigns, the
-/// reception source matches the spoofed source tuple that was sent from.
+/// reception source matches the spoofed source tuple that was sent from. A
+/// spoofed attempt whose identity matches under a different source tuple is
+/// proven rewritten in transit, because the Responder received the exact
+/// payload from a source the sender did not use. Unspoofed Campaigns record
+/// no sent source, so a rewrite cannot be proven for them here.
 #[must_use]
 pub fn join_receptions(mut aggregate: Aggregate, records: &[ReceptionRecord]) -> Aggregate {
     let expected_source = aggregate
@@ -235,20 +259,41 @@ pub fn join_receptions(mut aggregate: Aggregate, records: &[ReceptionRecord]) ->
             )
         })
         .collect();
+    let received: std::collections::HashSet<(u16, u32, String)> = records
+        .iter()
+        .map(|record| {
+            (
+                record.variant_index,
+                record.attempt_seq,
+                record.payload_sha256.clone(),
+            )
+        })
+        .collect();
     for attempt in &mut aggregate.attempts {
         if attempt.answered {
+            attempt.rewritten = false;
             continue;
         }
         let Ok(variant_index) = u16::try_from(attempt.variant_index) else {
             continue;
         };
+        let digest = hex(&attempt.payload_sha256);
         let key = (
             variant_index,
             attempt.attempt_seq,
-            hex(&attempt.payload_sha256),
+            digest.clone(),
             expected_source,
         );
         attempt.answered = identities.contains(&key);
+        if attempt.answered {
+            attempt.rewritten = false;
+        }
+        if !attempt.answered
+            && expected_source.is_some()
+            && received.contains(&(variant_index, attempt.attempt_seq, digest))
+        {
+            attempt.rewritten = true;
+        }
     }
     aggregate.rows = rows_for(&aggregate.attempts);
     aggregate.valid = aggregate
@@ -273,6 +318,7 @@ mod tests {
             variant_index,
             attempt_seq: seq,
             answered,
+            rewritten: false,
             packets_sent: 1,
             payload_sha256: [0x11; 32],
             reply: None,
@@ -356,5 +402,54 @@ mod tests {
         let joined = join_receptions(aggregate, &records);
         assert!(joined.attempts[0].answered);
         assert!(!joined.attempts[1].answered);
+    }
+
+    #[test]
+    fn spoofed_attempt_received_from_another_source_is_rewritten() {
+        let spoofed = std::net::Ipv4Addr::new(192, 0, 2, 99);
+        let aggregate = Aggregate {
+            valid: false,
+            provisional: true,
+            plan_digest: "digest".to_owned(),
+            source_port: 53210,
+            spoof_source: Some(spoofed),
+            attempts: vec![attempt(0, 0, false), attempt(1, 1, false)],
+            diagnostics: Vec::new(),
+            rows: Vec::new(),
+            stats: Stats::default(),
+        };
+        let records = vec![
+            ReceptionRecord {
+                variant_index: 0,
+                attempt_seq: 0,
+                source: "192.0.2.99:53210".parse().expect("addr"),
+                payload_sha256: hex(&[0x11; 32]),
+            },
+            ReceptionRecord {
+                variant_index: 1,
+                attempt_seq: 1,
+                source: "198.51.100.7:40000".parse().expect("addr"),
+                payload_sha256: hex(&[0x11; 32]),
+            },
+        ];
+        let joined = join_receptions(aggregate, &records);
+        assert!(joined.attempts[0].answered && !joined.attempts[0].rewritten);
+        assert!(!joined.attempts[1].answered && joined.attempts[1].rewritten);
+        assert_eq!(joined.rows[0].verdict, Verdict::Accepted);
+        assert_eq!(joined.rows[1].verdict, Verdict::Rewritten);
+        assert_eq!(joined.rows[1].rewritten, 1);
+        assert!(joined.valid);
+
+        let mut rejoined = joined;
+        rejoined.attempts[1].answered = false;
+        let declared = vec![ReceptionRecord {
+            variant_index: 1,
+            attempt_seq: 1,
+            source: "192.0.2.99:53210".parse().expect("addr"),
+            payload_sha256: hex(&[0x11; 32]),
+        }];
+        let rejoined = join_receptions(rejoined, &declared);
+        assert!(rejoined.attempts[1].answered);
+        assert!(!rejoined.attempts[1].rewritten);
     }
 }

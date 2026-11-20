@@ -42,7 +42,6 @@ impl Spec for ScanDiff {
         },
     ];
     const FORMATS: &'static [Format] = crate::output::contract::TEXT_JSON_NDJSON;
-    const CANCELLATION: bool = true;
     const OFFLINE: bool = true;
     fn resources(&self, s: &mut Settings<'_>) {
         self.bounds.resources(s);

@@ -10,7 +10,7 @@ use std::{
     future::Future,
     panic::{AssertUnwindSafe, catch_unwind},
     sync::{
-        Arc, Condvar, Mutex, MutexGuard, PoisonError,
+        Arc, Condvar, Mutex, PoisonError,
         atomic::{AtomicU64, Ordering},
         mpsc::{self, SyncSender},
     },
@@ -25,7 +25,7 @@ use rtnetlink::{Handle, new_connection};
 use crate::{
     native,
     platform::common::{os_error, refused},
-    workers::{self, ExecutionContext, NAMESPACE_PATH, Task, Waited},
+    workers::{self, ExecutionContext, NAMESPACE_PATH, Task, Waited, lock},
 };
 
 // Namespace services are a bounded cache, rather than immortal historical work.
@@ -41,10 +41,6 @@ struct WorkerSlot {
     generation: u64,
     inbox: Arc<Inbox>,
     worker: Task<()>,
-}
-
-fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 type NamespaceId = ExecutionContext;

@@ -27,6 +27,23 @@ pub(super) fn invalid(message: impl Into<String>) -> CliError {
     CliError::new(Kind::Usage, message)
 }
 
+pub(super) fn check_result_size(
+    format: Format,
+    report: &output::Report<'_>,
+    limit: usize,
+    message: &'static str,
+) -> Result<(), CliError> {
+    let size = match format {
+        Format::Json => crate::publication::bounded_pretty_field_len(report, limit),
+        Format::Text | Format::Ndjson => {
+            crate::publication::bounded_json_len(report, limit, serde_json::ser::CompactFormatter)
+        }
+        other => other.unreachable(),
+    };
+    size.map(|_| ())
+        .map_err(|error| error.into_cli_error(|| invalid(message)))
+}
+
 pub(super) fn publish(
     i: &Invocation,
     command: Command,
@@ -43,12 +60,12 @@ pub(super) fn publish(
     }
     let fail = bounds.fails(&report);
     let report = output::Report::from(&report);
-    crate::publication::bounded_json_len(
+    check_result_size(
+        i.format,
         &report,
         bounds.max_result_bytes,
-        serde_json::ser::CompactFormatter,
-    )
-    .map_err(|e| e.into_cli_error(|| invalid("security result exceeds --max-result-bytes")))?;
+        "security result exceeds --max-result-bytes",
+    )?;
     match i.format {
         Format::Json => {
             crate::publication::emit_published(i, command, Published::new(report, Vec::new()))?;

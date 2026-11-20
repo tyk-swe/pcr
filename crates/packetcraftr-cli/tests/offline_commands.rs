@@ -2967,6 +2967,46 @@ fn report_counts_repeated_inputs_once_at_the_findings_limit() {
 }
 
 #[test]
+fn report_caps_the_emitted_json_result_before_writing_html() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let input = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/documents/output-audit-http-success.json");
+    let html = directory.path().join("évaluation.html");
+    let args = [
+        "--output",
+        "json",
+        "--resource-diagnostics",
+        "analyze",
+        "report",
+        input.to_str().unwrap(),
+        "--html",
+        html.to_str().unwrap(),
+    ];
+    let baseline = assert_success(&run(&args), &args);
+    std::fs::remove_file(&html).expect("remove baseline HTML");
+    let (_, tail) = baseline.split_once("\"result\":").expect("result field");
+    let mut values =
+        serde_json::Deserializer::from_str(tail.trim_start()).into_iter::<serde_json::Value>();
+    let result = values.next().unwrap().expect("JSON result");
+    let result_bytes = values.byte_offset();
+    assert!(std::fs::metadata(&input).unwrap().len() < result_bytes as u64);
+
+    let exact = result_bytes.to_string();
+    let exact_args = [&args[..], &["--max-result-bytes", &exact]].concat();
+    let text = assert_success(&run(&exact_args), &exact_args);
+    let accepted: serde_json::Value = serde_json::from_str(&text).expect("JSON report");
+    assert_eq!(accepted["result"], result);
+    std::fs::remove_file(&html).expect("remove accepted HTML");
+
+    let short = (result_bytes - 1).to_string();
+    let short_args = [&args[..], &["--max-result-bytes", &short]].concat();
+    let output = run(&short_args);
+    assert_eq!(output.status.code(), Some(2), "{}", stdout(&output));
+    assert!(stdout(&output).contains("report exceeds --max-result-bytes"));
+    assert!(!html.exists(), "the oversized report published HTML");
+}
+
+#[test]
 fn report_writes_a_bundle_that_binds_its_inputs() {
     let directory = tempfile::tempdir().expect("tempdir");
     let html = directory.path().join("assessment.html");

@@ -98,6 +98,18 @@ pub(crate) fn bounded_json_len(
     Ok(limit - counter.remaining)
 }
 
+/// Counts a top-level object's field value with its indentation, excluding the key.
+pub(crate) fn bounded_pretty_field_len(
+    value: &impl Serialize,
+    limit: usize,
+) -> Result<usize, BoundedJsonError> {
+    let mut formatter = PrettyFormatter::new();
+    formatter
+        .begin_object(&mut io::sink())
+        .map_err(serde_json::Error::io)?;
+    bounded_json_len(value, limit, formatter)
+}
+
 pub(crate) fn bounded_pretty_item_len(
     value: &impl Serialize,
     limit: usize,

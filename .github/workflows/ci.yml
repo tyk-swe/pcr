@@ -336,16 +336,14 @@ jobs:
             find target -maxdepth 3 -name '*packetcraftr*' -prune -exec rm -rf {} +
           fi
 
-  # Mutation gates on repaired security boundaries. A timeout means the
-  # mutant hung the tests (for example an infinite read loop), so it is
-  # accepted only when missed.txt is empty; cargo-mutants reports timeouts
-  # ahead of misses in its exit code.
+  # Strict gates accept timeouts only when missed.txt is empty, since
+  # cargo-mutants reports timeouts ahead of misses in its exit code.
   test-quality-boundaries:
     name: Mutation gate (${{ matrix.gate }})
     strategy:
       fail-fast: false
       matrix:
-        gate: [audit, http-policy, mqtt, staged-input]
+        gate: [audit, http-policy, mqtt, staged-input, budget, policy, netio]
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -365,7 +363,7 @@ jobs:
           key: ci-v1-${{ github.job }}-${{ matrix.gate }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', '**/Cargo.toml', 'Cargo.lock') }}
       - name: Install cargo-mutants
         run: cargo install --locked cargo-mutants
-      - name: Enforce mutation gates (all viable mutants caught when measured)
+      - name: Enforce mutation gates
         shell: bash
         run: |
           gate() {
@@ -380,7 +378,27 @@ jobs:
               return 2
             fi
           }
+          score_gate() {
+            local status=0
+            cargo mutants -o mutants "$@" || status=$?
+            case "$status" in
+              0|2|3) ;;
+              *) return "$status" ;;
+            esac
+            python3 scripts/check_mutation_score.py mutants/mutants.out/outcomes.json
+          }
           case "${{ matrix.gate }}" in
+            budget)
+              score_gate -p packetcraftr-core \
+                -f crates/packetcraftr-core/src/budget.rs ;;
+            policy)
+              score_gate -p packetcraftr \
+                -f 'crates/packetcraftr/src/policy/**' -- --lib ;;
+            netio)
+              score_gate -p packetcraftr-netio \
+                -f crates/packetcraftr-netio/src/bounded.rs \
+                -f crates/packetcraftr-netio/src/capture/limits.rs \
+                -f crates/packetcraftr-netio/src/transmit/frame.rs -- --lib ;;
             # audit and policy declarations: 57 caught, 26 unviable.
             audit)
               gate -p packetcraftr \

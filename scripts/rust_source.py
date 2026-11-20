@@ -92,8 +92,8 @@ def blank_comments(text: str) -> str:
 def _item_end(text: str, i: int) -> int:
     """End of the item starting at `i`, ignoring delimiters inside literals.
 
-    A field or declaration ends at its `;` or `,` once every delimiter
-    depth is zero; anything with a block ends at its balancing brace.
+    A semicolon ends an item outside parentheses, brackets, and braces.
+    A comma also requires balanced generic angles; blocks end at their closing brace.
     """
     paren = bracket = brace = angle = 0
     while i < len(text):
@@ -122,7 +122,9 @@ def _item_end(text: str, i: int) -> int:
             angle += 1
         elif char == ">" and paren == bracket == brace == 0 and angle and text[i - 1] not in "-=":
             angle -= 1
-        elif char in ",;" and paren == bracket == brace == angle == 0:
+        elif char == ";" and paren == bracket == brace == 0:
+            return i + 1
+        elif char == "," and paren == bracket == brace == angle == 0:
             return i + 1
         i += 1
     return i

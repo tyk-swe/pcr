@@ -83,6 +83,42 @@ fn help_succeeds_with_tool_name() {
 }
 
 #[test]
+fn offline_help_explains_when_machine_output_requires_fields() {
+    for (args, expected) in [
+        (
+            ["files", "read", "--help"],
+            [
+                "JSON requires at least one --field",
+                "streams frame records without --field",
+                "rows_written: 0",
+            ],
+        ),
+        (
+            ["packet", "dissect", "--help"],
+            [
+                "NDJSON requires at least one --field",
+                "matched: false, dissection: null",
+                "rows_written: 0",
+            ],
+        ),
+        (
+            ["reference", "topics", "formats"],
+            [
+                "files read: JSON requires at least one --field",
+                "packet dissect: NDJSON requires at least one --field",
+                "field projection with --field",
+            ],
+        ),
+    ] {
+        let help = assert_success(&run(&args), &args);
+        let help = help.split_whitespace().collect::<Vec<_>>().join(" ");
+        for detail in expected {
+            assert!(help.contains(detail), "{args:?} should explain {detail}");
+        }
+    }
+}
+
+#[test]
 fn reference_topics_rejects_machine_output_flags_with_text_output() {
     for (args, expected) in [
         (
@@ -777,6 +813,97 @@ fn projection_json_budget_is_the_sum_of_every_retained_row() {
             continue;
         }
         assert_eq!(limited["error"]["code"], "policy.projection_limit");
+    }
+}
+
+#[test]
+fn files_read_floors_fractional_pcapng_timestamps_only_for_display() {
+    use packetcraftr_core::capture_file::{Interface, TimestampResolution, Writer};
+    use packetcraftr_core::frame::{Frame, LinkType};
+    use std::time::{Duration, UNIX_EPOCH};
+
+    let packet = capture_frames(&capture_path("dns-response.pcap")).remove(0);
+    let file = tempfile::NamedTempFile::new().unwrap();
+    let path = file.path().to_str().unwrap();
+    for (resolution, offset, ticks, expected_nanos, exact) in [
+        (TimestampResolution::Binary(10), 123, 1_u64, 976_562, false),
+        (TimestampResolution::Binary(10), 123, 128, 125_000_000, true),
+        (TimestampResolution::Binary(10), -1, 1, 976_562, false),
+        (TimestampResolution::Decimal(10), 123, 19, 1, false),
+        (TimestampResolution::Decimal(127), 123, u64::MAX, 0, false),
+        (TimestampResolution::Decimal(127), 123, 0, 0, true),
+    ] {
+        let mut writer = Writer::pcapng_with_options(Vec::new(), Default::default()).unwrap();
+        let interface = writer
+            .add_interface_description_with_options(
+                Interface {
+                    link_type: LinkType::IPV4,
+                    snap_len: 65_535,
+                    timestamp_resolution: resolution,
+                    timestamp_offset: offset,
+                },
+                &[],
+            )
+            .unwrap();
+        let seconds = Duration::from_secs(offset.unsigned_abs());
+        let time_at_zero_ticks = if offset < 0 {
+            UNIX_EPOCH - seconds
+        } else {
+            UNIX_EPOCH + seconds
+        };
+        let mut frame =
+            Frame::new(Some(time_at_zero_ticks), LinkType::IPV4, packet.clone()).unwrap();
+        frame.interface = Some(interface);
+        let enhanced = writer.get_ref().len();
+        writer.write_frame(&frame).unwrap();
+        let mut capture = writer.into_inner();
+        let mut wire_ticks = ticks.to_le_bytes();
+        wire_ticks.rotate_left(4);
+        capture[enhanced + 12..enhanced + 20].copy_from_slice(&wire_ticks);
+        std::fs::write(path, &capture).unwrap();
+
+        let args = ["--output", "ndjson", "files", "read", path];
+        let output = run(&args);
+        let text = assert_success(&output, &args);
+        let record: serde_json::Value = serde_json::from_str(text.lines().next().unwrap()).unwrap();
+        assert_eq!(record["event"], "frame");
+        let fraction = Duration::from_nanos(expected_nanos);
+        let expected_nanos = if offset < 0 {
+            let before_epoch = (UNIX_EPOCH - (seconds - fraction))
+                .duration_since(UNIX_EPOCH)
+                .unwrap_err()
+                .duration();
+            (1_000_000_000 - before_epoch.subsec_nanos()) % 1_000_000_000
+        } else {
+            (UNIX_EPOCH + (seconds + fraction))
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .subsec_nanos()
+        };
+        assert_eq!(
+            record["result"]["frame"]["timestamp"]["unix_seconds"],
+            offset,
+        );
+        assert_eq!(
+            record["result"]["frame"]["timestamp"]["nanoseconds"],
+            expected_nanos
+        );
+        assert_eq!(record["result"]["frame"]["captured_length"], packet.len());
+
+        for flags in [&[][..], &["--normalize"][..]] {
+            let args = ["--output", "pcapng", "files", "read", path]
+                .into_iter()
+                .chain(flags.iter().copied())
+                .collect::<Vec<_>>();
+            let output = run(&args);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert_eq!(output.status.success(), exact, "{args:?}: {stderr}");
+            if exact && flags.is_empty() {
+                assert_eq!(output.stdout, capture);
+            } else if !exact {
+                assert!(stderr.contains("sub-nanosecond timestamp"), "{stderr}");
+            }
+        }
     }
 }
 
@@ -3149,6 +3276,141 @@ fn passive_inventory_reports_only_observed_hosts_and_ports() {
     );
 }
 
+fn first_frame(capture: &str) -> packetcraftr_core::frame::Frame {
+    let source = std::fs::File::open(capture_path(capture)).unwrap();
+    packetcraftr_core::capture_file::Reader::with_limits(source, Default::default())
+        .unwrap()
+        .next_frame()
+        .unwrap()
+        .unwrap()
+}
+
+fn little_endian_pcapng(
+    frame: &packetcraftr_core::frame::Frame,
+) -> packetcraftr_core::capture_file::Writer<Vec<u8>> {
+    use packetcraftr_core::capture_file::{Endianness, PcapNgOptions, Writer};
+
+    let mut writer = Writer::pcapng_with_options(
+        Vec::new(),
+        PcapNgOptions {
+            endianness: Endianness::Little,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    writer.add_interface(frame.link_type).unwrap();
+    writer
+}
+
+fn untimed_pcapng_block(frame: &packetcraftr_core::frame::Frame) -> Vec<u8> {
+    let padding = [0; 3];
+    let pad = &padding[..frame.bytes().len().next_multiple_of(4) - frame.bytes().len()];
+    let block_size = 16 + u32::try_from(frame.bytes().len() + pad.len()).unwrap();
+    [
+        &3_u32.to_le_bytes()[..],
+        &block_size.to_le_bytes(),
+        &frame.original_length().to_le_bytes(),
+        frame.bytes(),
+        pad,
+        &block_size.to_le_bytes(),
+    ]
+    .concat()
+}
+
+fn inventory_result(path: &Path, selection: &[&str]) -> serde_json::Value {
+    let args = [
+        &[
+            "--output",
+            "json",
+            "analyze",
+            "inventory",
+            path.to_str().unwrap(),
+        ][..],
+        selection,
+    ]
+    .concat();
+    let text = assert_success(&run(&args), &args);
+    serde_json::from_str::<serde_json::Value>(&text).unwrap()["result"].clone()
+}
+
+#[test]
+fn passive_inventory_counts_untimed_pcapng_frames() {
+    let frame = first_frame("dns-response.pcap");
+    let mut writer = little_endian_pcapng(&frame);
+    let packet_block_size = writer.encoded_frame_size(&frame).unwrap();
+    writer.write_frame(&frame).unwrap();
+    writer.write_frame(&frame).unwrap();
+
+    let dir = tempfile::tempdir().unwrap();
+    let timed = dir.path().join("timed.pcapng");
+    let mixed = dir.path().join("mixed.pcapng");
+    let mut capture = writer.into_inner();
+    std::fs::write(&timed, &capture).unwrap();
+
+    capture.truncate(capture.len() - packet_block_size);
+    capture.extend(untimed_pcapng_block(&frame));
+    std::fs::write(&mixed, &capture).unwrap();
+
+    let expected = inventory_result(&timed, &[]);
+    assert_eq!(expected["frames_read"], 2);
+    assert_eq!(inventory_result(&mixed, &[]), expected);
+    assert_eq!(
+        inventory_result(&mixed, &["--filter", "udp.stream == 0"]),
+        expected
+    );
+    assert_eq!(
+        inventory_result(&mixed, &["--filter", "frame.number == 2"]),
+        inventory_result(&timed, &["--filter", "frame.number == 2"]),
+    );
+    assert_eq!(
+        inventory_result(&mixed, &["--start-epoch", "0"]),
+        inventory_result(&timed, &["--filter", "frame.number == 1"]),
+    );
+
+    let args = [
+        "--output",
+        "json",
+        "analyze",
+        "stats",
+        mixed.to_str().unwrap(),
+    ];
+    assert_error(&run(&args), "packet.timestamp_unavailable");
+}
+
+#[test]
+fn passive_inventory_stream_numbers_ignore_time_bounds() {
+    let untimed = first_frame("protocol-coap.pcap");
+    let timed = first_frame("protocol-snmp.pcap");
+    assert_eq!(untimed.link_type, timed.link_type);
+    let mut writer = little_endian_pcapng(&timed);
+    let timed_block_size = writer.encoded_frame_size(&timed).unwrap();
+    writer.write_frame(&timed).unwrap();
+
+    let dir = tempfile::tempdir().unwrap();
+    let timed_only = dir.path().join("timed.pcapng");
+    let untimed_first = dir.path().join("untimed-first.pcapng");
+    let mut capture = writer.into_inner();
+    std::fs::write(&timed_only, &capture).unwrap();
+
+    let timed_block = capture.split_off(capture.len() - timed_block_size);
+    capture.extend(untimed_pcapng_block(&untimed));
+    capture.extend(timed_block);
+    std::fs::write(&untimed_first, &capture).unwrap();
+
+    let second_flow = inventory_result(&timed_only, &[])["hosts"].clone();
+    assert_ne!(second_flow, serde_json::json!([]));
+    for selection in [
+        &["--filter", "udp.stream == 1"][..],
+        &["--start-epoch", "0", "--filter", "udp.stream == 1"],
+    ] {
+        assert_eq!(
+            inventory_result(&untimed_first, selection)["hosts"],
+            second_flow,
+            "{selection:?}"
+        );
+    }
+}
+
 #[test]
 fn inventory_attributes_vxlan_frames_and_protocols_to_each_network() {
     let capture = capture_path("scoped-vxlan.pcap");
@@ -3447,4 +3709,107 @@ fn http3_streaming_summary_reports_capture_loss_separately_from_recovered_exchan
     let terminal = records.last().unwrap();
     assert_eq!(terminal["event"], "complete");
     assert_eq!(terminal["result"]["summary"]["input_incomplete"], true);
+}
+
+#[test]
+fn dns_transactions_follow_first_captured_bytes_not_completion_order() {
+    use packetcraftr_core::capture_file::{Format, Writer};
+    use packetcraftr_core::frame::{Frame, LinkType};
+    use packetcraftr_core::protocol::checksum_parts;
+    use std::time::{Duration, UNIX_EPOCH};
+
+    fn segment(reverse: bool, sequence: u32, flags: u8, payload: &[u8]) -> Vec<u8> {
+        let (src, dst, sport, dport) = if reverse {
+            ([192, 0, 2, 2], [192, 0, 2, 1], 53u16, 40000u16)
+        } else {
+            ([192, 0, 2, 1], [192, 0, 2, 2], 40000u16, 53u16)
+        };
+        let mut wire = vec![0u8; 40];
+        wire[0] = 0x45;
+        wire[2..4].copy_from_slice(&u16::try_from(40 + payload.len()).unwrap().to_be_bytes());
+        wire[8] = 64;
+        wire[9] = 6;
+        wire[12..16].copy_from_slice(&src);
+        wire[16..20].copy_from_slice(&dst);
+        wire[20..22].copy_from_slice(&sport.to_be_bytes());
+        wire[22..24].copy_from_slice(&dport.to_be_bytes());
+        wire[24..28].copy_from_slice(&sequence.to_be_bytes());
+        if flags & 0x10 != 0 {
+            wire[28..32].copy_from_slice(&(if reverse { 101u32 } else { 501 }).to_be_bytes());
+        }
+        wire[32] = 0x50;
+        wire[33] = flags;
+        wire[34..36].copy_from_slice(&65535u16.to_be_bytes());
+        wire.extend_from_slice(payload);
+        let length = u16::try_from(wire.len() - 20).unwrap().to_be_bytes();
+        let sum = checksum_parts(&[&src, &dst, &[0, 6], &length, &wire[20..]]);
+        wire[36..38].copy_from_slice(&sum.to_be_bytes());
+        let sum = checksum_parts(&[&wire[..20]]);
+        wire[10..12].copy_from_slice(&sum.to_be_bytes());
+        wire
+    }
+    let query = b"\x00\x1d\x12\x34\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00\x07example\x03com\x00\x00\x01\x00\x01";
+    let mut response = query.to_vec();
+    response[4..6].copy_from_slice(&0x8180u16.to_be_bytes());
+    for response_started_first in [true, false] {
+        let mut frames = vec![
+            segment(false, 100, 2, &[]),
+            segment(true, 500, 18, &[]),
+            segment(false, 101, 16, &[]),
+        ];
+        if response_started_first {
+            frames.extend([
+                segment(true, 501, 24, &response[..10]),
+                segment(false, 101, 24, query),
+                segment(true, 511, 24, &response[10..]),
+            ]);
+        } else {
+            frames.extend([
+                segment(false, 101, 24, &query[..10]),
+                segment(true, 501, 24, &response),
+                segment(false, 111, 24, &query[10..]),
+            ]);
+        }
+        let capture = tempfile::NamedTempFile::new().unwrap();
+        let mut writer =
+            Writer::new(capture.reopen().unwrap(), Format::Pcap, LinkType::IPV4).unwrap();
+        for (index, bytes) in frames.into_iter().enumerate() {
+            let frame = Frame::new(
+                Some(UNIX_EPOCH + Duration::from_secs(index as u64)),
+                LinkType::IPV4,
+                bytes,
+            )
+            .unwrap();
+            writer.write_frame(&frame).unwrap();
+        }
+        writer.flush().unwrap();
+        let args = [
+            "--output",
+            "json",
+            "analyze",
+            "dns",
+            capture.path().to_str().unwrap(),
+        ];
+        let output = run(&args);
+        let result: serde_json::Value =
+            serde_json::from_str(&assert_success(&output, &args)).unwrap();
+        let transactions = result["result"]["transactions"].as_array().unwrap();
+        let statuses: Vec<_> = transactions
+            .iter()
+            .map(|t| t["status"].as_str().unwrap())
+            .collect();
+        if response_started_first {
+            assert_eq!(statuses.len(), 2, "{result}");
+            assert!(
+                statuses.contains(&"orphan_response") && statuses.contains(&"unanswered"),
+                "{result}"
+            );
+        } else {
+            assert_eq!(statuses, ["matched"], "{result}");
+            assert_eq!(
+                transactions[0]["first_query_latency"]["negative"], true,
+                "{result}"
+            );
+        }
+    }
 }

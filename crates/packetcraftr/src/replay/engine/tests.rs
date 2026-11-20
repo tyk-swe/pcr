@@ -9,7 +9,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use bytes::Bytes;
 use packetcraftr_core::budget::Deadline;
-use packetcraftr_core::capture_file::{Reader, Writer};
+use packetcraftr_core::capture_file::{self, Reader, TimestampResolution, Writer};
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::Raw;
 use packetcraftr_core::packet::{MacAddress, Packet};
@@ -240,9 +240,12 @@ fn udp_frame_from(source: Ipv4Addr) -> Bytes {
 }
 
 fn replay_layer2_from(source: Ipv4Addr) -> (Result<Report, Error>, Vec<Bytes>) {
-    let frame = udp_frame_from(source);
+    replay_layer2(capture(udp_frame_from(source)))
+}
+
+fn replay_layer2(reader: Reader<Cursor<Vec<u8>>>) -> (Result<Report, Error>, Vec<Bytes>) {
     let parts = Parts {
-        source: Source::stream(capture(frame)),
+        source: Source::stream(reader),
         selector: Layer2Selector,
         options: Options {
             repeat: 1,
@@ -309,6 +312,52 @@ fn layer2_replay_sends_from_any_owned_interface_address_and_refuses_foreign_sour
         matches!(
             result,
             Err(Error::Authorization {
+                source_index: 0,
+                ..
+            })
+        ),
+        "{result:?}"
+    );
+    assert!(sent.is_empty());
+}
+
+fn pcapng_with_binary_ticks(bytes: Bytes, ticks: u64) -> Reader<Cursor<Vec<u8>>> {
+    let mut writer = Writer::pcapng_with_options(Vec::new(), Default::default()).unwrap();
+    let interface = writer
+        .add_interface_description_with_options(
+            capture_file::Interface {
+                link_type: LinkType::ETHERNET,
+                snap_len: 65_535,
+                timestamp_resolution: TimestampResolution::Binary(10),
+                timestamp_offset: 0,
+            },
+            &[],
+        )
+        .unwrap();
+    let mut frame = Frame::new(Some(SystemTime::UNIX_EPOCH), LinkType::ETHERNET, bytes).unwrap();
+    frame.interface = Some(interface);
+    let enhanced = writer.get_ref().len();
+    writer.write_frame(&frame).unwrap();
+    let mut capture = writer.into_inner();
+    let mut wire_ticks = ticks.to_le_bytes();
+    wire_ticks.rotate_left(4);
+    capture[enhanced + 12..enhanced + 20].copy_from_slice(&wire_ticks);
+    Reader::with_limits(Cursor::new(capture), Default::default()).unwrap()
+}
+
+#[test]
+fn replay_refuses_timestamps_it_cannot_reproduce_exactly() {
+    let frame = udp_frame_from(Ipv4Addr::new(10, 0, 0, 2));
+
+    let (result, sent) = replay_layer2(pcapng_with_binary_ticks(frame.clone(), 128));
+    assert!(result.is_ok(), "{result:?}");
+    assert_eq!(sent, std::slice::from_ref(&frame));
+
+    let (result, sent) = replay_layer2(pcapng_with_binary_ticks(frame, 1));
+    assert!(
+        matches!(
+            result,
+            Err(Error::Capture {
                 source_index: 0,
                 ..
             })

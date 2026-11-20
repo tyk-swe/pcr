@@ -10,7 +10,7 @@ use crate::capture_file::{
     header::{Interface, Section},
     limits::ReaderLimits,
     record::{CaptureRecord, MetadataBlockKind, RecordKind},
-    wire::PCAPNG_SECTION_HEADER,
+    wire::{PCAPNG_SECTION_HEADER, Subnanosecond},
 };
 
 mod framing;
@@ -167,6 +167,7 @@ pub(in crate::capture_file) fn read_next_pcapng_record<R: Read>(
     all_interfaces: &mut Vec<Interface>,
     limits: &ReaderLimits,
     scratch: &mut Vec<u8>,
+    subnanosecond: Subnanosecond,
 ) -> Result<Option<CaptureRecord>, Error> {
     let remaining_in_section = state.remaining_in_section;
     if let Some(remaining) = remaining_in_section
@@ -187,5 +188,5 @@ pub(in crate::capture_file) fn read_next_pcapng_record<R: Read>(
             .map(Some);
     }
     let block = framing::read(reader, raw_header, state, limits)?;
-    record::decode(block, state, all_interfaces, limits).map(Some)
+    record::decode(block, state, all_interfaces, limits, subnanosecond).map(Some)
 }

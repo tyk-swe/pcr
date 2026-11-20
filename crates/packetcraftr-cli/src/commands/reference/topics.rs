@@ -135,7 +135,12 @@ fn formats() -> String {
         "\n\nSelect one with --output FORMAT, before or after the subcommand. Binary formats \
          (raw, pcap, pcapng) refuse an interactive terminal unless --force-binary-stdout is \
          given. --resource-diagnostics requires json or ndjson, and --output-timeout-ms \
-         requires ndjson.\n\nFormats by command:\n",
+         requires ndjson.\n\n\
+         files read: JSON requires at least one --field. NDJSON streams frame records\n\
+         without --field and field rows with --field.\n\
+         packet dissect: NDJSON requires at least one --field. JSON returns a full\n\
+         dissection without --field and a field projection with --field.\n\n\
+         Formats by command:\n",
     );
     for command in commands {
         let names = command

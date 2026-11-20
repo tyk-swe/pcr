@@ -2,12 +2,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::io::Read;
 use std::net::IpAddr;
+use std::sync::Arc;
 
-use crate::analysis::pipeline::FrameRecord;
-use crate::analysis::{StreamTransport, Summary as RunSummary};
+use crate::analysis::pipeline::{self, FrameRecord};
+use crate::analysis::{Error, Options, StreamTransport, Summary as RunSummary};
+use crate::capture_file::Reader;
 use crate::packet::{MacAddress, Packet};
 use crate::protocol::identity;
+use crate::registry::Registry;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ObservedPort {
@@ -38,6 +42,21 @@ pub struct Report {
     pub protocols: Vec<ProtocolCount>,
 }
 
+/// Inventories untimed frames without using them for time-based reassembly.
+/// When time bounds are set, untimed frames only count toward input totals.
+pub fn run<R: Read>(
+    reader: &mut Reader<R>,
+    registry: Arc<Registry>,
+    options: &Options<'_>,
+) -> Result<Report, Error> {
+    let mut collector = Collector::new();
+    let summary = pipeline::run_observations(reader, registry, options, |record| {
+        collector.observe(&record);
+        Ok(())
+    })?;
+    Ok(collector.finish(&summary))
+}
+
 #[derive(Default)]
 struct HostState {
     mac_addresses: BTreeSet<[u8; 6]>,
@@ -59,7 +78,7 @@ impl Collector {
         Self::default()
     }
 
-    pub fn observe(&mut self, record: &FrameRecord<'_>) {
+    pub fn observe<T>(&mut self, record: &FrameRecord<'_, T>) {
         self.observe_frame(&record.decoded.packet);
 
         for (transport, conversation) in [

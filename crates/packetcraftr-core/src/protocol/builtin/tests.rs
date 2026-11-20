@@ -287,6 +287,49 @@ fn yaml_packet_document_builds() {
 }
 
 #[test]
+fn vrrp_v3_checksum_uses_the_enclosing_ip_family() {
+    use crate::decode::Dissector;
+    use crate::diagnostic::VRRP_CHECKSUM;
+    use crate::frame::{Frame, LinkType};
+    use crate::protocol::network::Vrrp;
+
+    // RFC 9568 §5.2.8 reference checksums: 0xa80b over VRRP alone for IPv4,
+    // and 0x3d98 over the IPv6 pseudo-header and VRRP (0x3bb7 over VRRP alone).
+    let ipv4: &[u8] = &[
+        0x45, 0x00, 0x00, 0x20, 0x00, 0x00, 0x00, 0x00, 0xff, 0x70, 0x19, 0x5a, 0xc0, 0x00, 0x02,
+        0x01, 0xe0, 0x00, 0x00, 0x12, 0x31, 0x2a, 0x64, 0x01, 0x00, 0x64, 0xa8, 0x0b, 0xc0, 0x00,
+        0x02, 0x64,
+    ];
+    let ipv6: &[u8] = &[
+        0x60, 0x00, 0x00, 0x00, 0x00, 0x18, 0x70, 0xff, 0xfe, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0xff, 0x02, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x12, 0x31, 0x2a, 0x64, 0x01, 0x00,
+        0x64, 0x3d, 0x98, 0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x01, 0x00,
+    ];
+    let dissector = Dissector::new(super::registry());
+    for (link_type, reference) in [(LinkType::IPV4, ipv4), (LinkType::IPV6, ipv6)] {
+        let has_checksum_warning = |bytes: Vec<u8>| {
+            let frame = Frame::new(None, link_type, bytes).unwrap();
+            let decoded = dissector.decode(frame, Default::default()).unwrap();
+            assert!(decoded.packet.get::<Vrrp>().is_some(), "{link_type}");
+            decoded.diagnostics.iter().any(|d| d.code == VRRP_CHECKSUM)
+        };
+        assert!(!has_checksum_warning(reference.to_vec()), "{link_type}");
+        let frame = Frame::new(None, link_type, reference.to_vec()).unwrap();
+        let mut packet = dissector.decode(frame, Default::default()).unwrap().packet;
+        packet.get_mut::<Vrrp>().unwrap().checksum = crate::field::WireValue::Auto;
+        let rebuilt = crate::build::Builder::new(super::registry())
+            .build(packet, Addresses::default(), Default::default())
+            .unwrap_or_else(|error| panic!("{link_type}: rebuild: {error}"));
+        assert_eq!(rebuilt.bytes.as_ref(), reference, "{link_type}");
+        let mut corrupted = reference.to_vec();
+        *corrupted.last_mut().unwrap() ^= 1;
+        assert!(has_checksum_warning(corrupted), "{link_type}");
+    }
+}
+
+#[test]
 fn headers_match_capture_decoding() {
     let manifest: serde_json::Value = serde_json::from_str(include_str!(
         "../../../../../examples/captures/protocols.manifest.json"

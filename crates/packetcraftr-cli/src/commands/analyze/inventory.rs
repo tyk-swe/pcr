@@ -50,15 +50,11 @@ fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<()
         arguments.filter.as_deref(),
         &arguments.decode,
     )?;
-    let mut collector = analysis::inventory::Collector::new();
     let mut reader = prepared.open(invocation, &arguments.path)?;
     let options = prepared.options(invocation);
-    let summary = analysis::run(&mut reader, prepared.registry.clone(), &options, |record| {
-        collector.observe(&record);
-        Ok(())
-    })
-    .map_err(CliError::classified)?;
-    let report = output::Report::from(collector.finish(&summary));
+    let report = analysis::inventory::run(&mut reader, prepared.registry.clone(), &options)
+        .map(output::Report::from)
+        .map_err(CliError::classified)?;
     match invocation.format {
         Format::Text => render_text(invocation, &report),
         Format::Json => emit_published(

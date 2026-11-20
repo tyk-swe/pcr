@@ -10,7 +10,7 @@ from pathlib import Path
 import re
 import sys
 
-from rust_source import is_test_path, without_test_items
+from rust_source import blank_comments, blank_comments_and_strings, is_test_path, without_test_items
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -80,21 +80,22 @@ CONST_PATTERN = re.compile(
 )
 
 
-POLL_PATTERN = re.compile(r"(?:invocation|control|cancellation|i)\.check(?:_interrupted)?\(")
+POLL_PATTERN = re.compile(
+    r"\b(?:invocation|control|cancellation|i)\s*\.\s*check(?:_interrupted)?\s*\("
+)
 
 
 def cancellation_polls(sources: dict[Path, str]) -> int:
     """Manual Invocation/Control polls in CLI production sources.
 
-    Whitespace is stripped first so a poll split across lines counts, and
-    every local receiver spelling counts, not only `invocation`.
-    `invocation.rs` itself defines the wrappers and is excluded.
+    Count calls across line breaks and comments. Exclude the wrapper
+    definitions in `invocation.rs`.
     """
     total = 0
     for path, text in sources.items():
         if "packetcraftr-cli" not in str(path) or path.name == "invocation.rs":
             continue
-        total += len(POLL_PATTERN.findall("".join(text.split())))
+        total += len(POLL_PATTERN.findall(blank_comments_and_strings(text)))
     return total
 
 
@@ -168,7 +169,6 @@ BOUNDARY_MODULES = (
     "document/",
     "filter/",
     "layer/model.rs",
-    "layer/reflection.rs",
     "layer/selector.rs",
     "codec.rs",
     "build.rs",
@@ -179,7 +179,7 @@ BOUNDARY_MODULES = (
 
 def production_sources(root: Path = ROOT) -> dict[Path, str]:
     return {
-        path: without_test_items(path.read_text())
+        path: blank_comments(without_test_items(path.read_text(encoding='utf-8')))
         for path in sorted((root / "crates").rglob("*.rs"))
         if not is_test_path(path.relative_to(root))
     }

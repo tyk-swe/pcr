@@ -36,7 +36,6 @@ impl crate::commands::Spec for Args {
         crate::output::contract::Format::Json,
         crate::output::contract::Format::Csv,
     ];
-    const CANCELLATION: bool = true;
     const OFFLINE: bool = true;
 
     fn run_time(&self) -> Option<&dyn crate::command_options::Bounded> {

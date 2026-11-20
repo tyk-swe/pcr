@@ -5,7 +5,7 @@ mod event_output;
 pub(in crate::commands) mod output;
 mod rendering;
 
-use self::event_output::EventOutput;
+pub(super) use self::event_output::EventOutput;
 pub(super) use self::rendering::{encapsulation_text, ip_event_sink, render_clock, render_scope};
 use crate::command_options::Bounded as _;
 use crate::output::envelope::Published;

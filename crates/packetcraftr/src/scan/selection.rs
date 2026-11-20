@@ -215,6 +215,24 @@ fn expand(
     Ok(())
 }
 
+/// Deterministically shuffles endpoints in place from `seed`, so a recorded
+/// seed reproduces one probe order exactly. The shuffle only permutes, it
+/// never adds, drops, or duplicates an endpoint.
+pub fn shuffle_endpoints(endpoints: &mut [probe::Endpoint], seed: u64) {
+    let mut state = seed ^ 0x9E37_79B9_7F4A_7C15;
+    let mut next = move || {
+        state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut value = state;
+        value = (value ^ (value >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        value = (value ^ (value >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        value ^ (value >> 31)
+    };
+    for index in (1..endpoints.len()).rev() {
+        let chosen = (next() % (index as u64 + 1)) as usize;
+        endpoints.swap(index, chosen);
+    }
+}
+
 fn endpoint(transport: Transport, port: u16) -> probe::Endpoint {
     match transport {
         Transport::Tcp => probe::Endpoint::Tcp { port },
@@ -281,5 +299,32 @@ impl Seen {
     fn contains(&self, endpoint: probe::Endpoint) -> bool {
         let (table, word, bit) = Self::slot(endpoint);
         self.0[table][word] & bit != 0
+    }
+}
+
+#[cfg(test)]
+mod shuffle_tests {
+    use super::*;
+
+    fn endpoints() -> Vec<probe::Endpoint> {
+        (1..=16).map(|port| probe::Endpoint::Tcp { port }).collect()
+    }
+
+    #[test]
+    fn shuffle_is_reproducible_per_seed_and_only_permutes() {
+        let mut first = endpoints();
+        let mut second = endpoints();
+        shuffle_endpoints(&mut first, 42);
+        shuffle_endpoints(&mut second, 42);
+        assert_eq!(first, second);
+        assert_ne!(first, endpoints());
+
+        let mut sorted = first.clone();
+        sorted.sort_by_key(|endpoint| endpoint.port());
+        assert_eq!(sorted, endpoints());
+
+        let mut other = endpoints();
+        shuffle_endpoints(&mut other, 7);
+        assert_ne!(other, first);
     }
 }

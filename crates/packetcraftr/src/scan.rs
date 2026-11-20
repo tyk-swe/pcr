@@ -58,7 +58,7 @@ pub use request::{Limits, PortSpec, Request, select_ports};
 pub use sctp::SctpScan;
 pub use selection::{
     MAX_PORT_TERMS, PortSelection, Selected, Selector, Term, select_endpoints,
-    select_endpoints_with_exclusion_counts,
+    select_endpoints_with_exclusion_counts, shuffle_endpoints,
 };
 pub use tcp::TcpScan;
 

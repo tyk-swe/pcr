@@ -1,0 +1,99 @@
+{
+  "schema": "packetcraftr.output/v22",
+  "command": "http3",
+  "mode": "stream",
+  "sequence": 1,
+  "event": "http3_exchange",
+  "status": "success",
+  "result": {
+    "exchange": {
+      "connection": 0,
+      "stream": 0,
+      "request": {
+        "complete": true,
+        "prefix_bytes": 21,
+        "header_sections": [
+          {
+            "kind": "request",
+            "offset": 0,
+            "encoded_bytes": 19,
+            "required_insert_count": 1,
+            "method": "GET",
+            "fields": [
+              {
+                "name": ":method",
+                "value": "GET"
+              },
+              {
+                "name": ":scheme",
+                "value": "https"
+              },
+              {
+                "name": ":path",
+                "value": "/private-demo"
+              },
+              {
+                "name": ":authority",
+                "value": "example.test"
+              }
+            ]
+          }
+        ],
+        "data_frames": 0,
+        "data_bytes": 0,
+        "issues": [],
+        "issues_omitted": 0
+      },
+      "response": {
+        "complete": true,
+        "prefix_bytes": 48,
+        "header_sections": [
+          {
+            "kind": "informational",
+            "offset": 0,
+            "encoded_bytes": 3,
+            "required_insert_count": 0,
+            "status": 103,
+            "fields": [
+              {
+                "name": ":status",
+                "value": "103"
+              }
+            ]
+          },
+          {
+            "kind": "response",
+            "offset": 5,
+            "encoded_bytes": 3,
+            "required_insert_count": 0,
+            "status": 200,
+            "fields": [
+              {
+                "name": ":status",
+                "value": "200"
+              }
+            ]
+          },
+          {
+            "kind": "trailers",
+            "offset": 35,
+            "encoded_bytes": 11,
+            "required_insert_count": 0,
+            "fields": [
+              {
+                "name": "x-test",
+                "value_hex": "ff"
+              }
+            ]
+          }
+        ],
+        "data_frames": 1,
+        "data_bytes": 23,
+        "first_data_offset": 10,
+        "issues": [],
+        "issues_omitted": 0
+      }
+    }
+  },
+  "diagnostics": []
+}

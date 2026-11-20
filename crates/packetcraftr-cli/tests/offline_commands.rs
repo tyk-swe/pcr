@@ -3,10 +3,12 @@
 
 #![forbid(unsafe_code)]
 
+use std::ffi::OsStr;
+use std::fmt::Debug;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-fn run(args: &[&str]) -> Output {
+fn run(args: &[impl AsRef<OsStr> + Debug]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_packetcraftr"))
         .args(args)
         .output()
@@ -29,7 +31,7 @@ fn stdout(output: &Output) -> String {
     String::from_utf8_lossy(&output.stdout).into_owned()
 }
 
-fn assert_success(output: &Output, args: &[&str]) -> String {
+fn assert_success(output: &Output, args: &[impl Debug]) -> String {
     let text = stdout(output);
     assert!(
         output.status.success(),
@@ -78,6 +80,26 @@ fn help_succeeds_with_tool_name() {
         text.contains("packetcraftr"),
         "--help should name the tool, got:\n{text}"
     );
+}
+
+#[test]
+fn reference_topics_rejects_machine_output_flags_with_text_output() {
+    for (args, expected) in [
+        (
+            ["reference", "topics", "--resource-diagnostics"].as_slice(),
+            "--resource-diagnostics requires --output json or ndjson",
+        ),
+        (
+            ["reference", "topics", "--output-timeout-ms", "20"].as_slice(),
+            "--output-timeout-ms requires --output ndjson",
+        ),
+    ] {
+        let output = run(args);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(2), "{args:?}: {stderr}");
+        assert!(output.stdout.is_empty(), "{args:?}: {}", stdout(&output));
+        assert!(stderr.contains(expected), "{args:?}: {stderr}");
+    }
 }
 
 #[test]
@@ -506,6 +528,55 @@ fn capture_field_projection_preserves_rows_across_output_formats() {
 }
 
 #[test]
+fn read_and_dissect_resource_diagnostics_report_active_rendering_limits() {
+    let path = capture_path("dns-response.pcap");
+    let capture = path.to_string_lossy();
+    let read = ["files", "read", capture.as_ref()];
+    let dissect = [
+        "packet",
+        "dissect",
+        "--link-type",
+        "ipv4",
+        "--hex",
+        "4500001c0000000040018eaac0000201c63364020800f7ff00000000",
+    ];
+    let selections = [["--field", "frame.number"].as_slice(), &[]];
+    for (format, command) in [("ndjson", read.as_slice()), ("json", dissect.as_slice())] {
+        for fields in selections {
+            let args = ["--output", format, "--resource-diagnostics"]
+                .into_iter()
+                .chain(command.iter().copied())
+                .chain(fields.iter().copied())
+                .collect::<Vec<_>>();
+            let text = assert_success(&run(&args), &args);
+            let result: serde_json::Value = if format == "ndjson" {
+                serde_json::from_str(text.lines().last().unwrap()).unwrap()
+            } else {
+                serde_json::from_str(&text).unwrap()
+            };
+            assert_eq!(result["status"], "success", "{result}");
+            let selected = !fields.is_empty();
+            assert_eq!(
+                result["result"].get("columns").is_some(),
+                selected,
+                "{result}"
+            );
+            let settings = result["resources"]["settings"].as_array().unwrap();
+            for (name, enabled) in [
+                ("--max-projection-bytes", selected),
+                ("--max-tree-bytes", false),
+            ] {
+                let setting = settings
+                    .iter()
+                    .find(|setting| setting["name"] == name)
+                    .unwrap_or_else(|| panic!("missing resource setting {name} in {result}"));
+                assert_eq!(setting["enabled"], enabled, "{args:?}: {setting}");
+            }
+        }
+    }
+}
+
+#[test]
 fn projection_ndjson_budget_counts_row_payload_and_rejects_unpublished_rows() {
     let path = capture_path("protocol-mqtt.pcap");
     let capture = path.to_string_lossy().into_owned();
@@ -847,6 +918,308 @@ fn merge_rejects_clock_regression_before_publication() {
         assert_error(&run(&args), "packet.capture_merge_order");
         assert!(!destination.exists());
     }
+}
+
+fn merge_source<'a>(
+    name: &str,
+    capture: &'a [u8],
+) -> packetcraftr_core::capture_file::MergeSource<&'a [u8]> {
+    use packetcraftr_core::capture_file::{MergeSource, Reader};
+
+    MergeSource {
+        name: name.to_owned(),
+        reader: Reader::with_limits(capture, Default::default()).unwrap(),
+    }
+}
+
+#[test]
+fn merge_honors_source_count_and_name_limits() {
+    use packetcraftr_core::capture_file::{Error, MAX_MERGE_SOURCES, MergeLimits, Writer, merge};
+
+    let capture = Writer::pcapng_with_options(Vec::new(), Default::default())
+        .unwrap()
+        .into_inner();
+    let longest_name = "é".repeat(2048);
+    let long_name = format!("{longest_name}x");
+    let limits = MergeLimits {
+        max_sources: 1,
+        ..Default::default()
+    };
+    let mut output = Writer::pcapng_with_options(Vec::new(), Default::default()).unwrap();
+    let report = merge(
+        &mut [merge_source(&longest_name, &capture)],
+        &mut output,
+        limits,
+    )
+    .unwrap();
+    assert_eq!(report.source_frames, [0]);
+
+    for mut sources in [
+        vec![],
+        vec![
+            merge_source("first", &capture),
+            merge_source("second", &capture),
+        ],
+        vec![merge_source(&long_name, &capture)],
+    ] {
+        assert!(matches!(
+            merge(&mut sources, &mut output, limits),
+            Err(Error::MergeSources { maximum: 1 })
+        ));
+    }
+    for max_sources in [0, MAX_MERGE_SOURCES + 1] {
+        assert!(matches!(
+            merge(
+                &mut [merge_source("source", &capture)],
+                &mut output,
+                MergeLimits {
+                    max_sources,
+                    ..limits
+                },
+            ),
+            Err(Error::MergeSources {
+                maximum: MAX_MERGE_SOURCES
+            })
+        ));
+    }
+}
+
+#[test]
+fn merge_validates_order_options_and_requires_pcapng_output() {
+    use packetcraftr_core::capture_file::{
+        Error, Format, MAX_REORDER_FRAMES, MergeLimits, MergeOrder, Writer, merge,
+    };
+    use packetcraftr_core::frame::LinkType;
+
+    let capture = Writer::pcapng_with_options(Vec::new(), Default::default())
+        .unwrap()
+        .into_inner();
+    let mut output = Writer::pcapng_with_options(Vec::new(), Default::default()).unwrap();
+    let merge_with_order = |output: &mut Writer<Vec<u8>>, order, max_reorder_frames| {
+        merge(
+            &mut [merge_source("source", &capture)],
+            output,
+            MergeLimits {
+                order,
+                max_reorder_frames,
+                ..Default::default()
+            },
+        )
+    };
+    merge_with_order(&mut output, MergeOrder::Chronological, MAX_REORDER_FRAMES).unwrap();
+    for (order, window) in [
+        (MergeOrder::Chronological, MAX_REORDER_FRAMES + 1),
+        (MergeOrder::Append, 1),
+    ] {
+        assert!(matches!(
+            merge_with_order(&mut output, order, window),
+            Err(Error::MergeOption(_))
+        ));
+    }
+    let mut classic = Writer::new(Vec::new(), Format::Pcap, LinkType::ETHERNET).unwrap();
+    assert!(matches!(
+        merge_with_order(&mut classic, MergeOrder::Chronological, 0),
+        Err(Error::WrongWriterFormat {
+            expected: Format::PcapNg,
+            actual: Format::Pcap
+        })
+    ));
+}
+
+#[test]
+fn merge_counts_interfaces_across_capture_formats() {
+    use packetcraftr_core::capture_file::{Error, Format, MergeLimits, Writer, merge};
+    use packetcraftr_core::frame::LinkType;
+
+    let classic = Writer::new(Vec::new(), Format::Pcap, LinkType::ETHERNET)
+        .unwrap()
+        .into_inner();
+    let pcapng = Writer::new(Vec::new(), Format::PcapNg, LinkType::ETHERNET)
+        .unwrap()
+        .into_inner();
+    for second in [&classic, &pcapng] {
+        let merge_with_limit = |max_interfaces| {
+            let mut output = Writer::pcapng_with_options(Vec::new(), Default::default()).unwrap();
+            merge(
+                &mut [
+                    merge_source("first", &classic),
+                    merge_source("second", second),
+                ],
+                &mut output,
+                MergeLimits {
+                    max_interfaces,
+                    ..Default::default()
+                },
+            )
+        };
+        assert_eq!(merge_with_limit(2).unwrap().source_frames, [0, 0]);
+        assert!(matches!(
+            merge_with_limit(1),
+            Err(Error::TotalInterfaceLimit { limit: 1 })
+        ));
+    }
+}
+
+fn merge_pcapng_section(
+    endianness: packetcraftr_core::capture_file::Endianness,
+    frame: &packetcraftr_core::frame::Frame,
+    fcs_bits: u8,
+) -> Vec<u8> {
+    use packetcraftr_core::capture_file::{
+        Interface, PcapNgOption, PcapNgOptions, TimestampResolution, Writer,
+    };
+
+    const IF_FCS_LENGTH_OPTION: u16 = 13;
+
+    let mut writer = Writer::pcapng_with_options(
+        Vec::new(),
+        PcapNgOptions {
+            endianness,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    writer
+        .add_interface_description_with_options(
+            Interface {
+                link_type: frame.link_type,
+                snap_len: 128,
+                timestamp_resolution: TimestampResolution::Decimal(9),
+                timestamp_offset: 0,
+            },
+            &[PcapNgOption {
+                code: IF_FCS_LENGTH_OPTION,
+                value: vec![fcs_bits].into(),
+            }],
+        )
+        .unwrap();
+    writer.write_frame(frame).unwrap();
+    writer.into_inner()
+}
+
+#[test]
+fn merge_preserves_frames_and_interface_provenance_across_sections() {
+    use packetcraftr_core::capture_file::{
+        Endianness, MetadataBlockKind, Reader, RecordKind, Writer, merge,
+    };
+    use packetcraftr_core::frame::{Direction, Frame, LinkType};
+    use std::time::{Duration, UNIX_EPOCH};
+
+    const COMMENT_OPTION: u16 = 1;
+
+    let cases = [
+        (
+            Endianness::Little,
+            Direction::Inbound,
+            LinkType::ETHERNET,
+            1,
+        ),
+        (Endianness::Big, Direction::Outbound, LinkType::RAW, 2),
+    ];
+    let frames = cases.map(|(_, direction, link_type, marker)| {
+        let mut frame = Frame::new(
+            Some(UNIX_EPOCH + Duration::from_secs(u64::from(marker))),
+            link_type,
+            vec![marker],
+        )
+        .unwrap();
+        frame.direction = Some(direction);
+        frame
+    });
+    let capture = cases
+        .into_iter()
+        .zip(&frames)
+        .flat_map(|((endianness, ..), frame)| merge_pcapng_section(endianness, frame, 0))
+        .collect::<Vec<_>>();
+    let mut output = Writer::pcapng_with_options(Vec::new(), Default::default()).unwrap();
+    let report = merge(
+        &mut [merge_source("mixed", &capture)],
+        &mut output,
+        Default::default(),
+    )
+    .unwrap();
+    assert_eq!(report.source_metadata_records, 3);
+    assert_eq!(report.interfaces.len(), frames.len());
+
+    let bytes = output.into_inner();
+    let mut reader = Reader::with_limits(bytes.as_slice(), Default::default()).unwrap();
+    let records: Vec<_> = std::iter::from_fn(|| reader.next_record().unwrap()).collect();
+    let interfaces: Vec<_> = records
+        .iter()
+        .filter_map(|record| match &record.kind {
+            RecordKind::Metadata(MetadataBlockKind::InterfaceDescription {
+                global_id,
+                options,
+                ..
+            }) => Some((*global_id, options)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(interfaces.len(), frames.len());
+    let actual_frames: Vec<_> = records
+        .iter()
+        .filter_map(|record| record.frame.as_ref())
+        .collect();
+    assert_eq!(actual_frames.len(), frames.len());
+    for (section, (actual, mut expected)) in actual_frames.into_iter().zip(frames).enumerate() {
+        let output_id = actual.interface.unwrap();
+        let mapping = report
+            .interfaces
+            .iter()
+            .find(|mapping| mapping.output_interface == output_id)
+            .unwrap();
+        let (_, options) = interfaces.iter().find(|(id, _)| *id == output_id).unwrap();
+        assert_eq!(mapping.source, 0);
+        assert_eq!(mapping.source_name, "mixed");
+        assert_eq!(mapping.section, Some(u64::try_from(section).unwrap()));
+        assert_eq!(mapping.local_interface, Some(0));
+        assert_eq!(mapping.global_interface, u32::try_from(section).unwrap());
+        let comment = options
+            .iter()
+            .find(|option| option.code == COMMENT_OPTION)
+            .unwrap();
+        let provenance: serde_json::Value = serde_json::from_slice(&comment.value).unwrap();
+        assert_eq!(
+            provenance,
+            serde_json::json!({
+                "schema": "packetcraftr.capture-source/v1",
+                "source": mapping.source,
+                "source_name": mapping.source_name,
+                "section": mapping.section,
+                "local_interface": mapping.local_interface,
+                "global_interface": mapping.global_interface,
+            })
+        );
+
+        expected.interface = Some(mapping.output_interface);
+        assert_eq!(actual, &expected);
+    }
+}
+
+#[test]
+fn merge_rejects_fcs_declared_in_a_later_section() {
+    use packetcraftr_core::capture_file::{Endianness, Error, Writer, merge};
+    use packetcraftr_core::frame::{Frame, LinkType};
+    use std::time::UNIX_EPOCH;
+
+    let frame = Frame::new(Some(UNIX_EPOCH), LinkType::ETHERNET, vec![1]).unwrap();
+    let capture = [
+        merge_pcapng_section(Endianness::Little, &frame, 0),
+        merge_pcapng_section(Endianness::Little, &frame, 32),
+    ]
+    .concat();
+    let mut output = Writer::pcapng_with_options(Vec::new(), Default::default()).unwrap();
+    assert!(matches!(
+        merge(
+            &mut [merge_source("source", &capture)],
+            &mut output,
+            Default::default(),
+        ),
+        Err(Error::MergeMetadata {
+            input: 0,
+            field: "declared frame check sequence"
+        })
+    ));
 }
 
 #[test]
@@ -2003,6 +2376,48 @@ fn quic_exports_exact_contiguous_ranges_and_refuses_to_overwrite_them() {
 }
 
 #[test]
+fn quic_export_budget_includes_the_complete_manifest() {
+    let directory = tempfile::tempdir().unwrap();
+    let capture = capture_path("quic-demo-v2.pcapng");
+    let keys = capture_path("quic-demo.keys");
+    let args = [
+        "analyze",
+        "quic",
+        capture.to_str().unwrap(),
+        "--keylog",
+        keys.to_str().unwrap(),
+        "--write",
+        directory.path().to_str().unwrap(),
+    ];
+    assert_success(&run(&args), &args);
+    let exported_bytes: u64 = std::fs::read_dir(directory.path())
+        .unwrap()
+        .map(|entry| {
+            let entry = entry.unwrap();
+            let bytes = entry.metadata().unwrap().len();
+            std::fs::remove_file(entry.path()).unwrap();
+            bytes
+        })
+        .sum();
+
+    let too_small = (exported_bytes - 1).to_string();
+    let limited = [&args[..], &["--max-application-output-bytes", &too_small]].concat();
+    let output = run(&limited);
+    assert!(!output.status.success(), "{}", stdout(&output));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("QUIC application output"));
+    assert!(
+        std::fs::read_dir(directory.path())
+            .unwrap()
+            .next()
+            .is_none()
+    );
+
+    let exact = exported_bytes.to_string();
+    let limited = [&args[..], &["--max-application-output-bytes", &exact]].concat();
+    assert_success(&run(&limited), &limited);
+}
+
+#[test]
 fn quic_missing_secrets_and_payload_limits_are_explicit() {
     let capture = capture_path("quic-demo-v1.pcap");
     let args = [
@@ -2224,4 +2639,597 @@ fn security_modes_observe_each_frame_and_finish_their_run() {
         anomalies["measurements"]["thresholds"]["window_seconds"],
         60
     );
+}
+
+#[test]
+fn verbose_security_findings_show_details_on_separate_lines() {
+    let capture = capture_path("beacon-periodic.pcap");
+    let args = ["--verbose", "analyze", "beacons", capture.to_str().unwrap()];
+    let text = assert_success(&run(&args), &args);
+    let lines: Vec<_> = text.lines().collect();
+    assert!(
+        lines.windows(3).any(|lines| {
+            lines[0].starts_with("  frames: [")
+                && lines[1].starts_with("  evidence: {")
+                && lines[2].starts_with("  remediation: ")
+        }),
+        "{text}"
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn security_analysis_reports_capture_paths_with_invalid_utf8() {
+    use std::os::unix::ffi::OsStrExt;
+
+    let directory = tempfile::tempdir().expect("tempdir");
+    let capture = directory.path().join(OsStr::from_bytes(b"dns-\xff.pcap"));
+    std::fs::copy(capture_path("dns-response.pcap"), &capture).expect("copy capture");
+    let args = [
+        OsStr::new("--output"),
+        OsStr::new("json"),
+        OsStr::new("analyze"),
+        OsStr::new("dns-anomalies"),
+        capture.as_os_str(),
+    ];
+    let output = run(&args);
+    let text = assert_success(&output, &args);
+    let report: serde_json::Value = serde_json::from_str(&text).expect("JSON report");
+    assert_eq!(
+        report["result"]["measurements"]["capture"],
+        capture.to_string_lossy().as_ref(),
+    );
+}
+
+#[test]
+fn report_writes_a_bundle_that_binds_its_inputs() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let html = directory.path().join("assessment.html");
+    let bundle_path = directory.path().join("bundle.json");
+    let scan = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/documents/output-scan-success.json");
+    let html_arg = html.to_string_lossy().into_owned();
+    let bundle_arg = bundle_path.to_string_lossy().into_owned();
+    let scan_arg = scan.to_string_lossy().into_owned();
+    let args = [
+        "analyze",
+        "report",
+        scan_arg.as_str(),
+        "--html",
+        html_arg.as_str(),
+        "--bundle",
+        bundle_arg.as_str(),
+    ];
+    let output = run(&args);
+    assert_success(&output, &args);
+    let bundle: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&bundle_path).expect("bundle written"))
+            .expect("bundle JSON");
+    assert_eq!(bundle["schema"], "packetcraftr.bundle/v1");
+    assert_eq!(
+        bundle["report"]["findings"][0]["rule_id"],
+        "engagement.scan.summary"
+    );
+    let parsed = packetcraftr_core::security::bundle::Bundle::parse(
+        &std::fs::read(&bundle_path).expect("bundle bytes"),
+    )
+    .expect("bundle validates against its inputs digest");
+    assert_eq!(parsed.sources.len(), 1);
+    let page = std::fs::read_to_string(&html).expect("html written");
+    assert!(page.contains("engagement.scan.summary"), "{page}");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn report_accepts_input_and_output_paths_with_invalid_utf8() {
+    use std::os::unix::ffi::OsStrExt;
+
+    let directory = tempfile::tempdir().expect("tempdir");
+    let source = directory.path().join(OsStr::from_bytes(b"scan-\xff.json"));
+    let html = directory
+        .path()
+        .join(OsStr::from_bytes(b"assessment-\xff.html"));
+    let bundle = directory
+        .path()
+        .join(OsStr::from_bytes(b"bundle-\xff.json"));
+    let scan = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/documents/output-scan-success.json");
+    std::fs::copy(scan, &source).expect("copy scan result");
+    let args = [
+        OsStr::new("--output"),
+        OsStr::new("json"),
+        OsStr::new("analyze"),
+        OsStr::new("report"),
+        source.as_os_str(),
+        OsStr::new("--html"),
+        html.as_os_str(),
+        OsStr::new("--bundle"),
+        bundle.as_os_str(),
+    ];
+    let output = run(&args);
+    let text = assert_success(&output, &args);
+    let report: serde_json::Value = serde_json::from_str(&text).expect("JSON report");
+    let result = &report["result"];
+    assert_eq!(
+        result["findings"][0]["evidence"]["source_file"],
+        source.to_string_lossy().as_ref(),
+    );
+    assert_eq!(
+        result["measurements"]["html"],
+        html.to_string_lossy().as_ref()
+    );
+    assert_eq!(
+        result["measurements"]["bundle"],
+        bundle.to_string_lossy().as_ref(),
+    );
+    assert!(html.is_file(), "HTML report was not written");
+    assert!(bundle.is_file(), "bundle was not written");
+}
+
+#[test]
+fn scan_timing_conflicts_and_seeded_order_is_reproducible() {
+    let conflict = run(&[
+        "network",
+        "scan",
+        "127.0.0.1",
+        "--list",
+        "--timing",
+        "normal",
+        "--rate",
+        "5",
+    ]);
+    assert_eq!(conflict.status.code(), Some(2));
+
+    let listed = |seed: &str| {
+        let args = [
+            "network",
+            "scan",
+            "127.0.0.1",
+            "--list",
+            "--ports",
+            "1-16",
+            "--shuffle-seed",
+            seed,
+        ];
+        let output = run(&args);
+        let text = assert_success(&output, &args);
+        text.lines()
+            .filter(|line| line.starts_with("port tcp/"))
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(listed("42"), listed("42"));
+    let seed_args = [
+        "--output",
+        "json",
+        "network",
+        "scan",
+        "127.0.0.1",
+        "--list",
+        "--ports",
+        "1-4",
+        "--shuffle-seed",
+        "42",
+    ];
+    let seed_output = run(&seed_args);
+    let seed_text = assert_success(&seed_output, &seed_args);
+    let seed_report: serde_json::Value = serde_json::from_str(&seed_text).expect("JSON list");
+    assert_eq!(seed_report["result"]["shuffle_seed"], 42);
+    assert_ne!(listed("42"), listed("7"));
+    let mut sorted = listed("42");
+    sorted.sort_by_key(|line| {
+        line.trim_start_matches("port tcp/")
+            .split(' ')
+            .next()
+            .unwrap()
+            .parse::<u16>()
+            .unwrap()
+    });
+    assert_eq!(sorted.len(), 16);
+    assert!(sorted[0].starts_with("port tcp/1 "));
+    assert!(sorted[15].starts_with("port tcp/16 "));
+}
+
+#[test]
+fn report_rejects_identical_html_and_bundle_paths() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    std::fs::create_dir(directory.path().join("sub")).expect("subdirectory");
+    let same = directory.path().join("sub").join("..").join("same.out");
+    let scan = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/documents/output-scan-success.json");
+    let same_arg = same.to_string_lossy().into_owned();
+    let scan_arg = scan.to_string_lossy().into_owned();
+    let output = run(&[
+        "analyze",
+        "report",
+        scan_arg.as_str(),
+        "--html",
+        same_arg.as_str(),
+        "--bundle",
+        same_arg.as_str(),
+    ]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        !directory.path().join("same.out").exists(),
+        "no output may be published on rejection"
+    );
+
+    #[cfg(unix)]
+    {
+        let real = directory.path().join("real");
+        std::fs::create_dir_all(real.join("sub")).expect("real subdirectory");
+        std::os::unix::fs::symlink(real.join("sub"), directory.path().join("link"))
+            .expect("symlink");
+        let html = real.join("report.out");
+        let bundle = directory.path().join("link").join("..").join("report.out");
+        let html_arg = html.to_string_lossy().into_owned();
+        let bundle_arg = bundle.to_string_lossy().into_owned();
+        let output = run(&[
+            "analyze",
+            "report",
+            scan_arg.as_str(),
+            "--html",
+            html_arg.as_str(),
+            "--bundle",
+            bundle_arg.as_str(),
+        ]);
+        assert_eq!(output.status.code(), Some(2));
+        assert!(
+            !html.exists(),
+            "symlink aliases must be rejected before staging"
+        );
+    }
+}
+
+#[test]
+fn inventory_ties_macs_only_to_arp_senders() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let build = |name: &str, packet: &str| {
+        let path = directory.path().join(name);
+        let args = [
+            "--output",
+            "pcapng",
+            "packet",
+            "build",
+            "--packet",
+            packet,
+            "--link-type",
+            "ethernet",
+        ];
+        let output = run(&args);
+        assert_success(&output, &args);
+        std::fs::write(&path, &output.stdout).expect("write capture");
+        path.to_string_lossy().into_owned()
+    };
+    let inventory = |capture: &str| {
+        let args = ["analyze", "inventory", capture];
+        let output = run(&args);
+        assert_success(&output, &args)
+    };
+    let arp = build(
+        "arp.pcapng",
+        "ethernet(src=02:00:00:00:00:01,dst=ff:ff:ff:ff:ff:ff)/arp(operation=1,sender_hardware=02:00:00:00:00:01,sender_protocol=192.0.2.2,target_hardware=00:00:00:00:00:00,target_protocol=192.0.2.1)",
+    );
+    assert!(
+        inventory(&arp).contains("host=192.0.2.2 mac=02:00:00:00:00:01"),
+        "ARP sender mapping is established evidence"
+    );
+    let routed = build(
+        "routed.pcapng",
+        "ethernet(src=02:00:00:00:00:09,dst=02:00:00:00:00:01)/ipv4(src=198.51.100.7,dst=192.0.2.2)/udp(sport=40000,dport=9999)/raw(text=hi)",
+    );
+    let probe = build(
+        "probe.pcapng",
+        "ethernet(src=02:00:00:00:00:01,dst=ff:ff:ff:ff:ff:ff)/arp(operation=1,sender_hardware=02:00:00:00:00:01,sender_protocol=0.0.0.0,target_hardware=00:00:00:00:00:00,target_protocol=192.0.2.1)",
+    );
+    assert!(
+        inventory(&probe).contains("hosts=0"),
+        "an ARP probe claims no address yet"
+    );
+    let text = inventory(&routed);
+    assert!(
+        text.contains("host=198.51.100.7 mac=-"),
+        "a routed frame must not attribute the router MAC, got:\n{text}"
+    );
+}
+
+#[test]
+fn scan_resource_diagnostics_report_the_timing_preset() {
+    let args = [
+        "--output",
+        "json",
+        "--resource-diagnostics",
+        "network",
+        "scan",
+        "127.0.0.1",
+        "--connect",
+        "--ports",
+        "1",
+        "--timing",
+        "fast",
+    ];
+    let output = run(&args);
+    let text = assert_success(&output, &args);
+    let report: serde_json::Value = serde_json::from_str(&text).expect("JSON report");
+    let settings = report["resources"]["settings"]
+        .as_array()
+        .expect("settings");
+    let value = |name: &str| {
+        settings
+            .iter()
+            .find(|setting| setting["name"] == name)
+            .map(|setting| setting["value"].clone())
+    };
+    assert_eq!(value("--max-in-flight"), Some(serde_json::json!(16)));
+    assert_eq!(value("--timeout-ms"), Some(serde_json::json!(500)));
+}
+
+#[test]
+fn passive_inventory_reports_only_observed_hosts_and_ports() {
+    let capture = capture_path("dns-response.pcap");
+    let capture = capture.to_string_lossy().into_owned();
+    let args = ["--output", "json", "analyze", "inventory", capture.as_str()];
+    let output = run(&args);
+    let text = assert_success(&output, &args);
+    let report: serde_json::Value = serde_json::from_str(&text).expect("JSON report");
+    assert_eq!(report["command"], "inventory");
+    let hosts = report["result"]["hosts"].as_array().expect("hosts");
+    assert_eq!(hosts.len(), 2);
+    let server = hosts
+        .iter()
+        .find(|host| host["address"] == "192.0.2.53")
+        .expect("DNS server host");
+    assert_eq!(server["frames_sent"], 1);
+    assert_eq!(server["observed_ports"][0]["transport"], "udp");
+    assert_eq!(server["observed_ports"][0]["port"], 53);
+    assert!(
+        server["protocols"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|protocol| protocol == "dns")
+    );
+}
+
+#[test]
+fn scope_denies_an_excluded_destination_before_route_lookup() {
+    let scope =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/documents/scope.json");
+    assert!(
+        scope.is_file(),
+        "example scope missing: {}",
+        scope.display()
+    );
+    let scope = scope.to_string_lossy().into_owned();
+
+    let args = ["network", "preflight", "--scope-file", scope.as_str()];
+    let output = run(&args);
+    let text = assert_success(&output, &args);
+    assert!(
+        text.contains("scope label=lab-segment digest="),
+        "preflight should name the validated scope, got:\n{text}"
+    );
+    assert!(text.contains("permission=not_probed"), "{text}");
+
+    let args = [
+        "--output",
+        "json",
+        "network",
+        "plan",
+        "--packet",
+        "ipv4(dst=192.0.2.1)/udp(dport=53)",
+        "--scope-file",
+        scope.as_str(),
+    ];
+    let output = run(&args);
+    assert_eq!(output.status.code(), Some(6), "{}", stdout(&output));
+    assert_error(&output, "policy.destination_not_allowed");
+}
+
+#[test]
+fn http3_reconstructs_multiplexed_exchanges_and_hides_header_values_by_default() {
+    let capture = capture_path("http3-demo.pcapng");
+    let keys = capture_path("http3-demo.keys");
+    let analyze = [
+        "analyze",
+        "http3",
+        capture.to_str().unwrap(),
+        "--keylog",
+        keys.to_str().unwrap(),
+    ];
+    let args = [&["--output", "json"][..], &analyze].concat();
+    let report: serde_json::Value =
+        serde_json::from_str(&assert_success(&run(&args), &args)).unwrap();
+    let result = &report["result"];
+    let exchanges = result["exchanges"].as_array().unwrap();
+    assert_eq!(exchanges.len(), 2);
+    assert_eq!(result["connections"][0]["client"]["encoder_inserts"], 1);
+    assert_eq!(result["connections"][0]["transport_incomplete"], false);
+    let first = &exchanges[0];
+    assert_eq!(first["stream"], 0);
+    let request = &first["request"]["header_sections"][0];
+    assert_eq!(request["method"], "GET");
+    assert_eq!(request["required_insert_count"], 1);
+    assert!(
+        request["fields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|field| field.get("value").is_none() && field.get("value_hex").is_none())
+    );
+    let response = &first["response"];
+    assert_eq!(response["data_frames"], 1);
+    assert_eq!(response["data_bytes"], b"synthetic response body".len());
+    let sections = response["header_sections"].as_array().unwrap();
+    assert_eq!(sections[0]["status"], 103);
+    assert_eq!(sections[1]["status"], 200);
+    assert_eq!(sections[2]["kind"], "trailers");
+    let redacted_trailer = &sections[2]["fields"][0];
+    assert_eq!(redacted_trailer["name"], "x-test");
+    assert!(redacted_trailer.get("value").is_none());
+    assert!(redacted_trailer.get("value_hex").is_none());
+    assert_eq!(
+        exchanges[1]["response"]["header_sections"][0]["status"],
+        204
+    );
+
+    let args = [
+        &["--output", "ndjson"][..],
+        &analyze,
+        &["--stream", "0", "--include-header-values"],
+    ]
+    .concat();
+    let stream = assert_success(&run(&args), &args);
+    let events: Vec<serde_json::Value> = stream
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    let [connection, exchange, terminal] = events.as_slice() else {
+        panic!("expected connection, exchange and complete events")
+    };
+    assert_eq!(connection["event"], "http3_connection");
+    assert_eq!(exchange["event"], "http3_exchange");
+    let selected = &exchange["result"]["exchange"];
+    let fields = selected["request"]["header_sections"][0]["fields"]
+        .as_array()
+        .unwrap();
+    assert!(
+        fields
+            .iter()
+            .any(|field| field["name"] == ":path" && field["value"] == "/private-demo")
+    );
+    let trailer = &selected["response"]["header_sections"][2]["fields"][0];
+    assert_eq!(trailer["value_hex"], "ff");
+    assert_eq!(terminal["event"], "complete");
+    assert_eq!(terminal["result"]["summary"]["exchanges"], 1);
+    assert!(!stream.contains("synthetic response body"));
+
+    let text = assert_success(&run(&analyze), &analyze);
+    assert!(text.contains("request GET offset=0"));
+    assert!(text.contains("response 200"));
+    assert!(!text.contains("/private-demo"));
+    assert!(!text.contains("hex:ff"));
+}
+
+#[test]
+fn http3_caps_rendered_application_evidence() {
+    let capture = capture_path("http3-demo.pcapng");
+    let keys = capture_path("http3-demo.keys");
+    for format in ["json", "text"] {
+        let args = [
+            "--output",
+            format,
+            "analyze",
+            "http3",
+            capture.to_str().unwrap(),
+            "--keylog",
+            keys.to_str().unwrap(),
+            "--include-header-values",
+        ];
+        let rendered = assert_success(&run(&args), &args);
+        let evidence_bytes = if format == "json" {
+            ["\"connections\"", "\"exchanges\""]
+                .into_iter()
+                .map(|key| {
+                    let (_, tail) = rendered.split_once(key).unwrap();
+                    let array = &tail[tail.find('[').unwrap()..];
+                    let mut values = serde_json::Deserializer::from_str(array)
+                        .into_iter::<serde::de::IgnoredAny>();
+                    values.next().unwrap().unwrap();
+                    array[1..values.byte_offset() - 1].trim_end().len()
+                })
+                .sum()
+        } else {
+            rendered.split_once("HTTP/3 connections=").unwrap().0.len()
+        };
+
+        let exact = evidence_bytes.to_string();
+        let exact_args = [&args[..], &["--max-application-output-bytes", &exact]].concat();
+        assert_eq!(assert_success(&run(&exact_args), &exact_args), rendered);
+
+        let short = (evidence_bytes - 1).to_string();
+        let short_args = [&args[..], &["--max-application-output-bytes", &short]].concat();
+        let output = run(&short_args);
+        let error = if format == "json" {
+            assert_error(&output, "policy.denied");
+            stdout(&output)
+        } else {
+            assert!(!output.status.success());
+            assert!(stdout(&output).len() < evidence_bytes);
+            String::from_utf8_lossy(&output.stderr).into_owned()
+        };
+        assert!(error.contains("application output exceeds --max-application-output-bytes"));
+    }
+}
+
+#[test]
+fn http3_honors_quic_stream_retention_override() {
+    let capture = capture_path("http3-demo.pcapng");
+    let keys = capture_path("http3-demo.keys");
+    for (limit, data_bytes, complete) in [(32, 0, false), (64, 23, true)] {
+        let limit = limit.to_string();
+        let args = [
+            "--output",
+            "json",
+            "analyze",
+            "http3",
+            capture.to_str().unwrap(),
+            "--keylog",
+            keys.to_str().unwrap(),
+            "--stream",
+            "0",
+            "--max-quic-stream-bytes",
+            &limit,
+        ];
+        let report: serde_json::Value =
+            serde_json::from_str(&assert_success(&run(&args), &args)).unwrap();
+        let response = &report["result"]["exchanges"][0]["response"];
+        assert_eq!(response["data_bytes"], data_bytes);
+        assert_eq!(response["complete"], complete);
+        if !complete {
+            assert!(
+                response["issues"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|issue| issue["code"] == "stream_gap")
+            );
+        }
+    }
+}
+
+#[test]
+fn http3_streaming_summary_reports_capture_loss_separately_from_recovered_exchanges() {
+    let mut capture = std::fs::read(capture_path("http3-demo.pcapng")).unwrap();
+    let last_block = u32::from_le_bytes(capture[capture.len() - 4..].try_into().unwrap()) as usize;
+    let original_length = capture.len() - last_block + 24;
+    let field = &mut capture[original_length..original_length + 4];
+    let wire_bytes = u32::from_le_bytes(field.try_into().unwrap());
+    field.copy_from_slice(&(wire_bytes + 1).to_le_bytes());
+    let file = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(file.path(), capture).unwrap();
+    let keys = capture_path("http3-demo.keys");
+    let args = [
+        "--output",
+        "ndjson",
+        "analyze",
+        "http3",
+        file.path().to_str().unwrap(),
+        "--keylog",
+        keys.to_str().unwrap(),
+    ];
+    let output = assert_success(&run(&args), &args);
+    let records: Vec<serde_json::Value> = output
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert!(
+        records
+            .iter()
+            .any(|record| record["event"] == "http3_exchange"
+                && record["result"]["exchange"]["response"]["complete"] == true)
+    );
+    let terminal = records.last().unwrap();
+    assert_eq!(terminal["event"], "complete");
+    assert_eq!(terminal["result"]["summary"]["input_incomplete"], true);
 }

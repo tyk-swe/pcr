@@ -9,6 +9,7 @@ mod capture;
 mod model;
 mod operation;
 mod resolution;
+mod scope;
 mod wire;
 
 pub use capture::CaptureBudget;
@@ -24,6 +25,7 @@ pub use operation::{
     SocketOperation, WireLimits,
 };
 pub use resolution::ResolutionError;
+pub use scope::{MAX_SCOPE_DOCUMENT_BYTES, SCHEMA as SCOPE_SCHEMA, Scope};
 pub use wire::requires_live_opt_in;
 pub(crate) use wire::{
     authorize_permissive_live, authorize_wire, authorize_wire_destinations, decode_wire,

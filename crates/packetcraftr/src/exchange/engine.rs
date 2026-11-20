@@ -16,7 +16,10 @@ use crate::{Client, Sink};
 
 impl<P: PacketProviders, K: Clock> Client<P, K> {
     /// Exact packet batches with mandatory workflow identity validation.
-    #[expect(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the matcher, pinned route, and operation are distinct borrows from different owners"
+    )]
     pub(crate) fn exchange_packets(
         &self,
         packets: Vec<Packet>,

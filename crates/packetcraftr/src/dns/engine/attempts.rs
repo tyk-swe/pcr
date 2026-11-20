@@ -29,19 +29,21 @@ use crate::dns::evidence::validate_dns_execution;
 use crate::dns::evidence::{
     ResponseClassification, candidate_evidence, classify_response, timeout_evidence,
 };
-use crate::dns::executor::{Exchange, ExchangeEvidence, TcpQuerier};
+use crate::dns::executor::{Exchange, ExchangeEvidence};
 use crate::dns::plan::{Probe, rotated_source_port};
 use crate::dns::{
     AttemptEvidence, Event, EventContext, Limits, Outcome, Record, Report, Request, Section,
     Transport, TransportMode, UndecodedEvidence, ValidatedResponse,
 };
+use crate::exchange::WorkflowExecutor;
+use crate::providers::{PacketProviders, TcpProviders};
 
 /// The UDP attempts of one query, each awaiting its own response.
-pub(super) struct Retries<'a, A, E, C, F> {
+pub(super) struct Retries<'a, 'e, A, P, C, F> {
     pub(super) request: &'a Request,
     pub(super) authorizer: &'a mut A,
     pub(super) registry: &'a Registry,
-    pub(super) executor: &'a mut E,
+    pub(super) executor: &'a mut WorkflowExecutor<'e, P, C>,
     pub(super) execution: Context<'a, C, Error>,
     pub(super) query: Bytes,
     pub(super) delay: Duration,
@@ -80,10 +82,10 @@ fn spent_on_neighbors(error: &BoundaryError) -> Option<Stats> {
     })
 }
 
-impl<A, E, C, F> Retries<'_, A, E, C, F>
+impl<A, P, C, F> Retries<'_, '_, A, P, C, F>
 where
     A: Authorizer + ResolveTarget,
-    E: Executor<Exchange> + TcpQuerier,
+    P: PacketProviders + TcpProviders,
     C: Clock,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {

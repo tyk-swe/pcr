@@ -16,6 +16,16 @@ Baseline before any edit. `cargo test --locked --workspace` passed, and
 `scripts/check_file_lengths.py` passed. The counted coupling patterns sit at
 their ceilings. Everything below is what those counters cannot see.
 
+## Index
+
+| Pass | Sections |
+| --- | --- |
+| Initial audit | [Periphery](#periphery-scripts-schemas-examples-fuzz-ci), [packetcraftr-core](#packetcraftr-core), [packetcraftr-netio](#packetcraftr-netio), [packetcraftr](#packetcraftr), [packetcraftr-cli](#packetcraftr-cli) |
+| Verification and deferred work | [Comments and tests](#comments-and-tests-sweep), [initial re-check](#initial-re-check), [deferred pass](#deferred-pass), [deferred pass re-check](#deferred-pass-re-check), [confirmation](#confirmation-round) |
+| November 6–7 | [Follow-up audit](#follow-up-audit-on-2026-11-06), [structural cleanup](#structural-cleanup-2026-11-07) |
+| November 10 | [CLI rendering folder](#cli-rendering-folder-2026-11-10), [module depth sweep](#module-depth-sweep-2026-11-10) |
+| November 11–15 | [Scan capture epochs](#scan-capture-epochs-2026-11-11), [hotspot modules](#hotspot-module-deepening-2026-11-12), [deferred list](#deferred-list-deepening-2026-11-15) |
+
 ## Periphery (scripts, schemas, examples, fuzz, CI)
 
 - Parse and compare the layer tables instead of hand-copying them.
@@ -293,7 +303,7 @@ differential fixture that was built through the code under test. It removed
 no tests, because every candidate it examined still fails on a real
 regression, and the candidates are recorded as kept with their reasons.
 
-## Re-check round
+## Initial re-check
 
 Independent re-audits and a two-axis review of the whole diff then found
 and fixed a second, smaller set. The layer-table guard now fails when a
@@ -475,7 +485,7 @@ finished there move out of their deferred sections into this record.
   takes its payload ceiling from it and core's own service-probe
   observations embed its payload type.
 
-## Re-check round
+## Deferred pass re-check
 
 Fresh subagent audits over the finished tree found the following, each
 verified again in the code before fixing.

@@ -5,12 +5,12 @@ use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 
-pub(super) struct Input {
+pub(in crate::commands::analyze) struct Input {
     file: Option<File>,
     read: u64,
 }
 impl Input {
-    pub(super) fn open(path: Option<&Path>) -> Result<Self, CliError> {
+    pub(in crate::commands::analyze) fn open(path: Option<&Path>) -> Result<Self, CliError> {
         let file = path
             .map(|path| {
                 let metadata =
@@ -26,7 +26,7 @@ impl Input {
             .transpose()?;
         Ok(Self { file, read: 0 })
     }
-    pub(super) fn poll(
+    pub(in crate::commands::analyze) fn poll(
         &mut self,
         collector: &mut Collector,
         invocation: &Invocation,

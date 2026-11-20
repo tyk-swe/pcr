@@ -19,7 +19,8 @@ use crate::{
     native,
 };
 
-use super::{lock, wait_remaining};
+use super::wait_remaining;
+use crate::workers::lock;
 
 pub(super) const NETLINK_QUEUE_DEPTH: usize = crate::workers::CAPACITY;
 const IDLE_RETIREMENT: Duration = Duration::from_millis(250);

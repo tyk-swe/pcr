@@ -2992,6 +2992,89 @@ fn passive_inventory_reports_only_observed_hosts_and_ports() {
 }
 
 #[test]
+fn passive_inventory_counts_untimed_pcapng_frames() {
+    use packetcraftr_core::capture_file::{Endianness, PcapNgOptions, Reader, Writer};
+
+    let source = std::fs::File::open(capture_path("dns-response.pcap")).unwrap();
+    let frame = Reader::with_limits(source, Default::default())
+        .unwrap()
+        .next_frame()
+        .unwrap()
+        .unwrap();
+    let mut writer = Writer::pcapng_with_options(
+        Vec::new(),
+        PcapNgOptions {
+            endianness: Endianness::Little,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    writer.add_interface(frame.link_type).unwrap();
+    let packet_block_size = writer.encoded_frame_size(&frame).unwrap();
+    writer.write_frame(&frame).unwrap();
+    writer.write_frame(&frame).unwrap();
+
+    let dir = tempfile::tempdir().unwrap();
+    let timed = dir.path().join("timed.pcapng");
+    let mixed = dir.path().join("mixed.pcapng");
+    let mut capture = writer.into_inner();
+    std::fs::write(&timed, &capture).unwrap();
+
+    capture.truncate(capture.len() - packet_block_size);
+    let wire_len = frame.original_length();
+    let padding = [0; 3];
+    let pad = &padding[..frame.bytes().len().next_multiple_of(4) - frame.bytes().len()];
+    let block_size = 16 + u32::try_from(frame.bytes().len() + pad.len()).unwrap();
+    capture.extend_from_slice(&3_u32.to_le_bytes());
+    capture.extend_from_slice(&block_size.to_le_bytes());
+    capture.extend_from_slice(&wire_len.to_le_bytes());
+    capture.extend_from_slice(frame.bytes());
+    capture.extend_from_slice(pad);
+    capture.extend_from_slice(&block_size.to_le_bytes());
+    std::fs::write(&mixed, &capture).unwrap();
+
+    let inventory = |path: &Path, selection: &[&str]| {
+        let args = [
+            &[
+                "--output",
+                "json",
+                "analyze",
+                "inventory",
+                path.to_str().unwrap(),
+            ][..],
+            selection,
+        ]
+        .concat();
+        let text = assert_success(&run(&args), &args);
+        serde_json::from_str::<serde_json::Value>(&text).unwrap()["result"].clone()
+    };
+    let expected = inventory(&timed, &[]);
+    assert_eq!(expected["frames_read"], 2);
+    assert_eq!(inventory(&mixed, &[]), expected);
+    assert_eq!(
+        inventory(&mixed, &["--filter", "udp.stream == 0"]),
+        expected
+    );
+    assert_eq!(
+        inventory(&mixed, &["--filter", "frame.number == 2"]),
+        inventory(&timed, &["--filter", "frame.number == 2"]),
+    );
+    assert_eq!(
+        inventory(&mixed, &["--start-epoch", "0"]),
+        inventory(&timed, &["--filter", "frame.number == 1"]),
+    );
+
+    let args = [
+        "--output",
+        "json",
+        "analyze",
+        "stats",
+        mixed.to_str().unwrap(),
+    ];
+    assert_error(&run(&args), "packet.timestamp_unavailable");
+}
+
+#[test]
 fn scope_denies_an_excluded_destination_before_route_lookup() {
     let scope =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/documents/scope.json");

@@ -370,7 +370,7 @@ fn read_frame<R: Read>(
     frames_read: u64,
 ) -> Result<Option<ReadFrame>, Error> {
     let frame = guarded(deadline, source_index, || {
-        reader.next_frame().map_err(|source| Error::Capture {
+        reader.next_exact_frame().map_err(|source| Error::Capture {
             source_index,
             source,
         })

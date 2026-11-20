@@ -8,7 +8,7 @@ use super::PcapNgState;
 use super::framing::{FramedBlock, packet_block_kind};
 use crate::capture_file::pcapng::{
     interface::parse_interface_description,
-    packet::{parse_enhanced_packet, parse_obsolete_packet, parse_simple_packet},
+    packet::{parse_simple_packet, parse_timestamped_packet},
 };
 use crate::capture_file::{
     error::Error,
@@ -18,7 +18,7 @@ use crate::capture_file::{
     record::{CaptureRecord, MetadataBlockKind, PacketBlockKind, RecordKind},
     wire::{
         PCAPNG_CUSTOM_BLOCK, PCAPNG_CUSTOM_BLOCK_NO_COPY, PCAPNG_INTERFACE_DESCRIPTION_BLOCK,
-        PCAPNG_INTERFACE_STATISTICS_BLOCK, PCAPNG_NAME_RESOLUTION_BLOCK, decode_u32,
+        PCAPNG_INTERFACE_STATISTICS_BLOCK, PCAPNG_NAME_RESOLUTION_BLOCK, Subnanosecond, decode_u32,
     },
 };
 
@@ -27,15 +27,22 @@ pub(super) fn decode(
     state: &mut PcapNgState,
     all_interfaces: &mut Vec<Interface>,
     limits: &ReaderLimits,
+    subnanosecond: Subnanosecond,
 ) -> Result<CaptureRecord, Error> {
     match block.block_type {
         PCAPNG_INTERFACE_DESCRIPTION_BLOCK => {
             decode_interface(&block.body, block.raw, state, all_interfaces, limits)
         }
         block_type => match packet_block_kind(block_type) {
-            Some(kind) => {
-                decode_packet(kind, &block.body, block.raw, state, all_interfaces, limits)
-            }
+            Some(kind) => decode_packet(
+                kind,
+                &block.body,
+                block.raw,
+                state,
+                all_interfaces,
+                limits,
+                subnanosecond,
+            ),
             None => decode_metadata(block_type, &block.body, block.raw, state, all_interfaces),
         },
     }
@@ -76,21 +83,28 @@ fn decode_packet(
     state: &mut PcapNgState,
     all_interfaces: &[Interface],
     limits: &ReaderLimits,
+    subnanosecond: Subnanosecond,
 ) -> Result<CaptureRecord, Error> {
-    let parse = match kind {
-        PacketBlockKind::Enhanced => parse_enhanced_packet,
-        PacketBlockKind::Obsolete => parse_obsolete_packet,
+    let interfaces = state.section_interfaces(all_interfaces);
+    let parsed = match kind {
+        PacketBlockKind::Enhanced | PacketBlockKind::Obsolete => parse_timestamped_packet(
+            body,
+            state.endianness,
+            interfaces,
+            state.interface_base,
+            limits,
+            kind == PacketBlockKind::Obsolete,
+            subnanosecond,
+        ),
         // A classic-PCAP record never reaches this decoder.
-        PacketBlockKind::Simple | PacketBlockKind::Classic => parse_simple_packet,
-    };
-    let parsed = parse(
-        body,
-        state.endianness,
-        state.section_interfaces(all_interfaces),
-        state.interface_base,
-        limits.max_size,
-        limits.max_options_per_block,
-    )?;
+        PacketBlockKind::Simple | PacketBlockKind::Classic => parse_simple_packet(
+            body,
+            state.endianness,
+            interfaces,
+            state.interface_base,
+            limits.max_size,
+        ),
+    }?;
     state.reset_metadata();
     Ok(record(
         RecordKind::Packet {

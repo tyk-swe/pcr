@@ -22,6 +22,9 @@ Selection (--start-epoch/--stop-epoch, --frames, --every, --filter) preserves
 one-based source frame numbers; skipped frames still count toward --max-frames
 and --max-bytes, and epoch bounds exclude untimestamped frames.
 
+Non-capture output floors PCAPNG timestamps to whole nanoseconds.
+Capture output rejects timestamps that would require rounding.
+
 Capture output preserves the input format unless --normalize is set. --normalize
 writes matching physical frames into one PCAPNG section or a single-interface
 classic PCAP (requiring one link type, timestamps, and no direction metadata),

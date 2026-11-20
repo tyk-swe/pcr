@@ -666,6 +666,84 @@ fn projection_json_budget_is_the_sum_of_every_retained_row() {
 }
 
 #[test]
+fn files_read_floors_fractional_pcapng_timestamps_only_for_display() {
+    use packetcraftr_core::capture_file::{Interface, TimestampResolution, Writer};
+    use packetcraftr_core::frame::{Frame, LinkType};
+    use std::time::{Duration, UNIX_EPOCH};
+
+    let packet = capture_frames(&capture_path("dns-response.pcap")).remove(0);
+    let file = tempfile::NamedTempFile::new().unwrap();
+    let path = file.path().to_str().unwrap();
+    for (resolution, offset, ticks, expected_nanos, exact) in [
+        (TimestampResolution::Binary(10), 123, 1_u64, 976_562, false),
+        (TimestampResolution::Binary(10), 123, 2, 1_953_125, true),
+        (TimestampResolution::Binary(10), -1, 1, 976_562, false),
+        (TimestampResolution::Decimal(10), 123, 19, 1, false),
+        (TimestampResolution::Decimal(127), 123, u64::MAX, 0, false),
+        (TimestampResolution::Decimal(127), 123, 0, 0, true),
+    ] {
+        let mut writer = Writer::pcapng_with_options(Vec::new(), Default::default()).unwrap();
+        let interface = writer
+            .add_interface_description_with_options(
+                Interface {
+                    link_type: LinkType::IPV4,
+                    snap_len: 65_535,
+                    timestamp_resolution: resolution,
+                    timestamp_offset: offset,
+                },
+                &[],
+            )
+            .unwrap();
+        let seconds = Duration::from_secs(offset.unsigned_abs());
+        let time_at_zero_ticks = if offset < 0 {
+            UNIX_EPOCH - seconds
+        } else {
+            UNIX_EPOCH + seconds
+        };
+        let mut frame =
+            Frame::new(Some(time_at_zero_ticks), LinkType::IPV4, packet.clone()).unwrap();
+        frame.interface = Some(interface);
+        let enhanced = writer.get_ref().len();
+        writer.write_frame(&frame).unwrap();
+        let mut capture = writer.into_inner();
+        let mut wire_ticks = ticks.to_le_bytes();
+        wire_ticks.rotate_left(4);
+        capture[enhanced + 12..enhanced + 20].copy_from_slice(&wire_ticks);
+        std::fs::write(path, &capture).unwrap();
+
+        let args = ["--output", "ndjson", "files", "read", path];
+        let output = run(&args);
+        let text = assert_success(&output, &args);
+        let record: serde_json::Value = serde_json::from_str(text.lines().next().unwrap()).unwrap();
+        assert_eq!(record["event"], "frame");
+        assert_eq!(
+            record["result"]["frame"]["timestamp"]["unix_seconds"],
+            offset
+        );
+        assert_eq!(
+            record["result"]["frame"]["timestamp"]["nanoseconds"],
+            expected_nanos
+        );
+        assert_eq!(record["result"]["frame"]["captured_length"], packet.len());
+
+        for flags in [&[][..], &["--normalize"][..]] {
+            let args = ["--output", "pcapng", "files", "read", path]
+                .into_iter()
+                .chain(flags.iter().copied())
+                .collect::<Vec<_>>();
+            let output = run(&args);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert_eq!(output.status.success(), exact, "{args:?}: {stderr}");
+            if exact && flags.is_empty() {
+                assert_eq!(output.stdout, capture);
+            } else if !exact {
+                assert!(stderr.contains("sub-nanosecond timestamp"), "{stderr}");
+            }
+        }
+    }
+}
+
+#[test]
 fn files_read_missing_capture_exits_nonzero() {
     let missing = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../examples/captures/missing-offline-corpus.pcap");

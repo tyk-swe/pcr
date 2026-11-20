@@ -11,6 +11,7 @@ use crate::command_options::{
 pub(crate) const AFTER_LONG_HELP: &str = r"Examples:
   packetcraftr files read capture.pcapng --max-frames 100
   packetcraftr --output ndjson files read - < capture.pcapng
+  packetcraftr --output json files read capture.pcapng --field frame.number
   packetcraftr files read capture.pcapng --filter 'tcp.flags.syn == 1 && !tcp.flags.ack' --dissect
   packetcraftr --output pcapng files read capture.pcapng --filter 'udp.port == 53' > dns.pcapng
   packetcraftr --output pcapng files read - --normalize --filter 'udp' < capture.pcap > selected.pcapng
@@ -21,6 +22,11 @@ pub(crate) const AFTER_LONG_HELP: &str = r"Examples:
 Selection (--start-epoch/--stop-epoch, --frames, --every, --filter) preserves
 one-based source frame numbers; skipped frames still count toward --max-frames
 and --max-bytes, and epoch bounds exclude untimestamped frames.
+
+JSON requires at least one --field and returns a field projection. NDJSON
+streams frame records without --field and field rows with --field.
+If no frames match --filter, JSON returns `rows_written: 0` and `rows: []`,
+and NDJSON emits only a `complete` record, with or without --field.
 
 Non-capture output floors PCAPNG timestamps to whole nanoseconds before
 converting to the platform's clock precision. Capture output rejects

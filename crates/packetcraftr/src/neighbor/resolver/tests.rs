@@ -26,7 +26,7 @@ struct Session {
     metadata: capture::Metadata,
     cancellation: Cancellation,
     cancel_before_send: bool,
-    reads: usize,
+    reads: Arc<AtomicUsize>,
 }
 impl capture::Session for Session {
     fn metadata(&self) -> &capture::Metadata {
@@ -39,7 +39,7 @@ impl capture::Session for Session {
         &mut self,
         deadline: &Deadline,
     ) -> Result<Option<capture::Captured>, packetcraftr_netio::Error> {
-        self.reads += 1;
+        self.reads.fetch_add(1, Ordering::SeqCst);
         if self.cancel_before_send || !deadline.limit().is_zero() {
             self.cancellation.cancel();
             if !self.cancel_before_send {
@@ -118,7 +118,8 @@ fn parent_cancellation_stops_reads_and_attempts() {
         let parent =
             Deadline::new(Duration::from_secs(1)).with_cancellation(Some(cancellation.clone()));
         let deadline = Deadline::new(Duration::from_secs(1)).with_parent(Some(Arc::new(parent)));
-        let mut session = Session {
+        let reads = Arc::new(AtomicUsize::new(0));
+        let capture = Armed(std::sync::Mutex::new(Some(Session {
             metadata: capture::Metadata {
                 interface: request.interface.clone(),
                 link_type: request.link_type,
@@ -127,30 +128,29 @@ fn parent_cancellation_stops_reads_and_attempts() {
             },
             cancellation,
             cancel_before_send,
-            reads: 0,
-        };
+            reads: Arc::clone(&reads),
+        })));
         let transmitter = Transmitter(AtomicUsize::new(0));
-        let state = State::default();
-        let active = state.over(&transmitter, &Captures);
-        let decision = discovery_decision(&request);
-        let bytes = build_request_frame(&request).unwrap();
-        let result = active
-            .exchange(
-                &request,
-                &bytes,
-                transmit::Route {
-                    decision: &decision,
-                    mode: Mode::Layer2,
-                    lookup_destination: None,
-                },
-                &mut session,
-                &deadline,
-            )
-            .unwrap();
+        let error = State::default()
+            .over(&transmitter, &capture)
+            .resolve(&request, &deadline)
+            .unwrap_err();
+        let Error::Io {
+            spent: Some(spent),
+            source,
+            ..
+        } = error
+        else {
+            panic!("cancellation must not read as an unanswered resolution: {error:?}");
+        };
         let expected = u32::from(!cancel_before_send);
-        assert_eq!(result.attempts, expected);
+        assert!(matches!(source, packetcraftr_netio::Error::Cancelled(_)));
+        assert_eq!(spent.attempts, expected);
         assert_eq!(transmitter.0.load(Ordering::SeqCst), expected as usize);
-        assert_eq!(session.reads, if cancel_before_send { 1 } else { 2 });
+        assert_eq!(
+            reads.load(Ordering::SeqCst),
+            if cancel_before_send { 1 } else { 2 }
+        );
     }
 }
 
@@ -207,10 +207,10 @@ impl capture::Session for InterruptedSession {
     }
 }
 
-struct InterruptedCapture(std::sync::Mutex<Option<InterruptedSession>>);
+struct Armed<S>(std::sync::Mutex<Option<S>>);
 
-impl capture::Provider for InterruptedCapture {
-    type Capture = InterruptedSession;
+impl<S: capture::Session + Send> capture::Provider for Armed<S> {
+    type Capture = S;
 
     fn arm_capture(
         &self,
@@ -239,7 +239,7 @@ fn interrupted_read_preserves_attempt_and_evidence() {
     let parent =
         Deadline::new(Duration::from_secs(1)).with_cancellation(Some(cancellation.clone()));
     let deadline = Deadline::new(Duration::from_secs(1)).with_parent(Some(Arc::new(parent)));
-    let capture = InterruptedCapture(std::sync::Mutex::new(Some(InterruptedSession {
+    let capture = Armed(std::sync::Mutex::new(Some(InterruptedSession {
         metadata: capture::Metadata {
             interface: request.interface.clone(),
             link_type: request.link_type,
@@ -411,19 +411,7 @@ fn not_found_stats_count_every_request_frame() {
 }
 
 fn cache_key(index: u16) -> NeighborCacheKey {
-    let [high, low] = index.to_be_bytes();
-    NeighborCacheKey::from(&Request {
-        interface: packetcraftr_netio::interface::Id {
-            name: "test0".into(),
-            index: 1,
-        },
-        interface_source: "192.0.2.1".parse().unwrap(),
-        interface_mac: MacAddress([2, 0, 0, 0, 0, 1]),
-        target: std::net::Ipv4Addr::new(198, 51, high, low).into(),
-        vlan_tags: vec![],
-        mtu: 1500,
-        link_type: packetcraftr_core::frame::LinkType::ETHERNET,
-    })
+    NeighborCacheKey::from(&neighbor(index))
 }
 
 fn cache_options(capacity: usize, ttl: u64) -> Options {
@@ -910,4 +898,87 @@ fn resolved_stats_count_every_request_frame() {
     let stats = resolution.stats(Duration::ZERO);
     assert_eq!(stats.packets_attempted, 2);
     assert_eq!(stats.bytes, 2 * frame_bytes as u64);
+}
+
+fn neighbor(index: u16) -> Request {
+    let [high, low] = index.to_be_bytes();
+    Request {
+        interface: packetcraftr_netio::interface::Id {
+            name: "test0".into(),
+            index: 1,
+        },
+        interface_source: "192.0.2.1".parse().unwrap(),
+        interface_mac: MacAddress([2, 0, 0, 0, 0, 1]),
+        target: std::net::Ipv4Addr::new(198, 51, high, low).into(),
+        vlan_tags: vec![],
+        mtu: 1500,
+        link_type: packetcraftr_core::frame::LinkType::ETHERNET,
+    }
+}
+
+#[test]
+fn operation_answers_outlive_shared_eviction_and_stay_pinned() {
+    let shared = State::try_new(cache_options(1, 3600)).unwrap();
+    let pinned = shared.for_operation(2);
+    let [first, second] = [1, 2].map(|index| MacAddress([2, 0, 0, 0, 0, index]));
+    pinned.remember(first, cache_key(1)).unwrap();
+    pinned.remember(second, cache_key(2)).unwrap();
+
+    assert_eq!(shared.cached(&neighbor(1)).unwrap(), None);
+    assert_eq!(shared.cached(&neighbor(2)).unwrap(), Some(second));
+    assert_eq!(pinned.cached(&neighbor(1)).unwrap(), Some(first));
+    let repinned = pinned.for_operation(1);
+    assert_eq!(repinned.cached(&neighbor(1)).unwrap(), Some(first));
+    assert_eq!(repinned.cached(&neighbor(2)).unwrap(), Some(second));
+    assert_eq!(pinned.fresh().cached(&neighbor(2)).unwrap(), None);
+}
+
+#[test]
+fn one_attempt_resolvers_share_the_cache_and_pin_their_answers() {
+    let shared = State::try_new(Options {
+        max_attempts: 3,
+        ..cache_options(1, 3600)
+    })
+    .unwrap();
+    let bounds = Bounds {
+        attempt_timeout: Duration::from_millis(50),
+        max_frames: 8,
+        max_bytes: 64 * 1024,
+        snap_length: 1500,
+    };
+    let narrowed = shared.one_attempt(bounds, 2).unwrap();
+    assert_eq!(narrowed.max_attempts(), 1);
+    let [first, second] = [1, 2].map(|index| MacAddress([2, 0, 0, 0, 0, index]));
+    narrowed.remember(first, cache_key(1)).unwrap();
+    narrowed.remember(second, cache_key(2)).unwrap();
+    assert_eq!(shared.cached(&neighbor(2)).unwrap(), Some(second));
+    assert_eq!(narrowed.cached(&neighbor(1)).unwrap(), Some(first));
+
+    let fresh = narrowed.fresh();
+    assert_eq!(fresh.max_attempts(), 1);
+    assert_eq!(fresh.cached(&neighbor(1)).unwrap(), None);
+    assert_eq!(fresh.cached(&neighbor(2)).unwrap(), None);
+}
+
+#[test]
+fn single_attempt_resolvers_keep_the_shared_cache_and_pinned_answers() {
+    let bounds = Bounds {
+        attempt_timeout: Duration::from_millis(50),
+        max_frames: 8,
+        max_bytes: 64 * 1024,
+        snap_length: 1500,
+    };
+    let shared = State::try_new(cache_options(1, 3600)).unwrap();
+    let [first, second, third] = [1, 2, 3].map(|index| MacAddress([2, 0, 0, 0, 0, index]));
+    let single = shared.single_attempt(bounds).unwrap();
+    assert_eq!(single.max_attempts(), 1);
+    single.remember(first, cache_key(1)).unwrap();
+    assert_eq!(shared.cached(&neighbor(1)).unwrap(), Some(first));
+
+    let pinned = shared.for_operation(2);
+    pinned.remember(second, cache_key(2)).unwrap();
+    let pinned_single = pinned.single_attempt(bounds).unwrap();
+    pinned_single.remember(third, cache_key(3)).unwrap();
+    assert_eq!(shared.cached(&neighbor(2)).unwrap(), None);
+    assert_eq!(pinned_single.cached(&neighbor(2)).unwrap(), Some(second));
 }

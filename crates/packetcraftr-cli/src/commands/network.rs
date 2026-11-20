@@ -12,6 +12,7 @@ pub(in crate::commands) mod identify;
 pub(in crate::commands) mod identify_os;
 pub(in crate::commands) mod interfaces;
 pub(in crate::commands) mod plan;
+pub(in crate::commands) mod preflight;
 pub(in crate::commands) mod replay;
 pub(in crate::commands) mod routes;
 pub(in crate::commands) mod scan;

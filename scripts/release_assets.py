@@ -1,7 +1,9 @@
 # Copyright (C) 2026 tyk-swe
 # SPDX-License-Identifier: AGPL-3.0-only
 """Validated inventory for release packaging."""
+import os
 from pathlib import Path, PurePosixPath
+import subprocess
 from typing import NamedTuple
 
 from script_support import portable_basename, read_json
@@ -85,6 +87,9 @@ FIXED_ASSETS = (
     'LICENSE',
     'README.md',
     'THIRD_PARTY_NOTICES.md',
+    'docs/adr/0003-never-reuse-output-contract-identifiers.md',
+    'docs/http3-analysis.md',
+    'docs/quic-analysis.md',
     'scripts/release-assets.json',
 )
 
@@ -115,9 +120,16 @@ def _tree_files(root: Path, relative: str) -> tuple[str, ...]:
 
 
 def generated_inventory(root: Path) -> Inventory:
-    source_assets = frozenset(FIXED_ASSETS) | frozenset(
+    discovered = frozenset(
         path for tree in DERIVED_TREES for path in _tree_files(root, tree)
     ) | frozenset(path.relative_to(root).as_posix() for path in (root / 'schemas').glob('*.json'))
+    if (root / '.git').exists():
+        checkout_paths = os.fsdecode(subprocess.check_output(
+            ['git', 'ls-files', '-z', '--cached', '--others', '--exclude-standard', '--',
+             *DERIVED_TREES, 'schemas'], cwd=root,
+        )).split('\0')
+        discovered &= frozenset(checkout_paths)
+    source_assets = frozenset(FIXED_ASSETS) | discovered
     return Inventory(tuple(sorted(source_assets)), tuple(sorted(BUILT_ASSETS)))
 
 

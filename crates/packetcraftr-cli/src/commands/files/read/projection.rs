@@ -87,11 +87,8 @@ pub(super) fn run(invocation: &crate::invocation::Invocation, args: Args) -> Res
             limits.reader_bounds().max_frame_bytes,
         )
         .map_err(CliError::classified)?;
-        let mut budget = core::capture_file::Budget::new(core::capture_file::Limits {
-            max_frames: limits.max_frames(),
-            max_bytes: limits.max_bytes(),
-        })
-        .map_err(CliError::classified)?;
+        let mut budget = core::capture_file::Budget::new(limits.stream_limits())
+            .map_err(CliError::classified)?;
         while let Some(frame) = reader.next_frame().map_err(CliError::classified)? {
             budget
                 .charge(frame.captured_length())

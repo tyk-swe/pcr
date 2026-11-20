@@ -9,7 +9,7 @@ use super::decode::{decode_response, decode_tcp_frame};
 use super::encode::encode_query;
 use super::error::Error;
 use super::name::canonical_query_name;
-use crate::dns::{EdnsRequest, MessageLimits, QueryType};
+use crate::dns::{EdnsRequest, MessageLimits, QueryType, Section};
 
 const ID: u16 = 0x1234;
 
@@ -182,6 +182,23 @@ fn response_decodes_answer_and_metadata() {
     assert!(metadata.checking_disabled);
     assert_eq!(metadata.rejected_record_count, 0);
     assert!(metadata.edns.is_none());
+}
+
+#[test]
+fn rejection_indexes_preserve_wire_positions_around_edns() {
+    let bytes = message(|dns| dns.additionals.extend([a_answer(), opt(0, 0), a_answer()]));
+    let response = decode(&bytes).unwrap();
+    assert!(response.metadata.edns.is_some());
+    assert_eq!(response.metadata.rejected_record_count, 2);
+    assert!(response.additionals.is_empty());
+    assert_eq!(
+        response
+            .rejected_records
+            .iter()
+            .map(|record| (record.section, record.index))
+            .collect::<Vec<_>>(),
+        [(Section::Additional, 0), (Section::Additional, 2)]
+    );
 }
 
 #[test]

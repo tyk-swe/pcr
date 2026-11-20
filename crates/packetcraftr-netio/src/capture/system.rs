@@ -9,8 +9,8 @@ use crate::{Error, interface::Id as InterfaceId};
 #[cfg(native_layer2)]
 pub(super) fn open(request: &Request, deadline: &Deadline) -> Result<Box<dyn Session>, Error> {
     request.validate()?;
-    let limits = request.limits;
-    if let Some(filter) = request.filter.as_deref() {
+    let limits = request.settings.limits;
+    if let Some(filter) = request.settings.filter.as_deref() {
         super::filter::validate(&request.interface, filter)?;
     }
     admit(deadline, ARMING)?;
@@ -21,10 +21,10 @@ pub(super) fn open(request: &Request, deadline: &Deadline) -> Result<Box<dyn Ses
         crate::platform::capture::open(
             &interface.id,
             limits,
-            request.filter.as_deref(),
+            request.settings.filter.as_deref(),
             netmask(&interface),
-            request.promiscuous,
-            &request.native,
+            request.settings.promiscuous,
+            &request.settings.native,
         )
     })
 }

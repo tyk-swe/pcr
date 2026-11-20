@@ -113,6 +113,15 @@ impl Default for Collection {
 }
 
 impl Collection {
+    /// Caps this exchange's responses, narrowing its unmatched frames so they
+    /// can never exceed the response ceiling.
+    #[must_use]
+    pub fn with_max_responses(mut self, max_responses: usize) -> Self {
+        self.max_responses = max_responses;
+        self.max_unmatched_frames = self.max_unmatched_frames.min(max_responses);
+        self
+    }
+
     pub fn validate(&self) -> Result<(), Error> {
         for (field, value) in [
             ("max_responses", self.max_responses),
@@ -187,6 +196,22 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn with_max_responses_narrows_unmatched_frames() {
+        let collection = Collection {
+            max_responses: 100,
+            max_unmatched_frames: 40,
+            ..Collection::default()
+        };
+        let narrowed = collection.clone().with_max_responses(10);
+        assert_eq!(narrowed.max_responses, 10);
+        assert_eq!(narrowed.max_unmatched_frames, 10);
+
+        let widened = collection.with_max_responses(200);
+        assert_eq!(widened.max_responses, 200);
+        assert_eq!(widened.max_unmatched_frames, 40);
     }
 
     #[test]

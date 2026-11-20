@@ -198,7 +198,8 @@ mod tests {
         assert_eq!(prepared.summary.total_packets, counted as u64);
         assert_eq!(
             prepared.summary.total_packets,
-            (catalog().len() * request().repeats as usize) as u64
+            ((catalog().len() + 2) * request().repeats as usize) as u64,
+            "the two fragmented Variants send one extra packet per attempt"
         );
         assert!(prepared.summary.total_wire_bytes > prepared.summary.total_packets * 60);
     }

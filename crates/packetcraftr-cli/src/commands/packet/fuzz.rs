@@ -46,7 +46,6 @@ impl crate::commands::Spec for Args {
     ];
     const FORMATS: &'static [crate::output::contract::Format] =
         crate::output::contract::TEXT_JSON_NDJSON;
-    const CANCELLATION: bool = true;
 
     fn run_time(&self) -> Option<&dyn crate::command_options::Bounded> {
         Some(&self.duration)
@@ -64,24 +63,23 @@ impl crate::commands::Spec for Args {
         self.timeout.resources(settings);
         self.duration.resources(settings);
         self.limits.resources(settings);
-        self.policy.budgets.resources(settings);
+        self.policy.resources(settings);
     }
 
     fn run(
         self,
         invocation: &crate::invocation::Invocation,
     ) -> Result<crate::commands::CommandExit, CliError> {
-        run(invocation, self, invocation.format, &invocation.output)
-            .map(|()| crate::commands::CommandExit::SUCCESS)
+        run(invocation, self).map(|()| crate::commands::CommandExit::SUCCESS)
     }
 }
 
 pub(super) fn run(
     invocation: &crate::invocation::Invocation,
     arguments: Args,
-    format: Format,
-    stream: &StreamEncoder,
 ) -> Result<(), CliError> {
+    let format = invocation.format;
+    let stream = &invocation.output;
     let (mut request, selectors) = prepare_request(&arguments)?;
     let mut live = prepare_live(&arguments, &request)?;
     let registry = packetcraftr_core::protocol::builtin::registry();

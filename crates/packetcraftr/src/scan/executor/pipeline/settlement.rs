@@ -282,7 +282,7 @@ impl<P: PacketProviders, K: Clock> Pipeline<'_, P, K> {
             }
             let execution = Evidence {
                 observation_quality: None,
-                permit: description.batch.batch().permit,
+                permit: description.batch.batch().permit(),
                 sent: vec![sent.clone()],
                 responses,
                 unsolicited: Vec::new(),

@@ -1,7 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#![allow(unsafe_code)]
+#![allow(
+    unsafe_code,
+    reason = "Npcap is loaded at runtime and its symbols resolve through unsafe FFI"
+)]
 
 use std::{
     ffi::{OsString, c_char},

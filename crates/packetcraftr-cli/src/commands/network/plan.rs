@@ -3,7 +3,7 @@
 
 pub(in crate::commands) mod output;
 use crate::command_options::{
-    DestinationAllowlistArgs, HostnameResolutionArgs, PublicDestinationArgs, RouteArgs,
+    DestinationAllowlistArgs, HostnameResolutionArgs, PublicDestinationArgs, RouteArgs, ScopeArgs,
 };
 use crate::errors::CliError;
 use crate::output::contract::Format;
@@ -35,6 +35,8 @@ pub(crate) struct PolicyArgs {
     hostname_resolution: HostnameResolutionArgs,
     #[command(flatten)]
     destination_allowlist: DestinationAllowlistArgs,
+    #[command(flatten)]
+    scope: ScopeArgs,
 }
 
 impl PolicyArgs {
@@ -47,6 +49,7 @@ impl PolicyArgs {
         self.public_destination.apply_to(&mut policy);
         self.hostname_resolution.apply_to(&mut policy);
         self.destination_allowlist.apply_to(&mut policy);
+        self.scope.apply_to(&mut policy);
         policy
     }
 }

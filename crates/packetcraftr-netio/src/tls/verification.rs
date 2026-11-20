@@ -27,14 +27,24 @@ impl TrustStore {
         }
         // Certificate-only iterators skip other PEM sections. Reject them first,
         // including unknown labels, rather than silently accepting a mixed bundle.
+        let mut certificate_open = false;
         for line in bytes.split(|byte| *byte == b'\n' || *byte == b'\r') {
-            let line = line.trim_ascii();
-            if (line.windows(11).any(|window| window == b"-----BEGIN ")
-                && line != b"-----BEGIN CERTIFICATE-----")
-                || (line.windows(9).any(|window| window == b"-----END ")
-                    && line != b"-----END CERTIFICATE-----")
+            let line = line.trim_ascii_end();
+            let trimmed = line.trim_ascii_start();
+            if (trimmed.windows(11).any(|window| window == b"-----BEGIN ")
+                && trimmed != b"-----BEGIN CERTIFICATE-----")
+                || (trimmed.windows(9).any(|window| window == b"-----END ")
+                    && trimmed != b"-----END CERTIFICATE-----")
             {
                 return Err("CA file contains a non-certificate PEM section".into());
+            }
+            match line {
+                b"-----BEGIN CERTIFICATE-----" if certificate_open => {
+                    return Err("CA file contains a nested certificate PEM section".into());
+                }
+                b"-----BEGIN CERTIFICATE-----" => certificate_open = true,
+                b"-----END CERTIFICATE-----" => certificate_open = false,
+                _ => {}
             }
         }
         let mut roots = RootCertStore::empty();
@@ -199,5 +209,23 @@ mod tests {
                     .contains("non-certificate")
             );
         }
+    }
+
+    #[test]
+    fn ca_bundles_require_an_end_before_the_next_certificate() {
+        let certificate = include_str!("test-ca.pem");
+        let formatted = certificate.replace('\n', "\r\n").replace(
+            "-----BEGIN CERTIFICATE-----",
+            "-----BEGIN CERTIFICATE----- ",
+        );
+        let adjacent = [formatted.as_bytes(), certificate.as_bytes()].concat();
+        assert!(TrustStore::from_pem(&adjacent).is_ok());
+
+        let nested = [
+            b"-----BEGIN CERTIFICATE-----\n".as_slice(),
+            certificate.as_bytes(),
+        ]
+        .concat();
+        assert!(TrustStore::from_pem(&nested).is_err());
     }
 }

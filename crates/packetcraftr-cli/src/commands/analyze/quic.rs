@@ -1,5 +1,5 @@
 pub(crate) mod arguments;
-mod keylog;
+pub(super) mod keylog;
 mod live;
 mod output;
 mod rendering;
@@ -42,8 +42,7 @@ impl commands::Spec for Args {
             example: "examples/documents/quic-event.json",
         },
     ];
-    const FORMATS: &'static [Format] = &[Format::Text, Format::Json, Format::Ndjson];
-    const CANCELLATION: bool = true;
+    const FORMATS: &'static [Format] = crate::output::contract::TEXT_JSON_NDJSON;
     fn run_time(&self) -> Option<&dyn crate::command_options::Bounded> {
         Some(&self.limits)
     }
@@ -51,7 +50,6 @@ impl commands::Spec for Args {
         crate::resources::declare!(settings,self,[
             max_connections:Count @ ActiveState,
             max_quic_buffered_bytes:Bytes @ ActiveState,
-            max_quic_stream_bytes:Bytes @ ActiveState,
             max_pending_packets:Count @ ActiveState,
             max_quic_streams:Count @ ActiveState,
             quic_idle_expiry_ms:Milliseconds @ ActiveState,
@@ -59,6 +57,7 @@ impl commands::Spec for Args {
             max_application_output_bytes:Bytes @ ResultRetention,
         ]);
 
+        self.stream_retention.resources(settings);
         self.limits.resources(
             settings,
             AnalysisStages {
@@ -188,7 +187,7 @@ fn finish(
             input_incomplete,
             connections_selected: state.selected,
             connections_omitted: state.omitted,
-            application_output_bytes: state.output_bytes,
+            application_output_bytes: state.output_bytes(),
         };
         match invocation.format {
             Format::Text => write_stdout_line(

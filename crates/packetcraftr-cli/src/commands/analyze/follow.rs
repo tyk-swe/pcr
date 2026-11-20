@@ -55,7 +55,6 @@ impl crate::commands::Spec for Args {
         crate::output::contract::Format::Hex,
         crate::output::contract::Format::Raw,
     ];
-    const CANCELLATION: bool = true;
     const OFFLINE: bool = true;
 
     fn run_time(&self) -> Option<&dyn crate::command_options::Bounded> {

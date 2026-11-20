@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v20",
+  "schema": "packetcraftr.output/v22",
   "command": "plan",
   "mode": "aggregate",
   "status": "success",

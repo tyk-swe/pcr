@@ -14,7 +14,7 @@ use crate::clock::Clock;
 use crate::engine::correlation;
 use crate::engine::execution::{Executor, ExecutorFault};
 use crate::evidence::ExecutionPermit;
-use crate::exchange::{WorkflowExecutor, WorkflowOverrides};
+use crate::exchange::{WorkflowExecutor, WorkflowStep};
 use crate::probe::Transport as ProbeTransport;
 use crate::providers::{PacketProviders, TcpProviders};
 use packetcraftr_core::error::BoundaryError;
@@ -72,11 +72,6 @@ pub(crate) struct TcpQuery {
 pub(crate) struct TcpEvidence {
     pub(crate) permit: ExecutionPermit,
     pub(crate) response: super::tcp::Response,
-}
-
-pub(crate) trait TcpQuerier {
-    /// Expected socket and framing failures are typed data, so normal retry precedence applies.
-    fn query(&mut self, query: &TcpQuery) -> Result<TcpEvidence, super::tcp::Error>;
 }
 
 const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
@@ -142,13 +137,8 @@ impl<P: PacketProviders, K: Clock> Executor<Exchange> for WorkflowExecutor<'_, P
             };
         let result = self.exchange_for_workflow(
             packetcraftr_core::template::Template::new(exchange.probe.packet()),
-            WorkflowOverrides {
-                timeout: exchange.timeout,
-                max_template_packets: 1,
-                destination: exchange.probe.server_address,
-                interface: None,
-                max_responses: Some(max_responses),
-            },
+            WorkflowStep::new(exchange.timeout, exchange.probe.server_address)
+                .responses(max_responses),
             &mut matches_request,
             Some(&mut stop_after_response),
         )?;
@@ -183,12 +173,10 @@ impl<P: PacketProviders, K: Clock> Executor<Exchange> for WorkflowExecutor<'_, P
 }
 
 /// Kernel TCP honors no route override: `Request::validate` refuses them before any query.
-impl<P: TcpProviders, K: Clock> TcpQuerier for WorkflowExecutor<'_, P, K> {
-    fn query(&mut self, query: &TcpQuery) -> Result<TcpEvidence, super::tcp::Error> {
-        let clock = self.client.clock.clone();
-        let wall_clock = clock.clone();
-        let deadline_clock = clock.clone();
-        let response = super::tcp::query_with_sources(
+impl<P: TcpProviders, K: Clock> WorkflowExecutor<'_, P, K> {
+    /// Expected socket and framing failures are typed data, so normal retry precedence applies.
+    pub(crate) fn query_tcp(&mut self, query: &TcpQuery) -> Result<TcpEvidence, super::tcp::Error> {
+        let response = super::tcp::query_with_clock(
             super::tcp::Request {
                 endpoint: query.endpoint,
                 query: &query.query,
@@ -199,13 +187,7 @@ impl<P: TcpProviders, K: Clock> TcpQuerier for WorkflowExecutor<'_, P, K> {
             std::sync::Arc::new(crate::providers::TcpOf(std::sync::Arc::clone(
                 &self.client.providers,
             ))),
-            move || clock.now(),
-            move || wall_clock.wall_now(),
-            |limit| {
-                packetcraftr_core::budget::Deadline::with_time_source(limit, move || {
-                    deadline_clock.now()
-                })
-            },
+            &self.client.clock,
         )?;
         Ok(TcpEvidence {
             permit: query.permit,

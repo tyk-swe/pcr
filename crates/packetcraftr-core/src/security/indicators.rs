@@ -3,7 +3,11 @@
 
 use super::Error;
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeSet, net::IpAddr};
+use std::{
+    collections::{BTreeSet, HashMap},
+    hash::Hash,
+    net::IpAddr,
+};
 
 pub const SCHEMA: &str = "packetcraftr.indicators/v1";
 pub const MAX_DOCUMENT_BYTES: usize = 1024 * 1024;
@@ -96,6 +100,126 @@ impl Document {
         }
         Ok(())
     }
+
+    pub(crate) fn compile(&mut self) -> Result<Matcher, Error> {
+        self.validate()?;
+        let positions = || self.indicators.iter().enumerate();
+        let values = |kinds: &'static [Kind]| {
+            positions()
+                .filter(|(_, indicator)| kinds.contains(&indicator.kind))
+                .map(|(position, indicator)| (indicator.value.clone(), position))
+        };
+        let networks = index(
+            positions()
+                .filter_map(|(position, indicator)| Some((indicator.network_key()?, position))),
+        );
+        Ok(Matcher {
+            entries: self
+                .indicators
+                .iter()
+                .map(|indicator| (indicator.id.clone(), indicator.kind))
+                .collect(),
+            prefixes: networks
+                .keys()
+                .map(|(base, prefix)| (base.is_ipv6(), *prefix))
+                .collect(),
+            networks,
+            fingerprints: index(values(&[Kind::Ja3, Kind::Ja4])),
+            domains: index(values(&[Kind::Domain, Kind::DomainSuffix])),
+            suffixes: index(values(&[Kind::DomainSuffix])),
+        })
+    }
+}
+
+/// Validated indicators indexed by the value an observation is looked up by.
+pub(crate) struct Matcher {
+    entries: Vec<(String, Kind)>,
+    networks: HashMap<(IpAddr, u8), Vec<usize>>,
+    prefixes: BTreeSet<(bool, u8)>,
+    fingerprints: HashMap<String, Vec<usize>>,
+    domains: HashMap<String, Vec<usize>>,
+    suffixes: HashMap<String, Vec<usize>>,
+}
+
+impl Matcher {
+    pub(crate) fn ip(&self, candidate: IpAddr) -> Vec<String> {
+        let family = candidate.is_ipv6();
+        self.ids(
+            self.prefixes
+                .range((family, 0)..=(family, u8::MAX))
+                .filter_map(|&(_, prefix)| {
+                    self.networks.get(&(prefix_key(candidate, prefix), prefix))
+                })
+                .flatten()
+                .copied(),
+        )
+    }
+
+    pub(crate) fn fingerprint(&self, kind: Kind, value: &str) -> Vec<String> {
+        self.ids(
+            self.fingerprints
+                .get(value)
+                .into_iter()
+                .flatten()
+                .copied()
+                .filter(|&position| self.entries[position].1 == kind),
+        )
+    }
+
+    pub(crate) fn domain(&self, candidate: &str) -> Vec<String> {
+        let candidate = candidate.strip_suffix('.').unwrap_or(candidate);
+        if !valid_domain(candidate) {
+            return Vec::new();
+        }
+        let candidate = candidate.to_ascii_lowercase();
+        let suffixes = candidate
+            .match_indices('.')
+            .filter_map(|(dot, _)| self.suffixes.get(&candidate[dot + 1..]));
+        self.ids(
+            self.domains
+                .get(&candidate)
+                .into_iter()
+                .chain(suffixes)
+                .flatten()
+                .copied(),
+        )
+    }
+
+    fn ids(&self, positions: impl Iterator<Item = usize>) -> Vec<String> {
+        positions
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .map(|position| self.entries[position].0.clone())
+            .collect()
+    }
+}
+
+fn index<K: Hash + Eq>(keys: impl Iterator<Item = (K, usize)>) -> HashMap<K, Vec<usize>> {
+    let mut index: HashMap<K, Vec<usize>> = HashMap::new();
+    for (key, position) in keys {
+        index.entry(key).or_default().push(position);
+    }
+    index
+}
+
+fn prefix_key(ip: IpAddr, prefix: u8) -> IpAddr {
+    let prefix = u32::from(prefix);
+    match ip {
+        IpAddr::V4(ip) => IpAddr::V4(
+            (u32::from(ip)
+                & u32::MAX
+                    .checked_shl(32_u32.saturating_sub(prefix))
+                    .unwrap_or(0))
+            .into(),
+        ),
+        IpAddr::V6(ip) => IpAddr::V6(
+            (u128::from(ip)
+                & u128::MAX
+                    .checked_shl(128_u32.saturating_sub(prefix))
+                    .unwrap_or(0))
+            .into(),
+        ),
+    }
 }
 fn valid_domain(s: &str) -> bool {
     !s.is_empty()
@@ -125,23 +249,19 @@ fn network(s: &str) -> Option<(IpAddr, u8)> {
 }
 impl Indicator {
     pub fn matches_ip(&self, candidate: IpAddr) -> bool {
+        self.network_key()
+            .is_some_and(|(base, prefix)| prefix_key(candidate, prefix) == base)
+    }
+    fn network_key(&self) -> Option<(IpAddr, u8)> {
         match self.kind {
-            Kind::Ip => self.value.parse::<IpAddr>() == Ok(candidate),
-            Kind::Cidr => {
-                network(&self.value).is_some_and(|(base, prefix)| match (base, candidate) {
-                    (IpAddr::V4(a), IpAddr::V4(b)) => {
-                        prefix == 0
-                            || (u32::from(a) >> (32 - prefix)) == (u32::from(b) >> (32 - prefix))
-                    }
-                    (IpAddr::V6(a), IpAddr::V6(b)) => {
-                        prefix == 0
-                            || (u128::from(a) >> (128 - prefix))
-                                == (u128::from(b) >> (128 - prefix))
-                    }
-                    _ => false,
-                })
+            Kind::Ip => {
+                let ip = self.value.parse::<IpAddr>().ok()?;
+                Some((ip, if ip.is_ipv4() { 32 } else { 128 }))
             }
-            _ => false,
+            Kind::Cidr => {
+                network(&self.value).map(|(base, prefix)| (prefix_key(base, prefix), prefix))
+            }
+            _ => None,
         }
     }
     pub fn matches_domain(&self, candidate: &str) -> bool {
@@ -188,6 +308,106 @@ mod tests {
         })
         .unwrap();
         Document::parse(&bytes)
+    }
+
+    #[test]
+    fn compiled_matcher_agrees_with_each_indicator() {
+        let ja3 = "a".repeat(32);
+        let ja4 = format!("t13d1516h2_{}_{}", "b".repeat(12), "c".repeat(12));
+        let mut document = Document {
+            schema: SCHEMA.into(),
+            indicators: [
+                ("host4", Kind::Ip, "192.0.2.1"),
+                ("host6", Kind::Ip, "2001:db8::1"),
+                ("mapped", Kind::Ip, "::ffff:192.0.2.1"),
+                ("net24", Kind::Cidr, "192.0.2.0/24"),
+                ("unmasked", Kind::Cidr, "203.0.113.200/25"),
+                ("single", Kind::Cidr, "198.51.100.7/32"),
+                ("any4", Kind::Cidr, "0.0.0.0/0"),
+                ("net6", Kind::Cidr, "2001:db8::/32"),
+                ("any6", Kind::Cidr, "::/0"),
+                ("exact", Kind::Domain, "Example.Test."),
+                ("suffix", Kind::DomainSuffix, "example.test"),
+                ("tld", Kind::DomainSuffix, "test"),
+                ("ja3", Kind::Ja3, &ja3),
+                ("ja4", Kind::Ja4, &ja4),
+            ]
+            .into_iter()
+            .map(|(id, kind, value)| Indicator {
+                id: id.into(),
+                kind,
+                value: value.into(),
+            })
+            .collect(),
+        };
+        let matcher = document.compile().unwrap();
+        let ids = |matches: &dyn Fn(&Indicator) -> bool| -> Vec<String> {
+            document
+                .indicators
+                .iter()
+                .filter(|indicator| matches(indicator))
+                .map(|indicator| indicator.id.clone())
+                .collect()
+        };
+        for candidate in [
+            "192.0.2.1",
+            "192.0.2.255",
+            "192.0.3.1",
+            "198.51.100.7",
+            "198.51.100.6",
+            "203.0.113.128",
+            "203.0.113.127",
+            "2001:db8::1",
+            "2001:db8:ffff::1",
+            "2001:db9::1",
+            "::ffff:192.0.2.1",
+        ] {
+            let ip = candidate.parse().unwrap();
+            assert_eq!(matcher.ip(ip), ids(&|i| i.matches_ip(ip)), "{candidate}");
+        }
+        for candidate in [
+            "example.test",
+            "A.EXAMPLE.TEST.",
+            "badexample.test",
+            "test",
+            "other.test",
+            "a..example.test",
+            ".example.test",
+            "example.org",
+            "",
+        ] {
+            assert_eq!(
+                matcher.domain(candidate),
+                ids(&|i| i.matches_domain(candidate)),
+                "{candidate}"
+            );
+        }
+        for (kind, value) in [
+            (Kind::Ja3, &ja3),
+            (Kind::Ja4, &ja4),
+            (Kind::Ja4, &ja3),
+            (Kind::Ja3, &ja3.to_uppercase()),
+        ] {
+            assert_eq!(
+                matcher.fingerprint(kind, value),
+                ids(&|i| i.kind == kind && i.value == *value),
+                "{kind:?} {value}"
+            );
+        }
+        assert_eq!(
+            matcher.ip("192.0.2.1".parse().unwrap()),
+            ["host4", "net24", "any4"]
+        );
+        assert_eq!(
+            matcher.ip("203.0.113.128".parse().unwrap()),
+            ["unmasked", "any4"]
+        );
+        assert_eq!(
+            matcher.ip("2001:db8:ffff::1".parse().unwrap()),
+            ["net6", "any6"]
+        );
+        assert_eq!(matcher.domain("A.EXAMPLE.TEST."), ["suffix", "tld"]);
+        assert_eq!(matcher.domain("example.test"), ["exact", "suffix", "tld"]);
     }
 
     #[test]

@@ -94,24 +94,46 @@ impl crate::commands::Spec for Args {
     ];
     const FORMATS: &'static [crate::output::contract::Format] =
         crate::output::contract::TEXT_JSON_NDJSON;
-    const CANCELLATION: bool = true;
 
     fn run_time(&self) -> Option<&dyn crate::command_options::Bounded> {
         Some(&self.duration)
     }
 
     fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
-        crate::resources::declare!(settings, self, [
-            max_in_flight: Count @ Operation,
-            max_targets: Count @ Operation,
-            max_ports: Count @ Operation,
-            max_probes: Count @ Operation,
-            max_undecoded: Count @ ResultRetention,
-            max_prepared_bytes: Bytes @ Preparation,
-            traceroute_max_hops: Count @ Operation if self.traceroute,
-            traceroute_max_probes: Count @ Operation if self.traceroute,
-        ]);
-        self.timeout.resources(settings);
+        if let Some(timing) = self.timing {
+            let schedule = timing.schedule();
+            settings.declare(crate::resources::Field {
+                id: "max_in_flight",
+                value: crate::resources::SettingValue::setting_value(&schedule.max_in_flight),
+                unit: crate::resources::Unit::Count,
+                stage: crate::resources::Stage::Operation,
+                enabled: crate::resources::Enabled::Fixed(true),
+                preset: None,
+            });
+            crate::command_options::TimeoutArgs::from_millis(schedule.timeout_ms)
+                .resources(settings);
+            crate::resources::declare!(settings, self, [
+                max_targets: Count @ Operation,
+                max_ports: Count @ Operation,
+                max_probes: Count @ Operation,
+                max_undecoded: Count @ ResultRetention,
+                max_prepared_bytes: Bytes @ Preparation,
+                traceroute_max_hops: Count @ Operation if self.traceroute,
+                traceroute_max_probes: Count @ Operation if self.traceroute,
+            ]);
+        } else {
+            crate::resources::declare!(settings, self, [
+                max_in_flight: Count @ Operation,
+                max_targets: Count @ Operation,
+                max_ports: Count @ Operation,
+                max_probes: Count @ Operation,
+                max_undecoded: Count @ ResultRetention,
+                max_prepared_bytes: Bytes @ Preparation,
+                traceroute_max_hops: Count @ Operation if self.traceroute,
+                traceroute_max_probes: Count @ Operation if self.traceroute,
+            ]);
+            self.timeout.resources(settings);
+        }
         self.duration.resources(settings);
         self.limits.resources(settings);
         self.policy.resources(settings);
@@ -129,12 +151,10 @@ pub(super) fn run(
     invocation: &crate::invocation::Invocation,
     arguments: Args,
 ) -> Result<(), CliError> {
-    let format = invocation.format;
-    let stream = &invocation.output;
     match preparation::prepare(invocation, arguments)? {
-        Planned::List(request) => list::run(invocation, request, format, stream),
-        Planned::Connect(request) => connect::run(invocation, request, format, stream),
-        Planned::Raw(request) => raw::run(invocation, request, format, stream),
+        Planned::List(request) => list::run(invocation, request),
+        Planned::Connect(request) => connect::run(invocation, request),
+        Planned::Raw(request) => raw::run(invocation, request),
     }
 }
 

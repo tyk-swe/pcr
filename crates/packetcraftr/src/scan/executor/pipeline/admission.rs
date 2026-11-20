@@ -81,6 +81,14 @@ impl AdaptiveAdmission {
             )
     }
 
+    /// The largest active descriptor: a description, its route, and the
+    /// descriptor itself.
+    pub(super) fn max_descriptor_bytes(&self) -> usize {
+        self.max_description_bytes
+            .saturating_add(self.max_route_bytes)
+            .saturating_add(512)
+    }
+
     pub(in crate::scan) fn reserve_summaries(&mut self, bytes: usize) {
         self.summary_bytes = bytes;
     }
@@ -104,10 +112,7 @@ impl AdaptiveAdmission {
                     usize::MAX
                 });
         let sources = window.min(capture::MAX_SOURCES);
-        let descriptor = self
-            .max_description_bytes
-            .saturating_add(self.max_route_bytes)
-            .saturating_add(512);
+        let descriptor = self.max_descriptor_bytes();
         let source_names = source_charge(
             sources,
             self.max_source_name_bytes,
@@ -174,14 +179,9 @@ pub(in crate::scan::executor) fn admit_adaptive<P: PacketProviders, K: Clock>(
         .map(Planned::new)
         .collect::<Result<Vec<_>, _>>()?;
     for planned in &planned {
-        let scope_bytes = planned
-            .probe
-            .scope
-            .as_ref()
-            .map_or(0, crate::target::ResolvedZone::retained_bytes);
         summary.max_description_bytes = summary
             .max_description_bytes
-            .max(384usize.saturating_add(scope_bytes));
+            .max(prepare::description_charge(planned.probe));
     }
     let preparation = until(executor.client, deadline, &options.control);
     let plan = prepare::plan(executor, &planned, options, deadline, &preparation, false)?;

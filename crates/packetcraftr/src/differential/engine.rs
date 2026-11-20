@@ -35,18 +35,47 @@ fn reply_payload(decoded: &DecodedPacket) -> Option<Vec<u8>> {
         .map(|raw| raw.bytes.to_vec())
 }
 
-fn tuple_matches(request: &Packet, response: &DecodedPacket, target: Ipv4Addr) -> bool {
-    let (Some(sent_udp), Some(ip), Some(udp)) = (
-        request.get::<Udp>(),
+fn attempt_ports(attempt: &AttemptPlan) -> Option<(u16, u16)> {
+    for packet in &attempt.packets {
+        if let Some(udp) = packet.get::<Udp>() {
+            return Some((udp.source_port, udp.destination_port));
+        }
+    }
+    for packet in &attempt.packets {
+        let Some(ip) = packet.get::<Ipv4>() else {
+            continue;
+        };
+        if ip.fragment_offset != 0 {
+            continue;
+        }
+        let raw = packet.iter().last().and_then(Raw::from_layer)?;
+        if raw.bytes.len() >= 4 {
+            return Some((
+                u16::from_be_bytes(raw.bytes[0..2].try_into().ok()?),
+                u16::from_be_bytes(raw.bytes[2..4].try_into().ok()?),
+            ));
+        }
+    }
+    None
+}
+
+fn tuple_matches(
+    attempt: &AttemptPlan,
+    request: &Packet,
+    response: &DecodedPacket,
+    target: Ipv4Addr,
+) -> bool {
+    let (Some((source_port, responder_port)), Some(ip), Some(udp)) = (
+        attempt_ports(attempt),
         response.packet.get::<Ipv4>(),
         response.packet.get::<Udp>(),
     ) else {
         return false;
     };
-    if ip.source != target || udp.destination_port != sent_udp.source_port {
+    if ip.source != target || udp.destination_port != source_port {
         return false;
     }
-    if udp.source_port != sent_udp.destination_port {
+    if udp.source_port != responder_port {
         return false;
     }
     match request.get::<Ipv4>() {
@@ -63,7 +92,7 @@ fn matches_attempt(
     request: &Packet,
     response: &DecodedPacket,
 ) -> bool {
-    if request_index != 0 || !tuple_matches(request, response, target) {
+    if request_index != 0 || !tuple_matches(attempt, request, response, target) {
         return false;
     }
     let Some(bytes) = reply_payload(response) else {
@@ -182,6 +211,7 @@ pub(super) fn run_campaign<R: Runner>(
             variant_index: plan_attempt.variant_index,
             attempt_seq: plan_attempt.attempt_seq,
             answered: outcome.answered,
+            rewritten: false,
             packets_sent: outcome.packets_sent,
             payload_sha256: plan_attempt.payload_sha256,
             reply: outcome.reply,

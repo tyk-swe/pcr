@@ -70,20 +70,23 @@ ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-## HPACK RFC tables and conformance vectors
+## HPACK and QPACK RFC tables and conformance vectors
 
 RFC 7541 Appendices A (static table), B (Huffman code), and C (conformance
-examples) are incorporated in the HTTP/2 protocol modules and tests. The
-decoder implementation is original safe Rust; RFC-derived components retain
-this separate notice under the IETF Trust Legal Provisions
+examples) are incorporated in the HTTP/2 protocol modules and tests. RFC 9204
+Appendix A (static table) and Appendix B.2–B.5 (conformance examples) are
+incorporated in the QPACK decoder and HTTP/3 tests. The RFC-derived components
+retain this separate notice under the IETF Trust Legal Provisions
 (https://www.rfc-editor.org/rfc/rfc7541.html,
+https://www.rfc-editor.org/rfc/rfc9204.html,
 https://trustee.ietf.org/documents/trust-legal-provisions/tlp-5/). The Trust
-corrected the former "Simplified BSD" name to "Revised BSD" in 2021; the text
+corrected the former "Simplified BSD" name to "Revised BSD" in 2021. The text
 remains the 3-clause license below.
 
-BSD License
+Revised BSD License
 
 Copyright (c) 2015 IETF Trust and the persons identified as authors of the code.
+Copyright (c) 2022 IETF Trust and the persons identified as authors of the code.
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,

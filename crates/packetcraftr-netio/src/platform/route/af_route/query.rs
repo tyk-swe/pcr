@@ -1,7 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#![allow(unsafe_code)]
+#![allow(
+    unsafe_code,
+    reason = "BSD route queries build and parse rt_msghdr buffers through libc"
+)]
 
 use std::mem::{MaybeUninit, offset_of, size_of};
 use std::net::IpAddr;

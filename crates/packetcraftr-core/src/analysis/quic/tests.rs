@@ -1354,6 +1354,44 @@ fn quic_zero_rtt_cid_and_path_frames_enable_server_traffic() {
 }
 
 #[test]
+fn quic_path_challenge_capacity_only_rejects_new_tokens() {
+    for repeat in [true, false] {
+        let limits = Limits::default();
+        let capacity = limits.max_connection_ids as u64;
+        let mut h = Harness::new(limits);
+        h.hellos(Version::V1, 0x1301);
+        h.collector.append_keylog(keylog(0x1301).as_bytes(), true);
+        let client = Keys::new(Suite::Aes128, Version::V1, &traffic_secret(0x1301, 0x33)).unwrap();
+        let server = Keys::new(Suite::Aes128, Version::V1, &traffic_secret(0x1301, 0x44)).unwrap();
+        for number in 0..capacity {
+            let challenge = [&[26][..], &number.to_be_bytes()].concat();
+            h.feed(
+                true,
+                &short_packet(true, number, false, &challenge, &client),
+            );
+        }
+        let token = if repeat { 0 } else { capacity };
+        let challenge = [&[26][..], &token.to_be_bytes()].concat();
+        h.feed(
+            true,
+            &short_packet(true, capacity, false, &challenge, &client),
+        );
+        let response = [&[27][..], &0_u64.to_be_bytes(), &[29, 0, 0]].concat();
+        h.feed(false, &short_packet(false, 0, false, &response, &server));
+        let (connections, summary) = h.finish();
+        assert_eq!(summary.decrypted_packets, capacity + 4);
+        assert_eq!(connections[0].metrics.path_challenges, capacity + 1);
+        assert_eq!(connections[0].metrics.validated_paths, 1);
+        assert_eq!(connections[0].diagnostics.len(), usize::from(!repeat));
+        if !repeat {
+            assert_eq!(connections[0].diagnostics[0].code, "buffer_limit");
+        }
+        assert!(connections[0].closed);
+        assert_eq!(connections[0].incomplete, !repeat);
+    }
+}
+
+#[test]
 fn quic_early_merge_limit_preserves_later_streams() {
     let mut h = Harness::new(Limits {
         max_stream_bytes: 5,

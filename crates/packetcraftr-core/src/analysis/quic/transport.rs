@@ -317,13 +317,13 @@ impl State {
             }
             Frame::PathChallenge(data) => {
                 self.report.metrics.path_challenges += 1;
-                if self.challenges.len() >= limits.max_connection_ids {
+                let token: [u8; 8] = data.try_into().map_err(|_| Error::Invalid)?;
+                if !self.challenges.contains_key(&token)
+                    && self.challenges.len() >= limits.max_connection_ids
+                {
                     return Err(Error::Limit);
                 }
-                self.challenges.insert(
-                    data.try_into().map_err(|_| Error::Invalid)?,
-                    (direction, flow.clone()),
-                );
+                self.challenges.insert(token, (direction, flow.clone()));
             }
             Frame::PathResponse(data) => {
                 let token: [u8; 8] = data.try_into().map_err(|_| Error::Invalid)?;

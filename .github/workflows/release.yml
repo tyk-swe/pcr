@@ -64,37 +64,9 @@ jobs:
 
           cargo metadata --locked --no-deps --format-version 1 \
             > "$RUNNER_TEMP/cargo-metadata.json"
-          version="$(
-            python3 - "$RUNNER_TEMP/cargo-metadata.json" <<'PY'
-          import json
-          import pathlib
-          import sys
-
-          metadata = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
-          # The workspace root is virtual; the released artifact is the CLI.
-          released = [
-              package
-              for package in metadata["packages"]
-              if package["name"] == "packetcraftr-cli"
-          ]
-          if len(released) != 1:
-              raise SystemExit("could not identify exactly one packetcraftr-cli package")
-          print(released[0]["version"])
-          PY
-          )"
-
-          expected_tag="v${version}"
-          if [[ "$RELEASE_TAG" != "$expected_tag" ]]; then
-            echo "tag '$RELEASE_TAG' does not match packetcraftr-cli version '$expected_tag'" >&2
-            exit 1
-          fi
-
-          prerelease=false
-          if [[ "${version%%+*}" == *-* ]]; then
-            prerelease=true
-          fi
-          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
+          python3 scripts/release_metadata.py \
+            --metadata "$RUNNER_TEMP/cargo-metadata.json" \
+            --tag "$RELEASE_TAG" >> "$GITHUB_OUTPUT"
 
   build:
     name: build (${{ matrix.target.triple }}, ${{ matrix.variant.name }})

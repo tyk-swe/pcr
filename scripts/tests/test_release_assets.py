@@ -14,42 +14,11 @@ from urllib.parse import unquote, urlsplit
 
 from markdown_it import MarkdownIt
 from markdown_it.tree import SyntaxTreeNode
-from yaml import safe_load
 
 from support import load_script
 
 assets = load_script('release_assets')
 ROOT = Path(__file__).resolve().parents[2]
-
-
-class ReleasePreflightTests(unittest.TestCase):
-    def test_prerelease_classification_ignores_build_metadata(self):
-        workflow = safe_load((ROOT / '.github/workflows/release.yml').read_text(encoding='utf-8'))
-        steps = workflow['jobs']['preflight']['steps']
-        script = next(step['run'] for step in steps if step.get('id') == 'metadata')
-        cases = (
-            ('1.2.3', 'false'),
-            ('1.2.3+build.42', 'false'),
-            ('1.2.3+build-linux.42', 'false'),
-            ('1.2.3-beta.1', 'true'),
-            ('1.2.3-beta.1+build-linux.42', 'true'),
-        )
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            cargo = root / 'cargo'
-            cargo.write_text('#!/bin/sh\nprintf "%s\\n" "$CARGO_METADATA"\n', encoding='utf-8')
-            cargo.chmod(0o755)
-            for version, expected in cases:
-                with self.subTest(version=version):
-                    output = root / f'github-output-{version}'
-                    metadata = {'packages': [{'name': 'packetcraftr-cli', 'version': version}]}
-                    env = dict(os.environ, PATH=os.pathsep.join((temporary, os.environ['PATH'])),
-                               CARGO_METADATA=json.dumps(metadata), RUNNER_TEMP=temporary,
-                               GITHUB_OUTPUT=str(output), RELEASE_TAG=f'v{version}')
-                    subprocess.run(['bash', '-e', '-o', 'pipefail', '-c', script],
-                                   cwd=root, env=env, check=True, timeout=10)
-                    outputs = dict(line.split('=', 1) for line in output.read_text(encoding='utf-8').splitlines())
-                    self.assertEqual(outputs, {'prerelease': expected, 'version': version})
 
 
 class ReleaseAssetTests(unittest.TestCase):

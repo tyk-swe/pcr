@@ -920,6 +920,308 @@ fn merge_rejects_clock_regression_before_publication() {
     }
 }
 
+fn merge_source<'a>(
+    name: &str,
+    capture: &'a [u8],
+) -> packetcraftr_core::capture_file::MergeSource<&'a [u8]> {
+    use packetcraftr_core::capture_file::{MergeSource, Reader};
+
+    MergeSource {
+        name: name.to_owned(),
+        reader: Reader::with_limits(capture, Default::default()).unwrap(),
+    }
+}
+
+#[test]
+fn merge_honors_source_count_and_name_limits() {
+    use packetcraftr_core::capture_file::{Error, MAX_MERGE_SOURCES, MergeLimits, Writer, merge};
+
+    let capture = Writer::pcapng_with_options(Vec::new(), Default::default())
+        .unwrap()
+        .into_inner();
+    let longest_name = "é".repeat(2048);
+    let long_name = format!("{longest_name}x");
+    let limits = MergeLimits {
+        max_sources: 1,
+        ..Default::default()
+    };
+    let mut output = Writer::pcapng_with_options(Vec::new(), Default::default()).unwrap();
+    let report = merge(
+        &mut [merge_source(&longest_name, &capture)],
+        &mut output,
+        limits,
+    )
+    .unwrap();
+    assert_eq!(report.source_frames, [0]);
+
+    for mut sources in [
+        vec![],
+        vec![
+            merge_source("first", &capture),
+            merge_source("second", &capture),
+        ],
+        vec![merge_source(&long_name, &capture)],
+    ] {
+        assert!(matches!(
+            merge(&mut sources, &mut output, limits),
+            Err(Error::MergeSources { maximum: 1 })
+        ));
+    }
+    for max_sources in [0, MAX_MERGE_SOURCES + 1] {
+        assert!(matches!(
+            merge(
+                &mut [merge_source("source", &capture)],
+                &mut output,
+                MergeLimits {
+                    max_sources,
+                    ..limits
+                },
+            ),
+            Err(Error::MergeSources {
+                maximum: MAX_MERGE_SOURCES
+            })
+        ));
+    }
+}
+
+#[test]
+fn merge_validates_order_options_and_requires_pcapng_output() {
+    use packetcraftr_core::capture_file::{
+        Error, Format, MAX_REORDER_FRAMES, MergeLimits, MergeOrder, Writer, merge,
+    };
+    use packetcraftr_core::frame::LinkType;
+
+    let capture = Writer::pcapng_with_options(Vec::new(), Default::default())
+        .unwrap()
+        .into_inner();
+    let mut output = Writer::pcapng_with_options(Vec::new(), Default::default()).unwrap();
+    let merge_with_order = |output: &mut Writer<Vec<u8>>, order, max_reorder_frames| {
+        merge(
+            &mut [merge_source("source", &capture)],
+            output,
+            MergeLimits {
+                order,
+                max_reorder_frames,
+                ..Default::default()
+            },
+        )
+    };
+    merge_with_order(&mut output, MergeOrder::Chronological, MAX_REORDER_FRAMES).unwrap();
+    for (order, window) in [
+        (MergeOrder::Chronological, MAX_REORDER_FRAMES + 1),
+        (MergeOrder::Append, 1),
+    ] {
+        assert!(matches!(
+            merge_with_order(&mut output, order, window),
+            Err(Error::MergeOption(_))
+        ));
+    }
+    let mut classic = Writer::new(Vec::new(), Format::Pcap, LinkType::ETHERNET).unwrap();
+    assert!(matches!(
+        merge_with_order(&mut classic, MergeOrder::Chronological, 0),
+        Err(Error::WrongWriterFormat {
+            expected: Format::PcapNg,
+            actual: Format::Pcap
+        })
+    ));
+}
+
+#[test]
+fn merge_counts_interfaces_across_capture_formats() {
+    use packetcraftr_core::capture_file::{Error, Format, MergeLimits, Writer, merge};
+    use packetcraftr_core::frame::LinkType;
+
+    let classic = Writer::new(Vec::new(), Format::Pcap, LinkType::ETHERNET)
+        .unwrap()
+        .into_inner();
+    let pcapng = Writer::new(Vec::new(), Format::PcapNg, LinkType::ETHERNET)
+        .unwrap()
+        .into_inner();
+    for second in [&classic, &pcapng] {
+        let merge_with_limit = |max_interfaces| {
+            let mut output = Writer::pcapng_with_options(Vec::new(), Default::default()).unwrap();
+            merge(
+                &mut [
+                    merge_source("first", &classic),
+                    merge_source("second", second),
+                ],
+                &mut output,
+                MergeLimits {
+                    max_interfaces,
+                    ..Default::default()
+                },
+            )
+        };
+        assert_eq!(merge_with_limit(2).unwrap().source_frames, [0, 0]);
+        assert!(matches!(
+            merge_with_limit(1),
+            Err(Error::TotalInterfaceLimit { limit: 1 })
+        ));
+    }
+}
+
+fn merge_pcapng_section(
+    endianness: packetcraftr_core::capture_file::Endianness,
+    frame: &packetcraftr_core::frame::Frame,
+    fcs_bits: u8,
+) -> Vec<u8> {
+    use packetcraftr_core::capture_file::{
+        Interface, PcapNgOption, PcapNgOptions, TimestampResolution, Writer,
+    };
+
+    const IF_FCS_LENGTH_OPTION: u16 = 13;
+
+    let mut writer = Writer::pcapng_with_options(
+        Vec::new(),
+        PcapNgOptions {
+            endianness,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    writer
+        .add_interface_description_with_options(
+            Interface {
+                link_type: frame.link_type,
+                snap_len: 128,
+                timestamp_resolution: TimestampResolution::Decimal(9),
+                timestamp_offset: 0,
+            },
+            &[PcapNgOption {
+                code: IF_FCS_LENGTH_OPTION,
+                value: vec![fcs_bits].into(),
+            }],
+        )
+        .unwrap();
+    writer.write_frame(frame).unwrap();
+    writer.into_inner()
+}
+
+#[test]
+fn merge_preserves_frames_and_interface_provenance_across_sections() {
+    use packetcraftr_core::capture_file::{
+        Endianness, MetadataBlockKind, Reader, RecordKind, Writer, merge,
+    };
+    use packetcraftr_core::frame::{Direction, Frame, LinkType};
+    use std::time::{Duration, UNIX_EPOCH};
+
+    const COMMENT_OPTION: u16 = 1;
+
+    let cases = [
+        (
+            Endianness::Little,
+            Direction::Inbound,
+            LinkType::ETHERNET,
+            1,
+        ),
+        (Endianness::Big, Direction::Outbound, LinkType::RAW, 2),
+    ];
+    let frames = cases.map(|(_, direction, link_type, marker)| {
+        let mut frame = Frame::new(
+            Some(UNIX_EPOCH + Duration::from_secs(u64::from(marker))),
+            link_type,
+            vec![marker],
+        )
+        .unwrap();
+        frame.direction = Some(direction);
+        frame
+    });
+    let capture = cases
+        .into_iter()
+        .zip(&frames)
+        .flat_map(|((endianness, ..), frame)| merge_pcapng_section(endianness, frame, 0))
+        .collect::<Vec<_>>();
+    let mut output = Writer::pcapng_with_options(Vec::new(), Default::default()).unwrap();
+    let report = merge(
+        &mut [merge_source("mixed", &capture)],
+        &mut output,
+        Default::default(),
+    )
+    .unwrap();
+    assert_eq!(report.source_metadata_records, 3);
+    assert_eq!(report.interfaces.len(), frames.len());
+
+    let bytes = output.into_inner();
+    let mut reader = Reader::with_limits(bytes.as_slice(), Default::default()).unwrap();
+    let records: Vec<_> = std::iter::from_fn(|| reader.next_record().unwrap()).collect();
+    let interfaces: Vec<_> = records
+        .iter()
+        .filter_map(|record| match &record.kind {
+            RecordKind::Metadata(MetadataBlockKind::InterfaceDescription {
+                global_id,
+                options,
+                ..
+            }) => Some((*global_id, options)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(interfaces.len(), frames.len());
+    let actual_frames: Vec<_> = records
+        .iter()
+        .filter_map(|record| record.frame.as_ref())
+        .collect();
+    assert_eq!(actual_frames.len(), frames.len());
+    for (section, (actual, mut expected)) in actual_frames.into_iter().zip(frames).enumerate() {
+        let output_id = actual.interface.unwrap();
+        let mapping = report
+            .interfaces
+            .iter()
+            .find(|mapping| mapping.output_interface == output_id)
+            .unwrap();
+        let (_, options) = interfaces.iter().find(|(id, _)| *id == output_id).unwrap();
+        assert_eq!(mapping.source, 0);
+        assert_eq!(mapping.source_name, "mixed");
+        assert_eq!(mapping.section, Some(u64::try_from(section).unwrap()));
+        assert_eq!(mapping.local_interface, Some(0));
+        assert_eq!(mapping.global_interface, u32::try_from(section).unwrap());
+        let comment = options
+            .iter()
+            .find(|option| option.code == COMMENT_OPTION)
+            .unwrap();
+        let provenance: serde_json::Value = serde_json::from_slice(&comment.value).unwrap();
+        assert_eq!(
+            provenance,
+            serde_json::json!({
+                "schema": "packetcraftr.capture-source/v1",
+                "source": mapping.source,
+                "source_name": mapping.source_name,
+                "section": mapping.section,
+                "local_interface": mapping.local_interface,
+                "global_interface": mapping.global_interface,
+            })
+        );
+
+        expected.interface = Some(mapping.output_interface);
+        assert_eq!(actual, &expected);
+    }
+}
+
+#[test]
+fn merge_rejects_fcs_declared_in_a_later_section() {
+    use packetcraftr_core::capture_file::{Endianness, Error, Writer, merge};
+    use packetcraftr_core::frame::{Frame, LinkType};
+    use std::time::UNIX_EPOCH;
+
+    let frame = Frame::new(Some(UNIX_EPOCH), LinkType::ETHERNET, vec![1]).unwrap();
+    let capture = [
+        merge_pcapng_section(Endianness::Little, &frame, 0),
+        merge_pcapng_section(Endianness::Little, &frame, 32),
+    ]
+    .concat();
+    let mut output = Writer::pcapng_with_options(Vec::new(), Default::default()).unwrap();
+    assert!(matches!(
+        merge(
+            &mut [merge_source("source", &capture)],
+            &mut output,
+            Default::default(),
+        ),
+        Err(Error::MergeMetadata {
+            input: 0,
+            field: "declared frame check sequence"
+        })
+    ));
+}
+
 #[test]
 fn files_export_honors_capture_limits() {
     let source = capture_path("dns-response.pcap");

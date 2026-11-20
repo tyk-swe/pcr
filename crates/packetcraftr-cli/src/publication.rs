@@ -6,7 +6,9 @@ mod bytes;
 mod json;
 mod ndjson;
 
-pub(crate) use bounded::{BoundedJsonError, Limited, bounded_json_len, bounded_pretty_item_len};
+pub(crate) use bounded::{
+    BoundedJsonError, Limited, bounded_json_len, bounded_pretty_field_len, bounded_pretty_item_len,
+};
 pub(crate) use bytes::{write_hex_line, write_raw};
 pub(crate) use json::{emit_json, emit_published, serialization_error};
 pub(crate) use ndjson::{stdout_stream, write_unattributed_error};

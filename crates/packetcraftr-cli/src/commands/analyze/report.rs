@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::commands::security::{Bounds, input, invalid, publish, read, source};
+use crate::commands::security::{Bounds, check_result_size, input, invalid, publish, read, source};
 use crate::commands::{CommandExit, Spec};
 use crate::invocation::Invocation;
 use crate::output::contract::{Command, Format};
@@ -102,12 +102,12 @@ impl Spec for Assessment {
                 &mut seen_sources,
                 std::iter::once(input_source).chain(result.sources),
             );
-            crate::publication::bounded_json_len(
+            check_result_size(
+                i.format,
                 &crate::commands::security::output::Report::from(&report),
                 self.bounds.max_result_bytes,
-                serde_json::ser::CompactFormatter,
-            )
-            .map_err(|e| e.into_cli_error(|| invalid("report exceeds --max-result-bytes")))?;
+                "report exceeds --max-result-bytes",
+            )?;
         }
         report
             .measurements
@@ -122,15 +122,14 @@ impl Spec for Assessment {
                 .measurements
                 .insert("scope_digest".into(), serde_json::json!(scope.digest()));
         }
-        crate::publication::bounded_json_len(
-            &crate::commands::security::output::Report::from(&report),
+        let published = crate::commands::security::output::Report::from(&report);
+        check_result_size(
+            i.format,
+            &published,
             self.bounds.max_result_bytes,
-            serde_json::ser::CompactFormatter,
-        )
-        .map_err(|e| e.into_cli_error(|| invalid("report exceeds --max-result-bytes")))?;
-        let html = crate::commands::security::rendering::html(
-            &crate::commands::security::output::Report::from(&report),
-        );
+            "report exceeds --max-result-bytes",
+        )?;
+        let html = crate::commands::security::rendering::html(&published);
         if html.len() > self.bounds.max_result_bytes.saturating_mul(8) {
             return Err(invalid("HTML exceeds bounded report expansion"));
         }

@@ -434,15 +434,21 @@ fn http_text_prints_the_published_start_line_and_headers() {
 }
 
 #[test]
-fn dns_capture_analysis_succeeds() {
+fn dns_capture_text_summary_counts_orphan_responses() {
     let capture = capture_path("dns-response.pcap");
     let capture = capture.to_string_lossy().into_owned();
     let args = ["analyze", "dns", capture.as_str()];
     let output = run(&args);
     let text = assert_success(&output, &args);
+    let summary = text
+        .lines()
+        .find(|line| line.contains(" DNS messages;"))
+        .unwrap_or_else(|| panic!("missing DNS analysis summary:\n{text}"));
     assert!(
-        text.contains("DNS"),
-        "DNS analysis should report DNS messages, got:\n{text}"
+        summary
+            .split("; ")
+            .any(|field| field == "orphan responses: 1"),
+        "{summary}"
     );
 }
 
@@ -2682,6 +2688,49 @@ fn security_analysis_reports_capture_paths_with_invalid_utf8() {
 }
 
 #[test]
+fn report_counts_repeated_inputs_once_at_the_findings_limit() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let input = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/documents/output-beacons-success.json");
+    let copy = directory.path().join("copy.json");
+    std::fs::copy(&input, &copy).expect("copy input to a distinct path");
+
+    let report = |inputs: &[&Path], name: &str, limit: &str| {
+        let html = directory.path().join(name);
+        let mut args = ["--output", "json", "analyze", "report"]
+            .map(OsStr::new)
+            .to_vec();
+        args.extend(inputs.iter().map(|path| path.as_os_str()));
+        args.extend([
+            OsStr::new("--html"),
+            html.as_os_str(),
+            OsStr::new("--max-findings"),
+            OsStr::new(limit),
+        ]);
+        let text = assert_success(&run(&args), &args);
+        let json: serde_json::Value = serde_json::from_str(&text).expect("JSON report");
+        let page = std::fs::read_to_string(html).expect("HTML report");
+        assert!(page.contains(&format!("Showing {limit} of {limit} findings.")));
+        json["result"].clone()
+    };
+
+    let single = report(&[&input], "single.html", "1");
+    let repeated = report(&[&input, &input], "repeated.html", "1");
+    assert_eq!(single["findings"].as_array().unwrap().len(), 1);
+    assert_eq!(repeated["findings"], single["findings"]);
+    assert_eq!(repeated["sources"], single["sources"]);
+
+    let distinct = report(&[&input, &copy, &input], "distinct.html", "2");
+    assert_eq!(distinct["findings"].as_array().unwrap().len(), 2);
+    assert_eq!(distinct["findings"][0], single["findings"][0]);
+    assert_eq!(
+        distinct["findings"][1]["evidence"]["source_file"],
+        copy.to_string_lossy().as_ref()
+    );
+    assert_eq!(distinct["sources"].as_array().unwrap().len(), 2);
+}
+
+#[test]
 fn report_writes_a_bundle_that_binds_its_inputs() {
     let directory = tempfile::tempdir().expect("tempdir");
     let html = directory.path().join("assessment.html");
@@ -2991,16 +3040,20 @@ fn passive_inventory_reports_only_observed_hosts_and_ports() {
     );
 }
 
-#[test]
-fn passive_inventory_counts_untimed_pcapng_frames() {
-    use packetcraftr_core::capture_file::{Endianness, PcapNgOptions, Reader, Writer};
-
-    let source = std::fs::File::open(capture_path("dns-response.pcap")).unwrap();
-    let frame = Reader::with_limits(source, Default::default())
+fn first_frame(capture: &str) -> packetcraftr_core::frame::Frame {
+    let source = std::fs::File::open(capture_path(capture)).unwrap();
+    packetcraftr_core::capture_file::Reader::with_limits(source, Default::default())
         .unwrap()
         .next_frame()
         .unwrap()
-        .unwrap();
+        .unwrap()
+}
+
+fn little_endian_pcapng(
+    frame: &packetcraftr_core::frame::Frame,
+) -> packetcraftr_core::capture_file::Writer<Vec<u8>> {
+    use packetcraftr_core::capture_file::{Endianness, PcapNgOptions, Writer};
+
     let mut writer = Writer::pcapng_with_options(
         Vec::new(),
         PcapNgOptions {
@@ -3010,6 +3063,44 @@ fn passive_inventory_counts_untimed_pcapng_frames() {
     )
     .unwrap();
     writer.add_interface(frame.link_type).unwrap();
+    writer
+}
+
+fn untimed_pcapng_block(frame: &packetcraftr_core::frame::Frame) -> Vec<u8> {
+    let padding = [0; 3];
+    let pad = &padding[..frame.bytes().len().next_multiple_of(4) - frame.bytes().len()];
+    let block_size = 16 + u32::try_from(frame.bytes().len() + pad.len()).unwrap();
+    [
+        &3_u32.to_le_bytes()[..],
+        &block_size.to_le_bytes(),
+        &frame.original_length().to_le_bytes(),
+        frame.bytes(),
+        pad,
+        &block_size.to_le_bytes(),
+    ]
+    .concat()
+}
+
+fn inventory_result(path: &Path, selection: &[&str]) -> serde_json::Value {
+    let args = [
+        &[
+            "--output",
+            "json",
+            "analyze",
+            "inventory",
+            path.to_str().unwrap(),
+        ][..],
+        selection,
+    ]
+    .concat();
+    let text = assert_success(&run(&args), &args);
+    serde_json::from_str::<serde_json::Value>(&text).unwrap()["result"].clone()
+}
+
+#[test]
+fn passive_inventory_counts_untimed_pcapng_frames() {
+    let frame = first_frame("dns-response.pcap");
+    let mut writer = little_endian_pcapng(&frame);
     let packet_block_size = writer.encoded_frame_size(&frame).unwrap();
     writer.write_frame(&frame).unwrap();
     writer.write_frame(&frame).unwrap();
@@ -3021,47 +3112,23 @@ fn passive_inventory_counts_untimed_pcapng_frames() {
     std::fs::write(&timed, &capture).unwrap();
 
     capture.truncate(capture.len() - packet_block_size);
-    let wire_len = frame.original_length();
-    let padding = [0; 3];
-    let pad = &padding[..frame.bytes().len().next_multiple_of(4) - frame.bytes().len()];
-    let block_size = 16 + u32::try_from(frame.bytes().len() + pad.len()).unwrap();
-    capture.extend_from_slice(&3_u32.to_le_bytes());
-    capture.extend_from_slice(&block_size.to_le_bytes());
-    capture.extend_from_slice(&wire_len.to_le_bytes());
-    capture.extend_from_slice(frame.bytes());
-    capture.extend_from_slice(pad);
-    capture.extend_from_slice(&block_size.to_le_bytes());
+    capture.extend(untimed_pcapng_block(&frame));
     std::fs::write(&mixed, &capture).unwrap();
 
-    let inventory = |path: &Path, selection: &[&str]| {
-        let args = [
-            &[
-                "--output",
-                "json",
-                "analyze",
-                "inventory",
-                path.to_str().unwrap(),
-            ][..],
-            selection,
-        ]
-        .concat();
-        let text = assert_success(&run(&args), &args);
-        serde_json::from_str::<serde_json::Value>(&text).unwrap()["result"].clone()
-    };
-    let expected = inventory(&timed, &[]);
+    let expected = inventory_result(&timed, &[]);
     assert_eq!(expected["frames_read"], 2);
-    assert_eq!(inventory(&mixed, &[]), expected);
+    assert_eq!(inventory_result(&mixed, &[]), expected);
     assert_eq!(
-        inventory(&mixed, &["--filter", "udp.stream == 0"]),
+        inventory_result(&mixed, &["--filter", "udp.stream == 0"]),
         expected
     );
     assert_eq!(
-        inventory(&mixed, &["--filter", "frame.number == 2"]),
-        inventory(&timed, &["--filter", "frame.number == 2"]),
+        inventory_result(&mixed, &["--filter", "frame.number == 2"]),
+        inventory_result(&timed, &["--filter", "frame.number == 2"]),
     );
     assert_eq!(
-        inventory(&mixed, &["--start-epoch", "0"]),
-        inventory(&timed, &["--filter", "frame.number == 1"]),
+        inventory_result(&mixed, &["--start-epoch", "0"]),
+        inventory_result(&timed, &["--filter", "frame.number == 1"]),
     );
 
     let args = [
@@ -3072,6 +3139,97 @@ fn passive_inventory_counts_untimed_pcapng_frames() {
         mixed.to_str().unwrap(),
     ];
     assert_error(&run(&args), "packet.timestamp_unavailable");
+}
+
+#[test]
+fn passive_inventory_stream_numbers_ignore_time_bounds() {
+    let untimed = first_frame("protocol-coap.pcap");
+    let timed = first_frame("protocol-snmp.pcap");
+    assert_eq!(untimed.link_type, timed.link_type);
+    let mut writer = little_endian_pcapng(&timed);
+    let timed_block_size = writer.encoded_frame_size(&timed).unwrap();
+    writer.write_frame(&timed).unwrap();
+
+    let dir = tempfile::tempdir().unwrap();
+    let timed_only = dir.path().join("timed.pcapng");
+    let untimed_first = dir.path().join("untimed-first.pcapng");
+    let mut capture = writer.into_inner();
+    std::fs::write(&timed_only, &capture).unwrap();
+
+    let timed_block = capture.split_off(capture.len() - timed_block_size);
+    capture.extend(untimed_pcapng_block(&untimed));
+    capture.extend(timed_block);
+    std::fs::write(&untimed_first, &capture).unwrap();
+
+    let second_flow = inventory_result(&timed_only, &[])["hosts"].clone();
+    assert_ne!(second_flow, serde_json::json!([]));
+    for selection in [
+        &["--filter", "udp.stream == 1"][..],
+        &["--start-epoch", "0", "--filter", "udp.stream == 1"],
+    ] {
+        assert_eq!(
+            inventory_result(&untimed_first, selection)["hosts"],
+            second_flow,
+            "{selection:?}"
+        );
+    }
+}
+
+#[test]
+fn inventory_attributes_vxlan_frames_and_protocols_to_each_network() {
+    let capture = capture_path("scoped-vxlan.pcap");
+    let args = [
+        "--output",
+        "json",
+        "analyze",
+        "inventory",
+        capture.to_str().unwrap(),
+    ];
+    let report: serde_json::Value =
+        serde_json::from_str(&assert_success(&run(&args), &args)).unwrap();
+    let result = &report["result"];
+    let hosts = result["hosts"].as_array().expect("hosts");
+    let host = |address: &str| {
+        hosts
+            .iter()
+            .find(|host| host["address"] == address)
+            .unwrap()
+    };
+    let outer_sender = host("203.0.113.1");
+    let shared_receiver = host("198.51.100.2");
+    let inner_sender = host("192.0.2.1");
+
+    assert_eq!(result["frames_read"], 2);
+    assert_eq!(outer_sender["frames_sent"], 2, "outer sender frame count");
+    assert_eq!(
+        shared_receiver["frames_received"], 2,
+        "a destination at both layers counts once per frame"
+    );
+    assert_eq!(
+        outer_sender["observed_ports"],
+        serde_json::json!([{"transport": "udp", "port": 40000}])
+    );
+    assert_eq!(
+        outer_sender["protocols"],
+        serde_json::json!(["ipv4", "udp", "vxlan"])
+    );
+    assert_eq!(inner_sender["frames_sent"], 2);
+    assert_eq!(
+        inner_sender["protocols"],
+        serde_json::json!(["ethernet", "ipv4", "tcp"])
+    );
+    assert_eq!(
+        shared_receiver["protocols"],
+        serde_json::json!(["ethernet", "ipv4", "tcp", "udp", "vxlan"])
+    );
+    let protocols = result["protocols"].as_array().expect("protocol counts");
+    for name in ["ethernet", "ipv4", "tcp", "udp", "vxlan"] {
+        let protocol = protocols
+            .iter()
+            .find(|protocol| protocol["protocol"] == name)
+            .unwrap();
+        assert_eq!(protocol["frames"], 2, "{name} must count each frame once");
+    }
 }
 
 #[test]

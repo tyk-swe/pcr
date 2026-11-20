@@ -66,10 +66,15 @@ impl Spec for Assessment {
             .map(|path| crate::staged_output::StagedFile::stage(i, path))
             .transpose()?;
         let mut report = Report::new("report");
+        let mut seen_inputs = BTreeSet::new();
         let mut seen_sources = BTreeSet::new();
         for path in &self.results {
             i.check()?;
             let bytes = read(i, path, self.bounds.max_result_bytes)?;
+            let input_source = source(path, &bytes);
+            if !seen_inputs.insert((path.as_os_str(), input_source.sha256.clone())) {
+                continue;
+            }
             let result = input::report(&bytes)?;
             if !result.completeness.complete {
                 if result.completeness.reasons.is_empty() {
@@ -95,7 +100,7 @@ impl Spec for Assessment {
             append_sources(
                 &mut report,
                 &mut seen_sources,
-                std::iter::once(source(path, &bytes)).chain(result.sources),
+                std::iter::once(input_source).chain(result.sources),
             );
             crate::publication::bounded_json_len(
                 &crate::commands::security::output::Report::from(&report),

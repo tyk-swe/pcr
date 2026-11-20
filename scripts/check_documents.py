@@ -19,6 +19,15 @@ IDENTITY = re.compile(r"^packetcraftr\.([a-z0-9-]+)/v(\d+)$")
 
 DOCUMENT_TREES = ("examples/documents", "crates/packetcraftr/data")
 
+SCHEMA_OPTIONAL_DOCUMENTS = frozenset({
+    "crates/packetcraftr/data/os-fingerprints.provenance.yaml",
+    "crates/packetcraftr/data/port-catalog.provenance.yaml",
+    "crates/packetcraftr/data/service-exclusions.provenance.yaml",
+    "crates/packetcraftr/data/service-probes.provenance.yaml",
+    "crates/packetcraftr/data/service-probes.training.v1.json",
+    "crates/packetcraftr/data/udp-payloads.provenance.yaml",
+})
+
 TWIN_PAIRS = (
     ("examples/documents/service-probes.json", "crates/packetcraftr/data/service-probes.json"),
     ("examples/documents/service-exclusions.json", "crates/packetcraftr/data/service-exclusions.json"),
@@ -77,10 +86,12 @@ def check_documents(root: Path = ROOT) -> list[str]:
                 except yaml.YAMLError as error:
                     raise CheckError(f"{path}: invalid YAML: {error}") from error
             identity = document.get("schema") if isinstance(document, dict) else None
+            shown = path.relative_to(root)
             if not isinstance(identity, str):
+                if shown.as_posix() not in SCHEMA_OPTIONAL_DOCUMENTS:
+                    problems.append(f"{shown}: expected a top-level 'schema' string")
                 continue
             schema = schema_path(root, identity)
-            shown = path.relative_to(root)
             if schema is None:
                 problems.append(f"{shown}: unrecognised schema identity {identity!r}")
                 continue

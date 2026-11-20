@@ -2,12 +2,16 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 from contextlib import redirect_stderr
 import io
+import json
+import os
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
 
-from support import load_script
+from support import ROOT, load_script
 
 manifest = load_script('build-manifest')
 
@@ -20,6 +24,33 @@ def identity():
 
 
 class BuildManifestTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == 'posix', 'requires executable script fixtures')
+    def test_write_and_verify_manifest_with_multiline_long_version(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binary = root / 'packetcraftr'
+            output = root / 'BUILD-METADATA.json'
+            version = 'packetcraftr 1.2.3-beta.1'
+            versions = {'-V': version, '--version': f'{version}\nnative features: native-layer3'}
+            binary.write_text(f'#!{sys.executable}\nimport sys\nprint({versions!r}[sys.argv[1]])\n',
+                              encoding='utf-8')
+            compiler = root / 'rustc'
+            compiler.write_text(f'#!{sys.executable}\nprint("rustc fixture")\n', encoding='utf-8')
+            binary.chmod(0o700)
+            compiler.chmod(0o700)
+
+            command = [sys.executable, str(ROOT / 'scripts/build-manifest.py'),
+                       '--binary', str(binary), '--commit', 'a' * 40,
+                       '--target', 'x86_64-unknown-linux-gnu', '--variant', 'pcap-free']
+            environment = dict(os.environ, PATH=str(root))
+            written = subprocess.run([*command, '--output', str(output)], env=environment,
+                                     capture_output=True, text=True, timeout=10)
+            self.assertEqual(written.returncode, 0, written.stderr)
+            self.assertEqual(json.loads(output.read_text(encoding='utf-8'))['version'], version)
+            verified = subprocess.run([*command, '--verify', str(output)], env=environment,
+                                      capture_output=True, text=True, timeout=10)
+            self.assertEqual(verified.returncode, 0, verified.stderr)
+
     def test_version_and_compiler_require_content(self):
         for field, value in (('version', 'packetcraftr '), ('rustc', 'rustc ')):
             document = identity()

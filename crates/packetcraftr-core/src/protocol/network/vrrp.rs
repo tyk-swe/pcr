@@ -363,7 +363,7 @@ impl Codec for VrrpCodec {
             push_address(&mut prefix, *address);
         }
         prefix.extend_from_slice(&auth_data);
-        let expected = if version == 2 {
+        let expected = if version == 2 || !ipv6 {
             checksum_parts(&[&prefix, covered_payload])
         } else {
             transport_checksum_parts(
@@ -430,7 +430,11 @@ impl Codec for VrrpCodec {
         let auth_data = input.slice(addresses_end..);
 
         let mut diagnostics = Vec::new();
-        let checksum_failed = if version == 2 {
+        let checksum_failed = if version == 2
+            || context
+                .network
+                .is_some_and(|network| network.destination.is_ipv4())
+        {
             checksum_parts(&[&input]) != 0
         } else {
             match context.network {

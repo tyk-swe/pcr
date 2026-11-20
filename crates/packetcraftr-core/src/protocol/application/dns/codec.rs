@@ -117,8 +117,17 @@ fn layer_error(error: Error, available: usize) -> crate::codec::Error {
 
 fn layer_from_wire(wire: Bytes, mdns: bool) -> Result<Dns, crate::codec::Error> {
     let available = wire.len();
-    Dns::from_wire_with_mdns(wire, Limits::default(), mdns)
-        .map_err(|error| layer_error(error, available))
+    decode::decode(wire, Limits::default(), mdns).map_err(|error| layer_error(error, available))
+}
+
+pub(crate) fn is_mdns_datagram(registry: &Registry, udp: &Udp, payload: &[u8]) -> bool {
+    registry.first_child_for(
+        BuiltinProtocol::Udp.as_str(),
+        &udp.payload_discriminators(payload),
+    ) == Some((
+        Discriminator(u64::from(MDNS_PORT)),
+        BuiltinProtocol::Dns.id(),
+    ))
 }
 
 fn seed_dns_layer(
@@ -182,12 +191,7 @@ impl Codec for DnsCodec {
             return self.construct(fields);
         };
         construct_layer(self, fields, |fields| {
-            seed_dns_layer(fields, |wire| {
-                registry.first_child_for(
-                    BuiltinProtocol::Udp.as_str(),
-                    &udp.payload_discriminators(wire),
-                ) == Some((Discriminator(MDNS_PORT), BuiltinProtocol::Dns.id()))
-            })
+            seed_dns_layer(fields, |wire| is_mdns_datagram(registry, udp, wire))
         })
     }
 

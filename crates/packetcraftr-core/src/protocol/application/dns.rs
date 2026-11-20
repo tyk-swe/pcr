@@ -5,8 +5,8 @@ mod codec;
 mod model;
 mod reflection;
 
-pub(crate) use codec::DnsCodec;
 pub use codec::decode_name;
+pub(crate) use codec::{DnsCodec, is_mdns_datagram};
 pub use model::{Dns, Edns, EdnsOption, Name, Question, Record, RecordValue};
 
 pub(crate) const MDNS_PORT: u16 = 5353;

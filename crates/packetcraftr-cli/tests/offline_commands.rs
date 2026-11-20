@@ -480,6 +480,9 @@ fn dns_analysis_preserves_mdns_cache_flush_record_values() {
         (40000, 5353, false, "a"),
         (53, 40000, false, "unknown"),
         (5355, 40000, false, "unknown"),
+        (53, 5353, false, "unknown"),
+        (5353, 53, false, "unknown"),
+        (5353, 5355, false, "unknown"),
         (5353, 40000, true, "unknown"),
     ] {
         let mut packet = Packet::default();

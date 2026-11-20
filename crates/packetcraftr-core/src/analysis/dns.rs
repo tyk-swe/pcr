@@ -12,7 +12,11 @@ use super::{
 };
 use crate::{
     error::BoundaryError,
-    protocol::application::dns::{self, Dns},
+    protocol::{
+        application::dns::{self, Dns},
+        builtin,
+        transport::Udp,
+    },
 };
 use bytes::Bytes;
 use serde::Serialize;
@@ -397,9 +401,13 @@ impl Collector {
         self.summary.messages += 1;
         message.index = self.summary.messages;
         if message.status == Status::Complete {
+            let udp = Udp {
+                source_port: message.flow.flow.source_port,
+                destination_port: message.flow.flow.destination_port,
+                ..Udp::default()
+            };
             let mdns = message.transport == StreamTransport::Udp
-                && (message.flow.flow.source_port == dns::MDNS_PORT
-                    || message.flow.flow.destination_port == dns::MDNS_PORT);
+                && dns::is_mdns_datagram(&builtin::registry(), &udp, &message.wire);
             match Dns::from_wire_with_mdns(message.wire.clone(), dns::Limits::default(), mdns) {
                 Ok(dns) => {
                     self.summary.complete_messages += 1;

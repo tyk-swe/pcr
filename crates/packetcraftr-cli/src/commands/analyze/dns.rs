@@ -75,7 +75,8 @@ fn run(invocation: &crate::invocation::Invocation, args: Args) -> Result<(), Cli
     let application = args.application.limits()?;
     let mut ports = args.dns_ports;
     ports.push(53);
-    let collector = Collector::new(application.core(), ports).map_err(CliError::classified)?;
+    let collector = Collector::new(application.core(), ports, args.decode.registry()?)
+        .map_err(CliError::classified)?;
     let (mut messages, mut transactions, mut issues) = (Vec::new(), Vec::new(), Vec::new());
     let outcome = inspect(
         invocation,

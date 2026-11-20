@@ -73,7 +73,8 @@ fn threshold_validation_accepts_exact_boundaries() {
             Collector::new(
                 Mode::Dns(options),
                 Limits::default(),
-                application::Limits::default()
+                application::Limits::default(),
+                crate::protocol::builtin::registry()
             )
             .is_err()
         );
@@ -120,7 +121,8 @@ fn threshold_validation_accepts_exact_boundaries() {
             Collector::new(
                 Mode::Beacons(options),
                 Limits::default(),
-                application::Limits::default()
+                application::Limits::default(),
+                crate::protocol::builtin::registry()
             )
             .is_err()
         );
@@ -155,6 +157,7 @@ fn collector() -> Collector {
         Mode::Beacons(BeaconOptions::default()),
         Limits::default(),
         application::Limits::default(),
+        crate::protocol::builtin::registry(),
     )
     .unwrap();
     for subject in ["first", "second"] {
@@ -256,7 +259,8 @@ fn constructed_hunts_validate_and_normalize() {
             Collector::new(
                 Mode::Hunt(doc),
                 Limits::default(),
-                application::Limits::default()
+                application::Limits::default(),
+                crate::protocol::builtin::registry()
             )
             .is_err()
         );
@@ -265,6 +269,7 @@ fn constructed_hunts_validate_and_normalize() {
         Mode::Hunt(document("dns", "EXAMPLE.TEST.")),
         Limits::default(),
         application::Limits::default(),
+        crate::protocol::builtin::registry(),
     )
     .unwrap();
     let Engine::Hunt(hunt) = &collector.engine else {
@@ -289,6 +294,7 @@ fn beacon_intervals_preserve_nanosecond_precision() {
         Mode::Beacons(options),
         Limits::default(),
         application::Limits::default(),
+        crate::protocol::builtin::registry(),
     )
     .unwrap();
     let epoch = Duration::from_secs(1_800_000_000);
@@ -443,6 +449,7 @@ fn dns_groups_inner_labels_within_budget() {
         Mode::Dns(options),
         Limits::default(),
         application::Limits::default(),
+        crate::protocol::builtin::registry(),
     )
     .unwrap();
     group_dns(&mut collector, "a.aBcD.Example.test.").unwrap();
@@ -471,6 +478,7 @@ fn dns_groups_inner_labels_within_budget() {
             ..Default::default()
         },
         application::Limits::default(),
+        crate::protocol::builtin::registry(),
     )
     .unwrap();
     assert!(group_dns(&mut bounded, "aBcD.eFgH.test.").is_err());
@@ -481,6 +489,7 @@ fn anomalies(options: DnsOptions) -> Collector {
         Mode::Dns(options),
         Limits::default(),
         application::Limits::default(),
+        crate::protocol::builtin::registry(),
     )
     .unwrap()
 }
@@ -653,9 +662,14 @@ fn malformed_messages_and_stream_issues_are_noted() {
 #[test]
 fn only_beacons_skip_tcp_stream_events() {
     let needs = |mode| {
-        Collector::new(mode, Limits::default(), application::Limits::default())
-            .unwrap()
-            .needs()
+        Collector::new(
+            mode,
+            Limits::default(),
+            application::Limits::default(),
+            crate::protocol::builtin::registry(),
+        )
+        .unwrap()
+        .needs()
     };
     assert!(!needs(Mode::Beacons(BeaconOptions::default())).tcp_events);
     assert!(needs(Mode::Dns(DnsOptions::default())).tcp_events);
@@ -685,6 +699,7 @@ fn hunts_match_indicators_in_every_kind_of_dns_answer() {
         Mode::Hunt(indicators),
         Limits::default(),
         application::Limits::default(),
+        crate::protocol::builtin::registry(),
     )
     .unwrap();
     let owner = |name: &str| name.parse().unwrap();

@@ -483,6 +483,8 @@ fn dns_analysis_preserves_mdns_cache_flush_record_values() {
         (53, 5353, false, "unknown"),
         (5353, 53, false, "unknown"),
         (5353, 5355, false, "unknown"),
+        (5353, 8053, false, "unknown"),
+        (8053, 5353, false, "a"),
         (5353, 40000, true, "unknown"),
     ] {
         let mut packet = Packet::default();
@@ -537,6 +539,10 @@ fn dns_analysis_preserves_mdns_cache_flush_record_values() {
             "5353",
             "--dns-port",
             "5355",
+            "--dns-port",
+            "8053",
+            "--decode-as",
+            "udp.port=8053:dns",
         ];
         let report: serde_json::Value =
             serde_json::from_str(&assert_success(&run(&args), &args)).unwrap();

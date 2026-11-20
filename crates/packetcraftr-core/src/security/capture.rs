@@ -10,9 +10,11 @@ use crate::{
     analysis::{self, FrameRecord, application, dns},
     error::BoundaryError,
     protocol::application::dns::Dns,
+    registry::Registry,
 };
 use serde_json::json;
 use std::collections::{BTreeMap, btree_map::Entry};
+use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug)]
 pub struct DnsOptions {
@@ -130,6 +132,7 @@ impl Collector {
         mode: Mode,
         limits: Limits,
         app: application::Limits,
+        registry: Arc<Registry>,
     ) -> Result<Self, BoundaryError> {
         limits.validate().map_err(BoundaryError::from_error)?;
         let (kind, engine) = match mode {
@@ -137,14 +140,16 @@ impl Collector {
                 let indicators = document.compile().map_err(BoundaryError::from_error)?;
                 (
                     "hunt",
-                    Engine::Hunt(Box::new(hunt::Hunt::new(indicators, app)?)),
+                    Engine::Hunt(Box::new(hunt::Hunt::new(indicators, app, registry)?)),
                 )
             }
             Mode::Dns(options) => {
                 options.validate().map_err(BoundaryError::from_error)?;
                 (
                     "dns-anomalies",
-                    Engine::Dns(Box::new(dns_anomalies::Anomalies::new(options, app)?)),
+                    Engine::Dns(Box::new(dns_anomalies::Anomalies::new(
+                        options, app, registry,
+                    )?)),
                 )
             }
             Mode::Beacons(options) => {

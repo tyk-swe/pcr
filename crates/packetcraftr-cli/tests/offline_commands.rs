@@ -434,15 +434,21 @@ fn http_text_prints_the_published_start_line_and_headers() {
 }
 
 #[test]
-fn dns_capture_analysis_succeeds() {
+fn dns_capture_text_summary_counts_orphan_responses() {
     let capture = capture_path("dns-response.pcap");
     let capture = capture.to_string_lossy().into_owned();
     let args = ["analyze", "dns", capture.as_str()];
     let output = run(&args);
     let text = assert_success(&output, &args);
+    let summary = text
+        .lines()
+        .find(|line| line.contains(" DNS messages;"))
+        .unwrap_or_else(|| panic!("missing DNS analysis summary:\n{text}"));
     assert!(
-        text.contains("DNS"),
-        "DNS analysis should report DNS messages, got:\n{text}"
+        summary
+            .split("; ")
+            .any(|field| field == "orphan responses: 1"),
+        "{summary}"
     );
 }
 

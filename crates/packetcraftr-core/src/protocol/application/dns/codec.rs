@@ -1,12 +1,14 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use std::collections::BTreeMap;
+
 use bytes::Bytes;
 
 use super::reflection::{dns_layout, dns_schema};
 use super::{Dns, Error, Limits, MAX_MESSAGE_BYTES};
 use crate::{
-    codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded, SeededLayer},
+    codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded, SeededLayer, construct_layer},
     diagnostic::{Diagnostic, Severity},
     error::{Classified, Kind},
     field,
@@ -17,7 +19,9 @@ use crate::{
             ensure_encode_budget, invalid, payload_without_padding, rejected, truncated,
             typed_layer,
         },
+        transport::Udp,
     },
+    registry::{Discriminator, Registry},
 };
 
 mod decode;
@@ -110,6 +114,28 @@ fn layer_from_wire(wire: Bytes, mdns: bool) -> Result<Dns, crate::codec::Error> 
     decode::decode(wire, Limits::default(), mdns).map_err(|error| layer_error(error, available))
 }
 
+fn seed_dns_layer(
+    fields: &[(usize, &field::Value)],
+    is_mdns: impl FnOnce(&[u8]) -> bool,
+) -> Result<Option<SeededLayer>, crate::codec::Error> {
+    let wire = dns_schema()
+        .field_index("wire")
+        .expect("DNS schema declares a wire field");
+    let Some((_, value)) = fields.iter().find(|(index, _)| *index == wire) else {
+        return Ok(Some(SeededLayer {
+            layer: Box::new(Dns::default()),
+            consumed: None,
+        }));
+    };
+    let field::Value::Bytes(bytes) = value else {
+        return Err(invalid(NAME, "wire must be bytes"));
+    };
+    Ok(Some(SeededLayer {
+        layer: Box::new(layer_from_wire(bytes.clone(), is_mdns(bytes))?),
+        consumed: Some(wire),
+    }))
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct DnsCodec;
 
@@ -134,22 +160,28 @@ impl Codec for DnsCodec {
         &self,
         fields: &[(usize, &field::Value)],
     ) -> Result<Option<SeededLayer>, crate::codec::Error> {
-        let wire = dns_schema()
-            .field_index("wire")
-            .expect("DNS schema declares a wire field");
-        let Some((_, value)) = fields.iter().find(|(index, _)| *index == wire) else {
-            return Ok(Some(SeededLayer {
-                layer: Box::new(Dns::default()),
-                consumed: None,
-            }));
+        seed_dns_layer(fields, |_| false)
+    }
+
+    fn construct_from_document(
+        &self,
+        fields: &BTreeMap<String, field::Value>,
+        parent: Option<&dyn Layer>,
+        registry: &Registry,
+    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
+        let Some(udp) = parent
+            .and_then(|parent| typed_layer::<Udp>(BuiltinProtocol::Udp.as_str(), parent).ok())
+        else {
+            return self.construct(fields);
         };
-        let field::Value::Bytes(bytes) = value else {
-            return Err(invalid(NAME, "wire must be bytes"));
-        };
-        Ok(Some(SeededLayer {
-            layer: Box::new(layer_from_wire(bytes.clone(), false)?),
-            consumed: Some(wire),
-        }))
+        construct_layer(self, fields, |fields| {
+            seed_dns_layer(fields, |wire| {
+                registry.first_child_for(
+                    BuiltinProtocol::Udp.as_str(),
+                    &udp.payload_discriminators(wire),
+                ) == Some((Discriminator(MDNS_PORT), BuiltinProtocol::Dns.id()))
+            })
+        })
     }
 
     fn encode(

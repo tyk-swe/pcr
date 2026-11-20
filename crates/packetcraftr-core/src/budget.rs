@@ -323,3 +323,169 @@ impl crate::error::Classified for Cancelled {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::{Classified, Code, Kind};
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    fn clocked(limit: Duration) -> (Deadline, Arc<AtomicU64>) {
+        let origin = Instant::now();
+        let elapsed = Arc::new(AtomicU64::new(0));
+        let clock = Arc::clone(&elapsed);
+        let deadline = Deadline::with_time_source(limit, move || {
+            origin + Duration::from_millis(clock.load(Ordering::SeqCst))
+        });
+        (deadline, elapsed)
+    }
+
+    #[test]
+    fn duration_bounds_allow_the_exact_maximum() {
+        let maximum = Duration::from_millis(10);
+        assert!(duration_violation(Duration::ZERO, maximum));
+        assert!(!duration_violation(Duration::from_millis(1), maximum));
+        assert!(!duration_violation(maximum, maximum));
+        assert!(duration_violation(
+            maximum + Duration::from_millis(1),
+            maximum
+        ));
+    }
+
+    #[test]
+    fn accounting_charges_prior_wall_time_and_the_larger_phase_duration() {
+        let limit = Duration::from_millis(10);
+        let (mut deadline, elapsed) = clocked(limit);
+        assert_eq!(deadline.limit(), limit);
+        elapsed.store(3, Ordering::SeqCst);
+        deadline.start_accounting(Duration::from_millis(7)).unwrap();
+        elapsed.store(5, Ordering::SeqCst);
+        deadline.account(Duration::from_millis(4)).unwrap();
+        assert_eq!(deadline.remaining(), Ok(Duration::from_millis(3)));
+        deadline.account(Duration::from_millis(1)).unwrap();
+        assert_eq!(deadline.remaining(), Ok(Duration::from_millis(2)));
+        deadline.check_additional(Duration::from_millis(2)).unwrap();
+        let expected = DeadlineExceeded {
+            actual: Duration::from_millis(11),
+            limit,
+        };
+        assert_eq!(
+            deadline.check_additional(Duration::from_millis(3)),
+            Err(expected)
+        );
+        assert_eq!(
+            deadline.start_accounting(Duration::from_millis(3)),
+            Err(expected)
+        );
+        assert_eq!(deadline.remaining(), Ok(Duration::from_millis(2)));
+        elapsed.store(8, Ordering::SeqCst);
+        assert_eq!(deadline.check(), Err(expected));
+        assert_eq!(deadline.remaining(), Err(expected));
+        assert_eq!(deadline.enforce(), Err(Interrupted::Exceeded(expected)));
+    }
+
+    #[test]
+    fn elapsed_wall_time_can_exceed_reported_time() {
+        let (mut deadline, elapsed) = clocked(Duration::from_millis(10));
+        elapsed.store(4, Ordering::SeqCst);
+        deadline.account(Duration::from_millis(1)).unwrap();
+        assert_eq!(deadline.remaining(), Ok(Duration::from_millis(6)));
+        elapsed.store(10, Ordering::SeqCst);
+        assert_eq!(deadline.check(), Ok(()));
+        assert_eq!(deadline.remaining(), Ok(Duration::ZERO));
+        assert!(deadline.bounded_timeout(Duration::from_millis(1)).is_err());
+        assert!(deadline.live_remaining().is_err());
+    }
+
+    #[test]
+    fn parent_deadlines_bound_children_and_reject_additional_work() {
+        let (parent, elapsed) = clocked(Duration::from_millis(10));
+        let (child, _) = clocked(Duration::from_secs(30));
+        let child = child.with_parent(Some(Arc::new(parent)));
+        assert_eq!(child.remaining(), Ok(Duration::from_millis(10)));
+        assert_eq!(
+            child.bounded_timeout(Duration::from_millis(4)),
+            Ok(Duration::from_millis(4))
+        );
+        assert_eq!(
+            child.bounded_timeout(Duration::from_secs(1)),
+            Ok(Duration::from_millis(10))
+        );
+        let wait = child.for_wait(Duration::from_secs(1)).unwrap();
+        let detached = child.detach().unwrap();
+        elapsed.store(8, Ordering::SeqCst);
+        assert!(child.check_additional(Duration::from_millis(3)).is_err());
+        elapsed.store(11, Ordering::SeqCst);
+        assert!(child.check().is_err());
+        assert!(wait.enforce().is_err());
+        assert!(detached.enforce().is_err());
+    }
+
+    #[test]
+    fn cancellation_propagates_through_waits_and_takes_precedence_over_expiry() {
+        let signal = Cancellation::default();
+        let deadline =
+            Deadline::new(Duration::from_secs(60)).with_cancellation(Some(signal.clone()));
+        let wait = deadline.for_wait(Duration::from_secs(10)).unwrap();
+        let detached = deadline.detach().unwrap();
+        assert!(!signal.is_cancelled());
+        assert!(signal.check().is_ok());
+        assert!(deadline.check_cancelled().is_ok());
+        assert!(
+            Deadline::new(Duration::from_secs(1))
+                .cancellation()
+                .is_none()
+        );
+        let child = Deadline::immediate(None).with_parent(Some(Arc::new(deadline.clone())));
+        deadline.cancellation().unwrap().cancel();
+        assert!(signal.is_cancelled());
+        assert_eq!(signal.check(), Err(Cancelled));
+        for deadline in [deadline, wait, detached, child] {
+            assert_eq!(deadline.check_cancelled(), Err(Cancelled));
+            assert_eq!(deadline.enforce(), Err(Interrupted::Cancelled(Cancelled)));
+            assert_eq!(
+                deadline.live_remaining(),
+                Err(Interrupted::Cancelled(Cancelled))
+            );
+            assert!(matches!(deadline.detach(), Err(Interrupted::Cancelled(_))));
+        }
+    }
+
+    #[test]
+    fn accounting_overflow_is_a_duration_limit_failure() {
+        let (mut deadline, _) = clocked(Duration::MAX);
+        deadline.account(Duration::MAX).unwrap();
+        let expected = DeadlineExceeded {
+            actual: Duration::MAX,
+            limit: Duration::MAX,
+        };
+        assert_eq!(
+            deadline.check_additional(Duration::from_nanos(1)),
+            Err(expected)
+        );
+        assert_eq!(
+            deadline.start_accounting(Duration::from_nanos(1)),
+            Err(expected)
+        );
+        assert_eq!(deadline.account(Duration::from_nanos(1)), Err(expected));
+    }
+
+    #[test]
+    fn interrupted_errors_preserve_failure_classification() {
+        let exceeded = DeadlineExceeded {
+            actual: Duration::from_secs(2),
+            limit: Duration::from_secs(1),
+        };
+        assert_eq!(exceeded.classification().code, Code::PolicyDurationLimit);
+        assert_eq!(exceeded.classification().kind, Kind::Policy);
+        assert_eq!(Cancelled.classification().code, Code::IoCancelled);
+        assert_eq!(Cancelled.classification().kind, Kind::Io);
+        for interrupted in [
+            Interrupted::Cancelled(Cancelled),
+            Interrupted::Exceeded(exceeded),
+        ] {
+            let error: Interrupted = interrupted.into_error();
+            assert_eq!(error.classification(), interrupted.classification());
+        }
+    }
+}

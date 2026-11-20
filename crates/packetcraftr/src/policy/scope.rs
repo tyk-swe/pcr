@@ -191,14 +191,14 @@ mod tests {
 
     #[test]
     fn label_limit_counts_characters_like_the_schema() {
-        let fits = "é".repeat(100);
+        let fits = "é".repeat(MAX_LABEL_CHARS);
         assert!(
             parse(&format!(
                 "{{\"schema\":\"packetcraftr.scope/v1\",\"label\":\"{fits}\"}}"
             ))
             .is_ok()
         );
-        let too_long = "é".repeat(129);
+        let too_long = "é".repeat(MAX_LABEL_CHARS + 1);
         assert!(
             parse(&format!(
                 "{{\"schema\":\"packetcraftr.scope/v1\",\"label\":\"{too_long}\"}}"
@@ -223,6 +223,39 @@ mod tests {
         )
         .unwrap();
         assert_ne!(first.digest(), relabeled.digest());
+        let narrower = parse(
+            r#"{"schema":"packetcraftr.scope/v1","label":"lab","allowed_destinations":["192.0.2.0/24"],"max_packets":10}"#,
+        )
+        .unwrap();
+        assert_ne!(first.digest(), narrower.digest());
+    }
+
+    #[test]
+    fn document_and_destination_limits_are_inclusive() {
+        let minimal = r#"{"schema":"packetcraftr.scope/v1","label":"lab"}"#;
+        let padded = |len: usize| minimal.to_owned() + &" ".repeat(len - minimal.len());
+        assert!(parse(&padded(MAX_SCOPE_DOCUMENT_BYTES)).is_ok());
+        assert!(matches!(
+            parse(&padded(MAX_SCOPE_DOCUMENT_BYTES + 1)),
+            Err(Error::InvalidScopeDocument { .. })
+        ));
+
+        for field in ["allowed_destinations", "denied_destinations"] {
+            let with = |count: usize| {
+                let destinations = vec![r#""192.0.2.1""#; count].join(",");
+                parse(&format!(
+                    r#"{{"schema":"packetcraftr.scope/v1","label":"lab","{field}":[{destinations}]}}"#
+                ))
+            };
+            assert!(with(MAX_DESTINATION_CONSTRAINTS).is_ok(), "{field}");
+            assert!(
+                matches!(
+                    with(MAX_DESTINATION_CONSTRAINTS + 1),
+                    Err(Error::InvalidScopeDocument { .. })
+                ),
+                "{field}"
+            );
+        }
     }
 
     #[test]

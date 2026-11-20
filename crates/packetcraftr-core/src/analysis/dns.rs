@@ -12,11 +12,16 @@ use super::{
 };
 use crate::{
     error::BoundaryError,
-    protocol::application::dns::{self, Dns},
+    protocol::{
+        application::dns::{self, Dns},
+        transport::Udp,
+    },
+    registry::Registry,
 };
 use bytes::Bytes;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 pub use transactions::{Latency, Transaction, TransactionStatus};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -101,6 +106,7 @@ impl Direction {
 pub struct Collector {
     limits: Limits,
     ports: Vec<u16>,
+    registry: Arc<Registry>,
     seen_streams: BTreeSet<(StreamTransport, u64)>,
     tcp: TcpSources,
     directions: BTreeMap<ScopedFlowKey, Direction>,
@@ -111,13 +117,20 @@ pub struct Collector {
     summary: Summary,
 }
 impl Collector {
-    pub fn new(limits: Limits, ports: impl IntoIterator<Item = u16>) -> Result<Self, Error> {
+    /// `registry` must be the one the pipeline dissects with, so mDNS is
+    /// recognized exactly when packet dissection recognizes it.
+    pub fn new(
+        limits: Limits,
+        ports: impl IntoIterator<Item = u16>,
+        registry: Arc<Registry>,
+    ) -> Result<Self, Error> {
         limits.validate()?;
         let ports = application::normalize_ports(ports, "dns_ports")?;
         Ok(Self {
             limits,
             tcp: TcpSources::new(ports.clone(), limits),
             ports,
+            registry,
             seen_streams: BTreeSet::new(),
             directions: BTreeMap::new(),
             scopes: BTreeMap::new(),
@@ -397,7 +410,14 @@ impl Collector {
         self.summary.messages += 1;
         message.index = self.summary.messages;
         if message.status == Status::Complete {
-            match Dns::from_wire_with_limits(message.wire.clone(), dns::Limits::default()) {
+            let udp = Udp {
+                source_port: message.flow.flow.source_port,
+                destination_port: message.flow.flow.destination_port,
+                ..Udp::default()
+            };
+            let mdns = message.transport == StreamTransport::Udp
+                && dns::is_mdns_datagram(&self.registry, &udp, &message.wire);
+            match Dns::from_wire_with_mdns(message.wire.clone(), dns::Limits::default(), mdns) {
                 Ok(dns) => {
                     self.summary.complete_messages += 1;
                     message.dns = Some(dns);

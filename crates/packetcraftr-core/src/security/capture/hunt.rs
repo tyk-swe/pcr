@@ -10,9 +10,10 @@ use crate::{
     analysis::{self, FrameRecord, application, dns, http, tls},
     budget::Deadline,
     error::BoundaryError,
+    registry::Registry,
 };
 use serde_json::json;
-use std::{collections::BTreeMap, net::IpAddr};
+use std::{collections::BTreeMap, net::IpAddr, sync::Arc};
 
 const HTTP_PORTS: [u16; 3] = [80, 8080, 8000];
 
@@ -32,9 +33,10 @@ impl Hunt {
     pub(super) fn new(
         indicators: Matcher,
         app: application::Limits,
+        registry: Arc<Registry>,
     ) -> Result<Self, BoundaryError> {
         Ok(Self {
-            dns: dns::Collector::new(app, [53]).map_err(BoundaryError::from_error)?,
+            dns: dns::Collector::new(app, [53], registry).map_err(BoundaryError::from_error)?,
             http: http::Collector::new(app, HTTP_PORTS, application::MAX_BODY_BYTES)
                 .map_err(BoundaryError::from_error)?,
             tls: tls::Collector::new(tls::Limits {

@@ -93,13 +93,18 @@ impl Capture {
     ) -> Result<CommandExit, CliError> {
         let limits = self.bounds.core()?;
         let application = self.application.limits()?;
-        let collector = security::capture::Collector::new(mode, limits, application.core())
-            .map_err(CliError::classified)?;
         let prepared = crate::commands::offline_analysis::prepare(
             self.limits,
             self.filter.as_deref(),
             &self.decode,
         )?;
+        let collector = security::capture::Collector::new(
+            mode,
+            limits,
+            application.core(),
+            prepared.registry.clone(),
+        )
+        .map_err(CliError::classified)?;
         let session = prepared.session(invocation, collector, None);
         let mut reader = prepared.open(invocation, &self.path)?;
         let mut report = session

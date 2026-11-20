@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use bytes::Bytes;
 
 use super::reflection::{dns_layout, dns_schema};
-use super::{Dns, Error, Limits, MAX_MESSAGE_BYTES};
+use super::{Dns, Error, Limits, MAX_MESSAGE_BYTES, MDNS_PORT};
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded, SeededLayer, construct_layer},
     diagnostic::{Diagnostic, Severity},
@@ -32,8 +32,6 @@ pub use decode::decode_name;
 
 pub(super) const NAME: &str = BuiltinProtocol::Dns.as_str();
 pub(super) const HEADER_LEN: usize = 12;
-/// The UDP port registry bindings dispatch to this codec as multicast DNS.
-const MDNS_PORT: u64 = 5353;
 
 pub(crate) const MESSAGE_UNPARSED: &str = "dns.message_unparsed";
 
@@ -74,7 +72,15 @@ impl Dns {
     /// No transport is known here, so the message decodes as unicast DNS: a
     /// record class keeps its top bit rather than mDNS's cache-flush reading.
     pub fn from_wire_with_limits(wire: impl Into<Bytes>, limits: Limits) -> Result<Self, Error> {
-        decode::decode(wire.into(), limits, false)
+        Self::from_wire_with_mdns(wire.into(), limits, false)
+    }
+
+    pub(crate) fn from_wire_with_mdns(
+        wire: Bytes,
+        limits: Limits,
+        mdns: bool,
+    ) -> Result<Self, Error> {
+        decode::decode(wire, limits, mdns)
     }
 
     pub fn to_wire(&self) -> Result<Bytes, Error> {
@@ -112,6 +118,16 @@ fn layer_error(error: Error, available: usize) -> crate::codec::Error {
 fn layer_from_wire(wire: Bytes, mdns: bool) -> Result<Dns, crate::codec::Error> {
     let available = wire.len();
     decode::decode(wire, Limits::default(), mdns).map_err(|error| layer_error(error, available))
+}
+
+pub(crate) fn is_mdns_datagram(registry: &Registry, udp: &Udp, payload: &[u8]) -> bool {
+    registry.first_child_for(
+        BuiltinProtocol::Udp.as_str(),
+        &udp.payload_discriminators(payload),
+    ) == Some((
+        Discriminator(u64::from(MDNS_PORT)),
+        BuiltinProtocol::Dns.id(),
+    ))
 }
 
 fn seed_dns_layer(
@@ -175,12 +191,7 @@ impl Codec for DnsCodec {
             return self.construct(fields);
         };
         construct_layer(self, fields, |fields| {
-            seed_dns_layer(fields, |wire| {
-                registry.first_child_for(
-                    BuiltinProtocol::Udp.as_str(),
-                    &udp.payload_discriminators(wire),
-                ) == Some((Discriminator(MDNS_PORT), BuiltinProtocol::Dns.id()))
-            })
+            seed_dns_layer(fields, |wire| is_mdns_datagram(registry, udp, wire))
         })
     }
 
@@ -300,7 +311,7 @@ impl Codec for DnsCodec {
         // (and LLMNR, which defines no cache-flush bit) keeps classes whole.
         let mdns = context
             .discriminator
-            .is_some_and(|discriminator| discriminator.0 == MDNS_PORT);
+            .is_some_and(|discriminator| discriminator.0 == u64::from(MDNS_PORT));
         let layer = layer_from_wire(input.clone(), mdns)?;
         Ok(Decoded {
             layer: Box::new(layer),

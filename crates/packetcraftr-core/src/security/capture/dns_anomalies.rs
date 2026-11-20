@@ -9,11 +9,13 @@ use crate::{
     budget::Deadline,
     error::BoundaryError,
     protocol::application::dns::RecordValue,
+    registry::Registry,
 };
 use serde_json::json;
 use std::{
     collections::{BTreeMap, BTreeSet},
     net::IpAddr,
+    sync::Arc,
     time::UNIX_EPOCH,
 };
 
@@ -42,9 +44,10 @@ impl Anomalies {
     pub(super) fn new(
         options: DnsOptions,
         app: application::Limits,
+        registry: Arc<Registry>,
     ) -> Result<Self, BoundaryError> {
         Ok(Self {
-            dns: dns::Collector::new(app, [53]).map_err(BoundaryError::from_error)?,
+            dns: dns::Collector::new(app, [53], registry).map_err(BoundaryError::from_error)?,
             grouping: Grouping {
                 options,
                 groups: BTreeMap::new(),

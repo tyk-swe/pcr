@@ -25,7 +25,11 @@ def workspace(files: dict[str, str]):
     historical = root / documents.HISTORICAL[0]
     historical.parent.mkdir(parents=True)
     historical.write_bytes((REPO / documents.HISTORICAL[0]).read_bytes())
-    twins = {relative: "{}" for pair in documents.TWIN_PAIRS for relative in pair}
+    twins = {
+        relative: '{"schema": "packetcraftr.indicators/v1"}'
+        for pair in documents.TWIN_PAIRS
+        for relative in pair
+    }
     base = {
         documents.HISTORICAL_ADR:
             f"| {documents.HISTORICAL[0]} | {documents.HISTORICAL[1]} |\n",
@@ -71,6 +75,20 @@ class CheckDocumentsTests(unittest.TestCase):
         })
         self.assertTrue(any("indicators.json" in problem for problem in problems))
 
+    def test_schema_is_required_even_when_other_documents_claim_the_schema(self):
+        cases = {
+            "examples/documents/second-indicators.json": "{}",
+            "examples/documents/second-indicators.yaml": "schema: 1\n",
+            "examples/documents/second-indicators.yml": "- not an object\n",
+            "crates/packetcraftr/data/second-indicators.json": '{"schema": null}',
+        }
+        for path, source in cases.items():
+            with self.subTest(path=path):
+                self.assertEqual(
+                    self.check({path: source}),
+                    [f"{path}: expected a top-level 'schema' string"],
+                )
+
     def test_invalid_schema_fails_even_when_document_omits_the_affected_property(self):
         schema_path = "schemas/packetcraftr.indicators.v1.schema.json"
         invalid_schema = SCHEMA | {
@@ -84,7 +102,6 @@ class CheckDocumentsTests(unittest.TestCase):
 
     def test_unclaimed_schema_fails(self):
         problems = self.check({
-            "examples/documents/other.json": "{}",
             "schemas/packetcraftr.packet.v1.schema.json": json.dumps(SCHEMA),
         })
         self.assertTrue(any("no document claims" in problem for problem in problems))
@@ -92,7 +109,7 @@ class CheckDocumentsTests(unittest.TestCase):
     def test_twin_drift_fails(self):
         problems = self.check({
             "examples/documents/indicators.json": '{"schema": "packetcraftr.indicators/v1"}',
-            "examples/documents/service-probes.json": '{"changed": true}',
+            "examples/documents/service-probes.json": '{"schema": "packetcraftr.indicators/v1"}\n',
         })
         self.assertTrue(any("byte-identical" in problem for problem in problems))
 

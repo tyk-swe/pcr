@@ -18,11 +18,11 @@ use packetcraftr_netio::{
 };
 
 use super::cache::{NeighborCache, NeighborCacheKey};
-use super::error::{invalid_options, map_io_error};
+use super::error::{invalid_options, map_io_error, spent_io_error};
 use super::evidence::{
     EvidenceBuffer, validate_captured_frame, validate_neighbor_send, validate_request,
 };
-use super::options::Options;
+use super::options::{Bounds, Options};
 use super::wire::{build_request_frame, match_neighbor_response};
 use super::{Error, Request, Resolution};
 
@@ -52,12 +52,38 @@ struct ExchangeOutcome {
 pub(crate) struct State {
     options: Options,
     cache: Arc<NeighborCache>,
+    answers: Answers,
+}
+
+/// Where answers live beside the shared cache.
+#[derive(Clone, Debug)]
+enum Answers {
+    Shared,
     /// One operation's answers, kept for the whole operation so the shared
     /// cache never holds an entry longer, or more entries, than configured.
-    operation: Option<Arc<NeighborCache>>,
-    /// The most answers the operation keeps: at least one per neighbor it
-    /// may resolve, so no answer is evicted and requested again.
-    operation_entries: usize,
+    Operation {
+        cache: Arc<NeighborCache>,
+        /// At least one per neighbor the operation may resolve, so no answer
+        /// is evicted and requested again.
+        max_entries: usize,
+    },
+}
+
+impl Answers {
+    /// Answers kept for an operation resolving up to `max_neighbors`, in the
+    /// same operation cache when one is already pinned.
+    fn pinned(&self, max_neighbors: usize) -> Self {
+        match self {
+            Self::Shared => Self::Operation {
+                cache: Arc::default(),
+                max_entries: max_neighbors,
+            },
+            Self::Operation { cache, max_entries } => Self::Operation {
+                cache: Arc::clone(cache),
+                max_entries: max_neighbors.max(*max_entries),
+            },
+        }
+    }
 }
 
 impl State {
@@ -65,8 +91,7 @@ impl State {
     /// Cached answers need no discovery capture or capture-limit validation.
     pub(crate) fn for_operation(&self, max_neighbors: usize) -> Self {
         Self {
-            operation: Some(self.operation.clone().unwrap_or_default()),
-            operation_entries: max_neighbors.max(self.operation_entries),
+            answers: self.answers.pinned(max_neighbors),
             ..self.clone()
         }
     }
@@ -76,8 +101,7 @@ impl State {
         Self {
             options: self.options.clone(),
             cache: Arc::new(NeighborCache::default()),
-            operation: None,
-            operation_entries: 0,
+            answers: Answers::Shared,
         }
     }
 
@@ -86,58 +110,27 @@ impl State {
         Ok(Self {
             options,
             cache: Arc::new(NeighborCache::default()),
-            operation: None,
-            operation_entries: 0,
+            answers: Answers::Shared,
         })
     }
 
-    /// A resolver sharing this cache that sends one request and waits
-    /// `attempt_timeout` for its reply, capturing at most `max_frames` frames
-    /// and `max_bytes` bytes, each cut at `snap_length`.
-    pub(crate) fn single_attempt(
-        &self,
-        attempt_timeout: std::time::Duration,
-        max_frames: usize,
-        max_bytes: usize,
-        snap_length: usize,
-    ) -> Result<Self, Error> {
-        Self::try_new(self.options.single_attempt(
-            attempt_timeout,
-            max_frames,
-            max_bytes,
-            snap_length,
-        ))
-        .map(|state| Self {
+    /// A resolver sharing this cache that sends one request under `bounds`.
+    pub(crate) fn single_attempt(&self, bounds: Bounds) -> Result<Self, Error> {
+        Self::try_new(self.options.single_attempt(bounds)).map(|state| Self {
             cache: Arc::clone(&self.cache),
-            operation: self.operation.clone(),
-            operation_entries: self.operation_entries,
+            answers: self.answers.clone(),
             ..state
         })
     }
 
     /// A resolver sharing this cache that sends at most one request per
-    /// fresh resolution, waiting at most `attempt_timeout` for its reply and
-    /// capturing at most `max_frames` frames and `max_bytes` bytes, each cut
-    /// at `snap_length`. Its
-    /// answers also live in a cache of its own for the whole operation, so a
-    /// resolution never has to run twice inside it, sized for at least
-    /// `max_neighbors` answers.
-    pub(crate) fn one_attempt(
-        &self,
-        attempt_timeout: std::time::Duration,
-        max_frames: usize,
-        max_bytes: usize,
-        snap_length: usize,
-        max_neighbors: usize,
-    ) -> Result<Self, Error> {
-        Self::try_new(
-            self.options
-                .one_attempt(attempt_timeout, max_frames, max_bytes, snap_length),
-        )
-        .map(|state| Self {
+    /// fresh resolution under `bounds`. Its answers also live in a cache of
+    /// its own for the whole operation, so a resolution never has to run
+    /// twice inside it, sized for at least `max_neighbors` answers.
+    pub(crate) fn one_attempt(&self, bounds: Bounds, max_neighbors: usize) -> Result<Self, Error> {
+        Self::try_new(self.options.one_attempt(bounds)).map(|state| Self {
             cache: Arc::clone(&self.cache),
-            operation: Some(self.operation.clone().unwrap_or_default()),
-            operation_entries: max_neighbors.max(self.operation_entries),
+            answers: self.answers.pinned(max_neighbors),
             ..state
         })
     }
@@ -154,7 +147,11 @@ impl State {
     }
 
     fn lookup(&self, key: &NeighborCacheKey) -> Result<Option<MacAddress>, Error> {
-        let Some(operation) = &self.operation else {
+        let Answers::Operation {
+            cache: operation,
+            max_entries,
+        } = &self.answers
+        else {
             return self.cache.get(key);
         };
         if let Some(mac_address) = operation.get(key)? {
@@ -167,18 +164,22 @@ impl State {
             operation.insert(
                 mac_address,
                 key.clone(),
-                &self.options.for_operation(self.operation_entries),
+                &self.options.for_operation(*max_entries),
             )?;
         }
         Ok(shared)
     }
 
     fn remember(&self, mac_address: MacAddress, key: NeighborCacheKey) -> Result<(), Error> {
-        if let Some(operation) = &self.operation {
+        if let Answers::Operation {
+            cache: operation,
+            max_entries,
+        } = &self.answers
+        {
             operation.insert(
                 mac_address,
                 key.clone(),
-                &self.options.for_operation(self.operation_entries),
+                &self.options.for_operation(*max_entries),
             )?;
         }
         self.cache.insert(mac_address, key, &self.options)
@@ -221,6 +222,7 @@ where
             return Ok(Resolution {
                 mac_address,
                 attempts: 0,
+                request_bytes: 0,
                 cache_hit: true,
                 captured: Vec::new(),
                 evidence_truncated: false,
@@ -230,13 +232,10 @@ where
 
         let request_bytes = build_request_frame(request)?;
         let decision = discovery_decision(request);
-        let capture_request = capture::Request {
-            interface: request.interface.clone(),
-            limits: self.state.options.capture_limits(),
-            filter: None,
-            promiscuous: false,
-            native: Default::default(),
-        };
+        let capture_request = capture::Request::new(
+            request.interface.clone(),
+            self.state.options.capture_limits(),
+        );
         capture_request
             .validate()
             .map_err(|error| map_io_error(request, "validating capture request", error))?;
@@ -294,6 +293,7 @@ where
                 interface: request.interface.name.clone(),
                 target: request.target,
                 attempts: outcome.attempts,
+                request_bytes: request_bytes.len(),
                 captured: outcome.captured,
                 evidence_truncated: outcome.evidence_truncated,
                 capture_statistics: statistics,
@@ -303,6 +303,7 @@ where
         Ok(Resolution {
             mac_address,
             attempts: outcome.attempts,
+            request_bytes: request_bytes.len(),
             cache_hit: false,
             captured: outcome.captured,
             evidence_truncated: outcome.evidence_truncated,
@@ -371,18 +372,12 @@ where
                 let captured_frame = match capture.next_captured_frame(&wait) {
                     Ok(captured_frame) => captured_frame,
                     Err(source) => {
-                        let (captured, evidence_truncated) = evidence.into_evidence();
-                        let mut error =
-                            map_io_error(request, "receiving discovery response", source);
-                        let Error::Io { spent, .. } = &mut error else {
-                            unreachable!()
-                        };
-                        *spent = Some(Box::new(super::error::FailureEvidence {
-                            attempts: attempt,
-                            captured: captured.into_boxed_slice(),
-                            evidence_truncated,
-                        }));
-                        return Err(error);
+                        return Err(spent_io_error(
+                            request,
+                            "receiving discovery response",
+                            source,
+                            evidence.spent(attempt),
+                        ));
                     }
                 };
                 let Some(captured_frame) = captured_frame else {
@@ -418,15 +413,21 @@ where
                 evidence.retain(frame);
             }
         }
-        {
-            let (captured, evidence_truncated) = evidence.into_evidence();
-            Ok(ExchangeOutcome {
-                mac_address: None,
-                attempts,
-                captured,
-                evidence_truncated,
-            })
+        if let Err(cancelled) = deadline.check_cancelled() {
+            return Err(spent_io_error(
+                request,
+                "waiting for discovery response",
+                cancelled.into(),
+                evidence.spent(attempts),
+            ));
         }
+        let (captured, evidence_truncated) = evidence.into_evidence();
+        Ok(ExchangeOutcome {
+            mac_address: None,
+            attempts,
+            captured,
+            evidence_truncated,
+        })
     }
 
     fn drain_pre_request<S: Session>(

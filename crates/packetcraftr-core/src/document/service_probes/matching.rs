@@ -6,18 +6,34 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::{
     Candidate, Confidence, Corpus, Field, Identification, MAX_CANDIDATES, MAX_FIELD_BYTES,
     MAX_OBSERVED_FIELDS, MAX_RESPONSE_BYTES, MatchOutcome, MatchProvenance, Observation,
-    ObservationOutcome, Probe, SupportedValue, ValueSource, VersionExtraction,
+    ObservationOutcome, Probe, SupportedValue, Validated, ValueSource, VersionExtraction,
 };
 
 impl Corpus {
+    /// Validates the corpus, then identifies as [`Validated::identify`] does.
+    /// Callers identifying many observations should validate once instead.
+    pub fn identify(&self, probe: &Probe, observation: &Observation) -> Identification {
+        match self.validated() {
+            Ok(corpus) => corpus.identify(probe, observation),
+            Err(_) => Identification {
+                outcome: MatchOutcome::Malformed,
+                candidates: Vec::new(),
+            },
+        }
+    }
+}
+
+impl Validated<'_> {
     /// Deterministic anchored literal matching over parsed protocol fields.
     /// Ambiguity erases all exact versions, including competing versions of
     /// the same product. Incomplete evidence never yields a candidate.
     pub fn identify(&self, probe: &Probe, observation: &Observation) -> Identification {
         // Public structs also permit construction without a document parser.
         // Keep that route bounded and require the exact declared probe.
-        if self.validate().is_err()
-            || !self.probes.contains(probe)
+        if self
+            .probes
+            .get(probe.id.as_str())
+            .is_none_or(|declared| *declared != probe)
             || observation.fields.len() > MAX_OBSERVED_FIELDS
             || observation
                 .fields
@@ -49,12 +65,8 @@ impl Corpus {
         }
         let mut candidates: Vec<Candidate> = Vec::new();
         let mut candidate_indices: BTreeMap<_, usize> = BTreeMap::new();
-        for (rule_index, rule) in self
-            .matches
-            .iter()
-            .enumerate()
-            .filter(|(_, rule)| rule.probe == probe.id)
-        {
+        for &rule_index in self.rules.get(probe.id.as_str()).into_iter().flatten() {
+            let rule = &self.corpus.matches[rule_index];
             if observation.protocol != Some(rule.field.protocol()) {
                 continue;
             }
@@ -94,8 +106,8 @@ impl Corpus {
                     version,
                     confidence,
                     provenance: MatchProvenance {
-                        corpus: self.name.clone(),
-                        version: self.version.clone(),
+                        corpus: self.corpus.name.clone(),
+                        version: self.corpus.version.clone(),
                         probe: probe.id.clone(),
                         rule: rule.id.clone(),
                         field_indices: vec![index],

@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use super::{
-    Captured, Limits, Metadata, NativeSettings, Provider, Realized, RealizedSettings, Request,
-    Session, Stats,
+    ARMING, Captured, Limits, Metadata, Provider, Realized, RealizedSettings, Request, Session,
+    Settings, Stats, admit,
 };
 use crate::{Error, interface::Id};
 use packetcraftr_core::clock::{Clock, SystemClock};
@@ -27,21 +27,24 @@ const MAX_INTERFACE_NAME_BYTES: usize = 4096;
 #[derive(Clone, Debug)]
 pub struct GroupRequest {
     pub interfaces: Vec<Id>,
-    pub limits: Limits,
-    pub filter: Option<String>,
-    pub promiscuous: bool,
-    pub native: NativeSettings,
+    pub settings: super::Settings,
 }
 
 impl GroupRequest {
+    pub fn new(interfaces: Vec<Id>, limits: Limits) -> Self {
+        Self {
+            interfaces,
+            settings: Settings::new(limits),
+        }
+    }
+
     pub fn validate(&self) -> Result<(), Error> {
-        super::validate_filter_length(self.filter.as_deref())?;
+        self.settings.validate_filter()?;
         let count = self.interfaces.len();
         if count == 0 || count > MAX_SOURCES {
             return Err(invalid("select 1..=15 capture interfaces"));
         }
-        self.limits.validate()?;
-        self.native.validate(&self.limits)?;
+        self.settings.validate_bounds()?;
         let mut identities = HashSet::new();
         for interface in &self.interfaces {
             if !interface.is_complete()
@@ -51,8 +54,8 @@ impl GroupRequest {
                 return Err(invalid("interface identities must be distinct and bounded"));
             }
         }
-        if self.limits.max_frames < count || self.limits.max_bytes / count < self.limits.snap_length
-        {
+        let limits = &self.settings.limits;
+        if limits.max_frames < count || limits.max_bytes / count < limits.snap_length {
             return Err(invalid(
                 "shared queues must hold at least one full snapshot per interface",
             ));
@@ -62,21 +65,22 @@ impl GroupRequest {
 
     fn partition(&self) -> Vec<Request> {
         let count = self.interfaces.len();
+        let limits = self.settings.limits;
         self.interfaces
             .iter()
             .enumerate()
             .map(|(index, interface)| Request {
                 interface: interface.clone(),
-                limits: Limits {
-                    max_frames: self.limits.max_frames / count
-                        + usize::from(index < self.limits.max_frames % count),
-                    max_bytes: self.limits.max_bytes / count
-                        + usize::from(index < self.limits.max_bytes % count),
-                    ..self.limits
+                settings: Settings {
+                    limits: Limits {
+                        max_frames: limits.max_frames / count
+                            + usize::from(index < limits.max_frames % count),
+                        max_bytes: limits.max_bytes / count
+                            + usize::from(index < limits.max_bytes % count),
+                        ..limits
+                    },
+                    ..self.settings.clone()
                 },
-                filter: self.filter.clone(),
-                promiscuous: self.promiscuous,
-                native: self.native.clone(),
             })
             .collect()
     }
@@ -197,7 +201,7 @@ impl<C: Session> Group<C> {
         }
         self.lifecycle = Lifecycle::Armed;
         for index in 0..self.requests.len() {
-            deadline.check_cancelled()?;
+            admit(deadline, ARMING)?;
             let request = &self.requests[index];
             let capture =
                 provider
@@ -217,6 +221,7 @@ impl<C: Session> Group<C> {
                     reason: "activation metadata disagrees with the request",
                 });
             }
+            admit(deadline, ARMING)?;
         }
         Ok(())
     }
@@ -328,10 +333,11 @@ impl<C: Session> Group<C> {
 
 impl<C: Session> Session for Group<C> {
     fn observation_quality(&self) -> super::ObservationQuality {
-        self.snapshot().iter().fold(
-            super::ObservationQuality::NoReportedLoss,
-            |quality, source| quality.combine(source.observation_quality),
-        )
+        self.snapshot()
+            .into_iter()
+            .map(|source| source.observation_quality)
+            .reduce(super::ObservationQuality::combine)
+            .unwrap_or_default()
     }
     fn metadata(&self) -> &Metadata {
         self.sources

@@ -3,7 +3,8 @@
 
 use crate::command_options::InterfaceSelector;
 use crate::command_options::{
-    CaptureLimitsArgs, CompressionArgs, DecodeArgs, LongTimeoutArgs, TrafficBudgetArgs, TreeArgs,
+    CaptureLimitsArgs, CompressionArgs, DecodeArgs, LongTimeoutArgs, ScopeArgs, TrafficBudgetArgs,
+    TreeArgs,
 };
 use packetcraftr_netio::capture::{TimestampPrecision, TimestampSource};
 
@@ -99,6 +100,8 @@ pub(crate) struct Args {
     pub(crate) limits: CaptureLimitsArgs,
     #[command(flatten)]
     pub(crate) budgets: TrafficBudgetArgs,
+    #[command(flatten)]
+    pub(crate) scope: ScopeArgs,
 }
 
 /// The timestamp sources the capture contract can represent, spelled the same

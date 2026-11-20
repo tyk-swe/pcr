@@ -100,3 +100,39 @@ Limits: 64 KiB text, 1024 terms, 1024 set members, 64 nesting levels.
 
 See also `packetcraftr reference topics expressions`.
 "#;
+
+pub(super) const SCOPE: &str = r"Engagement scope
+
+Live commands accept `--scope-file PATH` with a `packetcraftr.scope/v1` JSON
+document (a regular file, at most 1 MiB). One scope can be reused across
+send, exchange, scan, plan, differential, replay, fuzz, traceroute, dns,
+identify, identify-os, capture (budgets only), and the TLS and HTTP audits.
+
+A scope only narrows. Its `allow_*` booleans are ceilings, so a scope can
+take away a policy opt-in the flags gave and can never grant one they did
+not. `max_packets` and `max_bytes` keep the smaller of the scope and flag
+budgets. A destination must satisfy the flag allowlist, every scope
+`allowed_destinations` group, and no `denied_destinations` entry, and the
+public destination check still applies after all of those.
+
+Fields:
+  schema (required)         the string `packetcraftr.scope/v1`
+  label (required)          printable operator label, 1 to 128 bytes
+  allowed_destinations      IP addresses or canonical CIDR networks
+  denied_destinations       IP addresses or canonical CIDR networks
+  allow_public_destinations, allow_hostname_resolution,
+  allow_permissive_packets, allow_source_spoofing
+                            boolean ceilings, false when omitted
+  max_packets, max_bytes    optional budget ceilings
+
+Unknown fields are rejected. Destination entries must spell the canonical
+network address, so `192.0.2.0/24` is accepted and `192.0.2.1/24` is not.
+
+Run `packetcraftr network preflight --scope-file PATH` to validate a scope
+without sending anything. It prints the label and a digest of the scope
+contents, which is stable across JSON formatting and list order, so an
+engagement record can name the exact scope a run used.
+
+See `examples/documents/scope.json` and
+`schemas/packetcraftr.scope.v1.schema.json`.
+";

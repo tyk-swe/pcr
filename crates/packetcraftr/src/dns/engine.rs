@@ -11,7 +11,8 @@ use packetcraftr_core::registry::Registry;
 use crate::client::admission::approve_operation;
 use crate::clock::Clock;
 use crate::engine::execution::Context;
-use crate::engine::execution::{Executor, publisher};
+use crate::engine::execution::publisher;
+use crate::engine::operation::{Workflow as OperationWorkflow, WorkflowSetup};
 use crate::evidence::retention::EvidenceState;
 use crate::exchange::WorkflowExecutor;
 use crate::policy::Authorizer;
@@ -22,12 +23,13 @@ use crate::{Client, Sink, Stats};
 
 use super::EVIDENCE_DIAGNOSTICS;
 use super::error::Error;
-use super::executor::{Exchange, TcpQuerier};
 use super::plan::{OperationLimits, operation_limits};
 use super::{Event, EventContext, Outcome, Report, Request, batch};
 
 mod attempts;
 mod tcp;
+#[cfg(test)]
+mod tests;
 
 use attempts::Retries;
 
@@ -52,25 +54,20 @@ impl<P: PacketProviders + TargetProviders + TcpProviders, K: Clock> Client<P, K>
     where
         S: Sink<Event, Ack = ()>,
     {
-        let policy = operation.policy(&self.policy);
-        let mut admission =
-            crate::client::admission::Admission::new(&policy, self.providers.resolver());
-        let mut deadline = operation.deadline(self, request.limits.max_duration);
+        let setup = WorkflowSetup::new(self, operation);
+        let mut workflow = setup.start(self, request.limits.max_duration);
         let publish = publisher(&operation.runtime, sink, Error::from, |source| {
             Error::Output { source }
         })?;
         run(
             &request,
-            &mut admission,
-            &operation.registry,
+            &mut workflow,
             &mut WorkflowExecutor::new(
                 self,
                 operation,
                 send_options(&request),
                 request.collection.clone(),
             ),
-            &mut self.clock.clone(),
-            &mut deadline,
             publish,
         )
     }
@@ -88,15 +85,15 @@ impl<P: PacketProviders + TargetProviders + TcpProviders, K: Clock> Client<P, K>
     where
         Q: std::borrow::Borrow<Request>,
     {
-        batch::limits(questions, u64::from(self.neighbors.max_attempts()))
+        self.dns_limits_with(questions, u64::from(self.neighbors.max_attempts()))
     }
 
-    pub(crate) fn dns_limits_in<Q: std::borrow::Borrow<Request>>(
+    pub(crate) fn dns_limits_with<Q: std::borrow::Borrow<Request>>(
         &self,
         questions: impl IntoIterator<Item = Q>,
-        operation: &crate::engine::operation::Operation,
+        neighbor_attempts: u64,
     ) -> Result<DnsOperation, Error> {
-        batch::limits(questions, u64::from(operation.neighbors.max_attempts()))
+        batch::limits(questions, neighbor_attempts)
     }
 
     /// Runs DNS questions in input order under one deadline: the shortest `limits.max_duration`.
@@ -105,39 +102,44 @@ impl<P: PacketProviders + TargetProviders + TcpProviders, K: Clock> Client<P, K>
     where
         S: Sink<batch::Event, Ack = ()>,
     {
-        let operation = crate::engine::operation::Operation::new(self, request.max_duration()?);
-        self.dns_batch_in(request, sink, &operation)
+        let prepared = batch::Prepared::new(&request, u64::from(self.neighbors.max_attempts()))?;
+        let operation = crate::engine::operation::Operation::new(self, prepared.max_duration());
+        self.dns_batch_in(prepared, sink, &operation)
     }
 
     pub(crate) fn dns_batch_in<S>(
         &self,
-        request: batch::Request,
+        prepared: batch::Prepared<'_>,
         sink: S,
         operation: &crate::engine::operation::Operation,
     ) -> Result<batch::Report, Error>
     where
         S: Sink<batch::Event, Ack = ()>,
     {
-        let policy = operation.policy(&self.policy);
-        let mut admission =
-            crate::client::admission::Admission::new(&policy, self.providers.resolver());
-        let mut deadline = operation.deadline(self, request.max_duration()?);
+        let setup = WorkflowSetup::new(self, operation);
+        let mut workflow = setup.start(self, prepared.max_duration());
         let publish = publisher(&operation.runtime, sink, Error::from, |source| {
             Error::Output { source }
         })?;
-        let first = &request.questions[0];
+        let first = prepared.first();
+        let OperationWorkflow {
+            authorizer: admission,
+            registry,
+            clock,
+            deadline,
+        } = &mut workflow;
         batch::run(
-            &request,
-            &mut admission,
-            &operation.registry,
+            prepared,
+            admission,
+            registry,
             &mut WorkflowExecutor::new(
                 self,
                 operation,
                 send_options(first),
                 first.collection.clone(),
             ),
-            &mut self.clock.clone(),
-            &mut deadline,
+            clock,
+            deadline,
             publish,
         )
     }
@@ -150,21 +152,24 @@ fn send_options(request: &Request) -> crate::send::Options {
     }
 }
 
-pub(super) fn run<A, E, C, F>(
+pub(super) fn run<A, P, C, F>(
     request: &Request,
-    authorizer: &mut A,
-    registry: &Registry,
-    executor: &mut E,
-    clock: &mut C,
-    deadline: &mut Deadline,
+    workflow: &mut OperationWorkflow<A, C>,
+    executor: &mut WorkflowExecutor<'_, P, C>,
     emit: F,
 ) -> Result<Report, Error>
 where
     A: Authorizer + ResolveTarget,
-    E: Executor<Exchange> + TcpQuerier,
+    P: PacketProviders + TcpProviders,
     C: Clock,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
+    let OperationWorkflow {
+        authorizer,
+        registry,
+        clock,
+        deadline,
+    } = workflow;
     deadline.check_cancelled()?;
     let mut prepared = PreparedOperation::new(request)?;
     // Approved before server resolution, unlike `admit_operation`'s resolve-first order.
@@ -219,18 +224,18 @@ impl<'a> PreparedOperation<'a> {
     }
 
     /// The caller authorizes the cost first; endpoint authorization still runs per attempt.
-    pub(super) fn execute<A, E, C, F>(
+    pub(super) fn execute<A, P, C, F>(
         &mut self,
         authorizer: &mut A,
         registry: &Registry,
-        executor: &mut E,
+        executor: &mut WorkflowExecutor<'_, P, C>,
         clock: &mut C,
         deadline: &mut Deadline,
         mut emit: F,
     ) -> Result<(), Error>
     where
         A: Authorizer + ResolveTarget,
-        E: Executor<Exchange> + TcpQuerier,
+        P: PacketProviders + TcpProviders,
         C: Clock,
         F: FnMut(Event, &Deadline) -> Result<(), Error>,
     {

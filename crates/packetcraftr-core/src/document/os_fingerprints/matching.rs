@@ -166,7 +166,7 @@ pub fn evaluate(corpus: &Corpus, observations: &[Observation]) -> Result<Match, 
             Outcome::Matched => "observed stack satisfies qualified family signatures",
             Outcome::Ambiguous => "observed stack satisfies signatures for multiple families",
             Outcome::Unknown => "suitable fingerprint has no qualifying signature",
-            Outcome::Inconclusive => unreachable!(),
+            Outcome::Inconclusive => unreachable!("match outcome is never inconclusive"),
         }
         .into(),
         candidates,
@@ -185,7 +185,9 @@ fn matches(test: &Test, observation: &Observation) -> bool {
             Test::WindowScale(value) => tcp.window_scale == Some(*value),
             Test::SackPermitted(value) => tcp.sack_permitted == *value,
             Test::Timestamps(value) => tcp.timestamps == *value,
-            Test::IcmpType(_) | Test::IcmpCode(_) => unreachable!(),
+            Test::IcmpType(_) | Test::IcmpCode(_) => {
+                unreachable!("ICMP tests are handled by the outer match")
+            }
         }),
     }
 }

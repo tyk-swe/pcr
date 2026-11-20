@@ -5,7 +5,7 @@ use super::{
     Context, DEFAULT_MAX_FILTER_BYTES, Error, Limits, Requirements,
     ast::{Op, Predicate},
     eval, parser,
-    path::{FieldRef, FieldSource, FrameField, Occurrence},
+    path::{FieldRef, FieldSource, FrameField, LayerRead, Occurrence},
 };
 use crate::{field, registry::Registry};
 
@@ -90,16 +90,17 @@ impl Projection {
             FieldSource::Frame(FrameField::Protocols | FrameField::LayerCount) => false,
             FieldSource::Frame(_) | FieldSource::Stream(_) => true,
             // A list selector or `#last` picks from what was decoded, so a cut-off capture may hide the real choice.
-            FieldSource::NestedLayer {
-                occurrence,
-                selection,
-                ..
-            } => matches!(occurrence, Some(Occurrence::Nth(_))) && selection.is_none(),
-            FieldSource::Layer {
-                binding,
-                occurrence,
-                ..
-            } => matches!(occurrence, Some(Occurrence::Nth(_))) && binding.fields().len() == 1,
+            FieldSource::Layer { read, .. } => match read {
+                LayerRead::Selected { .. } => false,
+                LayerRead::Nested { occurrence, .. } => {
+                    matches!(occurrence, Some(Occurrence::Nth(_)))
+                }
+                LayerRead::Fields {
+                    binding,
+                    occurrence,
+                    ..
+                } => matches!(occurrence, Some(Occurrence::Nth(_))) && binding.fields().len() == 1,
+            },
         })
     }
 

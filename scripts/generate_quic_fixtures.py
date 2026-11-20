@@ -112,13 +112,17 @@ def handshake(kind: int, body: bytes) -> bytes:
     return bytes([kind]) + len(body).to_bytes(3, "big") + body
 
 
-def hello(client: bool) -> bytes:
+def alpn(value: bytes) -> bytes:
+    return extension(16, struct.pack("!HB", len(value) + 1, len(value)) + value)
+
+
+def hello(client: bool, application: bytes = b"quic-test") -> bytes:
     body = b"\3\3" + bytes([0x11 if client else 0x22]) * 32 + b"\0"
     if client:
         name = b"quic.example.test"
         server_name = b"\0" + struct.pack("!H", len(name)) + name
         extensions = extension(0, struct.pack("!H", len(server_name)) + server_name)
-        extensions += extension(16, b"\0\x0a\x09quic-test") + extension(43, b"\2\3\4")
+        extensions += alpn(application) + extension(43, b"\2\3\4")
         extensions += extension(57, varint(3) + varint(2) + varint(1200))
         body += b"\0\2\x13\1\1\0"
     else:
@@ -131,8 +135,8 @@ def crypto(data: bytes) -> bytes:
     return b"\6\0" + varint(len(data)) + data
 
 
-def stream(identifier: int, offset: int, data: bytes) -> bytes:
-    return b"\x0f" + varint(identifier) + varint(offset) + varint(len(data)) + data
+def stream(identifier: int, offset: int, data: bytes, fin: bool = True) -> bytes:
+    return bytes([0x0f if fin else 0x0e]) + varint(identifier) + varint(offset) + varint(len(data)) + data
 
 
 def ip_packet(payload: bytes, client: bool, migrated: bool = False) -> bytes:
@@ -147,20 +151,52 @@ def ip_packet(payload: bytes, client: bool, migrated: bool = False) -> bytes:
     return bytes(header) + udp
 
 
-def packets(version: Version) -> list[bytes]:
-    extensions = extension(16, b"\0\x0a\x09quic-test") + extension(57, varint(14) + varint(1) + varint(4))
+def handshake_packets(version: Version, application: bytes) -> list[bytes]:
+    extensions = alpn(application) + extension(57, varint(14) + varint(1) + varint(4))
     encrypted = handshake(8, struct.pack("!H", len(extensions)) + extensions) + handshake(20, bytes([0x77]) * 32)
-    new_cid = b"\x18\1\0\x08" + MIGRATED + bytes([0xAA]) * 16
     return [
-        ip_packet(long_packet(version, "initial", True, 0, crypto(hello(True))), True),
+        ip_packet(long_packet(version, "initial", True, 0, crypto(hello(True, application))), True),
         ip_packet(long_packet(version, "initial", False, 0, crypto(hello(False))) + long_packet(version, "handshake", False, 0, crypto(encrypted)), False),
         ip_packet(long_packet(version, "handshake", True, 0, crypto(handshake(20, bytes([0x88]) * 32))), True),
+    ]
+
+
+def packets(version: Version) -> list[bytes]:
+    new_cid = b"\x18\1\0\x08" + MIGRATED + bytes([0xAA]) * 16
+    return handshake_packets(version, b"quic-test") + [
         ip_packet(short_packet(version, True, 1, stream(0, 5, b" world")), True),
         ip_packet(short_packet(version, True, 0, b"\x0e\0\0\5hello"), True),
         ip_packet(short_packet(version, False, 0, b"\x1e" + stream(0, 0, b"received hello world\n")), False),
         ip_packet(short_packet(version, False, 1, new_cid + b"\x1aabcdefgh" + b"\x31\5probe"), False, migrated=True),
         ip_packet(short_packet(version, True, 2, b"\x1babcdefgh" + stream(4, 0, b"updated keys\n"), update=True, migrated=True), True, migrated=True),
         ip_packet(short_packet(version, False, 2, b"\x1d\0\4done"), False),
+    ]
+
+
+def http3_frame(kind: int, payload: bytes) -> bytes:
+    return varint(kind) + varint(len(payload)) + payload
+
+
+def http3_packets(version: Version) -> list[bytes]:
+    settings = b"\x00" + http3_frame(4, varint(1) + varint(128) + varint(7) + varint(4))
+    authority = b"\x50\x0c" + b"example.test"
+    request = http3_frame(1, b"\x02\x80\xd1\xd7\x10" + authority)
+    other_request = http3_frame(1, b"\x00\x00\xd1\xd7\xc1" + authority)
+    encoder = b"\x02\x3f\x61\xc1\x0d" + b"/private-demo"
+    response = (
+        http3_frame(1, b"\x00\x00\xd8")
+        + http3_frame(1, b"\x00\x00\xd9")
+        + http3_frame(0, b"synthetic response body")
+        + http3_frame(1, b"\x00\x00\x26x-test\x01\xff")
+    )
+    other_response = http3_frame(1, b"\x00\x00\xff\x01")
+    return handshake_packets(version, b"h3") + [
+        ip_packet(short_packet(version, True, 0, stream(2, 0, settings, False)
+                               + stream(0, 0, request) + stream(4, 0, other_request)), True),
+        ip_packet(short_packet(version, False, 0, b"\x1e" + stream(3, 0, settings, False)
+                               + stream(0, 0, response) + stream(4, 0, other_response)), False),
+        ip_packet(short_packet(version, True, 1, stream(6, 0, encoder, False)), True),
+        ip_packet(short_packet(version, False, 1, b"\x1d\0\0"), False),
     ]
 
 
@@ -174,6 +210,14 @@ def write_pcap(path: Path, records: list[tuple[int, bytes, int]]) -> None:
     header = struct.pack("<IHHIIII", 0xA1B2C3D4, 2, 4, 0, 0, 65535, 101)
     body = b"".join(struct.pack("<IIII", timestamp // 1000000, timestamp % 1000000, len(packet), original) + packet for timestamp, packet, original in records)
     path.write_bytes(header + body)
+
+
+def write_pcapng(path: Path, packets: list[bytes]) -> None:
+    capture = block(0x0A0D0D0A, struct.pack("<IHHq", 0x1A2B3C4D, 1, 0, -1))
+    capture += block(1, struct.pack("<HHI", 101, 0, 65535))
+    for index, packet in enumerate(packets):
+        capture += block(6, struct.pack("<IIIII", 0, 0, 1000000 + index * 10000, len(packet), len(packet)) + packet)
+    path.write_bytes(capture)
 
 
 def main() -> None:
@@ -198,14 +242,12 @@ def main() -> None:
     early = ip_packet(protect(early_secret, 1, header + bytes(4), len(header), 0, plain), True)
     rejected = [demo[0], early, demo[1], ip_packet(short_packet(1, True, 1, stream(0, 0, b"replacement")), True), ip_packet(short_packet(1, False, 0, b"\x1d\0\0"), False)]
     write_pcap(directory / "quic-demo-early-data.pcap", [(1000000 + index * 10000, packet, len(packet)) for index, packet in enumerate(rejected)])
-    v2 = block(0x0A0D0D0A, struct.pack("<IHHq", 0x1A2B3C4D, 1, 0, -1))
-    v2 += block(1, struct.pack("<HHI", 101, 0, 65535))
-    for index, packet in enumerate(packets(2)):
-        v2 += block(6, struct.pack("<IIIII", 0, 0, 1000000 + index * 10000, len(packet), len(packet)) + packet)
-    (directory / "quic-demo-v2.pcapng").write_bytes(v2)
+    write_pcapng(directory / "quic-demo-v2.pcapng", packets(2))
+    write_pcapng(directory / "http3-demo.pcapng", http3_packets(2))
     keylog = "# Synthetic fixture secrets only, generated without an endpoint\n"
     keylog += "".join(f"{label} {(bytes([0x11]) * 32).hex()} {secret.hex()}\n" for label, secret in SECRETS.items())
     (directory / "quic-demo.keys").write_text(keylog)
+    (directory / "http3-demo.keys").write_text(keylog)
     (directory / "quic-demo-early-data.keys").write_text(keylog + f"CLIENT_EARLY_TRAFFIC_SECRET {(bytes([0x11]) * 32).hex()} {early_secret.hex()}\n")
 
 

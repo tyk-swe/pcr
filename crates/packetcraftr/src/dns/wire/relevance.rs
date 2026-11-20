@@ -5,7 +5,6 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::dns::CLASS_IN;
 use crate::dns::{Name, QueryType, Record, RecordValue, RejectedRecord, Section};
-use packetcraftr_core::protocol::application::dns::TYPE_OPT;
 
 const TYPE_NS: u16 = 2;
 const TYPE_CNAME: u16 = 5;
@@ -245,6 +244,9 @@ impl RejectionAudit {
             .zip(accepted.iter().copied())
             .enumerate()
         {
+            if matches!(record.value, RecordValue::Opt(_)) {
+                continue;
+            }
             if accepted {
                 kept.push(record);
             } else {
@@ -276,8 +278,6 @@ impl RejectionAudit {
 fn rejection_reason<'a>(record: &Record, default: &'a str) -> &'a str {
     if record.class != CLASS_IN {
         "record class is not IN"
-    } else if record.value.type_code() == TYPE_OPT {
-        "EDNS OPT metadata is not accepted as question data"
     } else {
         default
     }

@@ -53,7 +53,7 @@ impl ReassemblyDispatch {
         };
 
         // Only matched frames advance TCP expiry.
-        let (now, _) = self.clock.at(timestamp, number)?;
+        let now = self.clock.at(timestamp, number)?;
         let sweep_due = self.clock.should_sweep(now);
         let pushable = segment.as_ref().is_some_and(|segment| {
             !segment.payload.is_empty() || segment.syn || segment.fin || segment.rst

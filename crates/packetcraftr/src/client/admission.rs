@@ -10,6 +10,8 @@ mod selection;
 pub(crate) use approval::{approve_operation, resolve_selected, wire_limits};
 pub(crate) use selection::{DeclaredTargets, FamilyGate, admit_operation, admit_selection};
 
+use std::borrow::Cow;
+
 use packetcraftr_core::error::BoundaryError;
 
 use crate::Client;
@@ -18,13 +20,16 @@ use crate::providers::TargetProviders;
 use crate::target::{Authorized, ResolveTarget, Resolver, Target};
 
 pub(crate) struct Admission<'c> {
-    policy: &'c Policy,
+    policy: Cow<'c, Policy>,
     resolver: &'c dyn Resolver,
 }
 
 impl<'c> Admission<'c> {
-    pub(crate) fn new(policy: &'c Policy, resolver: &'c dyn Resolver) -> Self {
-        Self { policy, resolver }
+    pub(crate) fn new(policy: impl Into<Cow<'c, Policy>>, resolver: &'c dyn Resolver) -> Self {
+        Self {
+            policy: policy.into(),
+            resolver,
+        }
     }
 }
 
@@ -50,6 +55,9 @@ impl ResolveTarget for Admission<'_> {
 
 impl<P: TargetProviders, K> Client<P, K> {
     pub(crate) fn admission(&self) -> Admission<'_> {
-        Admission::new(&self.policy, self.providers.resolver())
+        Admission::new(
+            Cow::Borrowed(self.policy.as_ref()),
+            self.providers.resolver(),
+        )
     }
 }

@@ -177,25 +177,26 @@ pub struct Source {
 impl From<&packetcraftr::capture::Source> for Source {
     fn from(source: &packetcraftr::capture::Source) -> Self {
         Self {
-            capture_id: source.index as u32,
-            native_interface: source.metadata.interface.clone().into(),
-            link_type: source.metadata.link_type.0,
-            snap_length: source.metadata.snap_length,
+            capture_id: source.native.index as u32,
+            native_interface: source.native.metadata.interface.clone().into(),
+            link_type: source.native.metadata.link_type.0,
+            snap_length: source.native.metadata.snap_length,
             capture_settings: source
+                .native
                 .metadata
                 .native
                 .reported()
-                .then(|| source.metadata.native.into()),
-            queue_frames: source.limits.max_frames,
-            queue_bytes: source.limits.max_bytes,
-            overflow_policy: source.limits.overflow_policy.into(),
-            metadata_valid: source.metadata_valid,
-            ready: source.ready,
-            shutdown_confirmed: source.shutdown_confirmed,
-            statistics_valid: source.statistics_valid,
-            statistics: source.statistics.into(),
-            delivered_frames: source.delivered_frames,
-            delivered_bytes: source.delivered_bytes,
+                .then(|| source.native.metadata.native.into()),
+            queue_frames: source.native.limits.max_frames,
+            queue_bytes: source.native.limits.max_bytes,
+            overflow_policy: source.native.limits.overflow_policy.into(),
+            metadata_valid: source.native.metadata_valid,
+            ready: source.native.ready,
+            shutdown_confirmed: source.native.shutdown_confirmed,
+            statistics_valid: source.native.statistics_valid,
+            statistics: source.native.statistics.into(),
+            delivered_frames: source.native.delivered_frames,
+            delivered_bytes: source.native.delivered_bytes,
             admitted_frames: source.admitted_frames,
             matched_frames: source.matched_frames,
             emitted_frames: source.emitted_frames,

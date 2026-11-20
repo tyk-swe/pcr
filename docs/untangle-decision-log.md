@@ -16,6 +16,16 @@ Baseline before any edit. `cargo test --locked --workspace` passed, and
 `scripts/check_file_lengths.py` passed. The counted coupling patterns sit at
 their ceilings. Everything below is what those counters cannot see.
 
+## Index
+
+| Pass | Sections |
+| --- | --- |
+| Initial audit | [Periphery](#periphery-scripts-schemas-examples-fuzz-ci), [packetcraftr-core](#packetcraftr-core), [packetcraftr-netio](#packetcraftr-netio), [packetcraftr](#packetcraftr), [packetcraftr-cli](#packetcraftr-cli) |
+| Verification and deferred work | [Comments and tests](#comments-and-tests-sweep), [initial re-check](#initial-re-check), [deferred pass](#deferred-pass), [deferred pass re-check](#deferred-pass-re-check), [confirmation](#confirmation-round) |
+| November 6–7 | [Follow-up audit](#follow-up-audit-on-2026-11-06), [structural cleanup](#structural-cleanup-2026-11-07) |
+| November 10 | [CLI rendering folder](#cli-rendering-folder-2026-11-10), [module depth sweep](#module-depth-sweep-2026-11-10) |
+| November 11–15 | [Scan capture epochs](#scan-capture-epochs-2026-11-11), [hotspot modules](#hotspot-module-deepening-2026-11-12), [deferred list](#deferred-list-deepening-2026-11-15) |
+
 ## Periphery (scripts, schemas, examples, fuzz, CI)
 
 - Parse and compare the layer tables instead of hand-copying them.
@@ -293,7 +303,7 @@ differential fixture that was built through the code under test. It removed
 no tests, because every candidate it examined still fails on a real
 regression, and the candidates are recorded as kept with their reasons.
 
-## Re-check round
+## Initial re-check
 
 Independent re-audits and a two-axis review of the whole diff then found
 and fixed a second, smaller set. The layer-table guard now fails when a
@@ -475,7 +485,7 @@ finished there move out of their deferred sections into this record.
   takes its payload ceiling from it and core's own service-probe
   observations embed its payload type.
 
-## Re-check round
+## Deferred pass re-check
 
 Fresh subagent audits over the finished tree found the following, each
 verified again in the code before fixing.
@@ -858,3 +868,357 @@ Piped and `--color never` output is unchanged. With colour enabled, topic
 headings such as `Values:` and `Operators:` are now styled like other
 headings, and plain lines that merely begin with `error`, `warning`, or
 `info` are no longer coloured.
+
+## Module depth sweep, 2026-11-10
+
+This pass ranked source files by recent churn times size and audited the
+hottest clusters in all four crates for shallow modules. It looked for
+pass-throughs, repeated multi-step sequences, positional knob clusters, and
+rules that callers had to know because the callee did not enforce them.
+Behaviour stays the same except where the visible changes below say otherwise.
+The maintainer approved the two behaviour changes and asked for
+characterization tests before the riskier engine and correlation work.
+
+### Decisions and problems addressed
+
+- Stage live workflow setup in one place.
+  - Eight entry points in dns, traceroute, scan, os, and fuzz repeated policy
+    narrowing, admission, clock, registry, and child deadline setup, and each
+    runner took about seven arguments.
+  - `WorkflowSetup` builds those once and `Workflow` carries them to the
+    runner. `Admission` owns its narrowed policy through a `Cow`, so the
+    client path still borrows.
+  - New entry-point tests pin policy denial before any send, sink failure on
+    the first event, and an exhausted deadline.
+- Make the discovery sweep own incomplete-target ordering.
+  - Both scan engines marked adaptive incomplete targets before composing
+    hosts and again after the scan stage. `Sweep` and `Discovered` make the
+    final host records reachable only after both passes.
+- Let the scan scheduler own adaptive host lifecycle calls.
+  - Eight call sites asked the scheduler for its optional controller and the
+    neighbor helpers threaded `Option<&mut Controller>`. The scheduler now
+    answers host questions itself and the fixed variant answers neutrally.
+- Report request bytes from the neighbor resolver.
+  - The resolver built the request frame and dropped its length, so four
+    callers rebuilt the frame only to count bytes. `Resolution` and
+    `Error::NotFound` now carry it and compute their own stats.
+  - The scan executor's two resolution paths share one exchange.
+- Narrow neighbor resolution through one `Bounds` value instead of four
+  positional arguments repeated by six callers, so scan approval and
+  execution validate the same narrowing.
+- Make each DNS batch question outcome a tagged union.
+  - The result and error options were valid only for one status each, a rule
+    kept in doc comments. The status is now derived from the outcome.
+- Compose the native capture source instead of copying ten of its fields.
+- Default capture request settings in `Request::new` and `GroupRequest::new`.
+- Give retained application bytes one owner. Four collectors repeated the
+  charge and check that HTTP/2 already kept in one method.
+- Let `AnalysisSetup` open captures and build sessions, so reader limits and
+  session options can no longer diverge across the analyze commands. One
+  function maps metered output errors for both callers.
+- Let one input reader own stdin-or-file documents for security documents and
+  UDP profiles.
+- Give the fuzz retained byte ceiling one owner, with a test for the byte
+  limit that had none.
+- Own the replay per-step deadline check in one guard and delete the
+  single-implementation replay executor trait.
+- Derive UDP decode-as selectability from catalog ports. Tunnel UDP ports now
+  live in their catalog rows instead of a hand list beside the bindings.
+- Build filter field references through one constructor and look up a
+  binding's schema once.
+
+### Requirements retained after inspection
+
+- The authoritative reply loop in `exchange/correlation.rs` stays separate
+  from `workflow_attribution`. The authoritative loop checks each request's
+  freshness on its own, while the workflow path takes the prefix found by
+  `partition_point`, and the two disagree when send markers are not in
+  order. The deadline is also checked before each matcher call in one and
+  after it in the other. Two tests now pin the authoritative behaviour.
+  Whether workflow sends can ever arrive out of order is a follow-up
+  question for `workflow_attribution`.
+- Differential keeps its own setup, because its preflight planning and
+  authorization run before the operation exists.
+- The scan stage budget stays written twice. The approval planner adds a
+  neighbor term, the fixed projections take different inputs, and the
+  overflow errors differ, so a shared helper would need three knobs to save
+  about ten lines.
+- Capture sessions keep their own shutdown, stats, and loss sequences. The
+  four callers read per-source or aggregate stats and apply the overflow
+  policy at different points.
+- `run_with_ip_events` stays because the IP reassembly fuzz target calls it.
+- The neighbor resolver and exchange still validate capture requests before
+  opening them, because the capture provider is a seam with fake and
+  third-party adapters.
+- The IPv4 and IPv6 option walkers stay separate until a malformed-option
+  table test exists, since their length rules differ.
+- `EvidenceFault` keeps its typed variants, because failures are modelled as
+  values here even when they are only rendered today.
+- `differential-join` keeps reading files only.
+- The built-bytes ceiling in fuzz `build_case` stays for now. Mutation
+  testing showed it can never decide an outcome, because the retained-byte
+  charge that follows it always holds at least as many bytes and fails with
+  the same error first. Removing it is a follow-up once the `actual` value it
+  reports is confirmed unused.
+- The uncalled dns batch `Report::status_counts` was removed.
+- Mutation testing over this pass's non-test diff kills 70 of 129 viable
+  mutants. The survivors sit in logic this pass reshaped but that had no
+  tests before it either, mainly the live scan neighbor helpers, the scan
+  executor's resolution paths, neighbor option bodies, capture evidence
+  stats, and CLI command entry points. Covering them needs live-path
+  fixtures and is left as follow-up work.
+
+### Visible changes
+
+`--decode-as udp.port=<port>:mpls` is now accepted, and the protocol reference
+lists `udp` as a transport for MPLS. An empty security document or UDP
+profiles document, from stdin or a file, now fails with `cli.input_source`
+before parsing instead of a JSON parse error. When a replay selector fails at
+the same moment the deadline expires, the deadline error is reported.
+
+## Scan capture epochs, 2026-11-11
+
+- Give scan capture lifetimes one owner.
+  - The pipeline tracked its capture group, accounting flag, aggregate quality,
+    source names, deduplication history, and drain allowance independently.
+    Fixed and streaming entry points each built the same capture prerequisites.
+  - `CaptureEpoch` now owns activation, readiness, bounded reads, rotating
+    interfaces, accounting state, observation quality, and deduplication. Its
+    callers supply a wake time, a new source set, and accounting behavior only
+    where those facts vary. Expiry settlement keeps its existing scheduling
+    policy through the epoch's drain state.
+  - Rotation still waits for every active probe to settle. The candidate index
+    and armed queue change only after the replacement is fully ready, so an
+    active interval never spans a capture cleanup/activation gap. Shutdown,
+    source statistics, failure evidence, and cleanup precedence are unchanged.
+  - Pipeline fixtures moved to `pipeline/tests.rs` beside the production
+    module. A new streaming regression fails a later source activation and
+    checks retained traffic, accumulated capture statistics, activation error
+    identity, no duplicate readiness, and no secondary cleanup error. Shutdown
+    failures retain capture statistics without publishing loss diagnostics.
+
+### Verification
+
+Streaming admission reserves all nine interface-name copies per source that
+overlap during rotation, including the epoch-owned list and rotation handoff.
+The long-name regression rejects an 80 KiB prepared-memory budget before
+capture starts and completes rotation with a 128 KiB budget.
+
+All 20 pipeline tests pass. Earlier verification passed all 213 packetcraftr
+library tests and all 159 CLI library tests. Clippy passes for the workflow
+library and tests with warnings denied. Formatting, layer, coupling, and file-size checks pass without
+changed thresholds. The full feature/platform, coverage, and mutation matrices
+were not run.
+
+A native-enabled CLI build succeeded. A bounded adaptive scan of a local
+listener with Layer 3 transmission attempted to arm capture on loopback but
+stopped in libpcap because this environment lacks CAP_NET_RAW. The live scan
+therefore could not verify received packets in this environment. The controlled
+multi-source pipeline fixtures exercise rotation, pending settlement, capture
+statistics, and failure evidence without raw-socket privileges.
+
+## Hotspot module deepening, 2026-11-12
+
+This pass ranked files by churn times size and audited the hottest clusters in
+all four crates, looking for callers that had to know a rule the callee should
+own. Behaviour and published output are unchanged; the only interface changes
+are on the unpublished-workspace basis earlier passes used. Each item landed as
+its own commit.
+
+### Decisions and problems addressed
+
+- Give a DNS batch one prepared owner.
+  - `dns_batch_in` read `&request.questions[0]` before validation, so an empty
+    batch panicked through a crate-private path instead of returning
+    `InvalidLimit`. Separately, `dns_limits` and `batch::run` each built the same
+    per-question `PreparedOperation` set.
+  - `batch::Prepared` now validates the batch once, owns the per-question
+    operations and combined limits, and is consumed by `run`. Empty-batch and
+    limits-equivalence tests cover it.
+- Let the session hand the deadline to `Collector::observe`.
+  - `observe` did not receive the deadline that `finish` got, so HTTP/2 stored
+    its own and required a `with_deadline` builder a caller could forget.
+  - The trait method now takes `&Deadline`. HTTP/2 uses the passed one and the
+    builder and stored field are gone. The existing expired-deadline test now
+    drives `observe` directly.
+- Share one UDP payload range extractor.
+  - DNS and QUIC each re-derived the UDP length field's payload size and clamped
+    it to the frame with different error handling.
+  - `adapter::udp_payload` owns the arithmetic and returns the range plus the
+    declared length, so each caller keeps its own truncation policy and its copy
+    or slice choice.
+- Share the neighbor-request charge.
+  - DNS batches and the traceroute host planner each restated the "one
+    solicitation per probe on a link-layer route, exempt multicast and
+    broadcast" authorization rule.
+  - `neighbor::charge` owns it in one place.
+- Make the workflow step a builder.
+  - `WorkflowOverrides` used `Option` for "inherit" and clamped
+    `max_unmatched_frames` from `max_responses` as an undocumented side effect.
+  - `WorkflowStep` names its two required inputs and defaults the rest, and
+    `Collection::with_max_responses` owns the clamp beside the fields it
+    narrows.
+- Read format and stream from the invocation in CLI inner runs.
+  - Six inner `run` functions took `format` and `stream` that were always
+    `invocation.format` and `&invocation.output`. OS identification also called
+    `with_deadline` on a client that already had it.
+- Collapse the DNS-over-TCP wait seam.
+  - `query` forwarded to `query_with_sources`, which forwarded to a third
+    wrapper whose `wait` parameter was `PendingConnect::wait` at every call
+    site. The middle layer owns the body now.
+
+### Deliberately left
+
+Audited and deferred as larger than a focused pass: the application collector
+budget kit, a scan `PreparedLedger`, splitting `probe::runner::Batch`,
+`filter::FieldRef` as a sum type, and the netio `Request`/`GroupRequest`
+shapes. A later pass should not re-derive that they are shallow; they are, and
+each needs several call-site rewrites at once.
+
+### Verification
+
+`cargo test --locked --workspace` passes all four crates, 843 tests. Clippy
+passes with warnings denied over all targets. The layer, coupling, file-length,
+and output-schema scripts pass without changed thresholds.
+
+Rebuilt-binary output is byte-identical to the pre-change binary for
+`analyze http2` on the multiplexed fixture, `analyze dns` on the response
+fixture, `--output ndjson files read`, and `network scan --list`.
+
+No mutation-gate file was touched, so the line-pinned exclusions in
+`.github/workflows/ci.yml` stay valid. Mutation testing was not run this pass.
+
+## Deferred-list deepening, 2026-11-15
+
+This pass took the shallow modules the 2026-11-12 pass deferred, plus the
+hottest files that pass did not reach, and kept each change behind its
+existing published behaviour except for one bug fix. Each item landed as its
+own commit.
+
+### Decisions and problems addressed
+
+- Report a cancelled neighbor resolution as interrupted.
+  - The attempt loop left through the same exits on cancellation as on an
+    exhausted budget, so `resolve` returned `NotFound` and scans recorded a
+    cancelled target as silent, sometimes with zero attempts.
+  - Cancellation now returns `Error::Io` with the cancelled source and the
+    spent attempts and evidence. `NotFound` keeps meaning the resolution ran
+    out of attempts or time. The resolver test now drives `resolve` and fails
+    without the fix.
+- Let probe batches own their permit and evidence attribution.
+  - Five literal constructions minted a placeholder permit that the runner
+    then overwrote, and three executors restated that evidence carries the
+    batch permit.
+  - `Batch::new` mints it, `Batch::evidence` attributes exchange evidence,
+    and the field is private to the runner. The first runner tests pin that
+    executors see a fresh grant bounded by the deadline and that evidence
+    under another permit is refused.
+- Share one capture `Settings` between `Request` and `GroupRequest`.
+  - Both shapes repeated the filter, promiscuous, native, and limit fields,
+    their defaults, and their validation chain, and `partition` copied each
+    field by hand. `size_of::<capture::Request>()`, which scan admission
+    charges, is unchanged at 120 bytes.
+  - A new test pins the remainder split and setting propagation in
+    `partition`.
+- Let the scan preparation plan own its planning-only charge.
+  - Streaming admission recomputed the description, index, expiry, and
+    source-table bytes that planning had charged, only to subtract them.
+  - `Plan::release_staging` returns exactly that charge, and one function
+    owns the description, descriptor, and per-probe formulas. A new test
+    pins that only route owners stay charged after release.
+- Make each filter field read a variant that carries only its own state.
+  - Frame and stream reads could hold a byte slice that evaluation ignored,
+    and one optional selection decided whether a nested path named a list or
+    a field.
+  - Layer reads own the slice, and nested and selected reads are separate
+    variants. Characterization tests for byte slices, `len` and `count`,
+    `#last` and `#-1`, `[*]` and `[-1]`, and the order in which unsliceable
+    paths are refused landed first, as the module had no unit tests.
+- Give each security capture mode its own engine state.
+  - The collector kept the hunt matcher, the DNS, HTTP, and TLS collectors,
+    and the DNS and beacon groups beside the mode, and eleven sites re-decided
+    the mode.
+  - `Engine` holds only the active mode's state, and `Output` owns the
+    report, limits, observation charge, and group admission. Completeness
+    notes keep their order, since reasons are an ordered list.
+- Give HTTP/2 source-set and settings-offer costs one owner.
+  - Eight sites restated the source-set cost and five the offer cost with a
+    bare 24, and two reservations built their own overflow error that the
+    limit check already reports. `budget::set_cost` and `budget::offer_cost`
+    own them.
+- Time DNS-over-TCP queries with one clock and one wait window.
+  - `query_with_sources` took three closures that its only caller filled
+    from one clock, and each socket loop threaded the deadline, cancellation,
+    and time source separately. `query_with_clock` takes the clock, and
+    `Window` owns the rest. A new test pins that the given clock bounds the
+    whole query.
+- Let the canary format own the no-amplification rule. Replies are fixed at
+  60 bytes and probes below 62 never parse, so a compile-time assertion
+  beside those sizes replaces the responder's runtime comparison.
+- Model operation-pinned neighbor answers as one resolver state. `Answers`
+  is either shared or an operation cache with its own bound, replacing an
+  optional cache paired with a count. A new test pins that operation answers
+  outlive shared eviction and survive re-pinning.
+- Give the CLI responder reception log one owner. `ReceptionLog` publishes or
+  salvages the log, and `ResponderCollector::into_records` replaces a
+  placeholder report built only to read records.
+
+### Deliberately left
+
+- The security `DnsGroup` stays one struct. Its key's optional suffix already
+  decides which rule reads the group, so a tagged union needed unreachable
+  arms to restate the key, and splitting the key reorders findings.
+- The HTTP/2 header cost stays inline. Its three sites hold two different
+  header types and the formula is one line.
+- The application collector budget keeps one meaning per collector.
+  `max_buffer_bytes` counts allocated capacity in messages, used bytes in
+  HTTP and DNS, and modeled overhead in HTTP/2 and QUIC, so a shared ledger
+  would move limit trigger points for identical input.
+- The scan steady-state bound is still written twice. `admission.rs` adds a
+  map-route term that `streaming.rs` does not, and the streaming refill check
+  compares a description without its 384-byte base against a maximum that
+  includes it. Unifying either changes when admission refuses a stage.
+- The reported prepared-memory limit still depends on the path. Adaptive and
+  streaming paths report the remaining budget and fixed paths the full limit.
+- Hunt mode charges `max_observations` only for DNS messages, not for its IP,
+  HTTP, and TLS observations. Charging them would change when a hunt stops.
+- The hunt reassembles HTTP on ports 80, 8080, and 8000, while the protocol
+  catalog lists 80 and 8080. Which one is intended needs a decision.
+- A neighbor resolution whose deadline has already expired before readiness
+  still reports `NotFound` with zero attempts, even when it was also
+  cancelled, because `for_wait` reports only expiry.
+- `[N]` after a list selector, as in `dns.answers[*].name[1]`, reads as a
+  list index rather than a byte slice. The characterization tests use the
+  range form and leave this unpinned.
+
+### Verification
+
+`cargo test --locked --workspace` passes 871 tests, 887 with
+`--all-features`, and 861 with `--no-default-features`. The CI Layer 3 build
+of the CLI and netio passes 303. Clippy passes with warnings denied over all
+targets with all features and with no default features. The layer, coupling,
+file-length, document, and output-schema scripts pass without changed
+thresholds.
+
+A rebuilt binary is byte-identical to the pre-change binary on 22 offline
+commands, covering `analyze hunt`, `dns-anomalies`, and `beacons` over five
+captures, `analyze http`, `http2`, `dns`, `tls`, `messages`, and `quic`,
+`files read` with byte-slice, occurrence, and `len` filters, and
+`network scan --list`.
+
+The neighbor fix was also run live in an isolated network namespace with a
+silent target and an interrupt. Both binaries reported `io.cancelled` there,
+because the native capture read sees the cancellation itself. The faulty exits
+are reached when cancellation lands between reads or attempts, or with a
+capture provider that returns no frame on cancellation, which the resolver
+test drives.
+
+Mutation testing over this branch's non-test diff, running workspace tests,
+catches 186 of 220 viable mutants, with 50 unviable. Before the added tests,
+running only each mutated crate's own tests, it caught 114. The survivors are the HTTP/2 set and offer cost magnitudes,
+which every charge and its release share so balance tests cannot see them,
+the live capture CLI wiring and native `open`, `Projection::selects_single_values`,
+which only forwarding verification reads, the description charge constant,
+and two equivalent mutants. Two more hang the HTTP/2 prelude loop and time
+out. No mutation-gate file was touched, so the
+line-pinned exclusions in `.github/workflows/ci.yml` stay valid.

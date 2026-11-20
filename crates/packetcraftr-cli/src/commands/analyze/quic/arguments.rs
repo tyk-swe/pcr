@@ -2,6 +2,7 @@ use crate::command_options::InterfaceSelector;
 use crate::command_options::{
     CaptureLimitsArgs, DecodeArgs, LongTimeoutArgs, OfflineLimitsArgs, Selector, interface_selector,
 };
+use crate::resources::Settings;
 use clap::{Args as ClapArgs, ValueEnum};
 use packetcraftr_core::analysis::quic;
 use std::path::PathBuf;
@@ -24,6 +25,18 @@ impl Direction {
         )
     }
 }
+#[derive(Clone, Debug, ClapArgs)]
+pub(crate) struct StreamRetentionArgs {
+    #[arg(long,default_value_t=quic::Limits::default().max_stream_bytes,help="Maximum retained bytes per QUIC stream direction")]
+    pub max_quic_stream_bytes: usize,
+}
+
+impl StreamRetentionArgs {
+    pub(crate) fn resources(&self, settings: &mut Settings<'_>) {
+        crate::resources::declare!(settings, self, [max_quic_stream_bytes: Bytes @ ActiveState]);
+    }
+}
+
 #[derive(Clone, Debug, ClapArgs)]
 pub(crate) struct Args {
     #[arg(
@@ -75,8 +88,8 @@ pub(crate) struct Args {
     pub max_connections: usize,
     #[arg(long,default_value_t=64*1024*1024,help="Maximum charged QUIC state bytes")]
     pub max_quic_buffered_bytes: usize,
-    #[arg(long,default_value_t=1024*1024,help="Maximum retained bytes per stream direction")]
-    pub max_quic_stream_bytes: usize,
+    #[command(flatten)]
+    pub stream_retention: StreamRetentionArgs,
     #[arg(
         long,
         default_value_t = 64,
@@ -117,7 +130,7 @@ impl Args {
         quic::Limits {
             max_connections: self.max_connections,
             max_buffered_bytes: self.max_quic_buffered_bytes,
-            max_stream_bytes: self.max_quic_stream_bytes,
+            max_stream_bytes: self.stream_retention.max_quic_stream_bytes,
             max_pending_packets: self.max_pending_packets,
             max_streams_per_connection: self.max_quic_streams,
             idle_expiry: Duration::from_millis(self.quic_idle_expiry_ms),

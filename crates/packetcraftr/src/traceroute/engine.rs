@@ -5,11 +5,11 @@ use std::net::IpAddr;
 use std::sync::Arc;
 
 use packetcraftr_core::budget::Deadline;
-use packetcraftr_core::registry::Registry;
 
 use crate::client::admission::{FamilyGate, admit_operation, wire_limits};
 use crate::clock::Clock;
 use crate::engine::execution::{Executor, publisher};
+use crate::engine::operation::{Workflow, WorkflowSetup};
 use crate::exchange::WorkflowExecutor;
 use crate::policy::Authorizer;
 use crate::probe::runner::{BatchEvidence, run_batches};
@@ -26,6 +26,9 @@ use super::plan::{build_batches, probe_target, worst_case_duration};
 use super::{Event, Probe, Report, Request, Termination};
 use crate::error::FromFailure as _;
 use crate::probe::enforce_deadline;
+
+#[cfg(test)]
+mod tests;
 
 impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
     /// Traces the route to the request's authorized destination one hop at a
@@ -48,9 +51,7 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
     where
         S: Sink<Event, Ack = ()>,
     {
-        let policy = operation.policy(&self.policy);
-        let mut admission =
-            crate::client::admission::Admission::new(&policy, self.providers.resolver());
+        let setup = WorkflowSetup::new(self, operation);
         let publish = publisher(
             &operation.runtime,
             sink,
@@ -58,13 +59,11 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
             |source| Error::Output { source },
         )?;
         let send = crate::traceroute::request::send_options(&request.route);
+        let mut executor = WorkflowExecutor::new(self, operation, send, request.collection.clone());
         run(
             &request,
-            &mut admission,
-            &operation.registry,
-            &mut WorkflowExecutor::new(self, operation, send, request.collection.clone()),
-            &mut self.clock.clone(),
-            &mut operation.deadline(self, request.limits.max_duration),
+            &mut setup.start(self, request.limits.max_duration),
+            &mut executor,
             publish,
         )
     }
@@ -72,11 +71,8 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
 
 pub(crate) fn run<A, E, C, F>(
     request: &Request,
-    authorizer: &mut A,
-    registry: &Registry,
+    workflow: &mut Workflow<A, C>,
     executor: &mut E,
-    clock: &mut C,
-    deadline: &mut Deadline,
     emit: F,
 ) -> Result<Report, Error>
 where
@@ -85,6 +81,12 @@ where
     C: Clock,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
+    let Workflow {
+        authorizer,
+        registry,
+        clock,
+        deadline,
+    } = workflow;
     enforce_deadline::<Error>(deadline)?;
     let approved = approve_traceroute(request, authorizer, deadline)?;
     let mut batches = build_batches(request, approved.destination)?;

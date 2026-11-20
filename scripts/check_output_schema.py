@@ -6,12 +6,14 @@ and real CLI stdout agree on one current output contract."""
 from __future__ import annotations
 
 import argparse
+from io import StringIO
 from pathlib import Path
 import re
 import subprocess
 import sys
-from typing import Any, Iterable, NamedTuple
+from typing import Any, Iterable, Literal, NamedTuple
 
+from release_assets import validate_manifest
 from rust_source import blank_comments, is_test_path, without_test_items
 from script_support import read_json, strict_json
 
@@ -21,7 +23,7 @@ RELEASE_ASSETS = 'scripts/release-assets.json'
 REGISTRY = 'published registry (Spec::PUBLISHED rows under crates/packetcraftr-cli/src)'
 CLI_SRC = 'crates/packetcraftr-cli/src'
 RUNTIME_IDENTIFIER = re.compile(
-    r'^pub const OUTPUT_SCHEMA: &str = "(packetcraftr\.output/v([1-9][0-9]*))";$', re.MULTILINE)
+    r'^pub const OUTPUT_SCHEMA: &str = "(packetcraftr\.output/v([1-9][0-9]*))";[ \t]*$', re.MULTILINE)
 OUTPUT_SCHEMA_ASSET = re.compile(r'^schemas/(?:historical/)?packetcraftr\.output\.')
 RUNTIME_TIMEOUT_SECONDS = 60
 MAX_PROBLEMS_PER_DOCUMENT = 5
@@ -60,6 +62,11 @@ RUNTIME_COMMANDS = (
                     '--hex', '4500001e0000000040118e98c0000201c63364029c409c41000a72b76869'), True),
     RuntimeCommand(('--output', 'json', 'analyze', 'dns', 'examples/captures/dns-response.pcap'), True),
     RuntimeCommand(('--output', 'ndjson', 'analyze', 'http', 'examples/captures/http-stream.pcap'), True),
+    RuntimeCommand(('--output', 'json', 'analyze', 'http3', 'examples/captures/http3-demo.pcapng',
+                    '--keylog', 'examples/captures/http3-demo.keys',
+                    '--max-quic-stream-bytes', '32'), True),
+    RuntimeCommand(('--output', 'ndjson', 'analyze', 'http3', 'examples/captures/http3-demo.pcapng',
+                    '--keylog', 'examples/captures/http3-demo.keys', '--include-header-values'), True),
     RuntimeCommand(('--output', 'json', 'analyze', 'stats', 'examples/captures/dns-response.pcap'), True),
     RuntimeCommand(('--output', 'json', 'analyze', 'scan-diff',
                     'examples/documents/output-scan-success.json',
@@ -71,7 +78,7 @@ RUNTIME_COMMANDS = (
 
 
 def read_identity(contract_source: str) -> Identity:
-    matches = RUNTIME_IDENTIFIER.findall(contract_source)
+    matches = RUNTIME_IDENTIFIER.findall(blank_comments(contract_source))
     if len(matches) != 1:
         raise CheckError(f'expected exactly one `pub const OUTPUT_SCHEMA` output identifier in {CONTRACT}')
     identifier, version = matches[0]
@@ -127,7 +134,8 @@ def document_problems(validator: Any, label: str, document: Any) -> list[str]:
 
 
 def parsed_records(label: str, text: str, ndjson: bool) -> tuple[list[tuple[str, Any]], list[str]]:
-    chunks = ([(f'{label}:{number}', line) for number, line in enumerate(text.splitlines(), 1)]
+    chunks = ([(f'{label}:{number}', line)
+               for number, line in enumerate(StringIO(text, newline='\n'), 1)]
               if ndjson else [(label, text)])
     records, problems = [], []
     for record_label, chunk in chunks:
@@ -142,6 +150,8 @@ def parsed_records(label: str, text: str, ndjson: bool) -> tuple[list[tuple[str,
 
 CODE_PATTERN = re.compile(r'^[a-z]+\.[a-z0-9_.]+$')
 CODE_LITERAL = re.compile(r'"((?:[a-z][a-z0-9]*)\.[a-z0-9_.]+)"')
+HTTP3_CODE_ENUM = re.compile(r'published_enum!\s*\{[^{}]*\benum Code from http3::Code\s*\{([^{}]*)\}')
+ENUM_VALUE = re.compile(r'=>\s*"([a-z][a-z0-9_]*)"')
 
 
 def published_codes(root: Path) -> set[str]:
@@ -157,41 +167,60 @@ def published_codes(root: Path) -> set[str]:
             continue
         text = blank_comments(without_test_items(path.read_text(encoding='utf-8', errors='replace')))
         codes.update(CODE_LITERAL.findall(text))
+        if declaration := HTTP3_CODE_ENUM.search(text):
+            codes.update(ENUM_VALUE.findall(declaration[1]))
     return codes
 
 
 def code_problems(label: str, record: Any, published: set[str]) -> list[str]:
     problems: list[str] = []
+    http3 = isinstance(record, dict) and record.get('command') == 'http3'
 
-    def walk(node: Any, trail: str) -> None:
+    def walk(node: Any, trail: str, issue: bool = False) -> None:
         if isinstance(node, dict):
             code = node.get('code')
-            if isinstance(code, str) and CODE_PATTERN.match(code) and code not in published:
+            if isinstance(code, str) and (issue or CODE_PATTERN.match(code)) and code not in published:
                 problems.append(f'{label}: {trail}/code: unpublished code {code!r}')
             for key, value in node.items():
                 walk(value, f'{trail}/{key}')
         elif isinstance(node, list):
             for index, value in enumerate(node):
-                walk(value, f'{trail}/{index}')
+                walk(value, f'{trail}/{index}', http3 and trail.endswith('/issues'))
 
     walk(record, '')
     return problems[:MAX_PROBLEMS_PER_DOCUMENT]
 
 
 def validated(validator: Any, label: str, text: str, ndjson: bool,
-              published: set[str] | None = None) -> list[str]:
+              published: set[str] | None = None, *,
+              expected_status: Literal['success', 'error'] | None = None) -> list[str]:
     records, problems = parsed_records(label, text, ndjson)
     for record_label, record in records:
         problems.extend(document_problems(validator, record_label, record))
         if published is not None:
             problems.extend(code_problems(record_label, record, published))
+    if expected_status is not None and not problems and records:
+        record_label, record = records[-1]
+        if ndjson:
+            for earlier_label, earlier in records[:-1]:
+                if isinstance(earlier, dict) and earlier.get('event') in ('complete', 'error'):
+                    return [f'{earlier_label}: terminal event before end of stream']
+            if not isinstance(record, dict) or record.get('event') not in ('complete', 'error'):
+                return [f'{record_label}: missing terminal event']
+        status = record.get('status') if isinstance(record, dict) else None
+        if status != expected_status:
+            problems.append(f'{record_label}: expected {expected_status!r} envelope status, got {status!r}')
     return problems
 
 
-def example_problems(root: Path, validator: Any, published: set[str]) -> list[str]:
+def output_example_paths(root: Path) -> list[Path]:
     documents = root / 'examples' / 'documents'
-    paths = sorted([*documents.glob('output-*.json'), *documents.glob('output-*.ndjson')])
-    problems = [] if paths else [f'{documents}: no output examples found']
+    return sorted([*documents.glob('output-*.json'), *documents.glob('output-*.ndjson')])
+
+
+def example_problems(root: Path, validator: Any, published: set[str]) -> list[str]:
+    paths = output_example_paths(root)
+    problems = [] if paths else [f'{root / "examples/documents"}: no output examples found']
     for path in paths:
         text = path.read_bytes().decode('utf-8')
         problems.extend(validated(validator, str(path.relative_to(root)), text,
@@ -219,10 +248,9 @@ def runtime_problems(binary: Path, root: Path, validator: Any, published: set[st
         except UnicodeDecodeError as error:
             problems.append(f'{label}: stdout is not UTF-8: {error}')
             continue
-        problems.extend(validated(validator, label, stdout, 'ndjson' in command.args, published))
+        problems.extend(validated(validator, label, stdout, 'ndjson' in command.args, published,
+                                  expected_status='success' if command.succeeds else 'error'))
     return problems
-
-
 
 
 class PublishedRow(NamedTuple):
@@ -273,9 +301,11 @@ def _consts(node: Any, key: str) -> list[str]:
             if name == 'properties' and isinstance(value, dict):
                 target = value.get(key)
                 if isinstance(target, dict):
-                    if 'const' in target:
-                        found.append(target['const'])
-                    found += target.get('enum', [])
+                    constants = [target['const']] if 'const' in target else []
+                    for constant in (*constants, *target.get('enum', [])):
+                        if not isinstance(constant, str):
+                            raise CheckError(f'{key!r} values must be strings')
+                        found.append(constant)
             found += _consts(value, key)
         return sorted(set(found))
     if isinstance(node, list):
@@ -322,7 +352,7 @@ def _type_defined(root: Path, rust_type: str, sources: dict[Path, str]) -> bool:
     return any(pattern.search(sources.get(path, '')) for path in candidates)
 
 
-def registry_problems(root: Path, schema: Any, jsonschema: Any) -> list[str]:
+def registry_problems(root: Path, schema: Any, jsonschema: Any, published: set[str]) -> list[str]:
     """The contract registry must agree with the schema, sources, and examples."""
     problems: list[str] = []
     sources = {path: blank_comments(without_test_items(path.read_text(encoding='utf-8')))
@@ -332,6 +362,7 @@ def registry_problems(root: Path, schema: Any, jsonschema: Any) -> list[str]:
         return [f'{REGISTRY}: no PublishedType rows found']
     definitions = schema.get('$defs', {})
     examples: dict[str, list[Any]] = {}
+    output_examples = set(output_example_paths(root))
 
     def example_records(relative: str) -> list[Any]:
         if relative not in examples:
@@ -340,9 +371,12 @@ def registry_problems(root: Path, schema: Any, jsonschema: Any) -> list[str]:
                 examples[relative] = []
             else:
                 text = path.read_text(encoding='utf-8')
-                examples[relative] = [strict_json(line) for line in text.splitlines()
-                                       if line.strip()] if relative.endswith('.ndjson') \
-                    else [strict_json(text)]
+                records, parse_problems = parsed_records(relative, text, path.suffix == '.ndjson')
+                examples[relative] = [record for _, record in records]
+                if path not in output_examples:
+                    problems.extend(parse_problems)
+                    for label, record in records:
+                        problems.extend(code_problems(label, record, published))
         return examples[relative]
 
     claimed: dict[str, set[str]] = {}
@@ -394,11 +428,20 @@ def registry_problems(root: Path, schema: Any, jsonschema: Any) -> list[str]:
 def check(root: Path, binary: Path | None = None) -> list[str]:
     identity = read_identity((root / CONTRACT).read_text(encoding='utf-8'))
     schema = read_json(root / identity.schema_path)
+    if not isinstance(schema, dict):
+        raise CheckError(f'{identity.schema_path}: expected a JSON object')
+    try:
+        inventory = validate_manifest(read_json(root / RELEASE_ASSETS))
+    except ValueError as error:
+        raise CheckError(f'{RELEASE_ASSETS}: {error}') from error
     problems = check_identity(schema, identity)
-    problems.extend(check_release_assets(read_json(root / RELEASE_ASSETS)['source_assets'], identity))
+    problems.extend(check_release_assets(inventory.source_assets, identity))
     validator = load_validator(schema)
-    problems.extend(registry_problems(root, schema, load_jsonschema()))
     published = published_codes(root)
+    try:
+        problems.extend(registry_problems(root, schema, load_jsonschema(), published))
+    except CheckError as error:
+        raise CheckError(f'{identity.schema_path}: {error}') from error
     problems.extend(example_problems(root, validator, published))
     if binary is not None:
         problems.extend(runtime_problems(binary, root, validator, published))

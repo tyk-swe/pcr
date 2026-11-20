@@ -161,7 +161,6 @@ impl Projector {
                 stream
                     .emit_data_counted(event(), Vec::new(), &mut self.budget.remaining)
                     .map_err(|error| match error {
-                        output::stream::MeteredError::Limit => self.budget.limit(),
                         output::stream::MeteredError::Encode(
                             error @ output::stream::EncodeError::RecordLimit { .. },
                         ) => {
@@ -175,10 +174,7 @@ impl Projector {
                                 Err(error) => self.budget.error(error),
                             }
                         }
-                        output::stream::MeteredError::Encode(error) => CliError::from(error),
-                        output::stream::MeteredError::Serialize(error) => {
-                            crate::publication::serialization_error(error)
-                        }
+                        other => crate::publication::metered_error(other, || self.budget.limit()),
                     })?;
             }
         }

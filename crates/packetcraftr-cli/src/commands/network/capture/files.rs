@@ -21,6 +21,7 @@ use std::{
 };
 
 pub(super) const MAX_FILES: usize = 64;
+const WRITE_BUFFER_BYTES: usize = 64 * 1024;
 #[derive(Clone, Debug)]
 pub(super) struct Options {
     pub(super) path: PathBuf,
@@ -152,17 +153,29 @@ struct Counted<W> {
     inner: W,
     bytes: u64,
 }
-impl<W: Write> Write for Counted<W> {
-    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        self.bytes
-            .checked_add(bytes.len() as u64)
-            .ok_or_else(|| io::Error::other("capture byte counter overflow"))?;
-        let written = self.inner.write(bytes)?;
+impl<W: Write> Counted<W> {
+    fn counted(
+        &mut self,
+        requested: u64,
+        write: impl FnOnce(&mut W) -> io::Result<usize>,
+    ) -> io::Result<usize> {
+        let overflow = || io::Error::other("capture byte counter overflow");
+        self.bytes.checked_add(requested).ok_or_else(overflow)?;
+        let written = write(&mut self.inner)?;
         self.bytes = self
             .bytes
             .checked_add(written as u64)
-            .ok_or_else(|| io::Error::other("capture byte counter overflow"))?;
+            .ok_or_else(overflow)?;
         Ok(written)
+    }
+}
+impl<W: Write> Write for Counted<W> {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.counted(bytes.len() as u64, |inner| inner.write(bytes))
+    }
+    fn write_vectored(&mut self, parts: &[io::IoSlice<'_>]) -> io::Result<usize> {
+        let requested = parts.iter().map(|part| part.len() as u64).sum();
+        self.counted(requested, |inner| inner.write_vectored(parts))
     }
     fn flush(&mut self) -> io::Result<()> {
         self.inner.flush()
@@ -187,7 +200,7 @@ fn fresh_report(path: String, slot: usize, generation: u64) -> FileReport {
 }
 struct Active {
     failed: bool,
-    writer: capture_file::Writer<Counted<compression::Output<File>>>,
+    writer: capture_file::Writer<Counted<compression::Output<io::BufWriter<File>>>>,
     slot: usize,
     opened_at: Duration,
 }
@@ -371,7 +384,10 @@ impl Files {
             source,
         })?;
         let output = Counted {
-            inner: compression::Output::new(handle, self.options.compression.format())?,
+            inner: compression::Output::new(
+                io::BufWriter::with_capacity(WRITE_BUFFER_BYTES, handle),
+                self.options.compression.format(),
+            )?,
             bytes: 0,
         };
         let writer = super::writer::initialize(
@@ -399,7 +415,7 @@ impl Files {
         let output = active.writer.into_inner();
         let finalized = output.inner.finish();
         if let Ok(handle) = &finalized {
-            handle.sync_all().map_err(|source| Error::Io {
+            handle.get_ref().sync_all().map_err(|source| Error::Io {
                 path: PathBuf::from(&slot.report.path),
                 source,
             })?;
@@ -452,5 +468,50 @@ impl Files {
 impl Drop for Files {
     fn drop(&mut self) {
         let _ = self.finish();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Counted;
+    use std::io::{self, IoSlice, Write};
+
+    struct Short {
+        accepted: Vec<u8>,
+        limit: usize,
+    }
+    impl Write for Short {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.write_vectored(&[IoSlice::new(bytes)])
+        }
+        fn write_vectored(&mut self, parts: &[IoSlice<'_>]) -> io::Result<usize> {
+            let available = parts.iter().flat_map(|part| part.iter()).take(self.limit);
+            let before = self.accepted.len();
+            self.accepted.extend(available);
+            Ok(self.accepted.len() - before)
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn vectored_writes_count_only_bytes_the_inner_writer_accepted() {
+        let mut counted = Counted {
+            inner: Short {
+                accepted: Vec::new(),
+                limit: 5,
+            },
+            bytes: 0,
+        };
+        let parts = [
+            IoSlice::new(b"abc"),
+            IoSlice::new(b"defg"),
+            IoSlice::new(b"hi"),
+        ];
+        assert_eq!(counted.write_vectored(&parts).unwrap(), 5);
+        assert_eq!(counted.write_vectored(&parts[1..]).unwrap(), 5);
+        assert_eq!(counted.inner.accepted, b"abcdedefgh");
+        assert_eq!(counted.bytes, 10);
     }
 }

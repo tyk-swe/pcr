@@ -89,14 +89,13 @@ fn run_with(
 }
 
 fn render(directory: &Path) -> Result<Rendered, CliError> {
+    let mut command = Cli::command();
+    command.build();
     let mut rendered = Vec::new();
     for shell in Shell::value_variants() {
         let destination = directory
             .join("completions")
             .join(shell.file_name("packetcraftr"));
-        let mut command = Cli::command();
-        command.set_bin_name("packetcraftr");
-        command.build();
         // Some completion generators panic on writer errors: render to memory.
         let mut bytes = Vec::new();
         shell
@@ -104,8 +103,6 @@ fn render(directory: &Path) -> Result<Rendered, CliError> {
             .map_err(|error| io_error("render completion", &destination, error))?;
         rendered.push((destination, bytes));
     }
-    let mut command = Cli::command();
-    command.build();
     render_man_pages(&command, &directory.join("man"), &mut rendered)?;
     Ok(rendered)
 }

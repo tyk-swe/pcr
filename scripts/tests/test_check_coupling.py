@@ -123,6 +123,21 @@ class CheckCouplingTests(unittest.TestCase):
             any("stale boundary exemption: template.rs" in problem for problem in problems)
         )
 
+    def test_comments_neither_count_as_coupling_nor_keep_exemptions_alive(self):
+        root = self.workspace({
+            "crates/packetcraftr-core/src/protocol/identity.rs":
+                "// layer.downcast_ref::<Tcp>();\n",
+            "crates/mini/src/codec.rs": '/* layer.field("x"); */',
+            "crates/mini/src/plain.rs": '/* layer.field("x"); Instant::now(); */',
+        })
+        measured = coupling.inventory(root)
+        self.assertEqual(measured["downcast_sites"], 0)
+        self.assertEqual(measured["dynamic_field_sites"], 0)
+        self.assertEqual(measured["instant_now"], 0)
+        problems = coupling.allowlist_problems(root)
+        self.assertIn("stale cast allowlist entry: crates/packetcraftr-core/src/protocol/identity.rs", problems)
+        self.assertIn("stale boundary exemption: codec.rs", problems)
+
     def test_duplicate_constant_literals_are_counted(self):
         root = self.workspace({
             "crates/packetcraftr-core/src/protocol/catalog.rs":
@@ -154,6 +169,32 @@ class CheckCouplingTests(unittest.TestCase):
         })
         measured = coupling.inventory(root)
         self.assertEqual(measured["manual_cancellation_polls"], 6)
+
+    def test_cancellation_polls_require_a_word_boundary(self):
+        sources = {
+            Path("crates/packetcraftr-cli/src/a.rs"):
+                "fn f() { api.check()?; multi.check()?; i.check()?; "
+                "invocation.check()?; self.i.check()?; }",
+        }
+        self.assertEqual(coupling.cancellation_polls(sources), 3)
+
+    def test_cancellation_polls_preserve_token_boundaries(self):
+        root = self.workspace({
+            "crates/packetcraftr-cli/src/a.rs":
+                "fn first() { return invocation\n    .check(); }\n"
+                "fn second() { return control /* deadline */ . check_interrupted(); }\n",
+        })
+        measured = coupling.inventory(root)
+        self.assertEqual(measured["manual_cancellation_polls"], 2)
+
+    def test_cancellation_polls_ignore_comments_and_strings(self):
+        root = self.workspace({
+            "crates/packetcraftr-cli/src/a.rs":
+                '// invocation.check();\n'
+                'const EXAMPLE: &str = "cancellation.check()";\n',
+        })
+        measured = coupling.inventory(root)
+        self.assertEqual(measured["manual_cancellation_polls"], 0)
 
     def test_repository_stays_under_ceilings(self):
         measured = coupling.inventory()

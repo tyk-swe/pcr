@@ -72,6 +72,17 @@ pub(super) fn parse_literal(
 
 /// Only fields that can hold a number or an address read `A..B` as a range; elsewhere it stays text.
 fn range_or_literal(field: &FieldRef, word: &str, offset: usize) -> Result<Option<Literal>, Error> {
+    let ipv6_only = !field.specs.is_empty()
+        && field
+            .specs
+            .iter()
+            .all(|spec| spec.kind == field::Kind::Ipv6);
+    let parse = |word: &str| {
+        if ipv6_only && let Ok(address) = word.parse() {
+            return Some(Literal::Ipv6(address));
+        }
+        literal::parse(word)
+    };
     let ranged = field.specs.is_empty()
         || field.specs.iter().any(|spec| {
             matches!(
@@ -84,7 +95,7 @@ fn range_or_literal(field: &FieldRef, word: &str, offset: usize) -> Result<Optio
             )
         });
     let range = if ranged {
-        literal::parse_range(word)
+        literal::parse_range(word, parse)
     } else {
         None
     };
@@ -96,7 +107,7 @@ fn range_or_literal(field: &FieldRef, word: &str, offset: usize) -> Result<Optio
             literal: word.to_owned(),
             reason,
         }),
-        None => Ok(literal::parse(word)),
+        None => Ok(parse(word)),
     }
 }
 

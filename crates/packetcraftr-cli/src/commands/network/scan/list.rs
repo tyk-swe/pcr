@@ -7,7 +7,6 @@ use std::time::Duration;
 use crate::command_options::{AddressFamily, HostnamePolicyArgs};
 use crate::errors::CliError;
 use crate::input::manifest::Declaration;
-use crate::invocation::StreamEncoder;
 use crate::output::{self, contract::Format};
 use crate::system::{Runtime, client};
 use crate::terminal::{write_stdout_line, write_summary_line};
@@ -24,15 +23,16 @@ pub(super) struct Request {
     pub(super) family: AddressFamily,
     pub(super) max_targets: usize,
     pub(super) max_duration: Duration,
+    pub(super) shuffle_seed: Option<u64>,
     pub(super) policy: HostnamePolicyArgs,
 }
 
 pub(super) fn run(
     invocation: &crate::invocation::Invocation,
     request: Request,
-    format: Format,
-    stream: &StreamEncoder,
 ) -> Result<(), CliError> {
+    let format = invocation.format;
+    let stream = &invocation.output;
     let Request {
         selection,
         origins,
@@ -41,6 +41,7 @@ pub(super) fn run(
         family,
         max_targets,
         max_duration,
+        shuffle_seed,
         policy,
     } = request;
     let policy = policy.into_policy();
@@ -67,12 +68,19 @@ pub(super) fn run(
                 &origins,
                 ports.as_ref(),
                 ip_protocols.as_ref(),
+                shuffle_seed,
             )?;
             crate::terminal::render_diagnostics_text(invocation, &diagnostics)
         }
         Format::Json => {
             let origins = published_origins(&origins);
-            let published = super::output::list::Report::new(report, &origins, ports, ip_protocols);
+            let published = super::output::list::Report::new(
+                report,
+                &origins,
+                ports,
+                ip_protocols,
+                shuffle_seed,
+            );
             crate::publication::emit_published(
                 invocation,
                 output::contract::Command::Scan,
@@ -81,7 +89,13 @@ pub(super) fn run(
         }
         Format::Ndjson => {
             let origins = published_origins(&origins);
-            let published = super::output::list::Report::new(report, &origins, ports, ip_protocols);
+            let published = super::output::list::Report::new(
+                report,
+                &origins,
+                ports,
+                ip_protocols,
+                shuffle_seed,
+            );
             for target in &published.targets {
                 stream.emit_published(Published::new(
                     super::output::list::TargetEvent::from(target),
@@ -134,6 +148,7 @@ fn render_text(
     origins: &[Declaration],
     ports: Option<&super::output::plan::Ports>,
     ip_protocols: Option<&super::output::plan::IpProtocols>,
+    shuffle_seed: Option<u64>,
 ) -> Result<(), CliError> {
     write_stdout_line(
         invocation,
@@ -178,6 +193,9 @@ fn render_text(
                 target.selected.address, scope, sources
             ),
         )?;
+    }
+    if let Some(seed) = shuffle_seed {
+        write_stdout_line(invocation, format_args!("shuffle_seed={seed}"))?;
     }
     if let Some(ports) = ports {
         if let Some(tcp_scan) = ports.tcp_scan {

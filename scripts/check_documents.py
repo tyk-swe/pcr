@@ -10,6 +10,7 @@ from pathlib import Path
 import re
 import sys
 
+import check_output_schema
 from script_support import read_json
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -17,6 +18,15 @@ ROOT = Path(__file__).resolve().parent.parent
 IDENTITY = re.compile(r"^packetcraftr\.([a-z0-9-]+)/v(\d+)$")
 
 DOCUMENT_TREES = ("examples/documents", "crates/packetcraftr/data")
+
+SCHEMA_OPTIONAL_DOCUMENTS = frozenset({
+    "crates/packetcraftr/data/os-fingerprints.provenance.yaml",
+    "crates/packetcraftr/data/port-catalog.provenance.yaml",
+    "crates/packetcraftr/data/service-exclusions.provenance.yaml",
+    "crates/packetcraftr/data/service-probes.provenance.yaml",
+    "crates/packetcraftr/data/service-probes.training.v1.json",
+    "crates/packetcraftr/data/udp-payloads.provenance.yaml",
+})
 
 TWIN_PAIRS = (
     ("examples/documents/service-probes.json", "crates/packetcraftr/data/service-probes.json"),
@@ -76,10 +86,12 @@ def check_documents(root: Path = ROOT) -> list[str]:
                 except yaml.YAMLError as error:
                     raise CheckError(f"{path}: invalid YAML: {error}") from error
             identity = document.get("schema") if isinstance(document, dict) else None
+            shown = path.relative_to(root)
             if not isinstance(identity, str):
+                if shown.as_posix() not in SCHEMA_OPTIONAL_DOCUMENTS:
+                    problems.append(f"{shown}: expected a top-level 'schema' string")
                 continue
             schema = schema_path(root, identity)
-            shown = path.relative_to(root)
             if schema is None:
                 problems.append(f"{shown}: unrecognised schema identity {identity!r}")
                 continue
@@ -89,7 +101,15 @@ def check_documents(root: Path = ROOT) -> list[str]:
             claimed.add(schema)
             if schema not in validators:
                 parsed = read_json(schema)
-                validators[schema] = jsonschema.validators.validator_for(parsed)(parsed)
+                shown_schema = schema.relative_to(root)
+                if not isinstance(parsed, (dict, bool)):
+                    raise CheckError(f"{shown_schema}: invalid schema: expected an object or boolean")
+                validator_class = jsonschema.validators.validator_for(parsed)
+                try:
+                    validator_class.check_schema(parsed)
+                except jsonschema.SchemaError as error:
+                    raise CheckError(f"{shown_schema}: invalid schema: {error.message}") from error
+                validators[schema] = validator_class(parsed)
             validator = validators[schema]
             for error in sorted(validator.iter_errors(document), key=lambda error: list(error.path)):
                 where = ".".join(str(part) for part in error.path) or "<root>"
@@ -104,12 +124,16 @@ def check_documents(root: Path = ROOT) -> list[str]:
         if (root / first).read_bytes() != (root / second).read_bytes():
             problems.append(f"{first} and {second} must stay byte-identical")
 
-    forwarding = (root / "examples/consumers/forwarding.py").read_text()
-    consumer = re.search(r'^SCHEMA = "([^"]+)"', forwarding, re.M)
-    security = (root / "crates/packetcraftr-core/src/security.rs").read_text()
-    emitted = re.search(r'pub const OUTPUT_SCHEMA: &str = "([^"]+)";', security)
-    if consumer is None or emitted is None or consumer.group(1) != emitted.group(1):
-        problems.append("examples/consumers/forwarding.py SCHEMA disagrees with OUTPUT_SCHEMA")
+    security = (root / check_output_schema.CONTRACT).read_text()
+    try:
+        emitted = check_output_schema.read_identity(security)
+    except check_output_schema.CheckError as error:
+        problems.append(str(error))
+    else:
+        forwarding = (root / "examples/consumers/forwarding.py").read_text()
+        consumer = re.search(r'^SCHEMA = "([^"]+)"', forwarding, re.M)
+        if consumer is None or consumer.group(1) != emitted.identifier:
+            problems.append("examples/consumers/forwarding.py SCHEMA disagrees with OUTPUT_SCHEMA")
 
     historical, digest = HISTORICAL
     actual = hashlib.sha256((root / historical).read_bytes()).hexdigest()
@@ -127,7 +151,7 @@ def main() -> int:
     args = parser.parse_args()
     try:
         problems = check_documents(args.root.resolve())
-    except CheckError as error:
+    except (CheckError, OSError, ValueError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
     for problem in problems:

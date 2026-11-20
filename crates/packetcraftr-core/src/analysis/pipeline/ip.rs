@@ -2,12 +2,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::mem::size_of;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::Instant;
 
-use crate::analysis::Error;
 use crate::analysis::adapter::IpFragments;
 use crate::analysis::pipeline::DerivedDatagram;
-use crate::analysis::pipeline::clock::CaptureClock;
 use crate::analysis::reassembly::ip::{
     self, CompletedDatagram, DatagramKey, Family, FragmentDisposition, IncompleteReason,
     Limits as IpReassemblyLimits, OverlapPolicy, PushOutcome,
@@ -95,7 +93,6 @@ pub(super) struct DerivedDecodeBudget {
 
 pub(super) struct IpDispatch {
     reassembler: ip::Reassembler,
-    clock: CaptureClock,
     max_aggregate_bytes: usize,
     max_outcomes: usize,
     report: IpReassemblyReport,
@@ -113,22 +110,8 @@ impl IpDispatch {
             max_aggregate_bytes: limits.max_aggregate_bytes,
             max_outcomes: limits.max_retained_outcomes,
             reassembler: ip::Reassembler::new(limits, overlap_policy)?,
-            clock: CaptureClock::new(),
             report: IpReassemblyReport::default(),
         })
-    }
-
-    /// Every physical frame advances IP expiry, matched or not.
-    pub(super) fn at(
-        &mut self,
-        timestamp: SystemTime,
-        number: u64,
-    ) -> Result<(Instant, Option<Duration>), Error> {
-        self.clock.at(timestamp, number)
-    }
-
-    pub(super) fn clock_report(&self) -> &super::clock::ClockReport {
-        self.clock.report()
     }
 
     /// Capping the decoder to the layers reserved here makes the pre-allocation charge enforceable.

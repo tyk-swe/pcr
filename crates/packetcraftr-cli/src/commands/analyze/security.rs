@@ -100,17 +100,8 @@ impl Capture {
             self.filter.as_deref(),
             &self.decode,
         )?;
-        let session = packetcraftr_core::analysis::Session::new(
-            prepared.registry.clone(),
-            prepared.session_options(invocation),
-            collector,
-        );
-        let mut reader = crate::input::open_capture(
-            &invocation.control,
-            &invocation.output,
-            &self.path,
-            prepared.capture_limits,
-        )?;
+        let session = prepared.session(invocation, collector, None);
+        let mut reader = prepared.open(invocation, &self.path)?;
         let mut report = session
             .run(&mut reader, |_| Ok(()), |_| Ok(()))
             .map_err(CliError::classified)?
@@ -130,7 +121,7 @@ impl Capture {
         // streamed stdin is deliberately not reread to manufacture a source hash.
         report
             .measurements
-            .insert("capture".into(), serde_json::json!(self.path));
+            .insert("capture".into(), self.path.display().to_string().into());
         let mut bounds = self.bounds;
         bounds.max_result_bytes = bounds.max_result_bytes.min(application.max_output_bytes());
         publish(invocation, command, report, bounds)
@@ -141,7 +132,6 @@ macro_rules! capture_spec {
         impl Spec for $ty {
             const PUBLISHED: &'static [PublishedType] = $published;
             const FORMATS: &'static [Format] = crate::output::contract::TEXT_JSON_NDJSON;
-            const CANCELLATION: bool = true;
             const OFFLINE: bool = true;
             fn run_time(&self) -> Option<&dyn Bounded> {
                 Some(&self.capture.limits)
@@ -240,7 +230,6 @@ impl Spec for Hunt {
         },
     ];
     const FORMATS: &'static [Format] = crate::output::contract::TEXT_JSON_NDJSON;
-    const CANCELLATION: bool = true;
     const OFFLINE: bool = true;
     fn run_time(&self) -> Option<&dyn Bounded> {
         Some(&self.capture.limits)

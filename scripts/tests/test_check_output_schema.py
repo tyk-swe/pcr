@@ -1,5 +1,8 @@
 # Copyright (C) 2026 tyk-swe
 # SPDX-License-Identifier: AGPL-3.0-only
+from contextlib import redirect_stderr
+from copy import deepcopy
+from io import StringIO
 import json
 import stat
 import sys
@@ -47,6 +50,13 @@ class IdentityTests(unittest.TestCase):
                        'pub const OUTPUT_SCHEMA: &str = "packetcraftr.packet/v1";'):
             with self.subTest(source=source), self.assertRaises(checker.CheckError):
                 checker.read_identity(source)
+
+    def test_only_the_active_schema_declaration_counts(self):
+        source = ('/*\npub const OUTPUT_SCHEMA: &str = "packetcraftr.output/v6";\n*/\n'
+                  'pub const OUTPUT_SCHEMA: &str = "packetcraftr.output/v7";')
+        for suffix in (' \t', ' // current', ' /* current */'):
+            with self.subTest(suffix=suffix):
+                self.assertEqual(checker.read_identity(source + suffix), IDENTITY)
 
     def test_agreeing_schema_identity_passes(self):
         self.assertEqual(checker.check_identity(SCHEMA, IDENTITY), [])
@@ -100,12 +110,38 @@ class DocumentValidationTests(unittest.TestCase):
         self.assertEqual(len(problems), 1, problems)
         self.assertIn('output-stream.ndjson:2', problems[0])
 
+    def test_ndjson_keeps_unicode_line_separators_inside_strings(self):
+        document = dict(VALID, label='first\u0085second\u2028third\u2029fourth')
+        text = '\r\n'.join(json.dumps(record, ensure_ascii=False)
+                           for record in (document, VALID)) + '\r\n'
+        self.assertEqual(checker.validated(self.validator, 'stream', text, ndjson=True), [])
+
     def test_unpublished_code_is_rejected(self):
         document = dict(VALID, error={'code': 'cli.invented', 'message': 'x', 'kind': 'usage'})
         problems = checker.code_problems('doc', document, {'cli.known'})
         self.assertEqual(len(problems), 1)
         self.assertIn('cli.invented', problems[0])
         self.assertEqual(checker.code_problems('doc', document, {'cli.invented'}), [])
+
+    def test_http3_issues_require_a_published_code(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / 'crates/mini/src/output.rs'
+            source.parent.mkdir(parents=True)
+            source.write_text(
+                'published_enum! { pub(super) enum Code from http3::Code {\n'
+                '    Known => "known_issue",\n'
+                '} }\n'
+                'const OTHER: &str = "unpublished_issue";\n')
+            published = checker.published_codes(root)
+        document = dict(VALID, command='http3', result={
+            'exchange': {'request': {'issues': [
+                {'code': 'known_issue'}, {'code': 'unpublished_issue'},
+            ]}},
+        })
+        self.assertEqual(checker.code_problems('doc', document, published), [
+            "doc: /result/exchange/request/issues/1/code: unpublished code 'unpublished_issue'",
+        ])
 
     def test_wrong_identity_document_is_rejected(self):
         problems = checker.document_problems(
@@ -153,13 +189,16 @@ class RuntimeValidationTests(unittest.TestCase):
         checker.RuntimeCommand(('--output', 'json', 'missing'), succeeds=False),
     )
 
-    def fake_binary(self, directory, document, stdout=None):
+    def fake_binary(self, directory, document, stdout=None, *, failure_status: str = 'error'):
         path = Path(directory) / 'fake-cli'
-        body = stdout if stdout is not None else json.dumps(document) + '\n'
+        success = stdout if stdout is not None else json.dumps(document) + '\n'
+        failure = stdout if stdout is not None else json.dumps(dict(document, status=failure_status)) + '\n'
+        stream = stdout if stdout is not None else json.dumps(dict(document, mode='stream', event='complete', sequence=0)) + '\n'
         path.write_text(
             f'#!{sys.executable}\nimport sys\n'
-            f'sys.stdout.write({body!r})\n'
-            "sys.exit(2 if 'missing' in sys.argv else 0)\n")
+            "failed = 'missing' in sys.argv\n"
+            f"sys.stdout.write({failure!r} if failed else {stream!r} if 'stream' in sys.argv else {success!r})\n"
+            'sys.exit(2 if failed else 0)\n')
         path.chmod(path.stat().st_mode | stat.S_IXUSR)
         return path
 
@@ -189,6 +228,52 @@ class RuntimeValidationTests(unittest.TestCase):
             problems = checker.runtime_problems(binary, Path(directory), validator, set(), commands)
         self.assertEqual(len(problems), 1)
         self.assertIn('exit', problems[0])
+
+    def test_failure_exit_status_requires_an_error_envelope(self):
+        validator = checker.load_validator(SCHEMA)
+        with tempfile.TemporaryDirectory() as directory:
+            binary = self.fake_binary(directory, VALID, failure_status='success')
+            problems = checker.runtime_problems(binary, Path(directory), validator, set(), self.COMMANDS)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("expected 'error'", problems[0])
+
+    def test_ndjson_exit_status_matches_the_final_record(self):
+        command = checker.RuntimeCommand(('--output', 'ndjson', 'missing'), succeeds=False)
+        validator = checker.load_validator(SCHEMA)
+        success = json.dumps(dict(VALID, mode='stream', event='event', sequence=0))
+        error = json.dumps(dict(VALID, mode='stream', status='error', event='error', sequence=1))
+        complete = json.dumps(dict(VALID, mode='stream', event='complete', sequence=0))
+        with tempfile.TemporaryDirectory() as directory:
+            binary = self.fake_binary(directory, VALID, stdout=f'{success}\n{error}\n')
+            self.assertEqual(checker.runtime_problems(binary, Path(directory), validator, set(), (command,)), [])
+            binary = self.fake_binary(directory, VALID, stdout=f'{complete}\n')
+            problems = checker.runtime_problems(binary, Path(directory), validator, set(), (command,))
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("missing:1: expected 'error'", problems[0])
+
+    def test_runtime_ndjson_requires_one_terminal_record_at_the_end(self):
+        command = checker.RuntimeCommand(('--output', 'ndjson', 'stream'), succeeds=True)
+        identity = checker.read_identity((ROOT / checker.CONTRACT).read_text(encoding='utf-8'))
+        validator = checker.load_validator(json.loads((ROOT / identity.schema_path).read_text(encoding='utf-8')))
+        examples = ROOT / 'examples/documents'
+        records = {
+            event: json.loads((examples / f'output-read-{event}.json').read_text(encoding='utf-8'))
+            for event in ('event', 'error', 'complete')
+        }
+        published = checker.published_codes(ROOT)
+        with tempfile.TemporaryDirectory() as directory:
+            def problems(*events: str) -> list[str]:
+                stdout = ''.join(json.dumps(records[event]) + '\n' for event in events)
+                binary = self.fake_binary(directory, VALID, stdout=stdout)
+                return checker.runtime_problems(binary, Path(directory), validator, published, (command,))
+
+            self.assertEqual(problems('event', 'complete'), [])
+            for events, message in ((('error', 'complete'), 'terminal event before end of stream'),
+                                    (('event',), 'missing terminal event')):
+                with self.subTest(events=events):
+                    found = problems(*events)
+                    self.assertEqual(len(found), 1, found)
+                    self.assertIn(message, found[0])
 
 
 REGISTRY_SCHEMA = {
@@ -259,7 +344,29 @@ class RegistryTests(unittest.TestCase):
 
     def test_agreeing_registry_passes(self):
         root = self.workspace(REGISTRY_SOURCE)
-        self.assertEqual(checker.registry_problems(root, REGISTRY_SCHEMA, checker.load_jsonschema()), [])
+        self.assertEqual(checker.registry_problems(root, REGISTRY_SCHEMA, checker.load_jsonschema(), set()), [])
+
+    def test_non_string_command_and_event_declarations_are_diagnosed(self):
+        root = self.workspace(REGISTRY_SOURCE)
+        jsonschema = checker.load_jsonschema()
+        for definition, field, declaration in (
+            ('buildSuccess', 'command', {'const': {}}),
+            ('buildStreamSuccess', 'event', {'enum': ['complete', 1]}),
+        ):
+            schema = deepcopy(REGISTRY_SCHEMA)
+            schema['$defs'][definition]['properties'][field] = declaration
+            with self.subTest(field=field), self.assertRaisesRegex(checker.CheckError, field):
+                checker.registry_problems(root, schema, jsonschema, set())
+
+    def test_registered_examples_outside_output_glob_require_published_codes(self):
+        relative = 'examples/documents/build.json'
+        root = self.workspace(REGISTRY_SOURCE.replace('examples/documents/output-build-success.json', relative))
+        (root / relative).write_text(json.dumps({
+            'command': 'build', 'status': 'success', 'result': {'code': 'cli.unpublished'},
+        }))
+        self.assertEqual(checker.registry_problems(root, REGISTRY_SCHEMA, checker.load_jsonschema(), set()), [
+            f"{relative}: /result/code: unpublished code 'cli.unpublished'",
+        ])
 
     def test_registry_ignores_comments_and_test_only_records(self):
         root = self.workspace(REGISTRY_SOURCE + '\n/*\n' + REGISTRY_SOURCE + '\n*/\n')
@@ -279,22 +386,22 @@ impl StreamRecord for CommentedRecord {
 }
 */
 ''')
-        self.assertEqual(checker.registry_problems(root, REGISTRY_SCHEMA, checker.load_jsonschema()), [])
+        self.assertEqual(checker.registry_problems(root, REGISTRY_SCHEMA, checker.load_jsonschema(), set()), [])
         output.write_text(source.replace('pub struct Report {}', '/* pub struct Report {} */'))
-        problems = checker.registry_problems(root, REGISTRY_SCHEMA, checker.load_jsonschema())
+        problems = checker.registry_problems(root, REGISTRY_SCHEMA, checker.load_jsonschema(), set())
         self.assertEqual(len(problems), 1)
         self.assertIn('rust type crate::output::build::Report is not defined', problems[0])
 
     def test_reports_unused_schema_definitions(self):
         root = self.workspace(REGISTRY_SOURCE.replace('buildSuccess"', 'goneSuccess"'))
-        problems = checker.registry_problems(root, REGISTRY_SCHEMA, checker.load_jsonschema())
+        problems = checker.registry_problems(root, REGISTRY_SCHEMA, checker.load_jsonschema(), set())
         self.assertTrue(any('no such schema definition' in problem for problem in problems))
         self.assertTrue(any('buildSuccess claims' in problem for problem in problems))
 
     def test_unregistered_stream_type_is_reported(self):
         source = REGISTRY_SOURCE.replace('"crate::output::build::PacketEvent", ', '')
         root = self.workspace(source)
-        problems = checker.registry_problems(root, REGISTRY_SCHEMA, checker.load_jsonschema())
+        problems = checker.registry_problems(root, REGISTRY_SCHEMA, checker.load_jsonschema(), set())
         self.assertTrue(any('PacketEvent' in problem for problem in problems))
 
     def registered_at(self, module):
@@ -304,7 +411,7 @@ impl StreamRecord for CommentedRecord {
         path = root / checker.CLI_SRC / f'{relative}.rs'
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text('pub struct Report {}\n')
-        return checker.registry_problems(root, REGISTRY_SCHEMA, checker.load_jsonschema())
+        return checker.registry_problems(root, REGISTRY_SCHEMA, checker.load_jsonschema(), set())
 
     def test_published_type_in_a_command_output_module_passes(self):
         self.assertEqual(self.registered_at('crate::commands::packet::build::output'), [])
@@ -320,6 +427,35 @@ impl StreamRecord for CommentedRecord {
 class RepositoryTests(unittest.TestCase):
     def test_repository_outputs_match_current_schema(self):
         self.assertEqual(checker.check(ROOT), [])
+
+    def test_malformed_repository_inputs_get_contextual_diagnostics(self):
+        assets = {
+            'schema': 'packetcraftr.release-assets/v1',
+            'source_assets': [IDENTITY.schema_path],
+            'generated_assets': ['BUILD-METADATA.json'],
+        }
+        for path, value in (
+            (IDENTITY.schema_path, []),
+            (checker.RELEASE_ASSETS, {'schema': assets['schema']}),
+            (checker.RELEASE_ASSETS, dict(assets, source_assets=[1])),
+        ):
+            with self.subTest(path=path, value=value), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                inputs = {
+                    checker.CONTRACT: f'pub const OUTPUT_SCHEMA: &str = "{IDENTITY.identifier}";\n',
+                    IDENTITY.schema_path: json.dumps(SCHEMA),
+                    checker.RELEASE_ASSETS: json.dumps(assets),
+                    path: json.dumps(value),
+                }
+                for relative, content in inputs.items():
+                    source = root / relative
+                    source.parent.mkdir(parents=True, exist_ok=True)
+                    source.write_text(content, encoding='utf-8')
+                stderr = StringIO()
+                with redirect_stderr(stderr):
+                    self.assertEqual(checker.main(['--root', directory]), 2)
+                self.assertIn(path, stderr.getvalue())
+                self.assertNotIn('Traceback', stderr.getvalue())
 
 
 if __name__ == '__main__':

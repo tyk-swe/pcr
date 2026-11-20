@@ -83,7 +83,7 @@ impl ConnectionState {
             upgrade: offer.is_some(),
         });
         if let Some(settings) = offer {
-            let charge = budget::OFFER_OVERHEAD + settings.capacity() * 24;
+            let charge = budget::offer_cost(settings.capacity());
             context.charge(&mut self.charge, charge)?;
             let prelude = self
                 .upgrade

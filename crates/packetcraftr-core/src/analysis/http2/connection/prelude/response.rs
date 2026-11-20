@@ -218,7 +218,7 @@ impl ConnectionState {
             {
                 context.release(
                     &mut self.charge,
-                    budget::OFFER_OVERHEAD + offer.settings.capacity() * 24,
+                    budget::offer_cost(offer.settings.capacity()),
                 )?;
                 if let Some(held) = offer.msg.take() {
                     self.refused_upgrade(held, context)?;

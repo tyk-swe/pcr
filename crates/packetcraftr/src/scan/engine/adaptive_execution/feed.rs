@@ -95,7 +95,7 @@ where
 
     fn batch(&self, active: &Active) -> Batch<Probe> {
         let selection = active.selection;
-        let mut batch = Batch::single(
+        Batch::single(
             scan::plan::planned_probe(
                 self.request,
                 selection.sequence,
@@ -105,9 +105,8 @@ where
                 selection.attempt,
             ),
             selection.timeout,
-        );
-        batch.permit = active.permit;
-        batch
+        )
+        .with_permit(active.permit)
     }
 
     fn invalid(index: usize) -> BoundaryError {
@@ -163,7 +162,7 @@ where
                 index,
                 Active {
                     selection,
-                    permit: batch.permit,
+                    permit: batch.permit(),
                     sent: false,
                 },
             );

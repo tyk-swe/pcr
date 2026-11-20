@@ -4,7 +4,7 @@ use super::limit;
 use crate::error::FromFailure as _;
 use crate::{
     clock::Clock,
-    engine::preparation::{AdmittedCost, Admitting, AuthorizedRoute, RetainedAdmission},
+    engine::preparation::{Admitted, AdmittedCost, Admitting, AuthorizedRoute, RetainedAdmission},
     exchange::WorkflowExecutor,
     probe::Batch,
     providers::PacketProviders,
@@ -23,8 +23,31 @@ pub(super) struct Plan<'c, P, K> {
     pub routes: HashMap<(IpAddr, Option<interface::Id>), AuthorizedRoute>,
     pub probes: Vec<AdmittedProbe>,
     pub interfaces: Vec<interface::Id>,
-    pub interfaces_bytes: usize,
+    interfaces_bytes: usize,
     pub base_bytes: usize,
+    /// Planning-only parts of `base_bytes`, beside `interfaces_bytes`:
+    /// every description with its expiry entry, and the correlation index.
+    descriptions_bytes: usize,
+    index_bytes: usize,
+}
+
+impl<P, K> Plan<'_, P, K> {
+    /// Returns the planning-only charge, for a caller that reserves its
+    /// steady-state structures separately.
+    pub(super) fn release_staging(&mut self, maximum: usize) -> Result<(), BoundaryError> {
+        let staging = self
+            .descriptions_bytes
+            .saturating_add(self.index_bytes)
+            .saturating_add(self.interfaces_bytes);
+        self.base_bytes = self
+            .base_bytes
+            .checked_sub(staging)
+            .ok_or_else(|| limit("prepared accounting", maximum))?;
+        self.descriptions_bytes = 0;
+        self.index_bytes = 0;
+        self.interfaces_bytes = 0;
+        Ok(())
+    }
 }
 #[derive(Clone, Copy)]
 pub(super) struct Planned<'b> {
@@ -91,18 +114,11 @@ pub(super) fn plan_with_limit<'c, P: PacketProviders, K: Clock>(
     // individually before cloning; this table is separate from route owners.
     let mut interfaces_bytes = 256usize
         .saturating_add(source_capacity.saturating_mul(std::mem::size_of::<interface::Id>()));
-    let mut base_bytes = planned.iter().fold(
+    let descriptions_bytes = planned.iter().fold(
         super::expiry::charge(planned.len().min(options.max_in_flight)),
-        |bytes, planned| {
-            let scope_bytes = planned
-                .probe
-                .scope
-                .as_ref()
-                .map_or(0, crate::target::ResolvedZone::retained_bytes);
-            bytes.saturating_add(384).saturating_add(scope_bytes)
-        },
+        |bytes, planned| bytes.saturating_add(description_charge(planned.probe)),
     );
-    base_bytes = base_bytes
+    let mut base_bytes = descriptions_bytes
         .saturating_add(index_bytes)
         .saturating_add(interfaces_bytes);
     if base_bytes > options.max_prepared_bytes {
@@ -207,12 +223,7 @@ pub(super) fn plan_with_limit<'c, P: PacketProviders, K: Clock>(
             admission.admit_on(packet, route)
         }
         .map_err(BoundaryError::from_error)?;
-        let charge = charge(admitted.packet(), options.max_prepared_bytes)?
-            .checked_mul(3)
-            .and_then(|bytes| bytes.checked_add(admitted.wire_len()))
-            .and_then(|bytes| bytes.checked_add(admitted.retained_route_name_bytes()))
-            .and_then(|bytes| bytes.checked_add(route.scoped_name_bytes()))
-            .ok_or_else(|| limit("prepared descriptions", options.max_prepared_bytes))?;
+        let charge = probe_charge(&admitted, route, options.max_prepared_bytes)?;
         max_probe_bytes = max_probe_bytes.max(charge);
         // Planning has no live probes. Reserve one runtime preparation overlap
         // before allocating/retaining the optional boxed preview. Later route,
@@ -263,6 +274,8 @@ pub(super) fn plan_with_limit<'c, P: PacketProviders, K: Clock>(
         interfaces,
         interfaces_bytes,
         base_bytes,
+        descriptions_bytes,
+        index_bytes,
     })
 }
 
@@ -294,12 +307,7 @@ pub(super) fn admit_one<P: PacketProviders, K: Clock>(
         plan.admission.admit_on(packet, &route)
     }
     .map_err(BoundaryError::from_error)?;
-    let memory = charge(admitted.packet(), maximum)?
-        .checked_mul(3)
-        .and_then(|bytes| bytes.checked_add(admitted.wire_len()))
-        .and_then(|bytes| bytes.checked_add(admitted.retained_route_name_bytes()))
-        .and_then(|bytes| bytes.checked_add(route.scoped_name_bytes()))
-        .ok_or_else(|| limit("prepared descriptions", maximum))?;
+    let memory = probe_charge(&admitted, &route, maximum)?;
     let (cost, retained) = admitted.into_parts();
     Ok((
         route,
@@ -309,6 +317,30 @@ pub(super) fn admit_one<P: PacketProviders, K: Clock>(
             retained,
         },
     ))
+}
+
+/// One probe's prepared description, before its route.
+pub(super) fn description_charge(probe: &Probe) -> usize {
+    384usize.saturating_add(
+        probe
+            .scope
+            .as_ref()
+            .map_or(0, crate::target::ResolvedZone::retained_bytes),
+    )
+}
+
+/// An admitted probe's packet, its two builds, wire bytes, and route names.
+fn probe_charge(
+    admitted: &Admitted,
+    route: &AuthorizedRoute,
+    maximum: usize,
+) -> Result<usize, BoundaryError> {
+    charge(admitted.packet(), maximum)?
+        .checked_mul(3)
+        .and_then(|bytes| bytes.checked_add(admitted.wire_len()))
+        .and_then(|bytes| bytes.checked_add(admitted.retained_route_name_bytes()))
+        .and_then(|bytes| bytes.checked_add(route.scoped_name_bytes()))
+        .ok_or_else(|| limit("prepared descriptions", maximum))
 }
 
 /// Route object metadata and every owned interface-name buffer. A map key and

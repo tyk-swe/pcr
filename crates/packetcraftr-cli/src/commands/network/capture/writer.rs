@@ -12,7 +12,7 @@ pub(super) fn initialize<W: Write>(
 ) -> Result<Writer<W>, Error> {
     let maximum = sources
         .iter()
-        .map(|source| source.metadata.snap_length)
+        .map(|source| source.native.metadata.snap_length)
         .max()
         .ok_or(Error::InvalidData {
             format,
@@ -27,7 +27,7 @@ pub(super) fn initialize<W: Write>(
         }
         return Writer::pcap_with_options(
             destination,
-            sources[0].metadata.link_type,
+            sources[0].native.metadata.link_type,
             capture_file::PcapOptions {
                 snap_len: maximum,
                 max_size: maximum,
@@ -54,8 +54,8 @@ pub(super) fn initialize<W: Write>(
     )?;
     for source in sources {
         let description = capture_file::Interface {
-            link_type: source.metadata.link_type,
-            snap_len: u32::try_from(source.metadata.snap_length).map_err(|_| {
+            link_type: source.native.metadata.link_type,
+            snap_len: u32::try_from(source.native.metadata.snap_length).map_err(|_| {
                 Error::InvalidData {
                     format,
                     reason: "snapshot exceeds capture wire range",
@@ -68,10 +68,12 @@ pub(super) fn initialize<W: Write>(
             description,
             &[capture_file::PcapNgOption {
                 code: 2,
-                value: bytes::Bytes::copy_from_slice(source.metadata.interface.name.as_bytes()),
+                value: bytes::Bytes::copy_from_slice(
+                    source.native.metadata.interface.name.as_bytes(),
+                ),
             }],
         )?;
-        if id as usize != source.index {
+        if id as usize != source.native.index {
             return Err(Error::InvalidData {
                 format,
                 reason: "capture source IDs are not contiguous",

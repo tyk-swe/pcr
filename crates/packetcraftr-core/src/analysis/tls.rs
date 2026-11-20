@@ -569,7 +569,11 @@ impl SessionCollector for Collector {
         }
     }
 
-    fn observe(&mut self, record: &FrameRecord<'_>) -> Result<Vec<SessionEvent>, BoundaryError> {
+    fn observe(
+        &mut self,
+        record: &FrameRecord<'_>,
+        _deadline: &crate::budget::Deadline,
+    ) -> Result<Vec<SessionEvent>, BoundaryError> {
         Ok(Self::observe(self, record))
     }
 

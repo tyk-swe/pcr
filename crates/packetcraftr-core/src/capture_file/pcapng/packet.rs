@@ -9,9 +9,10 @@ use super::options::{parse_options, unique_option};
 use crate::capture_file::error::Error;
 use crate::capture_file::format::{Endianness, Format};
 use crate::capture_file::header::{Interface, PcapNgOption};
+use crate::capture_file::limits::ReaderLimits;
 use crate::capture_file::wire::{
-    PCAPNG_OPTION_EPB_FLAGS, align_to_usize, decode_u16, decode_u32, pcapng_packet_bytes,
-    timestamp_from_ticks, validate_declared_lengths,
+    PCAPNG_OPTION_EPB_FLAGS, Subnanosecond, align_to_usize, decode_u16, decode_u32,
+    pcapng_packet_bytes, timestamp_from_ticks, validate_declared_lengths,
 };
 
 pub(in crate::capture_file) struct ParsedPacket {
@@ -20,52 +21,14 @@ pub(in crate::capture_file) struct ParsedPacket {
     pub(in crate::capture_file) options: Vec<PcapNgOption>,
 }
 
-pub(in crate::capture_file) fn parse_enhanced_packet(
+pub(in crate::capture_file) fn parse_timestamped_packet(
     body: &Bytes,
     endianness: Endianness,
     interfaces: &[Interface],
     interface_base: u32,
-    max_size: usize,
-    max_options: usize,
-) -> Result<ParsedPacket, Error> {
-    parse(
-        body,
-        endianness,
-        interfaces,
-        interface_base,
-        max_size,
-        max_options,
-        false,
-    )
-}
-
-pub(in crate::capture_file) fn parse_obsolete_packet(
-    body: &Bytes,
-    endianness: Endianness,
-    interfaces: &[Interface],
-    interface_base: u32,
-    max_size: usize,
-    max_options: usize,
-) -> Result<ParsedPacket, Error> {
-    parse(
-        body,
-        endianness,
-        interfaces,
-        interface_base,
-        max_size,
-        max_options,
-        true,
-    )
-}
-
-fn parse(
-    body: &Bytes,
-    endianness: Endianness,
-    interfaces: &[Interface],
-    interface_base: u32,
-    max_size: usize,
-    max_options: usize,
+    limits: &ReaderLimits,
     obsolete_layout: bool,
+    subnanosecond: Subnanosecond,
 ) -> Result<ParsedPacket, Error> {
     const HEADER_LENGTH: usize = 20;
 
@@ -91,7 +54,12 @@ fn parse(
         | u64::from(decode_u32(endianness, &header[8..12])?);
     let captured_length = decode_u32(endianness, &header[12..16])?;
     let original_length = decode_u32(endianness, &header[16..20])?;
-    validate_declared_lengths(captured_length, original_length, max_size, "pcapng packet")?;
+    validate_declared_lengths(
+        captured_length,
+        original_length,
+        limits.max_size,
+        "pcapng packet",
+    )?;
     let interface = interfaces
         .get(interface_id as usize)
         .ok_or(Error::UndefinedInterface {
@@ -123,13 +91,14 @@ fn parse(
         &body[data_end..],
         endianness,
         "pcapng packet options",
-        max_options,
+        limits.max_options_per_block,
     )?;
     let direction = packet_direction(&options, endianness)?;
     let timestamp = timestamp_from_ticks(
         timestamp_ticks,
         interface.timestamp_resolution,
         interface.timestamp_offset,
+        subnanosecond,
     )?;
     let global_interface = interface_base
         .checked_add(interface_id)
@@ -156,15 +125,12 @@ fn parse(
     })
 }
 
-/// Simple packet blocks carry no options; `max_options` keeps the packet
-/// parsers signature-compatible for the block-kind dispatch table.
 pub(in crate::capture_file) fn parse_simple_packet(
     body: &Bytes,
     endianness: Endianness,
     interfaces: &[Interface],
     interface_base: u32,
     max_size: usize,
-    _max_options: usize,
 ) -> Result<ParsedPacket, Error> {
     if body.len() < 4 {
         return Err(Error::InvalidData {

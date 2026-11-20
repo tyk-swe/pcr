@@ -14,7 +14,7 @@ use super::header::{CaptureHeader, Interface, PcapNgOption, Section};
 use super::limits::ReaderLimits;
 use super::pcapng::{PcapNgState, read_next_pcapng_record, read_section_header_after_type};
 use super::record::{CaptureRecord, MetadataBlockKind, RecordKind};
-use super::wire::{PCAPNG_SECTION_HEADER, read_exact_or_eof};
+use super::wire::{PCAPNG_SECTION_HEADER, Subnanosecond, read_exact_or_eof};
 
 pub(super) const DECLARED_FCS: &str = "declared frame check sequence";
 
@@ -187,11 +187,19 @@ impl<R: Read> Reader<R> {
         self.declares_fcs
     }
 
+    /// Returns a source record, rejecting timestamps that cannot be represented exactly.
     pub fn next_record(&mut self) -> Result<Option<CaptureRecord>, Error> {
+        self.next_record_with(Subnanosecond::Reject)
+    }
+
+    fn next_record_with(
+        &mut self,
+        subnanosecond: Subnanosecond,
+    ) -> Result<Option<CaptureRecord>, Error> {
         if self.finished {
             return Ok(None);
         }
-        let result = self.read_record();
+        let result = self.read_record(subnanosecond);
         match result {
             Ok(record) => {
                 if record.is_none() {
@@ -206,7 +214,10 @@ impl<R: Read> Reader<R> {
         }
     }
 
-    fn read_record(&mut self) -> Result<Option<CaptureRecord>, Error> {
+    fn read_record(
+        &mut self,
+        subnanosecond: Subnanosecond,
+    ) -> Result<Option<CaptureRecord>, Error> {
         self.check_interrupted()?;
         let record = match &mut self.state {
             ReaderState::Pcap(state) => {
@@ -218,6 +229,7 @@ impl<R: Read> Reader<R> {
                 &mut self.interfaces,
                 &self.limits,
                 &mut self.scratch,
+                subnanosecond,
             ),
         }
         .map_err(|error| self.check_interrupted().err().unwrap_or(error))?;
@@ -233,8 +245,19 @@ impl<R: Read> Reader<R> {
         Ok(record)
     }
 
+    /// Floors PCAPNG timestamps to whole nanoseconds before converting to the platform's
+    /// `SystemTime` precision.
     pub fn next_frame(&mut self) -> Result<Option<Frame>, Error> {
-        while let Some(record) = self.next_record()? {
+        self.next_frame_with(Subnanosecond::Floor)
+    }
+
+    /// Rejects PCAPNG timestamps that fall between whole nanoseconds.
+    pub fn next_exact_frame(&mut self) -> Result<Option<Frame>, Error> {
+        self.next_frame_with(Subnanosecond::Reject)
+    }
+
+    fn next_frame_with(&mut self, subnanosecond: Subnanosecond) -> Result<Option<Frame>, Error> {
+        while let Some(record) = self.next_record_with(subnanosecond)? {
             if let Some(frame) = record.frame {
                 return Ok(Some(frame));
             }

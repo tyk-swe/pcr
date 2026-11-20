@@ -44,7 +44,7 @@ fn next_selected(
     selection: Selection<'_>,
 ) -> Result<Option<(u64, core::frame::Frame)>, CliError> {
     loop {
-        let next = reader.next_frame().map_err(CliError::classified)?;
+        let next = reader.next_exact_frame().map_err(CliError::classified)?;
         reader.refuse_declared_fcs().map_err(CliError::classified)?;
         let Some(frame) = next else { return Ok(None) };
         let source_frame = account_frame(invocation, budget, &frame)?;

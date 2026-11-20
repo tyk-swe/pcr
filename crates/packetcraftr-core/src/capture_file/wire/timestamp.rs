@@ -48,10 +48,17 @@ fn out_of_range() -> Error {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(in crate::capture_file) enum Subnanosecond {
+    Reject,
+    Floor,
+}
+
 pub(in crate::capture_file) fn timestamp_from_ticks(
     ticks: u64,
     resolution: TimestampResolution,
     offset_seconds: i64,
+    subnanosecond: Subnanosecond,
 ) -> Result<SystemTime, Error> {
     let (whole_seconds, nanoseconds) = match resolution.ticks_per_second() {
         Some(exact_ticks_per_second) => {
@@ -62,7 +69,9 @@ pub(in crate::capture_file) fn timestamp_from_ticks(
             let scaled = remainder
                 .checked_mul(1_000_000_000)
                 .expect("u64 ticks multiplied by one billion fit in u128");
-            if !scaled.is_multiple_of(exact_ticks_per_second) {
+            if subnanosecond == Subnanosecond::Reject
+                && !scaled.is_multiple_of(exact_ticks_per_second)
+            {
                 return Err(Error::MetadataNotRepresentable {
                     format: Format::PcapNg,
                     field: "sub-nanosecond timestamp",
@@ -74,7 +83,7 @@ pub(in crate::capture_file) fn timestamp_from_ticks(
         }
         None => {
             // A denominator beyond u128 dwarfs any u64 timestamp, so only zero ticks are exact.
-            if ticks != 0 {
+            if subnanosecond == Subnanosecond::Reject && ticks != 0 {
                 return Err(Error::MetadataNotRepresentable {
                     format: Format::PcapNg,
                     field: "sub-nanosecond timestamp",

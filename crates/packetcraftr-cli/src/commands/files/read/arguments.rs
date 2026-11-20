@@ -28,6 +28,10 @@ streams frame records without --field and field rows with --field.
 If no frames match --filter, JSON returns `rows_written: 0` and `rows: []`,
 and NDJSON emits only a `complete` record, with or without --field.
 
+Non-capture output floors PCAPNG timestamps to whole nanoseconds before
+converting to the platform's clock precision. Capture output rejects
+sub-nanosecond timestamps.
+
 Capture output preserves the input format unless --normalize is set. --normalize
 writes matching physical frames into one PCAPNG section or a single-interface
 classic PCAP (requiring one link type, timestamps, and no direction metadata),

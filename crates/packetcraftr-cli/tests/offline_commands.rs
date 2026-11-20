@@ -83,6 +83,42 @@ fn help_succeeds_with_tool_name() {
 }
 
 #[test]
+fn offline_help_explains_when_machine_output_requires_fields() {
+    for (args, expected) in [
+        (
+            ["files", "read", "--help"],
+            [
+                "JSON requires at least one --field",
+                "streams frame records without --field",
+                "rows_written: 0",
+            ],
+        ),
+        (
+            ["packet", "dissect", "--help"],
+            [
+                "NDJSON requires at least one --field",
+                "matched: false, dissection: null",
+                "rows_written: 0",
+            ],
+        ),
+        (
+            ["reference", "topics", "formats"],
+            [
+                "files read: JSON requires at least one --field",
+                "packet dissect: NDJSON requires at least one --field",
+                "field projection with --field",
+            ],
+        ),
+    ] {
+        let help = assert_success(&run(&args), &args);
+        let help = help.split_whitespace().collect::<Vec<_>>().join(" ");
+        for detail in expected {
+            assert!(help.contains(detail), "{args:?} should explain {detail}");
+        }
+    }
+}
+
+#[test]
 fn reference_topics_rejects_machine_output_flags_with_text_output() {
     for (args, expected) in [
         (

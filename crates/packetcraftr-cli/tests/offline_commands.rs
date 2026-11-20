@@ -676,7 +676,7 @@ fn files_read_floors_fractional_pcapng_timestamps_only_for_display() {
     let path = file.path().to_str().unwrap();
     for (resolution, offset, ticks, expected_nanos, exact) in [
         (TimestampResolution::Binary(10), 123, 1_u64, 976_562, false),
-        (TimestampResolution::Binary(10), 123, 2, 1_953_125, true),
+        (TimestampResolution::Binary(10), 123, 128, 125_000_000, true),
         (TimestampResolution::Binary(10), -1, 1, 976_562, false),
         (TimestampResolution::Decimal(10), 123, 19, 1, false),
         (TimestampResolution::Decimal(127), 123, u64::MAX, 0, false),
@@ -716,9 +716,22 @@ fn files_read_floors_fractional_pcapng_timestamps_only_for_display() {
         let text = assert_success(&output, &args);
         let record: serde_json::Value = serde_json::from_str(text.lines().next().unwrap()).unwrap();
         assert_eq!(record["event"], "frame");
+        let fraction = Duration::from_nanos(expected_nanos);
+        let expected_nanos = if offset < 0 {
+            let before_epoch = (UNIX_EPOCH - (seconds - fraction))
+                .duration_since(UNIX_EPOCH)
+                .unwrap_err()
+                .duration();
+            (1_000_000_000 - before_epoch.subsec_nanos()) % 1_000_000_000
+        } else {
+            (UNIX_EPOCH + (seconds + fraction))
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .subsec_nanos()
+        };
         assert_eq!(
             record["result"]["frame"]["timestamp"]["unix_seconds"],
-            offset
+            offset,
         );
         assert_eq!(
             record["result"]["frame"]["timestamp"]["nanoseconds"],

@@ -245,12 +245,13 @@ impl<R: Read> Reader<R> {
         Ok(record)
     }
 
-    /// Returns the next frame, flooring PCAPNG timestamps to the preceding whole nanosecond.
+    /// Floors PCAPNG timestamps to whole nanoseconds before converting to the platform's
+    /// `SystemTime` precision.
     pub fn next_frame(&mut self) -> Result<Option<Frame>, Error> {
         self.next_frame_with(Subnanosecond::Floor)
     }
 
-    /// Returns the next frame without rounding. Use this for exact timing or re-encoding.
+    /// Rejects PCAPNG timestamps that fall between whole nanoseconds.
     pub fn next_exact_frame(&mut self) -> Result<Option<Frame>, Error> {
         self.next_frame_with(Subnanosecond::Reject)
     }

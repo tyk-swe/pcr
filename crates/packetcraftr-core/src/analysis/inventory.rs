@@ -6,9 +6,9 @@ use std::net::IpAddr;
 
 use crate::analysis::pipeline::FrameRecord;
 use crate::analysis::{StreamTransport, Summary as RunSummary};
-use crate::packet::MacAddress;
+use crate::packet::{MacAddress, Packet};
 use crate::protocol::identity;
-use crate::protocol::link::Arp;
+use crate::protocol::link::{Arp, Ethernet};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ObservedPort {
@@ -61,39 +61,7 @@ impl Collector {
     }
 
     pub fn observe(&mut self, record: &FrameRecord<'_>) {
-        let mut seen: Vec<&str> = Vec::new();
-        for layer in record.decoded.packet.iter() {
-            let name = layer.protocol_id().as_str();
-            if !seen.contains(&name) {
-                seen.push(name);
-            }
-        }
-        for name in &seen {
-            *self.protocols.entry((*name).to_owned()).or_default() += 1;
-        }
-
-        if let Some(arp) = record.decoded.packet.get::<Arp>()
-            && !arp.sender_protocol.is_unspecified()
-        {
-            let sender = IpAddr::V4(arp.sender_protocol);
-            let host = self.hosts.entry(sender).or_default();
-            host.mac_addresses.insert(arp.sender_hardware);
-            host.frames_sent += 1;
-            for name in &seen {
-                host.protocols.insert((*name).to_owned());
-            }
-        }
-        let Some((source, destination)) = innermost_network(record) else {
-            return;
-        };
-        for address in [source, destination] {
-            let host = self.hosts.entry(address).or_default();
-            for name in &seen {
-                host.protocols.insert((*name).to_owned());
-            }
-        }
-        self.hosts.entry(source).or_default().frames_sent += 1;
-        self.hosts.entry(destination).or_default().frames_received += 1;
+        self.observe_frame(&record.decoded.packet);
 
         for (transport, conversation) in [
             (
@@ -122,6 +90,69 @@ impl Collector {
                         .insert((transport, flow.destination_port));
                 }
             }
+        }
+    }
+
+    fn observe_frame(&mut self, packet: &Packet) {
+        let mut sent = BTreeSet::new();
+        let mut received = BTreeSet::new();
+        let mut frame_protocols = BTreeSet::new();
+        let mut network_protocols = BTreeSet::new();
+        let mut endpoints = None;
+        for layer in packet.iter() {
+            let network = identity::network_endpoints(layer);
+            let arp = layer.downcast_ref::<Arp>();
+            if (network.is_some() || arp.is_some() || layer.downcast_ref::<Ethernet>().is_some())
+                && let Some(previous) = endpoints.take()
+            {
+                self.record_host_protocols(previous, &network_protocols);
+                network_protocols.clear();
+            }
+            if let Some((source, destination)) = network {
+                sent.insert(source);
+                received.insert(destination);
+                endpoints = Some((source, Some(destination)));
+            } else if let Some(arp) = arp
+                && !arp.sender_protocol.is_unspecified()
+            {
+                let sender = IpAddr::V4(arp.sender_protocol);
+                self.hosts
+                    .entry(sender)
+                    .or_default()
+                    .mac_addresses
+                    .insert(arp.sender_hardware);
+                sent.insert(sender);
+                endpoints = Some((sender, None));
+            }
+            let name = layer.protocol_id().as_str();
+            frame_protocols.insert(name);
+            network_protocols.insert(name);
+        }
+        if let Some(endpoints) = endpoints {
+            self.record_host_protocols(endpoints, &network_protocols);
+        }
+        for address in sent {
+            self.hosts.entry(address).or_default().frames_sent += 1;
+        }
+        for address in received {
+            self.hosts.entry(address).or_default().frames_received += 1;
+        }
+        for name in frame_protocols {
+            *self.protocols.entry(name.to_owned()).or_default() += 1;
+        }
+    }
+
+    fn record_host_protocols(
+        &mut self,
+        (source, destination): (IpAddr, Option<IpAddr>),
+        protocols: &BTreeSet<&str>,
+    ) {
+        for address in std::iter::once(source).chain(destination) {
+            self.hosts
+                .entry(address)
+                .or_default()
+                .protocols
+                .extend(protocols.iter().map(|name| (*name).to_owned()));
         }
     }
 
@@ -159,14 +190,4 @@ fn usable_host(address: IpAddr) -> bool {
         return false;
     }
     !matches!(address, IpAddr::V4(v4) if v4.is_broadcast())
-}
-
-fn innermost_network(record: &FrameRecord<'_>) -> Option<(IpAddr, IpAddr)> {
-    let mut network = None;
-    for layer in record.decoded.packet.iter() {
-        if let Some(endpoints) = identity::network_endpoints(layer) {
-            network = Some(endpoints);
-        }
-    }
-    network
 }

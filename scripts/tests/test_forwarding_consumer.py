@@ -86,6 +86,20 @@ class ForwardingConsumerTests(unittest.TestCase):
         with self.assertRaisesRegex(consumer.ContractError, 'identity occurs'):
             consume(value)
 
+    def test_keyed_ranks_follow_capture_frame_order(self):
+        for side in ('ingress', 'egress'):
+            with self.subTest(side=side):
+                value = envelope()
+                report = value['result']
+                first, second = report['matches']
+                report['captures'][side]['read'] = 3
+                first[side]['frame'] = 2
+                second[side]['frame'] = 3
+                self.assertEqual(consume(value)['verdict'], 'pass')
+                first[side]['frame'], second[side]['frame'] = 3, 2
+                with self.assertRaisesRegex(consumer.ContractError, 'rank.*capture frame order'):
+                    consume(value)
+
     def test_object_identity_ignores_member_order(self):
         value = envelope()
         first, second = value['result']['matches']

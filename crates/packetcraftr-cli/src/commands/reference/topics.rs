@@ -10,7 +10,7 @@ use packetcraftr_core::error::{Classification, Kind};
 use crate::commands::{Command, Generate};
 use crate::errors::CliError;
 use crate::output::contract::Format;
-use crate::rendering::emit_stdout_document;
+use crate::terminal::emit_stdout_document;
 
 pub(crate) const AFTER_LONG_HELP: &str = r"Without NAME, lists the topics. Topics print text only and need no capture, network, or privileges.
 
@@ -23,7 +23,7 @@ Examples:
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
-    /// Topic to print: expressions, filters, formats, or exit-codes. Omit to list them.
+    /// Topic to print: expressions, filters, formats, scope, or exit-codes. Omit to list them.
     #[arg(value_name = "NAME")]
     pub(crate) name: Option<String>,
 }
@@ -50,6 +50,11 @@ const TOPICS: &[Topic] = &[
         name: "formats",
         summary: "Output formats and which commands offer each.",
         body: formats,
+    },
+    Topic {
+        name: "scope",
+        summary: "Engagement scope documents and how they narrow live policy.",
+        body: || String::from(text::SCOPE),
     },
     Topic {
         name: "exit-codes",

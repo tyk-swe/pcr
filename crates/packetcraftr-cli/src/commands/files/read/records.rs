@@ -17,7 +17,7 @@ use crate::filtering;
 use crate::invocation::StreamEncoder;
 use crate::output::contract::Format;
 use crate::output::frame::Record;
-use crate::rendering::FieldTree;
+use crate::packet_text::FieldTree;
 
 pub(super) fn run(
     invocation: &crate::invocation::Invocation,

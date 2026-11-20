@@ -1,6 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use std::time::Instant;
+
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::error::BoundaryError;
 
@@ -8,6 +10,7 @@ use crate::clock::Clock;
 use crate::target::SelectedAddress;
 
 use super::Prober;
+use super::Scheduler;
 use super::pipelined::add_stats;
 use crate::probe::enforce_deadline;
 use crate::scan::Error;
@@ -16,47 +19,28 @@ use crate::scan::executor::Pipelined;
 
 /// Marks `host` started and returns `None` when it has already expired.
 fn start_host(
-    controller: &mut Option<&mut crate::scan::adaptive::Controller>,
+    scheduler: &mut Scheduler,
     target: &SelectedAddress,
-    now: std::time::Instant,
+    now: Instant,
 ) -> Result<Option<usize>, ()> {
-    let host = controller.as_deref_mut().map(|c| c.host_index(target));
-    if let (Some(c), Some(h)) = (controller.as_deref_mut(), host) {
-        c.host_started(h, now);
-    }
-    if host_expired(controller, host, now) {
+    let host = scheduler.host_index(target);
+    scheduler.host_started(host, now);
+    if scheduler.host_expired(host, now) {
         return Err(());
     }
     Ok(host)
 }
 
-fn host_expired(
-    controller: &mut Option<&mut crate::scan::adaptive::Controller>,
-    host: Option<usize>,
-    now: std::time::Instant,
-) -> bool {
-    if let (Some(c), Some(h)) = (controller.as_deref_mut(), host)
-        && c.host_expired(h, now)
-    {
-        c.mark_incomplete(h);
-        return true;
-    }
-    false
-}
-
 fn host_deadline(
-    controller: &Option<&mut crate::scan::adaptive::Controller>,
+    scheduler: &Scheduler,
     host: Option<usize>,
     deadline: &Deadline,
-    now: std::time::Instant,
+    now: Instant,
 ) -> Result<Option<Deadline>, Error> {
-    match (controller, host) {
-        (Some(c), Some(h)) => deadline
-            .for_wait(c.host_remaining(h, now))
-            .map(Some)
-            .map_err(Error::from),
-        _ => Ok(None),
-    }
+    scheduler
+        .host_remaining(host, now)
+        .map(|remaining| deadline.for_wait(remaining).map_err(Error::from))
+        .transpose()
 }
 
 /// Resolves each target's link address in selection order. Each request is
@@ -70,20 +54,19 @@ pub(super) fn discover_neighbors<E: Pipelined, C: Clock>(
     targets: &[SelectedAddress],
     composer: &mut Composer,
     stats: &mut crate::Stats,
-    controller: Option<&mut crate::scan::adaptive::Controller>,
+    scheduler: &mut Scheduler,
 ) -> Result<Vec<bool>, Error> {
     let request = prober.request;
     let mut sendable = vec![true; targets.len()];
-    let mut controller = controller;
     for (index, target) in targets.iter().enumerate() {
-        let Ok(host) = start_host(&mut controller, target, prober.clock.now()) else {
+        let Ok(host) = start_host(scheduler, target, prober.clock.now()) else {
             sendable[index] = false;
             continue;
         };
         let mut attempts = 0;
         let mut last: Option<discovery::Neighbor> = None;
         let neighbor = loop {
-            if host_expired(&mut controller, host, prober.clock.now()) {
+            if scheduler.host_expired(host, prober.clock.now()) {
                 break last;
             }
             // A pause owed by an earlier request is waited out only before
@@ -92,14 +75,12 @@ pub(super) fn discover_neighbors<E: Pipelined, C: Clock>(
                 prober.settle(stats)?;
             }
             enforce_deadline::<Error>(prober.deadline)?;
-            if host_expired(&mut controller, host, prober.clock.now()) {
+            if scheduler.host_expired(host, prober.clock.now()) {
                 break last;
             }
-            let timeout = host.map_or(request.timeout, |h| {
-                controller.as_deref().map_or(request.timeout, |c| {
-                    request.timeout.min(c.host_remaining(h, prober.clock.now()))
-                })
-            });
+            let timeout = scheduler
+                .host_remaining(host, prober.clock.now())
+                .map_or(request.timeout, |remaining| request.timeout.min(remaining));
             let began = prober.clock.now();
             let resolved = prober
                 .executor
@@ -107,7 +88,7 @@ pub(super) fn discover_neighbors<E: Pipelined, C: Clock>(
             let (neighbor, exchange) = match resolved {
                 Ok(resolved) => resolved,
                 Err(source) => {
-                    if host_expired(&mut controller, host, prober.clock.now()) {
+                    if scheduler.host_expired(host, prober.clock.now()) {
                         break last;
                     }
                     return Err(Error::Neighbor {
@@ -133,7 +114,7 @@ pub(super) fn discover_neighbors<E: Pipelined, C: Clock>(
             prober.owed.owe(usize::from(sent), Some(began));
             attempts += neighbor.attempts;
             let silent = matches!(neighbor.outcome, discovery::NeighborOutcome::Silent);
-            if silent && host_expired(&mut controller, host, prober.clock.now()) {
+            if silent && scheduler.host_expired(host, prober.clock.now()) {
                 break last;
             }
             let neighbor = discovery::Neighbor {
@@ -185,12 +166,12 @@ pub(super) fn reach_next_hop<E: Pipelined, C: Clock>(
     target: &SelectedAddress,
     stats: &mut crate::Stats,
     sequence: u64,
-    mut controller: Option<&mut crate::scan::adaptive::Controller>,
+    scheduler: &mut Scheduler,
 ) -> Result<ReachOutcome, Error> {
-    let Ok(host) = start_host(&mut controller, target, prober.clock.now()) else {
+    let Ok(host) = start_host(scheduler, target, prober.clock.now()) else {
         return Ok(ReachOutcome::HostExpired);
     };
-    let scoped = host_deadline(&controller, host, prober.deadline, prober.clock.now())?;
+    let scoped = host_deadline(scheduler, host, prober.deadline, prober.clock.now())?;
     let needs_request = requests_neighbor(
         prober.executor,
         target,
@@ -201,18 +182,18 @@ pub(super) fn reach_next_hop<E: Pipelined, C: Clock>(
         prober.settle(stats)?;
     }
     enforce_deadline::<Error>(prober.deadline)?;
-    if host_expired(&mut controller, host, prober.clock.now()) {
+    if scheduler.host_expired(host, prober.clock.now()) {
         return Ok(ReachOutcome::HostExpired);
     }
     let began = prober.clock.now();
-    let scoped = host_deadline(&controller, host, prober.deadline, began)?;
+    let scoped = host_deadline(scheduler, host, prober.deadline, began)?;
     let resolved = prober
         .executor
         .resolve_next_hop(target, scoped.as_ref().unwrap_or(prober.deadline));
     let resolved = match resolved {
         Ok(resolved) => resolved,
         Err(source) => {
-            if host_expired(&mut controller, host, prober.clock.now()) {
+            if scheduler.host_expired(host, prober.clock.now()) {
                 return Ok(ReachOutcome::HostExpired);
             }
             return Err(Error::Neighbor {
@@ -231,7 +212,7 @@ pub(super) fn reach_next_hop<E: Pipelined, C: Clock>(
     prober.owed.owe(requests, Some(began));
     Ok(match resolved.silence {
         Some(source) => {
-            if host_expired(&mut controller, host, prober.clock.now()) {
+            if scheduler.host_expired(host, prober.clock.now()) {
                 return Ok(ReachOutcome::HostExpired);
             }
             ReachOutcome::Silent(source)

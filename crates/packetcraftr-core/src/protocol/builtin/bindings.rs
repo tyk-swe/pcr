@@ -268,12 +268,6 @@ fn register_tunnels(builder: &mut crate::registry::Builder) -> Result<(), crate:
                 Priority::Primary,
             ),
             (
-                BuiltinProtocol::Udp,
-                4789,
-                BuiltinProtocol::Vxlan,
-                Priority::Primary,
-            ),
-            (
                 BuiltinProtocol::Vxlan,
                 0,
                 BuiltinProtocol::Ethernet,
@@ -283,12 +277,6 @@ fn register_tunnels(builder: &mut crate::registry::Builder) -> Result<(), crate:
                 BuiltinProtocol::Etherip,
                 0,
                 BuiltinProtocol::Ethernet,
-                Priority::Primary,
-            ),
-            (
-                BuiltinProtocol::Udp,
-                2152,
-                BuiltinProtocol::Gtpu,
                 Priority::Primary,
             ),
             (
@@ -308,18 +296,6 @@ fn register_tunnels(builder: &mut crate::registry::Builder) -> Result<(), crate:
                 GTPU_OTHER_PAYLOAD,
                 BuiltinProtocol::Raw,
                 Priority::Fallback,
-            ),
-            (
-                BuiltinProtocol::Udp,
-                6635,
-                BuiltinProtocol::Mpls,
-                Priority::Primary,
-            ),
-            (
-                BuiltinProtocol::Udp,
-                6081,
-                BuiltinProtocol::Geneve,
-                Priority::Primary,
             ),
             (
                 BuiltinProtocol::Geneve,

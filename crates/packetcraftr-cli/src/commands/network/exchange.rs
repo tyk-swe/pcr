@@ -48,7 +48,6 @@ impl crate::commands::Spec for Args {
         crate::output::contract::Format::Pcap,
         crate::output::contract::Format::PcapNg,
     ];
-    const CANCELLATION: bool = true;
 
     fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
         self.send.policy.resources(settings);
@@ -119,7 +118,7 @@ fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<()
             };
             invocation.check()?;
             if format == Format::Json {
-                crate::rendering::emit_published(
+                crate::publication::emit_published(
                     invocation,
                     crate::output::contract::Command::Exchange,
                     crate::output::envelope::Published::<output::Report>::try_from(report)

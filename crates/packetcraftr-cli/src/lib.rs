@@ -15,7 +15,7 @@
 //! | 2. Foundation | `errors`, `filtering`, `cancellation`, `resources` |
 //! | 3. Options | `command_options` |
 //! | 4. Invocation | `invocation`: one command's output stream, deadline, cancellation, and diagnostics |
-//! | 5. Inputs, system, and presentation | `input`, `system`, `rendering`, `staged_output` |
+//! | 5. Inputs, system, and output channels | `input`, `system`, `staged_output`, `terminal`, `publication`, `capture_output`, `packet_text`, `field_projection` |
 //! | 6. Commands | `commands`: implementations by `--help` group, each with its own published `output` types, plus the registry and dispatch |
 //! | 7. Application shell | `app`: process entry, argument parsing, and help |
 //!
@@ -29,16 +29,20 @@
 
 mod app;
 mod cancellation;
+mod capture_output;
 mod command_options;
 mod commands;
 mod errors;
+mod field_projection;
 mod filtering;
 mod input;
 mod invocation;
 pub mod output;
-mod rendering;
+mod packet_text;
+mod publication;
 mod resources;
 mod staged_output;
 mod system;
+mod terminal;
 
 pub use app::run as main;

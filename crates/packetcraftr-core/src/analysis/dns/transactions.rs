@@ -4,7 +4,7 @@
 use super::Message;
 use crate::analysis::{
     ScopedFlowKey, StreamTransport,
-    application::{Error, Limits},
+    application::{Error, Retained},
     provenance::{Accumulator, SourceSet},
 };
 use serde::Serialize;
@@ -113,15 +113,13 @@ struct Waiting {
     sources: SourceSet,
 }
 pub(super) struct Tracker {
-    limits: Limits,
     pending: BTreeMap<Key, Pending>,
     answered: BTreeMap<Key, Answered>,
     waiting: BTreeMap<Key, Vec<Waiting>>,
 }
 impl Tracker {
-    pub(super) fn new(limits: Limits) -> Self {
+    pub(super) fn new() -> Self {
         Self {
-            limits,
             pending: BTreeMap::new(),
             answered: BTreeMap::new(),
             waiting: BTreeMap::new(),
@@ -130,7 +128,7 @@ impl Tracker {
     pub(super) fn observe(
         &mut self,
         message: &Message,
-        retained: &mut usize,
+        retained: &mut Retained,
     ) -> Result<Vec<Transaction>, Error> {
         let Some(key) = Key::from(message) else {
             return Ok(Vec::new());
@@ -142,7 +140,7 @@ impl Tracker {
             .last()
             .ok_or(Error::Sources { number: 0 })?
             .timestamp;
-        *retained = retained.saturating_add(
+        retained.charge_amount(
             512 + key
                 .questions
                 .iter()
@@ -150,8 +148,7 @@ impl Tracker {
                     labels.iter().map(|label| label.len() + 32).sum::<usize>() + 64
                 })
                 .sum::<usize>(),
-        );
-        self.limits.check_retained(*retained)?;
+        )?;
         if !dns.response {
             self.answered.remove(&key);
             if let Some(pending) = self.pending.get_mut(&key) {

@@ -1,0 +1,93 @@
+{
+  "schema": "packetcraftr.bundle/v1",
+  "tool_version": "0.5.0-beta.3",
+  "kind": "report",
+  "scope": {
+    "label": "lab-segment",
+    "digest": "127aea6817ee857b095337f87234f805872775e20578adfa3a63a90ceced317f"
+  },
+  "inputs_digest": "3393aa96d223c4c8d440022fab57c310cb6c1c3bfb7c6fd699b68350d4892ffd",
+  "sources": [
+    {
+      "path": "examples/documents/output-scan-success.json",
+      "sha256": "8e3ba3b94db5eafa047d1f63275703f0ed217f9979f2585e230e208ceb88b3aa"
+    },
+    {
+      "path": "examples/documents/output-differential-success.json",
+      "sha256": "9bea1a1fefbb9a3b63a654b6f67342f081ea85275d16547f4b92320bdc087a72"
+    }
+  ],
+  "report": {
+    "kind": "report",
+    "findings": [
+      {
+        "rule_id": "engagement.scan.summary",
+        "severity": "info",
+        "subject": "scan",
+        "summary": "Imported engagement evidence summary, observations only and not a vulnerability finding",
+        "indicator_id": null,
+        "frames": [],
+        "evidence": {
+          "observation": {
+            "classifications": {
+              "timeout": 1
+            },
+            "endpoints": 1,
+            "hosts": 1,
+            "resolved_addresses": 1,
+            "retained_evidence_bytes": 0,
+            "target": "192.168.56.10",
+            "unattributed": 0,
+            "undecoded": 0
+          },
+          "source_file": "examples/documents/output-scan-success.json"
+        },
+        "remediation": "Review the linked source result for the full evidence",
+        "complete": true
+      },
+      {
+        "rule_id": "engagement.differential.summary",
+        "severity": "info",
+        "subject": "differential",
+        "summary": "Imported engagement evidence summary, observations only and not a vulnerability finding",
+        "indicator_id": null,
+        "frames": [],
+        "evidence": {
+          "observation": {
+            "attempts": 9,
+            "plan_digest": "d5216c34d561684d7194142001e3ea916fa19790db45ca504af3f03f95e456e4",
+            "provisional": false,
+            "rows": 9,
+            "source_port": 53210,
+            "valid": true,
+            "verdicts": {
+              "accepted": 9
+            }
+          },
+          "source_file": "examples/documents/output-differential-success.json"
+        },
+        "remediation": "Review the linked source result for the full evidence",
+        "complete": true
+      }
+    ],
+    "completeness": {
+      "complete": true,
+      "reasons": []
+    },
+    "measurements": {
+      "bundle": "examples/documents/bundle.json",
+      "html": "/tmp/assessment.html",
+      "scope_digest": "127aea6817ee857b095337f87234f805872775e20578adfa3a63a90ceced317f"
+    },
+    "sources": [
+      {
+        "path": "examples/documents/output-scan-success.json",
+        "sha256": "8e3ba3b94db5eafa047d1f63275703f0ed217f9979f2585e230e208ceb88b3aa"
+      },
+      {
+        "path": "examples/documents/output-differential-success.json",
+        "sha256": "9bea1a1fefbb9a3b63a654b6f67342f081ea85275d16547f4b92320bdc087a72"
+      }
+    ]
+  }
+}

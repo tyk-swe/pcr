@@ -3,7 +3,7 @@
 
 use super::output as wire;
 use crate::errors::CliError;
-use crate::rendering::{
+use crate::terminal::{
     comma_separated, escaped, render_optional, write_stdout_line, write_summary_line,
 };
 
@@ -64,10 +64,16 @@ pub(super) fn render_message(
         }
     }
     if presentation.verbose {
-        presentation.details(invocation, "Header block bytes", &message.header_blocks_hex)?;
-        presentation.details(invocation, "Provenance", &message.sources)?;
-        presentation.details(
+        crate::terminal::write_details(
             invocation,
+            presentation,
+            "Header block bytes",
+            &message.header_blocks_hex,
+        )?;
+        crate::terminal::write_details(invocation, presentation, "Provenance", &message.sources)?;
+        crate::terminal::write_details(
+            invocation,
+            presentation,
             "Compression dependencies",
             &message.compression_sources,
         )?;

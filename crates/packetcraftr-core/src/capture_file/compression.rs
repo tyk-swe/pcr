@@ -101,7 +101,7 @@ struct Bounded<R> {
     exceeded: bool,
     error: fn(u64) -> Error,
 }
-impl<R> Bounded<R> {
+impl<R: Read> Bounded<R> {
     fn new(inner: R, limit: u64, error: fn(u64) -> Error) -> Self {
         Self {
             inner,
@@ -114,6 +114,15 @@ impl<R> Bounded<R> {
     fn limit_error(&self) -> io::Error {
         io::Error::other((self.error)(self.limit))
     }
+
+    fn read_inner(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+        loop {
+            match self.inner.read(bytes) {
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+                result => return result,
+            }
+        }
+    }
 }
 impl<R: Read> Read for Bounded<R> {
     fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
@@ -124,7 +133,7 @@ impl<R: Read> Read for Bounded<R> {
             return Err(self.limit_error());
         }
         if self.remaining == 0 {
-            if self.inner.read(&mut [0u8; 1])? == 0 {
+            if self.read_inner(&mut [0u8; 1])? == 0 {
                 return Ok(0);
             }
             self.exceeded = true;
@@ -133,7 +142,7 @@ impl<R: Read> Read for Bounded<R> {
         let allowed = bytes
             .len()
             .min(usize::try_from(self.remaining).unwrap_or(usize::MAX));
-        let count = self.inner.read(&mut bytes[..allowed])?;
+        let count = self.read_inner(&mut bytes[..allowed])?;
         if count > allowed {
             return Err(io::Error::other("reader exceeded its buffer"));
         }
@@ -276,6 +285,13 @@ impl<W: Write> Write for Output<W> {
             WriterState::Plain(writer) => writer.write(bytes),
             WriterState::Gzip(writer) => writer.write(bytes),
             WriterState::Zstd(writer) => writer.write(bytes),
+        }
+    }
+    fn write_vectored(&mut self, parts: &[io::IoSlice<'_>]) -> io::Result<usize> {
+        match &mut self.encoder {
+            WriterState::Plain(writer) => writer.write_vectored(parts),
+            WriterState::Gzip(writer) => writer.write_vectored(parts),
+            WriterState::Zstd(writer) => writer.write_vectored(parts),
         }
     }
     fn flush(&mut self) -> io::Result<()> {

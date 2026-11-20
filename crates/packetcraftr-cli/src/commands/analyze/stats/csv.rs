@@ -30,7 +30,7 @@ fn record(fields: &[String]) -> String {
 
 fn write(invocation: &crate::invocation::Invocation, fields: &[String]) -> Result<(), CliError> {
     invocation.check()?;
-    crate::rendering::write_raw(record(fields).as_bytes())
+    crate::publication::write_raw(record(fields).as_bytes())
 }
 
 fn header(invocation: &crate::invocation::Invocation, fields: &[&str]) -> Result<(), CliError> {

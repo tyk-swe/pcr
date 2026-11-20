@@ -7,7 +7,8 @@ use crate::output::frame::Record;
 
 use crate::errors::CliError;
 use crate::invocation::StreamEncoder;
-use crate::rendering::{FieldTree, render_frame, write_hex_line};
+use crate::packet_text::{FieldTree, Layers, render_frame};
+use crate::publication::write_hex_line;
 
 pub(super) fn render_record(
     invocation: &crate::invocation::Invocation,
@@ -22,24 +23,13 @@ pub(super) fn render_record(
         decoded,
     } = &record;
     match format {
-        Format::Text => match tree {
-            Some(tree) => render_frame(
-                invocation,
-                *source_frame,
-                frame,
-                decoded.as_ref(),
-                Some(tree),
-                crate::invocation::Presentation { verbose: true },
-            ),
-            None => render_frame(
-                invocation,
-                *source_frame,
-                frame,
-                decoded.as_ref(),
-                None,
-                stream.presentation(),
-            ),
-        },
+        Format::Text => render_frame(
+            invocation,
+            *source_frame,
+            frame,
+            decoded.as_ref(),
+            Layers::new(tree, stream.presentation()),
+        ),
         Format::Hex => write_hex_line(frame.bytes()),
         Format::Ndjson => Ok(stream.emit_published(Published::new(
             super::output::Event::from(record),

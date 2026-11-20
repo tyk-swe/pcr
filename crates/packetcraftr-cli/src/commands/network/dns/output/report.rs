@@ -307,28 +307,29 @@ impl TryFrom<library::batch::Aggregate> for Published<BatchResult> {
                 query_name,
                 query_type,
                 transaction_id,
-                status,
-                result,
-                error,
+                outcome,
             } = question;
-            let result = result
-                .map(|report| {
+            let status = outcome.status().into();
+            let (result, error) = match outcome {
+                library::batch::Outcome::Completed(report) => {
                     for diagnostic in report.diagnostics() {
                         packetcraftr_core::diagnostic::push_once(
                             &mut diagnostics,
                             diagnostic.clone(),
                         );
                     }
-                    Published::<Report>::try_from(report)
-                        .map(|published| Box::new(published.result))
-                })
-                .transpose()?;
+                    let published = Published::<Report>::try_from(report)?;
+                    (Some(Box::new(published.result)), None)
+                }
+                library::batch::Outcome::Failed(error) => (None, Some(error.to_string())),
+                library::batch::Outcome::Unattempted => (None, None),
+            };
             results.push(QuestionResult {
                 query_name,
                 query_type: query_type.code(),
                 transaction_id,
-                status: status.into(),
-                error: error.map(|error| error.to_string()),
+                status,
+                error,
                 result,
             });
         }
@@ -350,12 +351,12 @@ impl From<&library::batch::Question> for QuestionComplete {
             query_name: question.query_name.clone(),
             query_type: question.query_type.code(),
             transaction_id: question.transaction_id,
-            status: question.status.into(),
+            status: question.outcome.status().into(),
             outcome: question
-                .result
-                .as_ref()
+                .outcome
+                .result()
                 .map(|report| report.completion.outcome().into()),
-            error: question.error.as_ref().map(ToString::to_string),
+            error: question.outcome.error().map(ToString::to_string),
         }
     }
 }

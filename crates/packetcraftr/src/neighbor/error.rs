@@ -38,6 +38,7 @@ pub enum Error {
         interface: String,
         target: IpAddr,
         attempts: u32,
+        request_bytes: usize,
         captured: Vec<Frame>,
         evidence_truncated: bool,
         capture_statistics: Stats,
@@ -84,6 +85,25 @@ pub enum Error {
         operation: Box<Self>,
         cleanup: packetcraftr_netio::Error,
     },
+}
+
+impl Error {
+    pub(crate) fn exchange_stats(&self, elapsed: std::time::Duration) -> Option<crate::Stats> {
+        match self {
+            Self::NotFound {
+                attempts,
+                request_bytes,
+                capture_statistics,
+                ..
+            } => Some(super::stats(
+                *attempts,
+                *request_bytes,
+                elapsed,
+                *capture_statistics,
+            )),
+            _ => None,
+        }
+    }
 }
 
 impl Classified for Error {
@@ -156,6 +176,21 @@ pub(super) fn map_io_error(
         target: request.target,
         operation,
         spent: None,
+        source: error,
+    }
+}
+
+pub(super) fn spent_io_error(
+    request: &Request,
+    operation: &'static str,
+    error: packetcraftr_netio::Error,
+    spent: FailureEvidence,
+) -> Error {
+    Error::Io {
+        interface: request.interface.name.clone().into_boxed_str(),
+        target: request.target,
+        operation,
+        spent: Some(Box::new(spent)),
         source: error,
     }
 }

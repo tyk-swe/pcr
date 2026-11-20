@@ -31,12 +31,12 @@ pub(crate) fn render_scope(
     scope: &analysis::scope::Definition,
 ) -> Result<(), CliError> {
     let scope = super::output::Scope::try_from(scope.clone())?;
-    crate::rendering::write_stdout_line(
+    crate::terminal::write_stdout_line(
         invocation,
         format_args!(
             "scope {}: interface {}, encapsulation {}",
             scope.id,
-            crate::rendering::render_optional(scope.interface, |value| value.to_string()),
+            crate::terminal::render_optional(scope.interface, |value| value.to_string()),
             encapsulation_text(&scope.encapsulation)
         ),
     )
@@ -46,14 +46,14 @@ pub(crate) fn render_clock(
     invocation: &crate::invocation::Invocation,
     clock: &analysis::ClockReport,
 ) -> Result<(), CliError> {
-    crate::rendering::write_stdout_line(
+    crate::terminal::write_stdout_line(
         invocation,
         format_args!(
             "capture clock: {} regressing frame(s), largest rollback {}, largest forward step {} at frame {}; expiry follows the high-water mark",
             clock.regressions,
-            crate::rendering::duration_text(clock.max_regression),
-            crate::rendering::duration_text(clock.max_forward_step),
-            crate::rendering::render_optional(clock.max_forward_step_frame, |value| value
+            crate::terminal::duration_text(clock.max_regression),
+            crate::terminal::duration_text(clock.max_forward_step),
+            crate::terminal::render_optional(clock.max_forward_step_frame, |value| value
                 .to_string()),
         ),
     )
@@ -63,6 +63,6 @@ pub(crate) fn encapsulation_text(path: &[super::output::EncapsulationIdentifier]
     if path.is_empty() {
         "none".to_owned()
     } else {
-        crate::rendering::comma_separated(path)
+        crate::terminal::comma_separated(path)
     }
 }

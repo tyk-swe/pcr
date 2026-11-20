@@ -8,7 +8,6 @@ use packetcraftr::scan::followup;
 
 use super::traceroute;
 use crate::errors::CliError;
-use crate::invocation::StreamEncoder;
 use crate::output::{self, contract::Format};
 use crate::system::{Runtime, prepare_workflow};
 
@@ -28,9 +27,9 @@ pub(super) struct Request {
 pub(super) fn run(
     invocation: &crate::invocation::Invocation,
     run: Request,
-    format: Format,
-    stream: &StreamEncoder,
 ) -> Result<(), CliError> {
+    let format = invocation.format;
+    let stream = &invocation.output;
     let Request {
         request,
         plan,
@@ -134,7 +133,7 @@ pub(super) fn run(
             )
             .map_err(CliError::classified)?;
             if format == Format::Json {
-                crate::rendering::emit_published(
+                crate::publication::emit_published(
                     invocation,
                     output::contract::Command::Scan,
                     published,

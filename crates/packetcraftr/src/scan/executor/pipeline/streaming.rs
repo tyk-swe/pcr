@@ -95,36 +95,8 @@ pub(in crate::scan::executor) fn run_stream<P: PacketProviders, K: Clock>(
         true,
         attempts,
     )?;
-    let old_sources = plan.interfaces.len();
-    let descriptions_charge = planned
-        .iter()
-        .map(|planned| {
-            384usize.saturating_add(
-                planned
-                    .probe
-                    .scope
-                    .as_ref()
-                    .map_or(0, crate::target::ResolvedZone::retained_bytes),
-            )
-        })
-        .sum::<usize>();
-    let old_indexes = correlation::index_charge(
-        planned.len().min(options.max_in_flight.saturating_mul(2)),
-        old_sources,
-    )
-    .saturating_add(expiry::charge(planned.len().min(options.max_in_flight)));
-    plan.base_bytes = plan
-        .base_bytes
-        .checked_sub(
-            descriptions_charge
-                .saturating_add(old_indexes)
-                .saturating_add(plan.interfaces_bytes),
-        )
-        .ok_or_else(|| limit("prepared accounting", options.max_prepared_bytes))?;
-    let descriptor_bytes = admission
-        .max_description_bytes
-        .saturating_add(admission.max_route_bytes)
-        .saturating_add(512);
+    plan.release_staging(options.max_prepared_bytes)?;
+    let descriptor_bytes = admission.max_descriptor_bytes();
     let source_ceiling = options.max_in_flight.min(capture::MAX_SOURCES);
     let source_bytes = source_charge(
         source_ceiling,
@@ -226,6 +198,13 @@ pub(in crate::scan::executor) fn run_stream<P: PacketProviders, K: Clock>(
         max_descriptor_bytes: descriptor_bytes,
         max_source_name_bytes: admission.max_source_name_bytes,
     };
+    let capture = super::CaptureEpoch::open(
+        executor,
+        plan.interfaces.clone(),
+        deadline,
+        &options.control,
+        options.max_evidence_frames,
+    )?;
     let mut pipeline = Pipeline::assemble(
         executor,
         options,
@@ -237,6 +216,7 @@ pub(in crate::scan::executor) fn run_stream<P: PacketProviders, K: Clock>(
             plan,
             descriptions,
             streaming: Some(streaming),
+            capture,
         },
     )?;
     let result = pipeline.drive();
@@ -365,7 +345,7 @@ impl<P: PacketProviders, K: Clock> Pipeline<'_, P, K> {
             {
                 drop(admitted.retained.take());
             }
-            let armed = self.plan.interfaces.contains(route.interface());
+            let armed = self.capture.contains(route.interface());
             self.attempts.queue(
                 offer.index,
                 Descriptor {

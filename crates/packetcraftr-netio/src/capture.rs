@@ -157,15 +157,19 @@ impl<T: Session + ?Sized> Session for Box<T> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Request {
     pub interface: InterfaceId,
-    pub limits: Limits,
-    pub filter: Option<String>,
-    pub promiscuous: bool,
-    pub native: NativeSettings,
+    pub settings: Settings,
 }
 
 impl Request {
+    pub fn new(interface: InterfaceId, limits: Limits) -> Self {
+        Self {
+            interface,
+            settings: Settings::new(limits),
+        }
+    }
+
     pub fn validate(&self) -> Result<(), Error> {
-        validate_filter_length(self.filter.as_deref())?;
+        self.settings.validate_filter()?;
         if !self.interface.is_complete() {
             return Err(Error::Device {
                 interface: self.interface.name.clone(),
@@ -173,6 +177,34 @@ impl Request {
                 source: None,
             });
         }
+        self.settings.validate_bounds()
+    }
+}
+
+/// What a capture records and how, for one source or every source of a group.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Settings {
+    pub limits: Limits,
+    pub filter: Option<String>,
+    pub promiscuous: bool,
+    pub native: NativeSettings,
+}
+
+impl Settings {
+    pub fn new(limits: Limits) -> Self {
+        Self {
+            limits,
+            filter: None,
+            promiscuous: false,
+            native: NativeSettings::default(),
+        }
+    }
+
+    fn validate_filter(&self) -> Result<(), Error> {
+        validate_filter_length(self.filter.as_deref())
+    }
+
+    fn validate_bounds(&self) -> Result<(), Error> {
         self.limits.validate()?;
         self.native.validate(&self.limits)
     }
@@ -277,16 +309,13 @@ impl Provider for SystemProvider {
 mod tests {
     use super::*;
     fn request() -> Request {
-        Request {
-            interface: InterfaceId {
+        Request::new(
+            InterfaceId {
                 name: "test0".into(),
                 index: 1,
             },
-            limits: Limits::default(),
-            filter: None,
-            promiscuous: false,
-            native: Default::default(),
-        }
+            Limits::default(),
+        )
     }
     #[test]
     fn invalid_group_skips_capture_provider() {
@@ -313,13 +342,7 @@ mod tests {
         ] {
             let provider = RefuseCalls(std::sync::atomic::AtomicUsize::new(0));
             let request = request();
-            let group = GroupRequest {
-                interfaces: vec![identity],
-                limits: request.limits,
-                filter: None,
-                promiscuous: false,
-                native: Default::default(),
-            };
+            let group = GroupRequest::new(vec![identity], request.settings.limits);
             let result = Group::new(&group).and_then(|mut group| {
                 group.arm(&provider, &Deadline::new(std::time::Duration::from_secs(1)))
             });
@@ -342,30 +365,21 @@ mod tests {
             let mut request = request();
             request.interface = id.clone();
             assert!(matches!(request.validate(), Err(Error::Device { .. })));
-            let group = GroupRequest {
-                interfaces: vec![id],
-                limits: request.limits,
-                filter: None,
-                promiscuous: false,
-                native: Default::default(),
-            };
+            let group = GroupRequest::new(vec![id], request.settings.limits);
             assert!(matches!(
                 Group::<Box<dyn Session>>::new(&group),
                 Err(Error::InvalidCaptureGroup { .. })
             ));
         }
         let mut request = request();
-        request.filter = Some("tcp\0 or udp".into());
+        request.settings.filter = Some("tcp\0 or udp".into());
         assert!(matches!(
             request.validate(),
             Err(Error::InvalidCaptureFilter { .. })
         ));
         let group = GroupRequest {
             interfaces: vec![request.interface],
-            limits: request.limits,
-            filter: request.filter,
-            promiscuous: false,
-            native: Default::default(),
+            settings: request.settings,
         };
         assert!(matches!(
             Group::<Box<dyn Session>>::new(&group),

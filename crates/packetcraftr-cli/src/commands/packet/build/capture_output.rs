@@ -186,7 +186,7 @@ impl CaptureOutput {
             }),
         };
         writer.map_err(|source| {
-            crate::rendering::stream_capture_error("initialize capture output failed", source)
+            crate::capture_output::stream_capture_error("initialize capture output failed", source)
         })
     }
 }

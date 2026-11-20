@@ -6,9 +6,10 @@ use packetcraftr_core::diagnostic::Diagnostic;
 
 use crate::output;
 
+use crate::capture_output::write_capture_file;
 use crate::errors::CliError;
 use crate::invocation::StreamEncoder;
-use crate::rendering::{render_diagnostics_text, write_capture_file, write_stdout_line};
+use crate::terminal::{render_diagnostics_text, write_stdout_line};
 
 pub(super) fn render_text(
     invocation: &crate::invocation::Invocation,
@@ -34,7 +35,7 @@ pub(super) fn render_text(
                 "request={} response_bytes={} latency={}",
                 response.request_index,
                 response.response.frame.bytes().len(),
-                crate::rendering::duration_text(response.latency)
+                crate::terminal::duration_text(response.latency)
             ),
         )?;
         if presentation.verbose {
@@ -42,7 +43,7 @@ pub(super) fn render_text(
                 invocation,
                 format_args!(
                     "  bytes: {}",
-                    crate::rendering::SpacedHex(response.response.frame.bytes())
+                    crate::output::hex::SpacedHex(response.response.frame.bytes())
                 ),
             )?;
         }

@@ -6,9 +6,9 @@ use crate::invocation::StreamEncoder;
 use crate::output;
 
 use crate::errors::CliError;
-use crate::rendering::{
-    CapturedFrameText, comma_separated, duration_text, render_diagnostics_text, render_optional,
-    render_undecoded, write_stdout_line,
+use crate::packet_text::{CapturedFrameText, render_undecoded};
+use crate::terminal::{
+    comma_separated, duration_text, render_diagnostics_text, render_optional, write_stdout_line,
 };
 
 pub(super) mod multipath;

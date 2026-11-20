@@ -12,7 +12,6 @@ use packetcraftr_core::analysis;
 use self::arguments::Args;
 use crate::commands::offline_analysis::prepare;
 use crate::errors::CliError;
-use crate::input::open_capture;
 
 use crate::output::contract::PublishedType;
 
@@ -45,7 +44,6 @@ impl crate::commands::Spec for Args {
     ];
     const FORMATS: &'static [crate::output::contract::Format] =
         crate::output::contract::TEXT_JSON_NDJSON;
-    const CANCELLATION: bool = true;
     const OFFLINE: bool = true;
 
     fn run_time(&self) -> Option<&dyn crate::command_options::Bounded> {
@@ -79,18 +77,9 @@ pub(super) fn run(
         arguments.filter.as_deref(),
         &arguments.decode,
     )?;
-    let mut reader = open_capture(
-        &invocation.control,
-        &invocation.output,
-        &arguments.path,
-        prepared.capture_limits,
-    )?;
+    let mut reader = prepared.open(invocation, &arguments.path)?;
 
-    let session = analysis::Session::new(
-        prepared.registry.clone(),
-        prepared.session_options(invocation),
-        analysis::expert::Collector::default(),
-    );
+    let session = prepared.session(invocation, analysis::expert::Collector::default(), None);
     let mut state = rendering::State::new(prepared.capture_limits.retention_ceiling());
     let selector = analysis::expert::Selector {
         min_severity: arguments.min_severity.into(),

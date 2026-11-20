@@ -59,7 +59,6 @@ impl crate::commands::Spec for Args {
         },
     ];
     const FORMATS: &'static [Format] = crate::output::contract::TEXT_JSON_NDJSON;
-    const CANCELLATION: bool = true;
 
     fn run_time(&self) -> Option<&dyn crate::command_options::Bounded> {
         Some(&self.duration)
@@ -73,7 +72,7 @@ impl crate::commands::Spec for Args {
         self.timeout.resources(settings);
         self.duration.resources(settings);
         self.limits.resources(settings);
-        self.policy.budgets.resources(settings);
+        self.policy.resources(settings);
     }
 
     fn run(
@@ -130,7 +129,7 @@ fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<()
         let plan = output::PlanReport::from_summary(summary, &token, arguments.repeats);
         return match format {
             Format::Text => rendering::render_plan_text(invocation, &plan),
-            Format::Json => crate::rendering::emit_published(
+            Format::Json => crate::publication::emit_published(
                 invocation,
                 crate::output::contract::Command::Differential,
                 crate::output::envelope::Published::new(plan, Vec::new()),
@@ -160,7 +159,7 @@ fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<()
                     .map_err(CliError::classified)?;
             match format {
                 Format::Text => rendering::render_report_text(invocation, &published.result),
-                Format::Json => crate::rendering::emit_published(
+                Format::Json => crate::publication::emit_published(
                     invocation,
                     crate::output::contract::Command::Differential,
                     published,

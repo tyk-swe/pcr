@@ -17,6 +17,7 @@ pub(crate) use dispatch::Launch;
 pub use registry::Command;
 pub(crate) use registry::CommandLine;
 
+mod aggregate;
 mod analyze;
 mod dispatch;
 pub(crate) mod execution;
@@ -26,6 +27,7 @@ mod offline_analysis;
 mod packet;
 mod reference;
 pub(crate) mod registry;
+mod retained;
 mod security;
 
 pub(crate) trait Spec: Sized {
@@ -40,7 +42,7 @@ pub(crate) trait Spec: Sized {
     const PUBLISHED: &'static [crate::output::contract::PublishedType] = &[];
 
     /// Whether shared cancellation is installed before dispatch.
-    const CANCELLATION: bool;
+    const CANCELLATION: bool = true;
 
     const OFFLINE: bool = false;
 

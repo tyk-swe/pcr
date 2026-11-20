@@ -19,8 +19,7 @@ use self::arguments::Args;
 use self::output::Table;
 use crate::commands::offline_analysis::prepare;
 use crate::errors::CliError;
-use crate::input::open_capture;
-use crate::rendering::emit_published;
+use crate::publication::emit_published;
 
 use crate::output::contract::PublishedType;
 
@@ -37,7 +36,6 @@ impl crate::commands::Spec for Args {
         crate::output::contract::Format::Json,
         crate::output::contract::Format::Csv,
     ];
-    const CANCELLATION: bool = true;
     const OFFLINE: bool = true;
 
     fn run_time(&self) -> Option<&dyn crate::command_options::Bounded> {
@@ -97,12 +95,7 @@ pub(super) fn run(
     )
     .map_err(CliError::classified)?;
 
-    let mut reader = open_capture(
-        &invocation.control,
-        &invocation.output,
-        &arguments.path,
-        prepared.capture_limits,
-    )?;
+    let mut reader = prepared.open(invocation, &arguments.path)?;
 
     let options = prepared.options(invocation);
     let summary = analysis::run(&mut reader, prepared.registry.clone(), &options, |record| {
@@ -144,7 +137,7 @@ pub(super) fn run(
             let result = output::Report::try_from((table, report, frames_read))
                 .map_err(CliError::classified)?;
             csv::render(invocation, &result)?;
-            crate::rendering::render_diagnostics_stderr(&diagnostics)
+            crate::terminal::render_diagnostics_stderr(&diagnostics)
         }
         other => other.unreachable(),
     }

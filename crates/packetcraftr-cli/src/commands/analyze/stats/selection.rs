@@ -10,7 +10,7 @@ use packetcraftr_core::{
 
 use super::arguments::Sort;
 use super::output::Table;
-use crate::rendering::omitted_diagnostic;
+use crate::commands::retained::omitted_diagnostic;
 
 fn rank<T>(
     rows: &mut Vec<T>,
@@ -462,7 +462,7 @@ mod tests {
             ),
             Table::Ports => cap(&mut report.ports, top, "stats.ports_omitted", "port row(s)"),
             Table::Io => cap(&mut report.io, top, "stats.io_omitted", "io bucket(s)"),
-            _ => unreachable!(),
+            _ => unreachable!("test helper only caps the five sortable tables"),
         };
         diagnostics.extend(omitted);
         diagnostics

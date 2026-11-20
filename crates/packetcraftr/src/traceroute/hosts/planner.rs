@@ -459,11 +459,6 @@ impl Current {
                 outcomes: Vec::new(),
             },
         );
-        Ok(Batch {
-            probes,
-            timeout: request.timeout,
-            permit: crate::evidence::ExecutionPermit::new(),
-            sequence: first_sequence,
-        })
+        Ok(Batch::new(first_sequence, probes, request.timeout))
     }
 }

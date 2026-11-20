@@ -36,7 +36,7 @@ pub(crate) struct Args {
     /// Campaign token as 32 hex characters, from the plan-only run.
     #[arg(long, value_name = "HEX")]
     pub(crate) token: String,
-    /// Stop this many milliseconds after the first received Canary; omit to run until the duration bound.
+    /// Stop this many milliseconds after the first received Canary; 0 runs until the duration bound.
     #[arg(long, default_value_t = 30_000)]
     pub(crate) idle_ms: u64,
     /// Maximum datagrams processed before stopping.
@@ -69,7 +69,6 @@ impl crate::commands::Spec for Args {
         },
     ];
     const FORMATS: &'static [Format] = crate::output::contract::TEXT_JSON_NDJSON;
-    const CANCELLATION: bool = true;
 
     fn run_time(&self) -> Option<&dyn crate::command_options::Bounded> {
         Some(&self.duration)
@@ -98,6 +97,39 @@ impl crate::commands::Spec for Args {
     }
 }
 
+/// The staged reception log, when `--log-file` asked for one.
+struct ReceptionLog(Option<StagedFile>);
+
+impl ReceptionLog {
+    fn stage(
+        invocation: &crate::invocation::Invocation,
+        path: Option<&std::path::Path>,
+    ) -> Result<Self, CliError> {
+        path.map(|path| StagedFile::stage(&invocation.terminal(), path))
+            .transpose()
+            .map(Self)
+    }
+
+    fn publish(self, records: &[lib::ReceptionRecord]) -> Result<(), CliError> {
+        let Some(mut staged) = self.0 else {
+            return Ok(());
+        };
+        write_log(&mut staged, records)?;
+        staged.sync()?;
+        staged.persist().map(drop)
+    }
+
+    /// Keeps what was received before a failed run, ignoring any further failure.
+    fn salvage(self, records: &[lib::ReceptionRecord]) {
+        let Some(mut staged) = self.0 else {
+            return;
+        };
+        let _ = write_log(&mut staged, records);
+        let _ = staged.sync();
+        let _ = staged.persist();
+    }
+}
+
 fn write_log(staged: &mut StagedFile, records: &[lib::ReceptionRecord]) -> Result<(), CliError> {
     for record in records {
         let line = serde_json::to_string(record).map_err(|source| {
@@ -122,10 +154,7 @@ fn write_log(staged: &mut StagedFile, records: &[lib::ReceptionRecord]) -> Resul
 
 fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<(), CliError> {
     let token = parse_token(&arguments.token)?;
-    let mut staged = match &arguments.log_file {
-        Some(path) => Some(StagedFile::stage(&invocation.terminal(), path)?),
-        None => None,
-    };
+    let log = ReceptionLog::stage(invocation, arguments.log_file.as_deref())?;
     let mut request = lib::ResponderRequest::new(arguments.bind, arguments.port, token);
     request.max_duration = arguments.duration.max_duration();
     request.idle_after_first =
@@ -159,26 +188,13 @@ fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<()
     let report = match outcome {
         Ok(report) => report,
         Err(error) => {
-            if let Some(staged) = &mut staged {
-                let partial = collector.clone().finish(lib::ResponderReport::default());
-                let _ = write_log(staged, &partial.records);
-                let _ = staged.sync();
-            }
-            if let Some(staged) = staged {
-                let _ = staged.persist();
-            }
+            log.salvage(&collector.into_records());
             return Err(CliError::classified(error));
         }
     };
 
     let aggregate = collector.finish(report.clone());
-    if let Some(staged) = &mut staged {
-        write_log(staged, &aggregate.records)?;
-        staged.sync()?;
-    }
-    if let Some(staged) = staged {
-        staged.persist()?;
-    }
+    log.publish(&aggregate.records)?;
     if format == Format::Ndjson {
         rendering::render_responder_complete(report, stream)?;
     }
@@ -191,7 +207,7 @@ fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<()
                 output::envelope::Published::<super::output::ResponderReport>::from(aggregate);
             rendering::render_responder_text(invocation, &published.result)
         }
-        Format::Json => crate::rendering::emit_published(
+        Format::Json => crate::publication::emit_published(
             invocation,
             output::contract::Command::DifferentialResponder,
             output::envelope::Published::<super::output::ResponderReport>::from(aggregate),

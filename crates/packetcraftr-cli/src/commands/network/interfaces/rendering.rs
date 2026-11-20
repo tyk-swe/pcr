@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::output;
-use crate::rendering::render_optional;
+use crate::terminal::render_optional;
 
 pub(super) fn interface_line(interface: &output::network::Interface) -> String {
     let timestamp_types = interface.timestamp_types.as_deref().map(|types| {

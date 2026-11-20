@@ -5,11 +5,10 @@ use packetcraftr_core as core;
 use packetcraftr_core::error::Kind;
 
 use crate::errors::CliError;
+use crate::output::hex::SpacedHex;
 use crate::output::{self, contract::Format};
-use crate::rendering::{
-    SpacedHex, emit_published, render_diagnostics_text, write_hex_line, write_raw,
-    write_stdout_line, write_summary_line,
-};
+use crate::publication::{emit_published, write_hex_line, write_raw};
+use crate::terminal::{render_diagnostics_text, write_stdout_line, write_summary_line};
 
 pub(super) fn render_packet(
     invocation: &crate::invocation::Invocation,
@@ -24,12 +23,18 @@ pub(super) fn render_packet(
                 format_args!("built {} bytes", built.bytes.len()),
             )?;
             write_stdout_line(invocation, format_args!("{}", SpacedHex(&built.bytes)))?;
-            presentation.details(
+            crate::terminal::write_details(
                 invocation,
+                presentation,
                 "Packet fields",
                 &core::document::Packet::from_packet(&built.packet),
             )?;
-            presentation.details(invocation, "Packet layout", &built.layout)?;
+            crate::terminal::write_details(
+                invocation,
+                presentation,
+                "Packet layout",
+                &built.layout,
+            )?;
             render_diagnostics_text(invocation, &built.diagnostics)
         }
         Format::Hex => write_hex_line(&built.bytes),

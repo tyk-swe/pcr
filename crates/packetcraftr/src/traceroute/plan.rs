@@ -68,12 +68,7 @@ pub(super) fn build_batches(
                 reason: "probe sequence overflowed".to_owned(),
             })?;
         }
-        batches.push(Batch {
-            probes,
-            timeout: request.timeout,
-            permit: crate::evidence::ExecutionPermit::new(),
-            sequence: batch_sequence,
-        });
+        batches.push(Batch::new(batch_sequence, probes, request.timeout));
     }
     Ok(batches)
 }

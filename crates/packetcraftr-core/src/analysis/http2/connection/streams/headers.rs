@@ -4,10 +4,11 @@
 //! Request, response, and trailer semantics for decoded stream headers.
 
 use super::super::{ChainHead, ConnectionState, Context, Evidence, Fault, Head, Phase};
+use crate::analysis::http_headers::{final_status_forbids_content, final_status_forbids_trailers};
 use crate::analysis::http2::Error;
 use crate::analysis::http2::IssueCode;
 use crate::analysis::http2::budget;
-use crate::analysis::http2::headers::{FieldRole, validate};
+use crate::analysis::http2::headers::{FieldRole, recover, validate};
 use crate::analysis::http2::model::{Certainty, IssueScope, Status};
 use crate::analysis::http2::side::Side;
 use crate::analysis::http2::stream::{Decoded, HeaderSection, Phase as StreamPhase};
@@ -199,8 +200,9 @@ impl ConnectionState {
                             early.final_seen = meta
                                 .status
                                 .is_none_or(|status| !(100..200).contains(&status));
-                            early.forbids_trailers = matches!(meta.status, Some(204 | 304));
-                            early.bodyless = matches!(meta.status, Some(204 | 205 | 304));
+                            early.forbids_trailers =
+                                meta.status.is_some_and(final_status_forbids_trailers);
+                            early.bodyless = meta.status.is_some_and(final_status_forbids_content);
                             early.ended = end_stream || malformed;
                         }
                         Err((code, detail)) => {
@@ -321,19 +323,7 @@ impl ConnectionState {
                     .evidence(block.clone(), block_sources.clone()),
                 )?;
                 failure = Some(Status::Malformed);
-                super::super::super::headers::Meta {
-                    method: if role == FieldRole::Request {
-                        super::super::super::headers::request_method(&headers)
-                    } else {
-                        None
-                    },
-                    status: if role == FieldRole::Response {
-                        super::super::super::headers::response_status(&headers)
-                    } else {
-                        None
-                    },
-                    ..Default::default()
-                }
+                recover(role, &headers)
             }
         };
         if side == Side::Server
@@ -361,7 +351,7 @@ impl ConnectionState {
                 .open
                 .get(&stream_id)
                 .and_then(|stream| stream.msgs[side].as_ref())
-                .is_some_and(|msg| matches!(msg.status_code, Some(204 | 304)))
+                .is_some_and(|msg| msg.status_code.is_some_and(final_status_forbids_trailers))
         {
             self.issue(
                 context,

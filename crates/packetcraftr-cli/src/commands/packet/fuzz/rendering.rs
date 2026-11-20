@@ -7,7 +7,9 @@ use packetcraftr_core::error::Kind;
 
 use crate::errors::CliError;
 use crate::invocation::StreamEncoder;
-use crate::rendering::{CapturedFrameText, SpacedHex, render_diagnostics_text, write_stdout_line};
+use crate::output::hex::SpacedHex;
+use crate::packet_text::CapturedFrameText;
+use crate::terminal::{render_diagnostics_text, write_stdout_line};
 
 pub(super) fn render_text(
     invocation: &crate::invocation::Invocation,
@@ -90,7 +92,7 @@ pub(super) fn render_text(
             }
         }
         render_diagnostics_text(invocation, &case.diagnostics)?;
-        presentation.details(invocation, "Case evidence", case)?;
+        crate::terminal::write_details(invocation, presentation, "Case evidence", case)?;
     }
     write_stdout_line(
         invocation,

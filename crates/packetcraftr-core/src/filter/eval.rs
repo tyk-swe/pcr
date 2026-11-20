@@ -9,7 +9,7 @@ use super::ast::{Measure, Predicate};
 use super::comparison;
 use super::literal::Literal;
 use super::path::{
-    ByteSlice, FieldRef, FieldSource, FrameField, ListSelection, Occurrence, Selector,
+    ByteSlice, FieldRef, FieldSource, FrameField, LayerRead, ListSelection, Occurrence, Selector,
     StreamTransport,
 };
 use crate::decode::DecodedPacket;
@@ -174,23 +174,24 @@ where
 /// selects. An existing-but-empty list yields no values yet still projects as
 /// `[]` rather than an absent field's null.
 pub(super) fn selected_list_present(context: &Context<'_>, field: &FieldRef) -> bool {
-    let FieldSource::NestedLayer {
-        protocol,
-        path,
-        root_index,
-        selection,
-        occurrence,
+    let FieldSource::Layer {
+        read:
+            LayerRead::Selected {
+                protocol,
+                list,
+                root_index,
+                occurrence,
+                ..
+            },
+        ..
     } = &field.source
     else {
         return false;
     };
-    if selection.is_none() {
-        return false;
-    }
     layers(context, protocol.as_str(), *occurrence).any(|layer| {
         layer
             .field_by_index(*root_index)
-            .is_some_and(|root| matches!(path.get(&root), Some(field::Value::List(_))))
+            .is_some_and(|root| matches!(list.get(&root), Some(field::Value::List(_))))
     })
 }
 
@@ -199,37 +200,7 @@ where
     F: FnMut(Cow<'_, field::Value>) -> bool,
 {
     match &field.source {
-        FieldSource::NestedLayer {
-            protocol,
-            path,
-            root_index,
-            selection,
-            occurrence,
-        } => {
-            for layer in layers(context, protocol.as_str(), *occurrence) {
-                let Some(root) = layer.field_by_index(*root_index) else {
-                    continue;
-                };
-                let Some(value) = path.get(&root) else {
-                    continue;
-                };
-                let Some(selection) = selection else {
-                    if let Some(value) = project_nested(value, field.slice)
-                        && consume(value)
-                    {
-                        return;
-                    }
-                    continue;
-                };
-                for element in selected_elements(value, selection) {
-                    if let Some(value) = project_nested(element, field.slice)
-                        && consume(value)
-                    {
-                        return;
-                    }
-                }
-            }
-        }
+        FieldSource::Layer { read, slice } => each_layer_value(context, read, *slice, consume),
         FieldSource::Frame(which) => {
             if let Some(value) = frame_value(context, *which) {
                 consume(Cow::Owned(value));
@@ -244,7 +215,60 @@ where
                 consume(Cow::Owned(field::Value::Unsigned(index)));
             }
         }
-        FieldSource::Layer {
+    }
+}
+
+fn each_layer_value<F>(
+    context: &Context<'_>,
+    read: &LayerRead,
+    slice: Option<ByteSlice>,
+    mut consume: F,
+) where
+    F: FnMut(Cow<'_, field::Value>) -> bool,
+{
+    match read {
+        LayerRead::Nested {
+            protocol,
+            path,
+            root_index,
+            occurrence,
+        } => {
+            for layer in layers(context, protocol.as_str(), *occurrence) {
+                let Some(root) = layer.field_by_index(*root_index) else {
+                    continue;
+                };
+                if let Some(value) = path.get(&root)
+                    && let Some(value) = project_nested(value, slice)
+                    && consume(value)
+                {
+                    return;
+                }
+            }
+        }
+        LayerRead::Selected {
+            protocol,
+            list,
+            root_index,
+            selection,
+            occurrence,
+        } => {
+            for layer in layers(context, protocol.as_str(), *occurrence) {
+                let Some(root) = layer.field_by_index(*root_index) else {
+                    continue;
+                };
+                let Some(value) = list.get(&root) else {
+                    continue;
+                };
+                for element in selected_elements(value, selection) {
+                    if let Some(value) = project_nested(element, slice)
+                        && consume(value)
+                    {
+                        return;
+                    }
+                }
+            }
+        }
+        LayerRead::Fields {
             binding,
             indices,
             occurrence,
@@ -258,7 +282,7 @@ where
                     let Some(value) = value else {
                         continue;
                     };
-                    let Some(value) = project(value, binding, field.slice) else {
+                    let Some(value) = project(value, binding, slice) else {
                         continue;
                     };
                     if consume(Cow::Owned(value)) {
@@ -398,9 +422,7 @@ fn frame_value(context: &Context<'_>, which: FrameField) -> Option<field::Value>
             }
             .to_owned(),
         ),
-        FrameField::Truncated => {
-            field::Value::Bool(frame.captured_length() < frame.original_length())
-        }
+        FrameField::Truncated => field::Value::Bool(frame.is_truncated()),
         FrameField::LayerCount => field::Value::Unsigned(visible_layers(context).count() as u64),
         FrameField::Protocols => field::Value::List(
             visible_layers(context)

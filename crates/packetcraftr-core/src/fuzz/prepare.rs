@@ -93,7 +93,40 @@ where
 struct Counters {
     built_cases: u64,
     built_bytes: u64,
-    retained_bytes: u64,
+}
+
+struct ByteBudget {
+    limit: u64,
+    retained: u64,
+}
+
+impl ByteBudget {
+    fn new(limits: Limits) -> Self {
+        Self {
+            limit: total_byte_limit(limits),
+            retained: 0,
+        }
+    }
+
+    fn limit(&self) -> u64 {
+        self.limit
+    }
+
+    fn charge(&mut self, bytes: u64) -> Result<(), Error> {
+        let next = self
+            .retained
+            .checked_add(bytes)
+            .ok_or(byte_limit(u64::MAX, self.limit))?;
+        if next > self.limit {
+            return Err(byte_limit(next, self.limit));
+        }
+        self.retained = next;
+        Ok(())
+    }
+
+    fn remaining(&self) -> u64 {
+        self.limit.saturating_sub(self.retained)
+    }
 }
 
 struct CaseInputs<'a> {
@@ -114,9 +147,10 @@ where
     F: FnMut(Case, &Deadline) -> Result<(), Error>,
 {
     let mut counters = Counters::default();
+    let mut budget = ByteBudget::new(inputs.request.limits);
     for offset in 0..inputs.request.cases {
         deadline.enforce()?;
-        let case = prepare_case(inputs, offset, &mut counters, deadline)?;
+        let case = prepare_case(inputs, offset, &mut counters, &mut budget, deadline)?;
         emit(case, deadline)?;
     }
     Ok(counters)
@@ -126,11 +160,11 @@ fn prepare_case(
     inputs: &CaseInputs<'_>,
     offset: usize,
     counters: &mut Counters,
+    budget: &mut ByteBudget,
     deadline: &Deadline,
 ) -> Result<Case, Error> {
     let request = inputs.request;
     let compatible_mutations = inputs.compatible_mutations;
-    let total_byte_limit = total_byte_limit(request.limits);
     let index = request
         .first_case
         .checked_add(offset as u64)
@@ -175,11 +209,7 @@ fn prepare_case(
     let mutation_result = layer.set_field_path(&field.path, mutated_value);
     let retained_value_bytes =
         retained_case_value_bytes(&mutation, &shrink_values, &recipe, request.limits)?;
-    charge_retained_bytes(
-        &mut counters.retained_bytes,
-        retained_value_bytes,
-        total_byte_limit,
-    )?;
+    budget.charge(retained_value_bytes)?;
     let mut case = new_case(request.seed, index, seed, mutation, shrink_values, recipe);
     if let Err(source) = mutation_result {
         case.error = Some(mutation_failure(source));
@@ -191,7 +221,7 @@ fn prepare_case(
         inputs.builder,
         inputs.dissector,
         counters,
-        total_byte_limit,
+        budget,
         deadline,
     )?;
     Ok(case)
@@ -240,7 +270,7 @@ fn build_case(
     builder: &Builder,
     dissector: &Dissector,
     counters: &mut Counters,
-    total_byte_limit: u64,
+    budget: &mut ByteBudget,
     deadline: &Deadline,
 ) -> Result<(), Error> {
     match builder.build(
@@ -252,26 +282,18 @@ fn build_case(
             let next_built_bytes = counters
                 .built_bytes
                 .checked_add(built.bytes.len() as u64)
-                .ok_or(byte_limit(u64::MAX, total_byte_limit))?;
-            if next_built_bytes > total_byte_limit {
-                return Err(byte_limit(next_built_bytes, total_byte_limit));
+                .ok_or(byte_limit(u64::MAX, budget.limit()))?;
+            if next_built_bytes > budget.limit() {
+                return Err(byte_limit(next_built_bytes, budget.limit()));
             }
-            charge_retained_bytes(
-                &mut counters.retained_bytes,
-                built.bytes.len() as u64,
-                total_byte_limit,
-            )?;
+            budget.charge(built.bytes.len() as u64)?;
             case.diagnostics.extend_from_slice(&built.diagnostics);
             case.decoded = dissect_built(dissector, &built, request.limits, &mut case.diagnostics);
             if let Some(decoded) = &case.decoded {
                 let decoded_bytes = packet_reflected_value_bytes(&decoded.packet, request.limits)?;
-                charge_retained_bytes(
-                    &mut counters.retained_bytes,
-                    decoded_bytes,
-                    total_byte_limit,
-                )?;
+                budget.charge(decoded_bytes)?;
                 deadline.enforce()?;
-                let byte_room = total_byte_limit.saturating_sub(counters.retained_bytes);
+                let byte_room = budget.remaining();
                 case.diagnostics.extend(roundtrip::diagnostic(
                     builder, &built, decoded, request, byte_room,
                 ));
@@ -386,17 +408,6 @@ fn value_limit_error(reason: ValueLimit, limits: Limits) -> Error {
 
 fn total_byte_limit(limits: Limits) -> u64 {
     u64::try_from(limits.max_total_bytes).unwrap_or(u64::MAX)
-}
-
-fn charge_retained_bytes(total: &mut u64, value: u64, limit: u64) -> Result<(), Error> {
-    let next = total
-        .checked_add(value)
-        .ok_or(byte_limit(u64::MAX, limit))?;
-    if next > limit {
-        return Err(byte_limit(next, limit));
-    }
-    *total = next;
-    Ok(())
 }
 
 fn unresolved_target(field: &ResolvedField, reason: TargetFault) -> Error {

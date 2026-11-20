@@ -5,10 +5,8 @@ use crate::{
     errors::CliError,
     invocation::Invocation,
     output,
-    rendering::{
-        CapturedFrameText, duration_text, render_diagnostics_text, render_optional,
-        write_stdout_line,
-    },
+    packet_text::CapturedFrameText,
+    terminal::{duration_text, render_diagnostics_text, render_optional, write_stdout_line},
 };
 use packetcraftr::traceroute::multipath as library;
 

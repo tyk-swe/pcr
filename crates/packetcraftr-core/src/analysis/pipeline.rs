@@ -359,10 +359,12 @@ impl FramePipeline {
         let stages = *stages;
         let stage = FrameStage { decoder, deadline };
         let timestamp = frame.timestamp;
-        if timestamp.is_none() && options.time_bounds.is_some() {
-            return Ok(());
-        }
-        let record_timestamp = record_timestamp(timestamp, number)?;
+        let record_timestamp = match record_timestamp(timestamp, number) {
+            Err(Error::TimestampUnavailable { .. }) if options.time_bounds.is_some() => {
+                return Ok(());
+            }
+            result => result?,
+        };
         let decoded = decoder
             .decode(
                 frame,

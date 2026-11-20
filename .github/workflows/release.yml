@@ -90,7 +90,7 @@ jobs:
           fi
 
           prerelease=false
-          if [[ "$version" == *-* ]]; then
+          if [[ "${version%%+*}" == *-* ]]; then
             prerelease=true
           fi
           echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"

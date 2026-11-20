@@ -92,8 +92,9 @@ pub struct Options<'a> {
     /// regressing clocks still select by value. Like the filter, bounds apply
     /// after IP reconstruction and stream indexing for timestamped frames,
     /// even when they are excluded. All physical frames consume read budgets.
-    /// Records without timestamps are skipped when bounds are set; without
-    /// bounds they still fail the run before selection.
+    /// Records without timestamps are skipped when bounds are set. Without
+    /// bounds they are accepted by passive inventory, but regular pipeline
+    /// runs still reject them.
     pub time_bounds: Option<crate::frame::TimeBounds>,
     /// Drives bounded TCP reassembly over the matched frames and delivers
     /// its events with each record. Costs memory proportional to reordering,

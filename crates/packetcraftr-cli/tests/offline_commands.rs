@@ -3041,6 +3041,63 @@ fn passive_inventory_reports_only_observed_hosts_and_ports() {
 }
 
 #[test]
+fn inventory_attributes_vxlan_frames_and_protocols_to_each_network() {
+    let capture = capture_path("scoped-vxlan.pcap");
+    let args = [
+        "--output",
+        "json",
+        "analyze",
+        "inventory",
+        capture.to_str().unwrap(),
+    ];
+    let report: serde_json::Value =
+        serde_json::from_str(&assert_success(&run(&args), &args)).unwrap();
+    let result = &report["result"];
+    let hosts = result["hosts"].as_array().expect("hosts");
+    let host = |address: &str| {
+        hosts
+            .iter()
+            .find(|host| host["address"] == address)
+            .unwrap()
+    };
+    let outer_sender = host("203.0.113.1");
+    let shared_receiver = host("198.51.100.2");
+    let inner_sender = host("192.0.2.1");
+
+    assert_eq!(result["frames_read"], 2);
+    assert_eq!(outer_sender["frames_sent"], 2, "outer sender frame count");
+    assert_eq!(
+        shared_receiver["frames_received"], 2,
+        "a destination at both layers counts once per frame"
+    );
+    assert_eq!(
+        outer_sender["observed_ports"],
+        serde_json::json!([{"transport": "udp", "port": 40000}])
+    );
+    assert_eq!(
+        outer_sender["protocols"],
+        serde_json::json!(["ipv4", "udp", "vxlan"])
+    );
+    assert_eq!(inner_sender["frames_sent"], 2);
+    assert_eq!(
+        inner_sender["protocols"],
+        serde_json::json!(["ethernet", "ipv4", "tcp"])
+    );
+    assert_eq!(
+        shared_receiver["protocols"],
+        serde_json::json!(["ethernet", "ipv4", "tcp", "udp", "vxlan"])
+    );
+    let protocols = result["protocols"].as_array().expect("protocol counts");
+    for name in ["ethernet", "ipv4", "tcp", "udp", "vxlan"] {
+        let protocol = protocols
+            .iter()
+            .find(|protocol| protocol["protocol"] == name)
+            .unwrap();
+        assert_eq!(protocol["frames"], 2, "{name} must count each frame once");
+    }
+}
+
+#[test]
 fn scope_denies_an_excluded_destination_before_route_lookup() {
     let scope =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/documents/scope.json");

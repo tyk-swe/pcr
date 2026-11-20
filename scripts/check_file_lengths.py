@@ -5,13 +5,21 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Iterable
 from pathlib import Path
 import sys
+from typing import TypedDict
 
 from rust_source import blank_comments_and_strings, is_test_path
 
 CLOSING_ONLY = {"}", ")", "]", "};", ");", "],", "},"}
 SOURCE_GLOBS = ("crates/**/*.rs", "scripts/**/*.py", "examples/**/*.rs", "fuzz/**/*.rs")
+
+
+class FileLength(TypedDict):
+    path: str
+    code_lines: int
+    is_test: bool
 
 
 def rust_code_lines(text: str) -> int:
@@ -25,17 +33,17 @@ def rust_code_lines(text: str) -> int:
 
 def python_code_lines(text: str) -> int:
     count = 0
-    in_docstring = False
+    docstring_marker: str | None = None
     for line in text.splitlines():
         stripped = line.strip()
-        if in_docstring:
-            if '"""' in stripped or "'''" in stripped:
-                in_docstring = False
+        if docstring_marker is not None:
+            if docstring_marker in stripped:
+                docstring_marker = None
             continue
         if stripped.startswith('"""') or stripped.startswith("'''"):
             marker = stripped[:3]
             if stripped.count(marker) < 2:
-                in_docstring = True
+                docstring_marker = marker
             continue
         code = line.split("#")[0].strip()
         if code and code not in CLOSING_ONLY:
@@ -48,8 +56,8 @@ def code_lines(path: Path) -> int:
     return rust_code_lines(text) if path.suffix == ".rs" else python_code_lines(text)
 
 
-def rank_files(root: Path, globs=SOURCE_GLOBS) -> list[dict]:
-    rows = []
+def rank_files(root: Path, globs: Iterable[str] = SOURCE_GLOBS) -> list[FileLength]:
+    rows: list[FileLength] = []
     for pattern in globs:
         for path in sorted(root.glob(pattern)):
             relative = path.relative_to(root)
@@ -58,19 +66,19 @@ def rank_files(root: Path, globs=SOURCE_GLOBS) -> list[dict]:
             ]:
                 continue
             rows.append({
-                "path": str(path.relative_to(root)),
+                "path": str(relative),
                 "code_lines": code_lines(path),
-                "is_test": is_test_path(path.relative_to(root)),
+                "is_test": is_test_path(relative),
             })
     rows.sort(key=lambda row: (-row["code_lines"], row["path"]))
     return rows
 
 
-def violations(rows: list[dict], limit: int) -> list[dict]:
+def violations(rows: list[FileLength], limit: int) -> list[FileLength]:
     return [row for row in rows if row["code_lines"] > limit and not row["is_test"]]
 
 
-def render(rows: list[dict], limit: int, top: int) -> list[str]:
+def render(rows: list[FileLength], limit: int, top: int) -> list[str]:
     lines = [f"Top {top} files by code lines (comments, blanks, closing-only lines excluded):"]
     for row in rows[:top]:
         marker = "test" if row["is_test"] else "    "
@@ -87,7 +95,7 @@ def render(rows: list[dict], limit: int, top: int) -> list[str]:
     return lines
 
 
-def main(argv=None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--limit", type=int, default=800)

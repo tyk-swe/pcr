@@ -145,7 +145,7 @@ impl<P: PacketProviders, K: Clock> Executor<Batch<PlannedProbe>> for Native<'_, 
             .spent
             .checked_add_assign(&aggregate.aggregate.stats)
             .map_err(failure)?;
-        Ok(Evidence::from_exchange(batch.permit, aggregate))
+        Ok(batch.evidence(aggregate))
     }
 }
 

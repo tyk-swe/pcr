@@ -1,7 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#![allow(unsafe_code)]
+#![allow(
+    unsafe_code,
+    reason = "interface enumeration walks the getifaddrs linked list from libc"
+)]
 
 use std::collections::BTreeMap;
 use std::ffi::CStr;

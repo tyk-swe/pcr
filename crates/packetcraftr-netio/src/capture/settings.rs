@@ -128,7 +128,12 @@ impl<T> Default for Realized<T> {
 impl<T: PartialEq> Realized<T> {
     /// Backends must reject a confirmed effective mismatch before reporting a session.
     pub(crate) fn consistent_with(&self, request: Option<T>) -> bool {
-        self.requested == request && self.applied == request
+        self.requested == request
+            && self.applied == request
+            && request
+                .as_ref()
+                .zip(self.effective.as_ref())
+                .is_none_or(|(requested, effective)| requested == effective)
     }
 }
 

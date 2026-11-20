@@ -49,9 +49,12 @@ pub(super) fn run(
         .collect();
     let request = packetcraftr::capture::Request::new(
         net::capture::GroupRequest {
-            filter: args.capture_filter.clone(),
-            promiscuous: args.promiscuous,
-            ..net::capture::GroupRequest::new(interfaces, args.capture.clone().into_limits())
+            interfaces,
+            settings: net::capture::Settings {
+                filter: args.capture_filter.clone(),
+                promiscuous: args.promiscuous,
+                ..net::capture::Settings::new(args.capture.clone().into_limits())
+            },
         },
         args.timeout.timeout(),
     );

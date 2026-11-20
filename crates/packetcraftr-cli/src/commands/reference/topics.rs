@@ -23,7 +23,7 @@ Examples:
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
-    /// Topic to print: expressions, filters, formats, or exit-codes. Omit to list them.
+    /// Topic to print: expressions, filters, formats, scope, or exit-codes. Omit to list them.
     #[arg(value_name = "NAME")]
     pub(crate) name: Option<String>,
 }
@@ -50,6 +50,11 @@ const TOPICS: &[Topic] = &[
         name: "formats",
         summary: "Output formats and which commands offer each.",
         body: formats,
+    },
+    Topic {
+        name: "scope",
+        summary: "Engagement scope documents and how they narrow live policy.",
+        body: || String::from(text::SCOPE),
     },
     Topic {
         name: "exit-codes",

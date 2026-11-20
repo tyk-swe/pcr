@@ -22,8 +22,35 @@ use state::{Observation, Pending, PendingReason, State};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::time::SystemTime;
 
-type CidIndex = BTreeMap<(u32, Vec<u8>), BTreeSet<(u64, Direction)>>;
+type CidIndex = BTreeMap<u32, BTreeMap<Vec<u8>, BTreeSet<(u64, Direction)>>>;
 type ResetIndex = BTreeMap<(u32, [u8; 16]), BTreeSet<u64>>;
+
+fn index_cid(cids: &mut CidIndex, scope: u32, id: &[u8], owner: (u64, Direction)) {
+    let ids = cids.entry(scope).or_default();
+    match ids.get_mut(id) {
+        Some(owners) => {
+            owners.insert(owner);
+        }
+        None => {
+            ids.insert(id.to_vec(), BTreeSet::from([owner]));
+        }
+    }
+}
+
+fn unindex_cid(cids: &mut CidIndex, scope: u32, id: &[u8], owner: &(u64, Direction)) {
+    let Some(ids) = cids.get_mut(&scope) else {
+        return;
+    };
+    if let Some(owners) = ids.get_mut(id) {
+        owners.remove(owner);
+        if owners.is_empty() {
+            ids.remove(id);
+        }
+    }
+    if ids.is_empty() {
+        cids.remove(&scope);
+    }
+}
 
 pub struct Datagram<'a> {
     pub number: u64,
@@ -271,12 +298,9 @@ impl Collector {
                 &self.limits,
                 false,
             );
-            self.handle_result(
-                &mut state,
-                result,
-                &packet,
+            self.handle_result(&mut state, result, &packet, input.number, |reason| {
                 Pending {
-                    reason: PendingReason::MissingSecrets,
+                    reason,
                     bytes: Bytes::copy_from_slice(packet.bytes),
                     direction,
                     dcid_length: length,
@@ -284,8 +308,8 @@ impl Collector {
                     timestamp: input.timestamp,
                     flow: input.flow.flow.clone(),
                     keylog_revision: self.keylog.revision(),
-                },
-            );
+                }
+            });
             self.retry(&mut state);
             self.replay_resets(&mut state);
             self.summary.decrypted_packets += state.report.metrics.decrypted_packets - before;
@@ -317,24 +341,19 @@ impl Collector {
         state: &mut State,
         result: Result<bool, Error>,
         packet: &Packet<'_>,
-        pending: Pending,
+        number: u64,
+        pending: impl FnOnce(PendingReason) -> Pending,
     ) {
         match result {
             Ok(true) => {}
-            Ok(false) => self.defer(state, pending),
+            Ok(false) => self.defer(state, pending(PendingReason::MissingSecrets)),
             Err(Error::Authentication) => {
                 state.report.metrics.authentication_failures += 1;
                 if packet.number_offset.is_some() {
-                    self.defer(
-                        state,
-                        Pending {
-                            reason: PendingReason::Authentication,
-                            ..pending
-                        },
-                    );
+                    self.defer(state, pending(PendingReason::Authentication));
                 } else {
                     state.diagnostic(
-                        pending.number,
+                        number,
                         "authentication_failed",
                         "QUIC packet authentication failed",
                         &self.limits,
@@ -347,7 +366,7 @@ impl Collector {
                     Error::UnsupportedFrame(_) => "unsupported_frame",
                     _ => "malformed_packet",
                 };
-                state.diagnostic(pending.number, code, error.to_string(), &self.limits);
+                state.diagnostic(number, code, error.to_string(), &self.limits);
             }
         }
     }
@@ -481,10 +500,7 @@ impl Collector {
     fn store(&mut self, index: u64, state: State) {
         let scope = state.report.scope.id.get();
         for cid in &state.cids {
-            self.cids
-                .entry((scope, cid.id.clone()))
-                .or_default()
-                .insert((index, cid.owner.reverse()));
+            index_cid(&mut self.cids, scope, &cid.id, (index, cid.owner.reverse()));
             if !cid.retired
                 && let Some(token) = cid.token
             {
@@ -499,13 +515,12 @@ impl Collector {
         let state = self.states.remove(&index)?;
         let scope = state.report.scope.id.get();
         for cid in &state.cids {
-            let key = (scope, cid.id.clone());
-            if let Some(entries) = self.cids.get_mut(&key) {
-                entries.remove(&(index, cid.owner.reverse()));
-                if entries.is_empty() {
-                    self.cids.remove(&key);
-                }
-            }
+            unindex_cid(
+                &mut self.cids,
+                scope,
+                &cid.id,
+                &(index, cid.owner.reverse()),
+            );
             if let Some(token) = cid.token {
                 let key = (scope, token);
                 if let Some(entries) = self.resets.get_mut(&key) {
@@ -557,7 +572,7 @@ impl Collector {
         });
     }
     fn match_id(&self, flow: &ScopedFlowKey, id: &[u8]) -> Association {
-        let Some(candidates) = self.cids.get(&(flow.scope.get(), id.to_vec())) else {
+        let Some(candidates) = self.cids.get(&flow.scope.get()).and_then(|ids| ids.get(id)) else {
             return Association::None;
         };
         let matches: Vec<_> = candidates
@@ -623,7 +638,11 @@ impl Collector {
         }
     }
     fn match_initial_source(&self, flow: &ScopedFlowKey, packet: &Packet<'_>) -> Association {
-        let Some(candidates) = self.cids.get(&(flow.scope.get(), packet.scid.to_vec())) else {
+        let Some(candidates) = self
+            .cids
+            .get(&flow.scope.get())
+            .and_then(|ids| ids.get(packet.scid))
+        else {
             return Association::None;
         };
         let matches: Vec<_> = candidates

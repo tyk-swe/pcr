@@ -1,7 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#![allow(unsafe_code)]
+#![allow(
+    unsafe_code,
+    reason = "Windows route lookup reads SOCKADDR_INET unions returned by GetBestRoute2"
+)]
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 

@@ -44,7 +44,6 @@ impl crate::commands::Spec for Args {
         },
     ];
     const FORMATS: &'static [Format] = crate::output::contract::TEXT_JSON_NDJSON;
-    const CANCELLATION: bool = true;
 
     fn run_time(&self) -> Option<&dyn Bounded> {
         Some(self)
@@ -72,7 +71,7 @@ impl crate::commands::Spec for Args {
             probe_max_read_bytes: Bytes @ ResultRetention,
         ]);
         self.tls.resources(settings);
-        self.policy.budgets.resources(settings);
+        self.policy.resources(settings);
     }
 
     fn run(

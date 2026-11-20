@@ -83,11 +83,12 @@ pub(super) fn render_complete(
     write_summary_line(
         invocation,
         format_args!(
-            "{} DNS messages; {} matched and {} unanswered transactions in {} captured frames",
+            "{} DNS messages; {} matched and {} unanswered transactions in {} captured frames; orphan responses: {}",
             complete.summary.messages,
             complete.summary.matched_transactions,
             complete.summary.unanswered_transactions,
-            complete.frames_read
+            complete.frames_read,
+            complete.summary.orphan_responses,
         ),
     )
 }

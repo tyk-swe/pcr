@@ -84,10 +84,13 @@ impl fmt::Display for Literal {
 /// Reads `low..high` when at least one side is a number or an address, so a word such as `a..b` stays text.
 ///
 /// The faults name why a range-shaped word is refused; nothing is partially accepted.
-pub(super) fn parse_range(word: &str) -> Option<Result<Literal, &'static str>> {
+pub(super) fn parse_range(
+    word: &str,
+    parse_endpoint: impl Fn(&str) -> Option<Literal>,
+) -> Option<Result<Literal, &'static str>> {
     let (low, high) = word.split_once("..")?;
-    let low = parse(low);
-    let high = parse(high);
+    let low = parse_endpoint(low);
+    let high = parse_endpoint(high);
     let endpoint = |literal: &Option<Literal>| {
         matches!(
             literal,

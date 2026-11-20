@@ -409,7 +409,7 @@ impl<P: PacketProviders, K: Clock> Executor<Batch<Probe>> for ClientExecutor<'_,
         }
         let exchange =
             executor.exchange_for_workflow(template, step, &mut matches_request, None)?;
-        let evidence = Evidence::from_exchange(batch.permit, exchange);
+        let evidence = batch.evidence(exchange);
         for sent in &evidence.sent {
             self.reply_history.sent(
                 first,

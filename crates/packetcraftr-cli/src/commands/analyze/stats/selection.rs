@@ -462,7 +462,7 @@ mod tests {
             ),
             Table::Ports => cap(&mut report.ports, top, "stats.ports_omitted", "port row(s)"),
             Table::Io => cap(&mut report.io, top, "stats.io_omitted", "io bucket(s)"),
-            _ => unreachable!(),
+            _ => unreachable!("test helper only caps the five sortable tables"),
         };
         diagnostics.extend(omitted);
         diagnostics

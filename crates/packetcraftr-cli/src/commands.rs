@@ -42,7 +42,7 @@ pub(crate) trait Spec: Sized {
     const PUBLISHED: &'static [crate::output::contract::PublishedType] = &[];
 
     /// Whether shared cancellation is installed before dispatch.
-    const CANCELLATION: bool;
+    const CANCELLATION: bool = true;
 
     const OFFLINE: bool = false;
 

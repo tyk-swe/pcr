@@ -416,6 +416,53 @@ impl AdaptiveArgs {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+pub(crate) enum Timing {
+    Slow,
+    Normal,
+    Fast,
+}
+
+impl Timing {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Slow => "slow",
+            Self::Normal => "normal",
+            Self::Fast => "fast",
+        }
+    }
+
+    pub(crate) const fn schedule(self) -> Schedule {
+        match self {
+            Self::Slow => Schedule {
+                rate: 10,
+                timeout_ms: 3_000,
+                attempts: 2,
+                max_in_flight: 1,
+            },
+            Self::Normal => Schedule {
+                rate: 100,
+                timeout_ms: 1_000,
+                attempts: 1,
+                max_in_flight: 4,
+            },
+            Self::Fast => Schedule {
+                rate: 1_000,
+                timeout_ms: 500,
+                attempts: 1,
+                max_in_flight: 16,
+            },
+        }
+    }
+}
+
+pub(crate) struct Schedule {
+    pub(crate) rate: u32,
+    pub(crate) timeout_ms: u64,
+    pub(crate) attempts: u32,
+    pub(crate) max_in_flight: usize,
+}
+
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
     /// Use ordinary TCP connections without raw packet privileges; the same as
@@ -564,6 +611,17 @@ pub(crate) struct Args {
     /// Operation-wide probe-start rate ceiling, not achieved throughput.
     #[arg(long)]
     pub(crate) rate: Option<u32>,
+    /// Timing preset composing rate, timeout, attempts, and max in-flight:
+    /// slow (10/s, 3000ms, 2 attempts, 1 in flight), normal (100/s, 1000ms,
+    /// 1 attempt, 4 in flight), or fast (1000/s, 500ms, 1 attempt, 16 in
+    /// flight). Conflicts with the four flags it composes.
+    #[arg(long, value_enum, conflicts_with_all = ["rate", "attempts", "max_in_flight", "timeout_ms"])]
+    pub(crate) timing: Option<Timing>,
+    /// Shuffle the selected endpoints deterministically from this seed
+    /// before probing; the same seed reproduces the same order, which the
+    /// published plan records.
+    #[arg(long, value_name = "SEED")]
+    pub(crate) shuffle_seed: Option<u64>,
     /// Maximum distinct destination ports accepted by the request.
     #[arg(long, default_value_t = packetcraftr::scan::DEFAULT_MAX_PORTS)]
     pub(crate) max_ports: usize,

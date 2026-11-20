@@ -185,7 +185,7 @@ commands! {
     #[command(after_long_help = "Requires successful aggregate JSON from matching native scan methods. Missing endpoints are coverage changes, never presumed closed.\n\nExample: packetcraftr analyze scan-diff before.json after.json")]
     ScanDiff(analyze::scan_diff::ScanDiff) = "scan-diff" => ("analyze", "scan-diff", 34),
     /// Combine security results into a standalone local HTML assessment.
-    #[command(after_long_help = "Accepts aggregate JSON from the six security analysis/audit commands. Escapes captured content, records source-file hashes, and refuses existing HTML destinations.\n\nExample: packetcraftr analyze report hunt.json tls.json --html assessment.html")]
+    #[command(after_long_help = "Accepts aggregate JSON from the security analysis and audit commands plus scan, differential, fuzz, exchange, and traceroute results, which are summarized as observations. Escapes captured content, records source-file hashes, and refuses existing HTML and bundle destinations.\n\nExample: packetcraftr analyze report hunt.json scan.json --html assessment.html --bundle bundle.json --scope-file scope.json")]
     Assessment(analyze::report::Assessment) = "report" => ("analyze", "report", 35),
     /// Audit an observed TLS handshake, certificate chain, and name matching.
     #[command(after_long_help = "Uses ordinary TCP sockets. Bundled WebPKI roots are replaced by --ca-file. --server-name sets SNI and certificate identity without resolving another target. No revocation fetching or protocol enumeration.\n\nExample: packetcraftr network audit-tls 192.0.2.10:443 --server-name example.test")]
@@ -308,6 +308,14 @@ commands! {
     /// Print built-in references for packet expressions, filters, formats, and exit codes.
     #[command(after_long_help = reference::topics::AFTER_LONG_HELP)]
     Topics(reference::topics::Args) => ("reference", "topics", 29),
+    /// Passively report build, interface, and engagement scope readiness.
+    #[command(after_long_help = network::preflight::AFTER_LONG_HELP)]
+    Preflight(network::preflight::Args) => ("network", "preflight", 43),
+    /// Inventory hosts, protocols, and observed ports in a capture file.
+    #[command(after_long_help = analyze::inventory::arguments::AFTER_LONG_HELP)]
+    Inventory(analyze::inventory::arguments::Args) = "inventory" => ("analyze", "inventory", 44),
+    /// Reconstruct HTTP/3 exchanges from an encrypted QUIC capture.
+    Http3(analyze::http3::Args) = "http3" => ("analyze", "http3", 45),
 }
 
 /// Workflow placement and compact identifiers used in machine output.

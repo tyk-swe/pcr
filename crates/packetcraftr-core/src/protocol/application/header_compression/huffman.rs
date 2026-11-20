@@ -3,7 +3,14 @@
 
 use std::sync::LazyLock;
 
-use super::super::{Error, Limit};
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Error {
+    InvalidCode,
+    EndOfString,
+    PaddingLength,
+    PaddingPrefix,
+    Limit,
+}
 
 const CODES: [(u32, u8); 257] = [
     (0x1ff8, 13),
@@ -301,10 +308,18 @@ fn build() -> Vec<[Edge; 2]> {
     nodes
 }
 
-pub(super) fn decode<E: From<Error>>(
+pub(crate) fn max_encoded_bytes(decoded_bytes: usize) -> usize {
+    const MAX_CODE_BITS: usize = 30;
+    decoded_bytes
+        .checked_mul(MAX_CODE_BITS)
+        .map_or(usize::MAX, |bits| bits.div_ceil(8))
+}
+
+pub(crate) fn decode<E>(
     input: &[u8],
     max_output: usize,
     check: &mut impl FnMut() -> Result<(), E>,
+    wire_error: impl Fn(Error) -> E,
 ) -> Result<Vec<u8>, E> {
     static TREE: LazyLock<Vec<[Edge; 2]>> = LazyLock::new(build);
     let nodes = &*TREE;
@@ -320,7 +335,7 @@ pub(super) fn decode<E: From<Error>>(
         for shift in (0..8).rev() {
             let bit = ((byte >> shift) & 1) as usize;
             match nodes[node][bit] {
-                Edge::Empty => return Err(Error::Compression("invalid Huffman code").into()),
+                Edge::Empty => return Err(wire_error(Error::InvalidCode)),
                 Edge::Node(next) => {
                     node = next as usize;
                     padding = (padding << 1) | bit as u32;
@@ -328,10 +343,10 @@ pub(super) fn decode<E: From<Error>>(
                 }
                 Edge::Leaf(symbol) => {
                     if symbol == EOS {
-                        return Err(Error::Compression("Huffman end-of-string symbol").into());
+                        return Err(wire_error(Error::EndOfString));
                     }
                     if out.len() >= max_output {
-                        return Err(Error::Limit(Limit::HeaderBytes).into());
+                        return Err(wire_error(Error::Limit));
                     }
                     out.push(symbol as u8);
                     node = 0;
@@ -342,10 +357,10 @@ pub(super) fn decode<E: From<Error>>(
         }
     }
     if padding_len > 7 {
-        return Err(Error::Compression("Huffman padding exceeds seven bits").into());
+        return Err(wire_error(Error::PaddingLength));
     }
     if padding != (1u32 << padding_len) - 1 {
-        return Err(Error::Compression("Huffman padding is not an EOS prefix").into());
+        return Err(wire_error(Error::PaddingPrefix));
     }
     Ok(out)
 }

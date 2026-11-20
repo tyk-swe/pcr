@@ -1,3 +1,5 @@
+Act autonomously with full execution authority. Do not pause to ask for routine permissions or confirmation—make reasonable engineering decisions, verify the output, and deliver the complete working result
+
 Do not write comments unless they are any of:
 
 - necessary to explain complex logic, safety invariants, or public API contracts (in which case, keep it concise and clear)
@@ -134,3 +136,13 @@ Skills live in `.agents/skills/` as the canonical copy, with `.claude/skills/` a
 After adding or removing skills, update the tracked discovery links with `python3 scripts/agent_skills.py --write-links` and verify them with `python3 scripts/agent_skills.py --check`. The generator refuses unexpected entries in either discovery directory, so remove obsolete entries intentionally first.
 
 When the checkout cannot create symlinks, run `python3 scripts/agent_skills.py --write-copies` to replace materialized link files with local copies. Rerun it after editing canonical skills. It replaces copies under `.claude/skills/` and `.devin/skills/`, so edit `.agents/skills/` only. These local copies are not tracked replacements for the links and should not be committed.
+
+## Pull requests
+
+1. **Branch from latest default.** Pull the latest default branch (`git pull --ff-only`) and switch to a new feature branch before editing files. Open a **draft PR** as soon as the branch is up (`gh pr create --draft`).
+2. **Implement and request review.** Push your changes, update the draft PR title and body to match the diff, and comment `@codex review`. Keep the PR in draft.
+3. **Review loop.** For each `@codex review` response, verify every finding against the source:
+   - Fix real issues, push the commit, and resolve each addressed review thread.
+   - Comment `@codex review` again on the new commit.
+   - Repeat until `@codex review` returns clean with zero unresolved findings.
+4. **Promote when green.** Only after `@codex review` is clean **and** all CI checks pass on the latest commit, update the PR description if the scope shifted during review and mark it ready (`gh pr ready`).

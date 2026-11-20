@@ -64,3 +64,6 @@ pub use limits::{
 };
 pub use model::Filter;
 pub use requirements::Requirements;
+
+#[cfg(test)]
+mod tests;

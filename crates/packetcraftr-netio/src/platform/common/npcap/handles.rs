@@ -1,7 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#![allow(unsafe_code)]
+#![allow(
+    unsafe_code,
+    reason = "Npcap handles own raw pcap pointers behind Arc and worker ownership"
+)]
 
 use std::{
     ffi::{CStr, CString, c_char, c_int, c_void},

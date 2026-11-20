@@ -20,7 +20,7 @@ pub(crate) struct TreeArgs {
 
 impl TreeArgs {
     pub(crate) fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
-        crate::resources::declare!(settings, self, [max_tree_bytes: Bytes @ Output]);
+        crate::resources::declare!(settings, self, [max_tree_bytes: Bytes @ Output if self.tree]);
     }
 
     /// The tree is human text, so machine and byte formats refuse it.

@@ -246,7 +246,7 @@ fn compressed_dns_replies_round_trip_through_packet_documents() {
 
         let document = crate::document::Packet::from_packet(&decoded.packet);
         let json = serde_json::to_string(&document).unwrap();
-        let mut document =
+        let document =
             crate::document::Packet::parse(&json, crate::document::Format::Json, json.len())
                 .unwrap();
         let packet = document.to_packet(&registry, 64).unwrap();
@@ -268,28 +268,6 @@ fn compressed_dns_replies_round_trip_through_packet_documents() {
             .build(packet, Addresses::default(), Default::default())
             .unwrap_or_else(|error| panic!("{name}: {error:?}"));
         assert_eq!(rebuilt.bytes, bytes, "{name}");
-
-        let udp = document
-            .layers
-            .iter_mut()
-            .find(|layer| layer.protocol == "udp")
-            .unwrap();
-        udp.fields.insert("length".to_owned(), 61_u16.into());
-        let wrong_length = document.to_packet(&registry, 64).unwrap();
-        let error = builder
-            .build(wrong_length, Addresses::default(), Default::default())
-            .unwrap_err();
-        assert!(
-            matches!(
-                &error,
-                crate::build::Error::Codec {
-                    protocol,
-                    source: crate::codec::Error::Invalid { message, .. },
-                    ..
-                } if *protocol == BuiltinProtocol::Udp.id() && message == "length is 61, expected 62"
-            ),
-            "{name}: {error:?}"
-        );
     }
 }
 

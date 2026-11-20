@@ -2682,6 +2682,49 @@ fn security_analysis_reports_capture_paths_with_invalid_utf8() {
 }
 
 #[test]
+fn report_counts_repeated_inputs_once_at_the_findings_limit() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let input = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/documents/output-beacons-success.json");
+    let copy = directory.path().join("copy.json");
+    std::fs::copy(&input, &copy).expect("copy input to a distinct path");
+
+    let report = |inputs: &[&Path], name: &str, limit: &str| {
+        let html = directory.path().join(name);
+        let mut args = ["--output", "json", "analyze", "report"]
+            .map(OsStr::new)
+            .to_vec();
+        args.extend(inputs.iter().map(|path| path.as_os_str()));
+        args.extend([
+            OsStr::new("--html"),
+            html.as_os_str(),
+            OsStr::new("--max-findings"),
+            OsStr::new(limit),
+        ]);
+        let text = assert_success(&run(&args), &args);
+        let json: serde_json::Value = serde_json::from_str(&text).expect("JSON report");
+        let page = std::fs::read_to_string(html).expect("HTML report");
+        assert!(page.contains(&format!("Showing {limit} of {limit} findings.")));
+        json["result"].clone()
+    };
+
+    let single = report(&[&input], "single.html", "1");
+    let repeated = report(&[&input, &input], "repeated.html", "1");
+    assert_eq!(single["findings"].as_array().unwrap().len(), 1);
+    assert_eq!(repeated["findings"], single["findings"]);
+    assert_eq!(repeated["sources"], single["sources"]);
+
+    let distinct = report(&[&input, &copy, &input], "distinct.html", "2");
+    assert_eq!(distinct["findings"].as_array().unwrap().len(), 2);
+    assert_eq!(distinct["findings"][0], single["findings"][0]);
+    assert_eq!(
+        distinct["findings"][1]["evidence"]["source_file"],
+        copy.to_string_lossy().as_ref()
+    );
+    assert_eq!(distinct["sources"].as_array().unwrap().len(), 2);
+}
+
+#[test]
 fn report_writes_a_bundle_that_binds_its_inputs() {
     let directory = tempfile::tempdir().expect("tempdir");
     let html = directory.path().join("assessment.html");

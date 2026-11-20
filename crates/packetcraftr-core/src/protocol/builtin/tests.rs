@@ -230,7 +230,7 @@ fn yaml_packet_document_builds() {
 }
 
 #[test]
-fn vrrp_v3_checksum_validation_uses_the_enclosing_ip_family() {
+fn vrrp_v3_checksum_uses_the_enclosing_ip_family() {
     use crate::decode::Dissector;
     use crate::diagnostic::VRRP_CHECKSUM;
     use crate::frame::{Frame, LinkType};
@@ -259,6 +259,13 @@ fn vrrp_v3_checksum_validation_uses_the_enclosing_ip_family() {
             decoded.diagnostics.iter().any(|d| d.code == VRRP_CHECKSUM)
         };
         assert!(!has_checksum_warning(reference.to_vec()), "{link_type}");
+        let frame = Frame::new(None, link_type, reference.to_vec()).unwrap();
+        let mut packet = dissector.decode(frame, Default::default()).unwrap().packet;
+        packet.get_mut::<Vrrp>().unwrap().checksum = crate::field::WireValue::Auto;
+        let rebuilt = crate::build::Builder::new(super::registry())
+            .build(packet, Addresses::default(), Default::default())
+            .unwrap_or_else(|error| panic!("{link_type}: rebuild: {error}"));
+        assert_eq!(rebuilt.bytes.as_ref(), reference, "{link_type}");
         let mut corrupted = reference.to_vec();
         *corrupted.last_mut().unwrap() ^= 1;
         assert!(has_checksum_warning(corrupted), "{link_type}");

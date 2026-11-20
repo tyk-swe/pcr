@@ -363,7 +363,7 @@ impl Codec for VrrpCodec {
             push_address(&mut prefix, *address);
         }
         prefix.extend_from_slice(&auth_data);
-        let expected = if version == 2 {
+        let expected = if version == 2 || !ipv6 {
             checksum_parts(&[&prefix, covered_payload])
         } else {
             transport_checksum_parts(

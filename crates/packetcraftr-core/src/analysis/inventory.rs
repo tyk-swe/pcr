@@ -2,13 +2,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::io::Read;
 use std::net::IpAddr;
+use std::sync::Arc;
 
-use crate::analysis::pipeline::FrameRecord;
-use crate::analysis::{StreamTransport, Summary as RunSummary};
+use crate::analysis::pipeline::{self, FrameRecord};
+use crate::analysis::{Error, Options, StreamTransport, Summary as RunSummary};
+use crate::capture_file::Reader;
 use crate::packet::MacAddress;
 use crate::protocol::identity;
 use crate::protocol::link::Arp;
+use crate::registry::Registry;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ObservedPort {
@@ -39,6 +43,21 @@ pub struct Report {
     pub protocols: Vec<ProtocolCount>,
 }
 
+/// Inventories untimed frames without using them for time-based reassembly.
+/// When time bounds are set, untimed frames only count toward input totals.
+pub fn run<R: Read>(
+    reader: &mut Reader<R>,
+    registry: Arc<Registry>,
+    options: &Options<'_>,
+) -> Result<Report, Error> {
+    let mut collector = Collector::new();
+    let summary = pipeline::run_observations(reader, registry, options, |record| {
+        collector.observe_record(&record);
+        Ok(())
+    })?;
+    Ok(collector.finish(&summary))
+}
+
 #[derive(Default)]
 struct HostState {
     mac_addresses: BTreeSet<[u8; 6]>,
@@ -61,6 +80,10 @@ impl Collector {
     }
 
     pub fn observe(&mut self, record: &FrameRecord<'_>) {
+        self.observe_record(record);
+    }
+
+    fn observe_record<T>(&mut self, record: &FrameRecord<'_, T>) {
         let mut seen: Vec<&str> = Vec::new();
         for layer in record.decoded.packet.iter() {
             let name = layer.protocol_id().as_str();
@@ -161,7 +184,7 @@ fn usable_host(address: IpAddr) -> bool {
     !matches!(address, IpAddr::V4(v4) if v4.is_broadcast())
 }
 
-fn innermost_network(record: &FrameRecord<'_>) -> Option<(IpAddr, IpAddr)> {
+fn innermost_network<T>(record: &FrameRecord<'_, T>) -> Option<(IpAddr, IpAddr)> {
     let mut network = None;
     for layer in record.decoded.packet.iter() {
         if let Some(endpoints) = identity::network_endpoints(layer) {

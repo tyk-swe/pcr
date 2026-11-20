@@ -33,13 +33,12 @@ impl DerivedDatagram {
 
 /// One matched frame, dispatched in capture order.
 #[derive(Debug)]
-pub struct FrameRecord<'a> {
+pub struct FrameRecord<'a, Timestamp = SystemTime> {
     /// 1-based position in the capture, counting unmatched frames too, so
     /// numbers agree with every other command reading the same file.
     pub number: u64,
-    /// The frame's capture timestamp, already validated as present by the
-    /// loop that read it.
-    pub timestamp: SystemTime,
+    /// The capture timestamp, required for time-dependent analysis.
+    pub timestamp: Timestamp,
     pub decoded: &'a DecodedPacket,
     pub(super) derived_datagrams: &'a [DerivedDatagram],
     pub(super) scopes: &'a Interner,
@@ -85,7 +84,7 @@ pub struct UdpView<'a> {
     pub conversation: Option<Conversation<'a>>,
 }
 
-impl FrameRecord<'_> {
+impl<Timestamp> FrameRecord<'_, Timestamp> {
     pub fn physical_sources(&self) -> Option<&crate::analysis::provenance::SourceSet> {
         self.physical_sources
     }

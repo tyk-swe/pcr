@@ -6,7 +6,7 @@
 
 use std::io::Read;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use crate::budget::Deadline;
 use crate::capture_file::Reader;
@@ -105,12 +105,53 @@ pub(super) fn run_controlled<R, I, F>(
     registry: Arc<Registry>,
     options: &Options<'_>,
     ip_sink: I,
-    mut sink: F,
+    sink: F,
 ) -> Result<(Summary, Arc<Deadline>), Error>
 where
     R: Read,
     I: FnMut(IpEventRecord) -> Result<(), crate::error::BoundaryError>,
     F: FnMut(FrameRecord<'_>, &Deadline) -> Result<(), crate::error::BoundaryError>,
+{
+    run_with_timestamp(reader, registry, options, ip_sink, sink, require_timestamp)
+}
+
+pub(super) fn run_observations<R, F>(
+    reader: &mut Reader<R>,
+    registry: Arc<Registry>,
+    options: &Options<'_>,
+    mut sink: F,
+) -> Result<Summary, Error>
+where
+    R: Read,
+    F: FnMut(FrameRecord<'_, Option<SystemTime>>) -> Result<(), crate::error::BoundaryError>,
+{
+    run_with_timestamp(
+        reader,
+        registry,
+        options,
+        |_| Ok(()),
+        |record, _| sink(record),
+        |timestamp, _| Ok(timestamp),
+    )
+    .map(|(summary, _)| summary)
+}
+
+fn require_timestamp(timestamp: Option<SystemTime>, number: u64) -> Result<SystemTime, Error> {
+    timestamp.ok_or(Error::TimestampUnavailable { number })
+}
+
+fn run_with_timestamp<R, I, F, T>(
+    reader: &mut Reader<R>,
+    registry: Arc<Registry>,
+    options: &Options<'_>,
+    ip_sink: I,
+    mut sink: F,
+    record_timestamp: impl Fn(Option<SystemTime>, u64) -> Result<T, Error>,
+) -> Result<(Summary, Arc<Deadline>), Error>
+where
+    R: Read,
+    I: FnMut(IpEventRecord) -> Result<(), crate::error::BoundaryError>,
+    F: FnMut(FrameRecord<'_, T>, &Deadline) -> Result<(), crate::error::BoundaryError>,
 {
     options.limits.validate()?;
     let previous = reader.deadline();
@@ -137,6 +178,7 @@ where
         deadline.clone(),
         ip_sink,
         |record| sink(record, &deadline),
+        record_timestamp,
     )?;
     enforce_deadline(&deadline)?;
     Ok((summary, deadline))
@@ -153,18 +195,19 @@ impl<R: Read> Drop for ReaderDeadlineScope<'_, R> {
     }
 }
 
-fn run_inner<R, I, F>(
+fn run_inner<R, I, F, T>(
     reader: &mut Reader<R>,
     registry: Arc<Registry>,
     options: &Options<'_>,
     deadline: Arc<Deadline>,
     mut ip_sink: I,
     mut sink: F,
+    record_timestamp: impl Fn(Option<SystemTime>, u64) -> Result<T, Error>,
 ) -> Result<Summary, Error>
 where
     R: Read,
     I: FnMut(IpEventRecord) -> Result<(), crate::error::BoundaryError>,
-    F: FnMut(FrameRecord<'_>) -> Result<(), crate::error::BoundaryError>,
+    F: FnMut(FrameRecord<'_, T>) -> Result<(), crate::error::BoundaryError>,
 {
     let mut processor = FramePipeline::start(registry, options.clone(), deadline)?;
     loop {
@@ -176,7 +219,7 @@ where
         else {
             break;
         };
-        processor.push(number, frame, &mut ip_sink, &mut sink)?;
+        processor.push_with_timestamp(number, frame, &mut ip_sink, &mut sink, &record_timestamp)?;
     }
     processor.finish(reader.interfaces().to_vec(), ip_sink)
 }
@@ -268,12 +311,27 @@ impl FramePipeline {
         &mut self,
         number: u64,
         frame: Frame,
-        mut ip_sink: I,
-        mut sink: F,
+        ip_sink: I,
+        sink: F,
     ) -> Result<(), Error>
     where
         I: FnMut(IpEventRecord) -> Result<(), crate::error::BoundaryError>,
         F: FnMut(FrameRecord<'_>) -> Result<(), crate::error::BoundaryError>,
+    {
+        self.push_with_timestamp(number, frame, ip_sink, sink, require_timestamp)
+    }
+
+    fn push_with_timestamp<I, F, T>(
+        &mut self,
+        number: u64,
+        frame: Frame,
+        mut ip_sink: I,
+        mut sink: F,
+        record_timestamp: impl FnOnce(Option<SystemTime>, u64) -> Result<T, Error>,
+    ) -> Result<(), Error>
+    where
+        I: FnMut(IpEventRecord) -> Result<(), crate::error::BoundaryError>,
+        F: FnMut(FrameRecord<'_, T>) -> Result<(), crate::error::BoundaryError>,
     {
         let Self {
             options,
@@ -300,11 +358,11 @@ impl FramePipeline {
         let limits = &options.limits;
         let stages = *stages;
         let stage = FrameStage { decoder, deadline };
-        let timestamp = match frame.timestamp {
-            Some(timestamp) => timestamp,
-            None if options.time_bounds.is_some() => return Ok(()),
-            None => return Err(Error::TimestampUnavailable { number }),
-        };
+        let timestamp = frame.timestamp;
+        if timestamp.is_none() && options.time_bounds.is_some() {
+            return Ok(());
+        }
+        let record_timestamp = record_timestamp(timestamp, number)?;
         let decoded = decoder
             .decode(
                 frame,
@@ -319,13 +377,16 @@ impl FramePipeline {
 
         let physical_sources = provenance
             .as_ref()
-            .map(|tracker| {
+            .zip(timestamp)
+            .map(|(tracker, timestamp)| {
                 tracker.single(crate::analysis::provenance::SourceFrame { number, timestamp })
             })
             .transpose()?;
         // Advance capture time before transport indexing and filtering.
-        let clock_regression = clock.observe(timestamp, number);
-        let derived = if stages.ip_reassembly {
+        let clock_regression = timestamp.and_then(|timestamp| clock.observe(timestamp, number));
+        let derived = if let Some(timestamp) = timestamp
+            && stages.ip_reassembly
+        {
             let now = clock.at(timestamp, number)?;
             advance_ip_reassembly(
                 ip_dispatch,
@@ -383,7 +444,7 @@ impl FramePipeline {
         }
         let mut record = FrameRecord {
             number,
-            timestamp,
+            timestamp: record_timestamp,
             decoded: &decoded,
             derived_datagrams: &derived,
             scopes,
@@ -394,7 +455,7 @@ impl FramePipeline {
             clock_regression,
         };
         if let Some(bounds) = options.time_bounds
-            && !bounds.contains(Some(timestamp))
+            && !bounds.contains(timestamp)
         {
             return Ok(());
         }
@@ -416,12 +477,16 @@ impl FramePipeline {
         }
         *frames_matched = frames_matched.saturating_add(1);
 
-        let tcp_events = reassembly_dispatch.dispatch(
-            record.tcp.map(|view| view.header),
-            segment.as_ref(),
-            timestamp,
-            number,
-        )?;
+        let tcp_events = if let Some(timestamp) = timestamp {
+            reassembly_dispatch.dispatch(
+                record.tcp.map(|view| view.header),
+                segment.as_ref(),
+                timestamp,
+                number,
+            )?
+        } else {
+            Vec::new()
+        };
 
         enforce_deadline(deadline)?;
         record.tcp_events = &tcp_events;

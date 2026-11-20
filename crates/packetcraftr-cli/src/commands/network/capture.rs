@@ -28,7 +28,7 @@ use self::files::Files;
 use self::frames::{Decoding, Destinations};
 use crate::command_options::Compression;
 use crate::output;
-use crate::rendering::FieldTree;
+use crate::packet_text::FieldTree;
 use packetcraftr::capture::{self as workflow, Control, Event};
 use packetcraftr::policy::{CaptureBudget, Policy};
 use packetcraftr_core::error::Classified;
@@ -75,7 +75,6 @@ impl crate::commands::Spec for Args {
         crate::output::contract::Format::Pcap,
         crate::output::contract::Format::PcapNg,
     ];
-    const CANCELLATION: bool = true;
 
     fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
         crate::resources::declare!(settings, self, [
@@ -87,7 +86,7 @@ impl crate::commands::Spec for Args {
         ]);
         self.timeout.resources(settings);
         self.limits.resources(settings);
-        self.budgets.resources(settings);
+        self.budgets.resources_with_scope(settings, &self.scope);
         self.tree.resources(settings);
     }
 
@@ -125,7 +124,7 @@ pub(super) fn run(invocation: &crate::invocation::Invocation, args: Args) -> Res
     };
     native.validate(&limits).map_err(CliError::classified)?;
     let registry = args.decode.registry()?;
-    let projector = crate::rendering::Projector::prepare(
+    let projector = crate::field_projection::Projector::prepare(
         &args.fields,
         args.max_projection_bytes,
         &registry,
@@ -160,7 +159,8 @@ pub(super) fn run(invocation: &crate::invocation::Invocation, args: Args) -> Res
     } else {
         None
     };
-    let policy = args.budgets.into_policy();
+    let mut policy = args.budgets.into_policy();
+    args.scope.apply_to(&mut policy);
     let files = args
         .write
         .map(|path| {
@@ -195,10 +195,12 @@ pub(super) fn run(invocation: &crate::invocation::Invocation, args: Args) -> Res
     let request = workflow::Request::new(
         net::capture::GroupRequest {
             interfaces,
-            limits,
-            filter: args.capture_filter,
-            promiscuous: args.promiscuous,
-            native,
+            settings: net::capture::Settings {
+                filter: args.capture_filter,
+                promiscuous: args.promiscuous,
+                native,
+                ..net::capture::Settings::new(limits)
+            },
         },
         timeout,
     );
@@ -279,7 +281,7 @@ struct Output<'a> {
     compression: Compression,
     selector: Option<FrameSelector>,
     decoding: Option<Decoding>,
-    projector: Option<crate::rendering::Projector>,
+    projector: Option<crate::field_projection::Projector>,
     files: Option<Files>,
     stream: &'a StreamEncoder,
 }

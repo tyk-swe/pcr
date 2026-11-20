@@ -5,7 +5,7 @@ pub(in crate::commands) mod arguments;
 pub(in crate::commands) mod output;
 
 use self::arguments::{Args, OrderArg};
-use crate::{errors::CliError, rendering::write_summary_line};
+use crate::{errors::CliError, terminal::write_summary_line};
 use packetcraftr_core::{capture_file, error::Kind};
 use std::path::Path;
 
@@ -30,7 +30,6 @@ impl crate::commands::Spec for Args {
     ];
     const FORMATS: &'static [crate::output::contract::Format] =
         crate::output::contract::TEXT_JSON_NDJSON;
-    const CANCELLATION: bool = true;
     const OFFLINE: bool = true;
 
     fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
@@ -127,10 +126,12 @@ pub(crate) fn run(invocation: &crate::invocation::Invocation, args: Args) -> Res
         report,
         |report| report,
         |invocation, report| {
-            invocation
-                .output
-                .presentation()
-                .details(invocation, "Capture sources", report)?;
+            crate::terminal::write_details(
+                invocation,
+                invocation.output.presentation(),
+                "Capture sources",
+                report,
+            )?;
             write_summary_line(
                 invocation,
                 format_args!(

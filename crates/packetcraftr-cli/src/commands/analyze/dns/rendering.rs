@@ -9,9 +9,8 @@ use super::output::Latency;
 
 use super::output as wire;
 use crate::errors::CliError;
-use crate::rendering::{
-    comma_separated, render_dns_fields, render_optional, write_stdout_line, write_summary_line,
-};
+use crate::packet_text::render_dns_fields;
+use crate::terminal::{comma_separated, render_optional, write_stdout_line, write_summary_line};
 
 pub(super) fn render_message(
     invocation: &crate::invocation::Invocation,
@@ -84,11 +83,12 @@ pub(super) fn render_complete(
     write_summary_line(
         invocation,
         format_args!(
-            "{} DNS messages; {} matched and {} unanswered transactions in {} captured frames",
+            "{} DNS messages; {} matched and {} unanswered transactions in {} captured frames; orphan responses: {}",
             complete.summary.messages,
             complete.summary.matched_transactions,
             complete.summary.unanswered_transactions,
-            complete.frames_read
+            complete.frames_read,
+            complete.summary.orphan_responses,
         ),
     )
 }

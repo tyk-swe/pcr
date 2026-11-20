@@ -103,7 +103,7 @@ impl ConnectionState {
         release += prelude
             .offers
             .values()
-            .map(|offer| budget::OFFER_OVERHEAD + offer.settings.capacity() * 24)
+            .map(|offer| budget::offer_cost(offer.settings.capacity()))
             .sum::<usize>();
         release += budget::DIR_OVERHEAD;
         context.release(&mut self.charge, release)?;
@@ -251,9 +251,7 @@ impl ConnectionState {
                 .response
                 .as_ref()
                 .map_or(0, |head| head.wire().len())
-            + self.upgrade.sources.as_ref().map_or(0, |set| {
-                budget::SET_OVERHEAD + set.frames().len() * budget::SPAN_OVERHEAD
-            });
+            + self.upgrade.sources.as_ref().map_or(0, budget::set_cost);
         context.charge_retained(charge)?;
         let pending = self.control.pending_counts();
         context.connection(Connection {

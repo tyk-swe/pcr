@@ -65,6 +65,8 @@ pub(crate) struct Report {
     /// scan of these targets would probe.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ip_protocols: Option<IpProtocols>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shuffle_seed: Option<u64>,
 }
 
 impl Report {
@@ -74,6 +76,7 @@ impl Report {
         origins: &[Origin],
         ports: Option<Ports>,
         ip_protocols: Option<IpProtocols>,
+        shuffle_seed: Option<u64>,
     ) -> Self {
         Self {
             method: METHOD,
@@ -100,6 +103,7 @@ impl Report {
                 .collect(),
             ports,
             ip_protocols,
+            shuffle_seed,
         }
     }
 }
@@ -115,6 +119,8 @@ pub(crate) struct Complete {
     pub ports: Option<Ports>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ip_protocols: Option<IpProtocols>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shuffle_seed: Option<u64>,
 }
 
 impl From<Report> for Complete {
@@ -127,6 +133,7 @@ impl From<Report> for Complete {
             duplicates: report.duplicates,
             ports: report.ports,
             ip_protocols: report.ip_protocols,
+            shuffle_seed: report.shuffle_seed,
         }
     }
 }

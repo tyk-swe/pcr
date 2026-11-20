@@ -25,7 +25,11 @@ def workspace(files: dict[str, str]):
     historical = root / documents.HISTORICAL[0]
     historical.parent.mkdir(parents=True)
     historical.write_bytes((REPO / documents.HISTORICAL[0]).read_bytes())
-    twins = {relative: "{}" for pair in documents.TWIN_PAIRS for relative in pair}
+    twins = {
+        relative: '{"schema": "packetcraftr.indicators/v1"}'
+        for pair in documents.TWIN_PAIRS
+        for relative in pair
+    }
     base = {
         documents.HISTORICAL_ADR:
             f"| {documents.HISTORICAL[0]} | {documents.HISTORICAL[1]} |\n",
@@ -71,9 +75,33 @@ class CheckDocumentsTests(unittest.TestCase):
         })
         self.assertTrue(any("indicators.json" in problem for problem in problems))
 
+    def test_schema_is_required_even_when_other_documents_claim_the_schema(self):
+        cases = {
+            "examples/documents/second-indicators.json": "{}",
+            "examples/documents/second-indicators.yaml": "schema: 1\n",
+            "examples/documents/second-indicators.yml": "- not an object\n",
+            "crates/packetcraftr/data/second-indicators.json": '{"schema": null}',
+        }
+        for path, source in cases.items():
+            with self.subTest(path=path):
+                self.assertEqual(
+                    self.check({path: source}),
+                    [f"{path}: expected a top-level 'schema' string"],
+                )
+
+    def test_invalid_schema_fails_even_when_document_omits_the_affected_property(self):
+        schema_path = "schemas/packetcraftr.indicators.v1.schema.json"
+        invalid_schema = SCHEMA | {
+            "properties": SCHEMA["properties"] | {"count": {"type": "integeer"}},
+        }
+        with self.assertRaisesRegex(documents.CheckError, r"indicators\.v1\.schema\.json: invalid schema"):
+            self.check({
+                "examples/documents/indicators.json": '{"schema": "packetcraftr.indicators/v1"}',
+                schema_path: json.dumps(invalid_schema),
+            })
+
     def test_unclaimed_schema_fails(self):
         problems = self.check({
-            "examples/documents/other.json": "{}",
             "schemas/packetcraftr.packet.v1.schema.json": json.dumps(SCHEMA),
         })
         self.assertTrue(any("no document claims" in problem for problem in problems))
@@ -81,9 +109,30 @@ class CheckDocumentsTests(unittest.TestCase):
     def test_twin_drift_fails(self):
         problems = self.check({
             "examples/documents/indicators.json": '{"schema": "packetcraftr.indicators/v1"}',
-            "examples/documents/service-probes.json": '{"changed": true}',
+            "examples/documents/service-probes.json": '{"schema": "packetcraftr.indicators/v1"}\n',
         })
         self.assertTrue(any("byte-identical" in problem for problem in problems))
+
+    def test_duplicate_runtime_identifier_is_reported_at_its_source(self):
+        contract = "crates/packetcraftr-core/src/security.rs"
+        problems = self.check({
+            "examples/documents/indicators.json": '{"schema": "packetcraftr.indicators/v1"}',
+            contract: 'pub const OUTPUT_SCHEMA: &str = "packetcraftr.output/v19";\n'
+                      'pub const OUTPUT_SCHEMA: &str = "packetcraftr.output/v20"; // next version\n',
+        })
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn(contract, problems[0])
+        self.assertIn("OUTPUT_SCHEMA", problems[0])
+
+    def test_forwarding_schema_mismatch_is_reported_at_the_consumer(self):
+        consumer = "examples/consumers/forwarding.py"
+        problems = self.check({
+            "examples/documents/indicators.json": '{"schema": "packetcraftr.indicators/v1"}',
+            consumer: 'SCHEMA = "packetcraftr.output/v20"\n',
+        })
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn(consumer, problems[0])
+        self.assertIn("OUTPUT_SCHEMA", problems[0])
 
     def test_yaml_documents_are_validated_without_test_sources(self):
         for name in ("packet-raw.yaml", "new.yaml", "new.yml"):
@@ -107,6 +156,21 @@ class CheckDocumentsTests(unittest.TestCase):
                 self.check({
                     "examples/documents/indicators.yaml": "schema: packetcraftr.indicators/v1\n",
                 })
+
+    def test_main_reports_missing_files_without_a_traceback(self):
+        import contextlib
+        import io
+        import sys
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as empty:
+            stderr = io.StringIO()
+            with patch.object(sys, "argv", ["check_documents", "--root", empty]):
+                with contextlib.redirect_stderr(stderr):
+                    result = documents.main()
+        self.assertEqual(result, 2)
+        self.assertTrue(stderr.getvalue().startswith("error:"))
+        self.assertNotIn("Traceback", stderr.getvalue())
 
     def test_adr_hash_drift_fails(self):
         problems = self.check({

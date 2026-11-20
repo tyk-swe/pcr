@@ -11,6 +11,7 @@ use packetcraftr_netio::interface;
 use super::{Mode, Unresponsive};
 use crate::scan::Error;
 use crate::scan::Reply;
+use crate::scan::adaptive::Controller;
 use crate::target::{ResolvedZone, SelectedAddress};
 
 /// What discovery concluded about a host. Silence is an observation: a host
@@ -173,6 +174,77 @@ pub(in crate::scan) struct Observation {
     pub observed_at: SystemTime,
 }
 
+pub(in crate::scan) struct Sweep<'a> {
+    targets: &'a [SelectedAddress],
+    composer: Composer,
+}
+
+pub(in crate::scan) struct Discovered<'a> {
+    targets: &'a [SelectedAddress],
+    hosts: Vec<Host>,
+}
+
+impl<'a> Sweep<'a> {
+    pub(in crate::scan) fn new(
+        targets: &'a [SelectedAddress],
+        mode: Mode,
+        unresponsive: Unresponsive,
+    ) -> Self {
+        Self {
+            targets,
+            composer: Composer::new(targets, mode, unresponsive),
+        }
+    }
+
+    pub(in crate::scan) fn composer_mut(&mut self) -> &mut Composer {
+        &mut self.composer
+    }
+
+    pub(in crate::scan) fn unreachable(&mut self, index: usize) {
+        self.composer.unreachable(index);
+    }
+
+    pub(in crate::scan) fn observe_all(
+        &mut self,
+        observations: impl IntoIterator<Item = Observation>,
+    ) -> Result<(), Error> {
+        self.composer.observe_all(observations)
+    }
+
+    pub(in crate::scan) fn finish_discovery(
+        self,
+        controller: Option<&Controller>,
+    ) -> Discovered<'a> {
+        let mut composer = self.composer;
+        if let Some(controller) = controller {
+            for index in controller.incomplete_targets(self.targets) {
+                composer.incomplete(index);
+            }
+        }
+        Discovered {
+            targets: self.targets,
+            hosts: composer.finish(),
+        }
+    }
+}
+
+impl Discovered<'_> {
+    pub(in crate::scan) fn scan_targets(&self) -> Vec<SelectedAddress> {
+        scanned(self.targets, &self.hosts)
+    }
+
+    /// Adaptive discovery and scan limits both make a host's final scan
+    /// disposition incomplete, so only this transition returns the records.
+    pub(in crate::scan) fn finish_scan(mut self, controller: Option<&Controller>) -> Vec<Host> {
+        if let Some(controller) = controller {
+            for index in controller.incomplete_targets(self.targets) {
+                self.hosts[index].scan = Scan::Incomplete;
+            }
+        }
+        self.hosts
+    }
+}
+
 /// Builds one host record per selected target from neighbor and probe
 /// observations, then settles the state and scan disposition.
 pub(in crate::scan) struct Composer {
@@ -231,7 +303,7 @@ impl Composer {
         }
     }
 
-    pub(in crate::scan) fn incomplete(&mut self, index: usize) {
+    fn incomplete(&mut self, index: usize) {
         if let Some(incomplete) = self.incomplete.get_mut(index) {
             *incomplete = true;
         }
@@ -284,7 +356,7 @@ impl Composer {
         Ok(())
     }
 
-    pub(in crate::scan) fn finish(mut self) -> Vec<Host> {
+    fn finish(mut self) -> Vec<Host> {
         // Every address each link address answered for on each interface,
         // as a target or as a routed target's next hop. Separate links may
         // reuse a link address, so only claims on one interface are shared.
@@ -389,10 +461,7 @@ fn resolved(host: &Host) -> Option<Link> {
     }
 }
 
-pub(in crate::scan) fn scanned(
-    targets: &[SelectedAddress],
-    hosts: &[Host],
-) -> Vec<SelectedAddress> {
+fn scanned(targets: &[SelectedAddress], hosts: &[Host]) -> Vec<SelectedAddress> {
     targets
         .iter()
         .zip(hosts)
@@ -420,3 +489,6 @@ pub(in crate::scan) fn check_probes(
         })
     }
 }
+
+#[cfg(test)]
+mod tests;

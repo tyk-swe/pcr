@@ -14,7 +14,6 @@ use packetcraftr_core::analysis;
 use self::arguments::Args;
 use crate::commands::offline_analysis::prepare;
 use crate::errors::CliError;
-use crate::input::open_capture;
 
 use analysis::StreamTransport;
 use analysis::tls::{Collector, Limits as TlsLimits, Selector, SniPattern, Status};
@@ -50,7 +49,6 @@ impl crate::commands::Spec for Args {
     ];
     const FORMATS: &'static [crate::output::contract::Format] =
         crate::output::contract::TEXT_JSON_NDJSON;
-    const CANCELLATION: bool = true;
     const OFFLINE: bool = true;
 
     fn run_time(&self) -> Option<&dyn crate::command_options::Bounded> {
@@ -108,23 +106,15 @@ pub(super) fn run(
     let collector = Collector::new(tls_limits).map_err(CliError::classified)?;
 
     let prepared = prepare(arguments.limits, None, &arguments.decode)?;
-    let session = analysis::Session::new(
-        prepared.registry.clone(),
-        analysis::SessionOptions {
-            stream: selected_stream.map(|index| analysis::StreamRef {
-                transport: StreamTransport::Tcp,
-                index,
-            }),
-            ..prepared.session_options(invocation)
-        },
+    let session = prepared.session(
+        invocation,
         collector,
+        selected_stream.map(|index| analysis::StreamRef {
+            transport: StreamTransport::Tcp,
+            index,
+        }),
     );
-    let mut reader = open_capture(
-        &invocation.control,
-        &invocation.output,
-        &arguments.path,
-        prepared.capture_limits,
-    )?;
+    let mut reader = prepared.open(invocation, &arguments.path)?;
 
     let mut state = State::new(arguments.max_output_sessions);
     let outcome = session

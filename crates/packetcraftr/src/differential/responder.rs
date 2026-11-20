@@ -85,11 +85,10 @@ where
         if deadline.check().is_err() {
             return Ok(report);
         }
-        let reply = canary::build_reply(&probe);
-        if reply.len() < len {
-            socket.send_to(&reply, source).map_err(io_error)?;
-            report.replies_sent += 1;
-        }
+        socket
+            .send_to(&canary::build_reply(&probe), source)
+            .map_err(io_error)?;
+        report.replies_sent += 1;
     }
 }
 

@@ -280,9 +280,7 @@ impl ConnectionState {
             fault.wire.len() + fault.detail.len() + budget::ISSUE_OVERHEAD + budget::EVENT_OVERHEAD;
         context.charge_retained(charge)?;
         if let Some(sources) = &fault.sources {
-            context.charge_retained(
-                budget::SET_OVERHEAD + sources.frames().len() * budget::SPAN_OVERHEAD,
-            )?;
+            context.charge_retained(budget::set_cost(sources))?;
         }
         self.issues += 1;
         let number = self

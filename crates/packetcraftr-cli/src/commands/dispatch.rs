@@ -14,8 +14,9 @@ use crate::errors::{CANCELLED_EXIT_CODE, CliError};
 use crate::invocation::{Invocation, StreamEncoder};
 use crate::output;
 use crate::output::contract::{Command, Format};
-use crate::rendering::{emit_json, emit_stderr_error, report_structured_error, stdout_stream};
+use crate::publication::{emit_json, stdout_stream};
 use crate::resources::Preset;
+use crate::terminal::{emit_stderr_error, report_structured_error};
 
 #[cfg(test)]
 mod tests;
@@ -41,15 +42,20 @@ impl Launch<'_> {
             crate::cancellation::signal().clone(),
             None,
         );
-        let result = crate::cancellation::install()
-            .and_then(|()| arguments.generate(&invocation, self.format))
-            .and_then(|()| {
-                invocation
-                    .control
-                    .cancellation
-                    .check()
-                    .map_err(CliError::classified)
-            });
+        let result = if self.format == Format::Text {
+            self.validate_output_options()
+        } else {
+            Ok(())
+        }
+        .and_then(|()| crate::cancellation::install())
+        .and_then(|()| arguments.generate(&invocation, self.format))
+        .and_then(|()| {
+            invocation
+                .control
+                .cancellation
+                .check()
+                .map_err(CliError::classified)
+        });
         generation_exit(&invocation, result, emit_stderr_error)
     }
 
@@ -117,27 +123,8 @@ impl Launch<'_> {
         }
         invocation.output = invocation.output.with_presentation(self.presentation);
         let stream = &invocation.output;
-        if self.resource_diagnostics
-            && !matches!(
-                format,
-                output::contract::Format::Json | output::contract::Format::Ndjson
-            )
-        {
-            return command_failure(
-                &invocation,
-                command,
-                CliError::new(
-                    Kind::Usage,
-                    "--resource-diagnostics requires --output json or ndjson",
-                ),
-            );
-        }
-        if self.output_timeout_ms.is_some() && format != output::contract::Format::Ndjson {
-            return command_failure(
-                &invocation,
-                command,
-                CliError::new(Kind::Usage, "--output-timeout-ms requires --output ndjson"),
-            );
+        if let Err(error) = self.validate_output_options() {
+            return command_failure(&invocation, command, error);
         }
         if T::CANCELLATION
             && let Err(error) = crate::cancellation::install()
@@ -161,6 +148,22 @@ impl Launch<'_> {
             }
             Err(error) => command_failure(&invocation, command, error),
         }
+    }
+
+    fn validate_output_options(&self) -> Result<(), CliError> {
+        if self.resource_diagnostics && !matches!(self.format, Format::Json | Format::Ndjson) {
+            return Err(CliError::new(
+                Kind::Usage,
+                "--resource-diagnostics requires --output json or ndjson",
+            ));
+        }
+        if self.output_timeout_ms.is_some() && self.format != Format::Ndjson {
+            return Err(CliError::new(
+                Kind::Usage,
+                "--output-timeout-ms requires --output ndjson",
+            ));
+        }
+        Ok(())
     }
 }
 

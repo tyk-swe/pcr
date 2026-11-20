@@ -281,7 +281,7 @@ mod tests {
             _: &Deadline,
         ) -> Result<Authorized, BoundaryError> {
             let Target::Address(address) = target else {
-                unreachable!()
+                unreachable!("test authorizer only receives address targets")
             };
             Ok(Authorized {
                 declared: target.clone(),

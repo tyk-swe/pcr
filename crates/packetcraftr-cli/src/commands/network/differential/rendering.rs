@@ -6,7 +6,7 @@ use packetcraftr::differential as lib;
 use crate::errors::CliError;
 use crate::invocation::StreamEncoder;
 use crate::output;
-use crate::rendering::write_stdout_line;
+use crate::terminal::write_stdout_line;
 
 pub(super) fn render_plan_text(
     invocation: &crate::invocation::Invocation,

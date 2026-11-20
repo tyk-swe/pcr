@@ -232,3 +232,48 @@ fn optional_previews_preserve_minimum_resource_budget() {
         }
     }
 }
+
+#[test]
+fn released_staging_leaves_only_route_owners() {
+    let client = crate::engine::preparation::tests::client_for_plan();
+    let operation = Operation::new(&client, Duration::from_secs(10));
+    let deadline = operation.deadline(&client, Duration::from_secs(10));
+    let executor = WorkflowExecutor::new(
+        &client,
+        &operation,
+        crate::send::Options {
+            plan: crate::route::Options {
+                link_mode: packetcraftr_netio::link::Mode::Layer3,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        Default::default(),
+    );
+    let options = PipelineOptions {
+        max_in_flight: 2,
+        probes_per_second: None,
+        max_duration: Duration::from_secs(10),
+        control: deadline.clone(),
+        max_prepared_bytes: 8 * 1024 * 1024,
+        max_evidence_frames: 100,
+        max_evidence_bytes: 1024 * 1024,
+        preceding: Default::default(),
+    };
+    let address = "10.0.0.1".parse().unwrap();
+    let probes: Vec<_> = (0..3)
+        .map(|sequence| probe(sequence, address, None))
+        .collect();
+    let end = client.now() + Duration::from_secs(10);
+    for count in 1..=probes.len() {
+        let planned: Vec<_> = probes[..count]
+            .iter()
+            .map(|probe| Planned { probe })
+            .collect();
+        let mut plan = plan(&executor, &planned, &options, end, &deadline, false).unwrap();
+        let routes: usize = plan.routes.values().map(route_charge).sum();
+        assert!(plan.base_bytes > routes);
+        plan.release_staging(options.max_prepared_bytes).unwrap();
+        assert_eq!(plan.base_bytes, routes, "{count} probes");
+    }
+}

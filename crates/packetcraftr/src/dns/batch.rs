@@ -9,14 +9,15 @@ use packetcraftr_core::registry::Registry;
 
 use crate::client::admission::approve_operation;
 use crate::clock::Clock;
-use crate::engine::execution::{Context, Executor, Shared};
+use crate::engine::execution::{Context, Shared};
+use crate::exchange::WorkflowExecutor;
 use crate::policy::{Authorizer, DnsOperation, LimitOverflow, Operation, WireLimits};
+use crate::providers::{PacketProviders, TcpProviders};
 use crate::target::ResolveTarget;
 use crate::{Sink, Stats};
 use packetcraftr_core::error::BoundaryError;
 
 use super::engine::PreparedOperation;
-use super::executor::{Exchange, TcpQuerier};
 use super::plan::batch_limits;
 use super::report::Observed;
 use super::{Error, QueryType};
@@ -60,16 +61,6 @@ impl Request {
         }
         Ok(())
     }
-
-    pub(super) fn max_duration(&self) -> Result<Duration, Error> {
-        self.validate()?;
-        Ok(self
-            .questions
-            .iter()
-            .map(|question| question.limits.max_duration)
-            .min()
-            .expect("a validated batch is non-empty"))
-    }
 }
 
 /// The traffic limits `questions` need together, including the
@@ -85,10 +76,7 @@ where
     let mut failure = None;
     let operations = questions.into_iter().map_while(|question| {
         let question = question.borrow();
-        PreparedOperation::new(question)
-            .and_then(|prepared| {
-                with_neighbor_requests(question, prepared.limits, neighbor_attempts)
-            })
+        question_limits(question, neighbor_attempts)
             .map_err(|error| failure = Some(error))
             .ok()
     });
@@ -96,35 +84,87 @@ where
     failure.map_or(Ok(limits), Err)
 }
 
+fn question_limits(
+    question: &super::Request,
+    neighbor_attempts: u64,
+) -> Result<DnsOperation, Error> {
+    let prepared = PreparedOperation::new(question)?;
+    with_neighbor_requests(question, prepared.limits, neighbor_attempts)
+}
+
+/// One validated batch with its per-question operations and combined limits.
+/// Building it validates the batch once, so callers never index raw questions
+/// or rebuild the prepared set before execution.
+pub(crate) struct Prepared<'a> {
+    questions: &'a [super::Request],
+    operations: Vec<PreparedOperation<'a>>,
+    limits: DnsOperation,
+    max_duration: Duration,
+}
+
+impl<'a> Prepared<'a> {
+    pub(crate) fn new(request: &'a Request, neighbor_attempts: u64) -> Result<Self, Error> {
+        request.validate()?;
+        let questions = request.questions.as_slice();
+        let mut operations = Vec::with_capacity(questions.len());
+        let mut limits = Vec::with_capacity(questions.len());
+        for question in questions {
+            let prepared = PreparedOperation::new(question)?;
+            limits.push(with_neighbor_requests(
+                question,
+                prepared.limits,
+                neighbor_attempts,
+            )?);
+            operations.push(prepared);
+        }
+        let limits = batch_limits(limits.into_iter())?;
+        let max_duration = questions
+            .iter()
+            .map(|question| question.limits.max_duration)
+            .min()
+            .expect("a validated batch is non-empty");
+        Ok(Self {
+            questions,
+            operations,
+            limits,
+            max_duration,
+        })
+    }
+
+    pub(crate) const fn max_duration(&self) -> Duration {
+        self.max_duration
+    }
+
+    pub(crate) fn first(&self) -> &'a super::Request {
+        &self.questions[0]
+    }
+}
+
 /// Charges `attempts` neighbor requests before each of a question's UDP
-/// packets whose route may resolve a link-layer neighbor: an unanswered
-/// resolution is not remembered, so every packet may ask again.
+/// packets whose route may resolve a link-layer neighbor.
 fn with_neighbor_requests(
     question: &super::Request,
     limits: DnsOperation,
     attempts: u64,
 ) -> Result<DnsOperation, Error> {
-    if question.route.link_mode == packetcraftr_netio::link::Mode::Layer3 {
-        return Ok(limits);
-    }
-    // A multicast or limited-broadcast server's link address follows from its
-    // own, so no request precedes a query to it.
-    if let crate::target::Target::Address(address) = &question.server
-        && !crate::neighbor::needs_resolution(*address)
-    {
-        return Ok(limits);
-    }
-    // A server of unknown family is charged the larger solicitation.
-    let request_bytes = match &question.server {
-        crate::target::Target::Address(address) => crate::neighbor::request_wire_bytes(*address),
-        _ => crate::neighbor::IPV6_REQUEST_BYTES,
+    let address = match &question.server {
+        crate::target::Target::Address(address) => Some(*address),
+        _ => None,
     };
+    let (requests, request_bytes) = crate::neighbor::charge(
+        question.route.link_mode,
+        address,
+        limits.udp().packets(),
+        attempts,
+    )
+    .ok_or(LimitOverflow)?;
+    if requests == 0 {
+        return Ok(limits);
+    }
     let udp = limits.udp();
-    let requests = udp.packets().checked_mul(attempts).ok_or(LimitOverflow)?;
     let packets = udp.packets().checked_add(requests).ok_or(LimitOverflow)?;
-    let bytes = requests
-        .checked_mul(request_bytes)
-        .and_then(|requests| requests.checked_add(udp.wire_bytes()))
+    let bytes = request_bytes
+        .checked_add(udp.wire_bytes())
         .ok_or(LimitOverflow)?;
     Ok(DnsOperation::new(
         WireLimits::new(packets, bytes),
@@ -167,30 +207,60 @@ pub struct Question<R = super::Report> {
     pub query_name: String,
     pub query_type: QueryType,
     pub transaction_id: u16,
-    pub status: QuestionStatus,
-    /// Present exactly when `status` is [`QuestionStatus::Completed`].
-    pub result: Option<R>,
-    /// Present exactly when `status` is [`QuestionStatus::Failed`].
-    pub error: Option<Error>,
+    pub outcome: Outcome<R>,
+}
+
+#[derive(Debug)]
+pub enum Outcome<R> {
+    Completed(R),
+    Failed(Error),
+    Unattempted,
+}
+
+impl<R> Outcome<R> {
+    pub const fn status(&self) -> QuestionStatus {
+        match self {
+            Self::Completed(_) => QuestionStatus::Completed,
+            Self::Failed(_) => QuestionStatus::Failed,
+            Self::Unattempted => QuestionStatus::Unattempted,
+        }
+    }
+
+    pub const fn result(&self) -> Option<&R> {
+        match self {
+            Self::Completed(result) => Some(result),
+            Self::Failed(_) | Self::Unattempted => None,
+        }
+    }
+
+    pub const fn error(&self) -> Option<&Error> {
+        match self {
+            Self::Failed(error) => Some(error),
+            Self::Completed(_) | Self::Unattempted => None,
+        }
+    }
 }
 
 impl<R> Question<R> {
-    fn ended(request: &super::Request, status: QuestionStatus) -> Self {
+    fn new(request: &super::Request, outcome: Outcome<R>) -> Self {
         Self {
             query_name: request.query_name.clone(),
             query_type: request.query_type,
             transaction_id: request.transaction_id,
-            status,
-            result: None,
-            error: None,
+            outcome,
         }
     }
 
+    fn unattempted(request: &super::Request) -> Self {
+        Self::new(request, Outcome::Unattempted)
+    }
+
     fn failed(request: &super::Request, error: Error) -> Self {
-        Self {
-            error: Some(error),
-            ..Self::ended(request, QuestionStatus::Failed)
-        }
+        Self::new(request, Outcome::Failed(error))
+    }
+
+    fn completed(request: &super::Request, result: R) -> Self {
+        Self::new(request, Outcome::Completed(result))
     }
 }
 
@@ -200,21 +270,6 @@ pub struct Report {
     pub server_port: u16,
     pub questions: Vec<Question>,
     pub stats: Stats,
-}
-
-impl Report {
-    /// Counts questions by status as `(completed, failed, unattempted)`.
-    pub fn status_counts(&self) -> (usize, usize, usize) {
-        let mut counts = (0, 0, 0);
-        for question in &self.questions {
-            match question.status {
-                QuestionStatus::Completed => counts.0 += 1,
-                QuestionStatus::Failed => counts.1 += 1,
-                QuestionStatus::Unattempted => counts.2 += 1,
-            }
-        }
-        counts
-    }
 }
 
 #[derive(Debug)]
@@ -272,12 +327,11 @@ impl Collector {
                     query_name: question.query_name,
                     query_type: question.query_type,
                     transaction_id: question.transaction_id,
-                    status: question.status,
-                    result: question
-                        .result
-                        .map(|report| events.finish(report))
-                        .transpose()?,
-                    error: question.error,
+                    outcome: match question.outcome {
+                        Outcome::Completed(report) => Outcome::Completed(events.finish(report)?),
+                        Outcome::Failed(error) => Outcome::Failed(error),
+                        Outcome::Unattempted => Outcome::Unattempted,
+                    },
                 })
             })
             .collect::<Result<Vec<_>, Error>>()?;
@@ -294,28 +348,27 @@ impl Collector {
 const FIRST_ATTEMPT: u32 = 1;
 
 /// Authorizes the combined worst-case traffic limits before discovery.
-pub(super) fn run<A, E, C, F>(
-    request: &Request,
+pub(super) fn run<A, P, C, F>(
+    prepared: Prepared<'_>,
     authorizer: &mut A,
     registry: &Registry,
-    executor: &mut E,
+    executor: &mut WorkflowExecutor<'_, P, C>,
     clock: &mut C,
     deadline: &mut Deadline,
     mut observe: F,
 ) -> Result<Report, Error>
 where
     A: Authorizer + ResolveTarget,
-    E: Executor<Exchange> + TcpQuerier,
+    P: PacketProviders + TcpProviders,
     C: Clock,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
-    request.validate()?;
-    let requests = &request.questions;
-    let prepared = requests
-        .iter()
-        .map(PreparedOperation::new)
-        .collect::<Result<Vec<_>, _>>()?;
-    let limits = batch_limits(prepared.iter().map(|prepared| prepared.limits))?;
+    let Prepared {
+        questions: requests,
+        operations: prepared,
+        limits,
+        ..
+    } = prepared;
     let mut stop = deadline.enforce().is_err();
     if !stop {
         approve_operation::<_, Error>(authorizer, Operation::Dns(limits), deadline)?;
@@ -326,7 +379,7 @@ where
     for (index, (request, mut prepared)) in requests.iter().zip(prepared).enumerate() {
         // Cancellation wins over elapsed-time reporting, matching every other deadline gate.
         if stop || deadline.enforce().is_err() {
-            questions.push(Question::ended(request, QuestionStatus::Unattempted));
+            questions.push(Question::unattempted(request));
             continue;
         }
         // Pace across question boundaries too; a batch must not become an unpaced burst.
@@ -345,7 +398,7 @@ where
                     stop = true;
                     questions.push(match error {
                         Error::Cancelled(_) | Error::DurationLimit { .. } => {
-                            Question::ended(request, QuestionStatus::Unattempted)
+                            Question::unattempted(request)
                         }
                         error => Question::failed(request, error),
                     });
@@ -376,10 +429,7 @@ where
                 attempt: request.attempts,
             })?;
         match result {
-            Ok(()) => questions.push(Question {
-                result: Some(prepared.report),
-                ..Question::ended(request, QuestionStatus::Completed)
-            }),
+            Ok(()) => questions.push(Question::completed(request, prepared.report)),
             Err(error @ Error::Output { .. }) => return Err(error),
             Err(error) => {
                 stop = matches!(error, Error::Cancelled(_) | Error::DurationLimit { .. });
@@ -393,4 +443,72 @@ where
         questions,
         stats,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::{IpAddr, Ipv4Addr};
+    use std::time::Duration;
+
+    use super::{Prepared, Request};
+    use crate::dns::{Limits, QueryType, TransportMode};
+    use crate::target::{Family, Target};
+
+    fn question(name: &str) -> crate::dns::Request {
+        crate::dns::Request {
+            server: Target::Address(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))),
+            address_family: Family::Any,
+            server_port: 53,
+            source_port: 12_345,
+            query_name: name.to_owned(),
+            query_type: QueryType::A,
+            transaction_id: 7,
+            recursion_desired: true,
+            edns: None,
+            transport: TransportMode::Udp,
+            attempts: 2,
+            timeout: Duration::from_millis(250),
+            queries_per_second: None,
+            limits: Limits {
+                max_duration: Duration::from_secs(30),
+                ..Limits::default()
+            },
+            route: crate::route::Options::default(),
+            collection: crate::exchange::Collection::default(),
+        }
+    }
+
+    #[test]
+    fn empty_batch_is_rejected_before_indexing() {
+        let error = match Prepared::new(
+            &Request {
+                questions: Vec::new(),
+            },
+            1,
+        ) {
+            Ok(_) => panic!("an empty batch must be rejected"),
+            Err(error) => error,
+        };
+        assert!(
+            matches!(
+                error,
+                super::Error::InvalidLimit {
+                    field: "questions",
+                    ..
+                }
+            ),
+            "expected a questions limit error, got {error:?}"
+        );
+    }
+
+    #[test]
+    fn prepared_limits_match_the_authorization_entry_point() {
+        let questions = vec![question("a.test"), question("b.test")];
+        let request = Request {
+            questions: questions.clone(),
+        };
+        let expected = super::limits(questions.iter(), 3).unwrap();
+        let prepared = Prepared::new(&request, 3).unwrap();
+        assert_eq!(prepared.limits, expected);
+    }
 }

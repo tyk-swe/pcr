@@ -36,7 +36,6 @@ impl crate::commands::Spec for Args {
         example: "examples/documents/output-differential-join-success.json",
     }];
     const FORMATS: &'static [Format] = crate::output::contract::TEXT_JSON;
-    const CANCELLATION: bool = true;
     const OFFLINE: bool = true;
 
     fn run(
@@ -55,7 +54,7 @@ fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<()
         .map_err(CliError::classified)?;
     match invocation.format {
         Format::Text => rendering::render_report_text(invocation, &published.result),
-        Format::Json => crate::rendering::emit_published(
+        Format::Json => crate::publication::emit_published(
             invocation,
             output::contract::Command::DifferentialJoin,
             published,

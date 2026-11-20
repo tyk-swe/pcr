@@ -106,7 +106,7 @@ impl Limits {
 
     /// Conservative expansion charge for one decoded object, counted against
     /// `max_retained_bytes`; name compression can expand past it.
-    pub(crate) const fn decoded_charge(bytes: usize) -> usize {
+    const fn decoded_charge(bytes: usize) -> usize {
         bytes.saturating_mul(32).saturating_add(4096)
     }
 
@@ -136,12 +136,35 @@ impl Limits {
         )
     }
 
-    pub(crate) fn check_retained(&self, total: usize) -> Result<(), Error> {
+    fn check_retained(&self, total: usize) -> Result<(), Error> {
         refuse_if(
             total > self.max_retained_bytes,
             "max_retained_bytes",
             self.max_retained_bytes,
         )
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct Retained {
+    total: usize,
+    limits: Limits,
+}
+
+impl Retained {
+    pub(crate) const fn new(limits: Limits) -> Self {
+        Self { total: 0, limits }
+    }
+
+    pub(crate) fn charge(&mut self, bytes: usize) -> Result<(), Error> {
+        self.charge_amount(Limits::decoded_charge(bytes))
+    }
+
+    pub(crate) fn charge_amount(&mut self, amount: usize) -> Result<(), Error> {
+        let total = self.total.saturating_add(amount);
+        self.limits.check_retained(total)?;
+        self.total = total;
+        Ok(())
     }
 }
 
@@ -284,9 +307,13 @@ pub(crate) struct TcpSources {
     generations: HashMap<u64, u64>,
     syns: HashMap<ScopedFlowKey, u32>,
     closed: HashSet<ScopedFlowKey>,
-    pub(crate) scopes: std::collections::BTreeMap<u32, Definition>,
+    scopes: std::collections::BTreeMap<u32, Definition>,
 }
 impl TcpSources {
+    pub(crate) fn scopes(&self) -> impl Iterator<Item = &Definition> {
+        self.scopes.values()
+    }
+
     pub(crate) fn generation(&self, stream: u64) -> Option<u64> {
         self.generations.get(&stream).copied()
     }

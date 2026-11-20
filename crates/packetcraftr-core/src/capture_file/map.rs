@@ -109,7 +109,7 @@ where
                         "mapper exceeded declared frame growth",
                     ));
                 }
-                if changed.bytes() != frame.bytes() {
+                if changed != frame {
                     report.frames_changed += 1;
                 }
                 if changed.interface.is_none() {

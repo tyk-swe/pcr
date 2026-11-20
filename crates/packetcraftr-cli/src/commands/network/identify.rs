@@ -44,7 +44,6 @@ impl crate::commands::Spec for Args {
         },
     ];
     const FORMATS: &'static [Format] = crate::output::contract::TEXT_JSON_NDJSON;
-    const CANCELLATION: bool = true;
 
     fn run_time(&self) -> Option<&dyn Bounded> {
         Some(self)
@@ -72,7 +71,7 @@ impl crate::commands::Spec for Args {
             probe_max_read_bytes: Bytes @ ResultRetention,
         ]);
         self.tls.resources(settings);
-        self.policy.budgets.resources(settings);
+        self.policy.resources(settings);
     }
 
     fn run(
@@ -171,7 +170,7 @@ impl crate::commands::Spec for Args {
         let report = output::Report::try_from(report).map_err(CliError::classified)?;
         match format {
             Format::Text => rendering::render_text(invocation, &report, stream.presentation())?,
-            Format::Json => crate::rendering::emit_published(
+            Format::Json => crate::publication::emit_published(
                 invocation,
                 crate::output::contract::Command::Identify,
                 Published::new(report, Vec::new()),

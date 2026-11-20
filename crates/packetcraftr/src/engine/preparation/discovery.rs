@@ -240,6 +240,9 @@ fn unanswered(error: &route::Error, request: Option<&crate::neighbor::Request>) 
     let (route::Error::Neighbor(neighbor), Some(request)) = (error, request) else {
         return crate::Stats::default();
     };
+    if let Some(stats) = neighbor.exchange_stats(std::time::Duration::ZERO) {
+        return stats;
+    }
     let (attempts, capture) = requests_sent(neighbor);
     let frame_bytes = crate::neighbor::request_frame(request).map_or(0, |frame| frame.len());
     crate::neighbor::stats(attempts, frame_bytes, std::time::Duration::ZERO, capture)

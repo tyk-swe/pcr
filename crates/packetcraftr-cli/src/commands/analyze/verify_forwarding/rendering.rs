@@ -9,10 +9,11 @@ use packetcraftr_core::analysis::forwarding as analysis;
 use packetcraftr_core::field;
 
 use super::arguments::Args;
+use crate::commands::retained::omitted_diagnostic;
 use crate::errors::CliError;
 use crate::invocation::StreamEncoder;
-use crate::rendering::omitted_diagnostic;
-use crate::rendering::{emit_json, write_stdout_line};
+use crate::publication::emit_json;
+use crate::terminal::write_stdout_line;
 
 pub(super) fn render(
     invocation: &crate::invocation::Invocation,
@@ -74,7 +75,7 @@ pub(super) fn render(
                     crate::output::envelope::Published::new(document, diagnostics),
                 ));
                 // Measure the complete pretty-printed envelope and reserve the final newline.
-                crate::rendering::bounded_json_len(
+                crate::publication::bounded_json_len(
                     &envelope,
                     output::stream::MAX_RECORD_BYTES - 1,
                     serde_json::ser::PrettyFormatter::new(),
@@ -82,7 +83,7 @@ pub(super) fn render(
                 .map_err(|error| error.into_cli_error(report_limit_error))?;
                 emit_json(invocation, &envelope)
             } else {
-                crate::rendering::bounded_json_len(
+                crate::publication::bounded_json_len(
                     &document,
                     output::stream::MAX_RECORD_BYTES - 1024 * 1024,
                     serde_json::ser::CompactFormatter,
@@ -154,10 +155,7 @@ fn render_text(
     };
     write_stdout_line(invocation, format_args!("comparison: {comparison}"))?;
     for warning in &rules.warnings {
-        write_stdout_line(
-            invocation,
-            format_args!("warning {}: {}", warning.code, warning.message),
-        )?;
+        crate::terminal::write_coded_warning(invocation, warning.code, &warning.message)?;
     }
     if !rules.preserve_presence.is_empty() || !rules.expect_absent.is_empty() {
         write_stdout_line(

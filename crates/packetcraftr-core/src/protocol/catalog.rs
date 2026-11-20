@@ -56,9 +56,9 @@ macro_rules! builtin_protocol_catalog {
             Etherip { canonical: "etherip", aliases: [], constructible: true, exact_round_trip: true, matcher: None, layer: [tunnel::Etherip], codec: EtheripCodec, tcp: [], udp: [], coverage: "", framing: Datagram, message: false }
             Ethernet { canonical: "ethernet", aliases: ["eth", "ether", "ethernet2"], constructible: true, exact_round_trip: true, matcher: None, layer: [link::Ethernet], codec: EthernetCodec, tcp: [], udp: [], coverage: "", framing: Datagram, message: false }
             EthernetIp { canonical: "ethernet_ip", aliases: [], constructible: true, exact_round_trip: true, matcher: None, layer: [application::ethernet_ip::EthernetIp], codec: EthernetIpCodec, tcp: [44818], udp: [44818], coverage: "EtherNet/IP encapsulation, session/discovery and Common Packet Format items; CIP values remain bytes.", framing: EthernetIp, message: true }
-            Geneve { canonical: "geneve", aliases: [], constructible: true, exact_round_trip: true, matcher: None, layer: [tunnel::Geneve], codec: GeneveCodec, tcp: [], udp: [], coverage: "", framing: Datagram, message: false }
+            Geneve { canonical: "geneve", aliases: [], constructible: true, exact_round_trip: true, matcher: None, layer: [tunnel::Geneve], codec: GeneveCodec, tcp: [], udp: [6081], coverage: "", framing: Datagram, message: false }
             Gre { canonical: "gre", aliases: [], constructible: true, exact_round_trip: true, matcher: None, layer: [tunnel::Gre], codec: GreCodec, tcp: [], udp: [], coverage: "", framing: Datagram, message: false }
-            Gtpu { canonical: "gtpu", aliases: [], constructible: true, exact_round_trip: true, matcher: None, layer: [tunnel::Gtpu], codec: GtpuCodec, tcp: [], udp: [], coverage: "", framing: Datagram, message: false }
+            Gtpu { canonical: "gtpu", aliases: [], constructible: true, exact_round_trip: true, matcher: None, layer: [tunnel::Gtpu], codec: GtpuCodec, tcp: [], udp: [2152], coverage: "", framing: Datagram, message: false }
             Http { canonical: "http", aliases: ["http1"], constructible: false, exact_round_trip: true, matcher: None, layer: [application::http::Http], codec: HttpCodec, tcp: [80, 8080], udp: [], coverage: "", framing: Datagram, message: false }
             Icmpv4 { canonical: "icmpv4", aliases: ["icmp", "icmp4"], constructible: true, exact_round_trip: true, matcher: EchoV4, layer: [network::Icmpv4], codec: Icmpv4Codec, tcp: [], udp: [], coverage: "", framing: Datagram, message: false }
             Icmpv6 { canonical: "icmpv6", aliases: ["icmp6"], constructible: true, exact_round_trip: true, matcher: EchoV6, layer: [network::Icmpv6], codec: Icmpv6Codec, tcp: [], udp: [], coverage: "", framing: Datagram, message: false }
@@ -81,7 +81,7 @@ macro_rules! builtin_protocol_catalog {
             Malformed { canonical: "malformed", aliases: [], constructible: true, exact_round_trip: true, matcher: None, layer: [crate::layer::Malformed], codec: MalformedCodec, tcp: [], udp: [], coverage: "", framing: Datagram, message: false }
             Memcached { canonical: "memcached", aliases: [], constructible: true, exact_round_trip: true, matcher: None, layer: [application::memcached::Memcached], codec: MemcachedCodec, tcp: [11211], udp: [], coverage: "Binary request and response envelopes; ASCII/meta variants remain opaque.", framing: Memcached, message: true }
             ModbusTcp { canonical: "modbus_tcp", aliases: [], constructible: true, exact_round_trip: true, matcher: None, layer: [application::modbus_tcp::ModbusTcp], codec: ModbusTcpCodec, tcp: [502], udp: [], coverage: "MBAP headers and function PDUs, including functions 1-6/15/16 and exceptions; direction-ambiguous PDUs remain bytes.", framing: ModbusTcp, message: true }
-            Mpls { canonical: "mpls", aliases: [], constructible: true, exact_round_trip: true, matcher: None, layer: [tunnel::Mpls], codec: MplsCodec, tcp: [], udp: [], coverage: "", framing: Datagram, message: false }
+            Mpls { canonical: "mpls", aliases: [], constructible: true, exact_round_trip: true, matcher: None, layer: [tunnel::Mpls], codec: MplsCodec, tcp: [], udp: [6635], coverage: "", framing: Datagram, message: false }
             Mqtt { canonical: "mqtt", aliases: [], constructible: true, exact_round_trip: true, matcher: None, layer: [application::mqtt::Mqtt], codec: MqttCodec, tcp: [1883], udp: [], coverage: "MQTT 3.1.1 control packets; MQTT 5 is opaque.", framing: Mqtt, message: true }
             Netflowv5 { canonical: "netflowv5", aliases: [], constructible: true, exact_round_trip: true, matcher: None, layer: [application::netflowv5::Netflowv5], codec: Netflowv5Codec, tcp: [], udp: [2055], coverage: "NetFlow version 5 header and fixed-width flow records.", framing: Datagram, message: true }
             Ntp { canonical: "ntp", aliases: [], constructible: true, exact_round_trip: true, matcher: None, layer: [application::ntp::Ntp], codec: NtpCodec, tcp: [], udp: [123], coverage: "", framing: Datagram, message: false }
@@ -121,7 +121,7 @@ macro_rules! builtin_protocol_catalog {
             Vlan { canonical: "vlan", aliases: ["dot1q", "8021q"], constructible: true, exact_round_trip: true, matcher: None, layer: [link::Vlan], codec: VlanCodec, tcp: [], udp: [], coverage: "", framing: Datagram, message: false }
             Vlan8021ad { canonical: "vlan8021ad", aliases: ["dot1ad", "8021ad", "qinq"], constructible: true, exact_round_trip: true, matcher: None, layer: [link::Vlan8021ad], codec: Vlan8021adCodec, tcp: [], udp: [], coverage: "", framing: Datagram, message: false }
             Vrrp { canonical: "vrrp", aliases: [], constructible: true, exact_round_trip: true, matcher: None, layer: [network::Vrrp], codec: VrrpCodec, tcp: [], udp: [], coverage: "", framing: Datagram, message: false }
-            Vxlan { canonical: "vxlan", aliases: [], constructible: true, exact_round_trip: true, matcher: None, layer: [tunnel::Vxlan], codec: VxlanCodec, tcp: [], udp: [], coverage: "", framing: Datagram, message: false }
+            Vxlan { canonical: "vxlan", aliases: [], constructible: true, exact_round_trip: true, matcher: None, layer: [tunnel::Vxlan], codec: VxlanCodec, tcp: [], udp: [4789], coverage: "", framing: Datagram, message: false }
         }
     };
 }
@@ -335,16 +335,8 @@ impl BuiltinProtocol {
         match parent {
             Self::Tcp => self == Self::Raw || !self.tcp_ports().is_empty(),
             Self::Udp => {
-                matches!(
-                    self,
-                    Self::Vxlan
-                        | Self::Geneve
-                        | Self::Gtpu
-                        | Self::Raw
-                        | Self::Rtp
-                        | Self::Rtcp
-                        | Self::Dtls
-                ) || !self.udp_ports().is_empty()
+                matches!(self, Self::Raw | Self::Rtp | Self::Rtcp | Self::Dtls)
+                    || !self.udp_ports().is_empty()
             }
             _ => false,
         }

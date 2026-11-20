@@ -43,7 +43,7 @@ pub(super) fn publish(
     }
     let fail = bounds.fails(&report);
     let report = output::Report::from(&report);
-    crate::rendering::bounded_json_len(
+    crate::publication::bounded_json_len(
         &report,
         bounds.max_result_bytes,
         serde_json::ser::CompactFormatter,
@@ -51,7 +51,7 @@ pub(super) fn publish(
     .map_err(|e| e.into_cli_error(|| invalid("security result exceeds --max-result-bytes")))?;
     match i.format {
         Format::Json => {
-            crate::rendering::emit_published(i, command, Published::new(report, Vec::new()))?;
+            crate::publication::emit_published(i, command, Published::new(report, Vec::new()))?;
         }
         Format::Ndjson => {
             for finding in &report.findings {

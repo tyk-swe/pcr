@@ -74,7 +74,7 @@ pub(super) fn run(
         .collect::<Result<Vec<_>, CliError>>()?;
     let result = output::Report::from(interfaces);
     if format == Format::Text && !presentation.verbose && !arguments.timestamp_types {
-        crate::rendering::table_row(
+        crate::terminal::table_row(
             invocation,
             &[
                 ("INTERFACE", 16),
@@ -84,7 +84,7 @@ pub(super) fn run(
             ],
         )?;
     }
-    crate::rendering::render_aggregate_rows(
+    crate::commands::aggregate::render_aggregate_rows(
         invocation,
         crate::output::contract::Command::Interfaces,
         format,

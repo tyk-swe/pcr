@@ -14,6 +14,16 @@ const MAX_CONFIGURED_CACHE_TTL: Duration = Duration::from_secs(60 * 60);
 const MAX_CONFIGURED_CACHE_ENTRIES: usize = 65_536;
 const MIN_NEIGHBOR_SNAPSHOT_LENGTH: usize = 128;
 
+/// How one neighbor resolution narrows [`Options`]: the wait for a reply and
+/// the capture it may keep.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Bounds {
+    pub(crate) attempt_timeout: Duration,
+    pub(crate) max_frames: usize,
+    pub(crate) max_bytes: usize,
+    pub(crate) snap_length: usize,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Options {
     pub max_attempts: u32,
@@ -75,45 +85,33 @@ impl Options {
         Ok(())
     }
 
-    /// These options narrowed to one request that waits `attempt_timeout`,
-    /// capturing at most `max_frames` frames and `max_bytes` bytes, each cut
-    /// at `snap_length`.
+    /// These options narrowed to one request under `bounds`.
     #[must_use]
-    pub(crate) fn single_attempt(
-        &self,
-        attempt_timeout: Duration,
-        max_frames: usize,
-        max_bytes: usize,
-        snap_length: usize,
-    ) -> Self {
+    pub(crate) fn single_attempt(&self, bounds: Bounds) -> Self {
         Self {
             max_attempts: 1,
-            attempt_timeout,
-            max_capture_queue_frames: self.max_capture_queue_frames.min(max_frames),
-            max_captured_bytes: self.max_captured_bytes.min(max_bytes),
-            snap_length: self.snap_length.min(max_bytes).min(snap_length),
+            attempt_timeout: bounds.attempt_timeout,
+            max_capture_queue_frames: self.max_capture_queue_frames.min(bounds.max_frames),
+            max_captured_bytes: self.max_captured_bytes.min(bounds.max_bytes),
+            snap_length: self
+                .snap_length
+                .min(bounds.max_bytes)
+                .min(bounds.snap_length),
             ..self.clone()
         }
     }
 
-    /// These options narrowed to one request per fresh resolution, waiting
-    /// at most `attempt_timeout` for a reply and capturing within
-    /// `max_frames` frames and `max_bytes` bytes, each cut at `snap_length`.
-    /// Limits too small for a decodable reply fail validation rather than
-    /// being raised.
+    /// These options narrowed to one request per fresh resolution under
+    /// `bounds`, with the wait clamped to a valid attempt timeout. Limits too
+    /// small for a decodable reply fail validation rather than being raised.
     #[must_use]
-    pub(crate) fn one_attempt(
-        &self,
-        attempt_timeout: Duration,
-        max_frames: usize,
-        max_bytes: usize,
-        snap_length: usize,
-    ) -> Self {
+    pub(crate) fn one_attempt(&self, bounds: Bounds) -> Self {
         Self {
-            attempt_timeout: attempt_timeout
+            attempt_timeout: bounds
+                .attempt_timeout
                 .min(MAX_CONFIGURED_ATTEMPT_TIMEOUT)
                 .max(Duration::from_nanos(1)),
-            ..self.single_attempt(attempt_timeout, max_frames, max_bytes, snap_length)
+            ..self.single_attempt(bounds)
         }
     }
 

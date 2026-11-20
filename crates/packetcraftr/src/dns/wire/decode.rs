@@ -260,7 +260,7 @@ fn validate_sections(
             message: "OPT pseudo-record must appear only in the additional section".to_owned(),
         });
     }
-    let (edns, additionals) = extract_edns(additionals)?;
+    let edns = extract_edns(&additionals)?;
     Ok(ResponseSections {
         answers,
         authorities,
@@ -269,29 +269,25 @@ fn validate_sections(
     })
 }
 
-fn extract_edns(additionals: Vec<Record>) -> Result<(Option<Edns>, Vec<Record>), Error> {
+fn extract_edns(additionals: &[Record]) -> Result<Option<Edns>, Error> {
     let mut edns = None;
-    let mut non_opt_additionals = Vec::with_capacity(additionals.len());
     for record in additionals {
-        match &record.value {
-            RecordValue::Opt(value) => {
-                if value.version != 0 {
-                    return Err(Error::UnsupportedEdnsVersion {
-                        version: value.version,
-                    });
-                }
-
-                if !record.owner.is_root() {
-                    return Err(Error::InvalidEdns {
-                        message: "OPT owner name must be the root".to_owned(),
-                    });
-                }
-                if edns.replace(value.clone()).is_some() {
-                    return Err(Error::DuplicateEdns);
-                }
-            }
-            _ => non_opt_additionals.push(record),
+        let RecordValue::Opt(value) = &record.value else {
+            continue;
+        };
+        if value.version != 0 {
+            return Err(Error::UnsupportedEdnsVersion {
+                version: value.version,
+            });
+        }
+        if !record.owner.is_root() {
+            return Err(Error::InvalidEdns {
+                message: "OPT owner name must be the root".to_owned(),
+            });
+        }
+        if edns.replace(value.clone()).is_some() {
+            return Err(Error::DuplicateEdns);
         }
     }
-    Ok((edns, non_opt_additionals))
+    Ok(edns)
 }

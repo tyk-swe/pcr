@@ -2,10 +2,18 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 import copy
 import json
+import os
+import posixpath
+import subprocess
+import sys
 import tempfile
 import unittest
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from unittest.mock import patch
+from urllib.parse import unquote, urlsplit
+
+from markdown_it import MarkdownIt
+from markdown_it.tree import SyntaxTreeNode
 
 from support import load_script
 
@@ -70,6 +78,21 @@ class ReleaseAssetTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'must exist'):
                 assets.validate_protocol_fixtures(ROOT, self.inventory)
 
+    def test_packaged_readme_links_resolve_in_the_archive(self):
+        files = frozenset(self.inventory.source_assets + self.inventory.generated_assets)
+        directories = {str(parent) for name in files for parent in PurePosixPath(name).parents}
+        entries = files | directories
+        readme = (ROOT / 'README.md').read_text(encoding='utf-8')
+        for node in SyntaxTreeNode(MarkdownIt().parse(readme)).walk():
+            if node.type != 'link':
+                continue
+            target = urlsplit(node.attrs['href'])
+            if target.scheme or target.netloc or not target.path:
+                continue
+            path = unquote(target.path)
+            with self.subTest(link=path):
+                destinations = directories if path.endswith('/') else entries
+                self.assertTrue(posixpath.normpath(path) in destinations, f'Missing from release: {path}')
 
     def test_checked_in_manifest_matches_the_worktree(self):
         assets.validate_generated(ROOT, self.inventory)
@@ -106,6 +129,36 @@ class ReleaseAssetTests(unittest.TestCase):
             (root / 'examples/documents/new.txt').write_text('unlisted')
             with self.assertRaisesRegex(ValueError, 'drifted'):
                 assets.load_inventory(root)
+
+    def test_release_inventory_skips_ignored_local_files_but_keeps_package_inputs(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            subprocess.run(['git', 'init', '--quiet'], cwd=root, check=True)
+            (root / '.gitignore').write_text('local.tmp\n')
+            base = root / 'examples/documents'
+            base.mkdir(parents=True)
+            for name in ('local.tmp', 'new.json'):
+                (base / name).touch()
+            candidate, ignored = ('examples/documents/new.json', 'examples/documents/local.tmp')
+            generated = assets.generated_inventory(root)
+            self.assertIn(candidate, generated.source_assets)
+            self.assertNotIn(ignored, generated.source_assets)
+            subprocess.run(['git', 'add', '-f', '--', ignored], cwd=root, check=True)
+            self.assertIn(ignored, assets.generated_inventory(root).source_assets)
+
+    @unittest.skipUnless(sys.platform.startswith('linux'), 'needs arbitrary filename bytes')
+    def test_release_inventory_ignores_unrelated_non_utf8_paths(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            subprocess.run(['git', 'init', '--quiet'], cwd=root, check=True)
+            historic = root / 'schemas/historical'
+            historic.mkdir(parents=True)
+            (historic / os.fsdecode(b'local-\xff')).touch()
+            candidate = root / 'schemas/current.schema.json'
+            candidate.touch()
+            inventory = assets.generated_inventory(root)
+            self.assertIn('schemas/current.schema.json', inventory.source_assets)
+            self.assertFalse(any(path.startswith('schemas/historical/') for path in inventory.source_assets))
 
 
 if __name__ == '__main__':

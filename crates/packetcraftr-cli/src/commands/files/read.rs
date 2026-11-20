@@ -18,9 +18,10 @@ use packetcraftr_core::error::Classification;
 use packetcraftr_core::error::Kind;
 
 use self::arguments::Args;
+use crate::capture_output::finish_compressed_output;
 use crate::errors::CliError;
 use crate::input::open_capture;
-use crate::rendering::{FieldTree, finish_compressed_output};
+use crate::packet_text::FieldTree;
 
 use capture_output::CaptureOutput;
 use selection::{Selection, prepare_decoding};
@@ -65,11 +66,12 @@ impl crate::commands::Spec for Args {
         crate::output::contract::Format::Pcap,
         crate::output::contract::Format::PcapNg,
     ];
-    const CANCELLATION: bool = true;
     const OFFLINE: bool = true;
 
     fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
-        crate::resources::declare!(settings, self, [max_projection_bytes: Bytes @ ResultRetention]);
+        crate::resources::declare!(settings, self, [
+            max_projection_bytes: Bytes @ ResultRetention if !self.fields.is_empty(),
+        ]);
         self.limits.resources(settings);
         self.tree.resources(settings);
     }
@@ -93,7 +95,7 @@ pub(super) fn run(
         return projection::run(invocation, arguments);
     }
     if matches!(format, Format::Json) {
-        return Err(crate::rendering::missing_fields_error());
+        return Err(crate::field_projection::missing_fields_error());
     }
     let Args {
         fields: _,
@@ -149,19 +151,21 @@ pub(super) fn run(
         let result = output.write(invocation, &mut reader, limits, selection, &mut destination);
         return finish_compressed_output(result, destination);
     }
+    let mut run = || {
+        records::run(
+            invocation,
+            &mut reader,
+            limits,
+            selection,
+            format,
+            stream,
+            tree.as_mut(),
+        )
+    };
     if format == Format::Text && stream.batches_records() {
-        invocation.batch_stdout();
+        return crate::terminal::batched(invocation, run);
     }
-    let result = records::run(
-        invocation,
-        &mut reader,
-        limits,
-        selection,
-        format,
-        stream,
-        tree.as_mut(),
-    );
-    result.and(crate::rendering::flush_stdout_batch(invocation))
+    run()
 }
 
 fn validate_dissect_format(dissect: bool, format: Format) -> Result<(), CliError> {

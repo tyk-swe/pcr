@@ -3,14 +3,15 @@
 
 pub(in crate::commands) mod output;
 use crate::command_options::{
-    DestinationAllowlistArgs, HostnameResolutionArgs, PublicDestinationArgs, RouteArgs,
+    DestinationAllowlistArgs, HostnameResolutionArgs, PublicDestinationArgs, RouteArgs, ScopeArgs,
 };
 use crate::errors::CliError;
 use crate::output::contract::Format;
 use crate::output::envelope::Published;
-use crate::rendering::{emit_published, render_optional, write_stdout_line};
+use crate::publication::emit_published;
 use crate::resources::Settings;
 use crate::system::prepare_plan;
+use crate::terminal::{render_optional, write_stdout_line};
 
 pub(crate) const AFTER_LONG_HELP: &str = r"Route planning is passive: it performs no packet transmission.
 
@@ -34,6 +35,8 @@ pub(crate) struct PolicyArgs {
     hostname_resolution: HostnameResolutionArgs,
     #[command(flatten)]
     destination_allowlist: DestinationAllowlistArgs,
+    #[command(flatten)]
+    scope: ScopeArgs,
 }
 
 impl PolicyArgs {
@@ -46,6 +49,7 @@ impl PolicyArgs {
         self.public_destination.apply_to(&mut policy);
         self.hostname_resolution.apply_to(&mut policy);
         self.destination_allowlist.apply_to(&mut policy);
+        self.scope.apply_to(&mut policy);
         policy
     }
 }
@@ -96,7 +100,7 @@ pub(super) fn run(
     match format {
         Format::Text => {
             render_text(invocation, &result.plan)?;
-            presentation.details(invocation, "Route decision", &result.plan)
+            crate::terminal::write_details(invocation, presentation, "Route decision", &result.plan)
         }
         Format::Json => emit_published(
             invocation,

@@ -5,7 +5,7 @@
 
 use super::{
     FrameRecord, ScopedFlowKey, Summary as RunSummary,
-    application::{self, Error, Limits, TcpSources},
+    application::{self, Error, Limits, Retained, TcpSources},
     provenance::{Accumulator, SourceSet},
     scope::Definition,
     session::{self, CollectorNeeds},
@@ -115,7 +115,7 @@ pub struct Collector {
     upgraded: BTreeSet<Connection>,
     generations: BTreeMap<u64, u64>,
     buffered: usize,
-    retained: usize,
+    retained: Retained,
     summary: Summary,
 }
 impl Collector {
@@ -140,12 +140,12 @@ impl Collector {
             upgraded: BTreeSet::new(),
             generations: BTreeMap::new(),
             buffered: 0,
-            retained: 0,
+            retained: Retained::new(limits),
             summary: Summary::default(),
         })
     }
     pub fn scopes(&self) -> impl Iterator<Item = &Definition> {
-        self.tcp.scopes.values()
+        self.tcp.scopes()
     }
     pub fn observe(&mut self, record: &FrameRecord<'_>) -> Result<Vec<Event>, Error> {
         let mut output = Vec::new();
@@ -323,10 +323,7 @@ impl Collector {
                 if !live.header.ends_with(b"\r\n\r\n") {
                     continue;
                 }
-                self.retained = self
-                    .retained
-                    .saturating_add(Limits::decoded_charge(live.header.len()));
-                self.limits.check_retained(self.retained)?;
+                self.retained.charge(live.header.len())?;
                 let parsed = http::parse_head(&Bytes::copy_from_slice(&live.header));
                 let (head, _) = match parsed {
                     Ok(Some(head)) => head,
@@ -514,18 +511,16 @@ impl Collector {
             Status::Malformed | Status::Limit => self.summary.malformed_messages += 1,
             _ => self.summary.incomplete_messages += 1,
         }
-        let extra = Limits::decoded_charge(
-            live.body
-                .as_ref()
-                .map_or(0, BodyDecoder::buffered_bytes)
-                .saturating_add(if live.head.is_none() {
-                    live.header.len()
-                } else {
-                    0
-                }),
-        );
-        self.retained = self.retained.saturating_add(extra);
-        self.limits.check_retained(self.retained)?;
+        let extra = live
+            .body
+            .as_ref()
+            .map_or(0, BodyDecoder::buffered_bytes)
+            .saturating_add(if live.head.is_none() {
+                live.header.len()
+            } else {
+                0
+            });
+        self.retained.charge(extra)?;
         let header_wire = live
             .head
             .as_ref()

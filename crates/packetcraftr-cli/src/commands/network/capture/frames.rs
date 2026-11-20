@@ -25,7 +25,8 @@ use crate::command_options::Compression;
 use crate::errors::CliError;
 use crate::filtering;
 use crate::output::{self, contract::Format};
-use crate::rendering::{FieldTree, render_frame, write_hex_line};
+use crate::packet_text::{FieldTree, Layers, render_frame};
+use crate::publication::write_hex_line;
 
 /// Selection decodes a kept frame once and parks it so emission republishes
 /// the same dissection; decoded state never outlives one frame.
@@ -84,7 +85,7 @@ impl Decoding {
 pub(super) struct Destinations {
     pub(super) files: Option<Files>,
     pub(super) writer: Option<capture_file::Writer<compression::Output<io::Stdout>>>,
-    pub(super) projector: Option<crate::rendering::Projector>,
+    pub(super) projector: Option<crate::field_projection::Projector>,
     pub(super) format: Format,
     pub(super) compression: Compression,
     pub(super) limits: capture_file::Limits,
@@ -182,7 +183,7 @@ impl Destinations {
 fn emit_frame(
     invocation: &crate::invocation::Invocation,
     decoding: Option<&mut Decoding>,
-    projector: Option<&mut crate::rendering::Projector>,
+    projector: Option<&mut crate::field_projection::Projector>,
     writer: &mut Option<capture_file::Writer<compression::Output<io::Stdout>>>,
     source_frame: u64,
     frame: Frame,
@@ -205,24 +206,13 @@ fn emit_frame(
                 let frame =
                     output::frame::Captured::try_from(frame).map_err(CliError::classified)?;
                 let source_frame = source_frame.try_into().map_err(CliError::classified)?;
-                match tree {
-                    Some(tree) => render_frame(
-                        invocation,
-                        source_frame,
-                        &frame,
-                        Some(&stack),
-                        Some(tree),
-                        crate::invocation::Presentation { verbose: true },
-                    ),
-                    None => render_frame(
-                        invocation,
-                        source_frame,
-                        &frame,
-                        Some(&stack),
-                        None,
-                        stream.presentation(),
-                    ),
-                }
+                render_frame(
+                    invocation,
+                    source_frame,
+                    &frame,
+                    Some(&stack),
+                    Layers::new(tree, stream.presentation()),
+                )
             }
             Format::Ndjson => {
                 crate::output::frame::Record::try_from((source_frame, frame, &decoded))
@@ -250,8 +240,7 @@ fn emit_frame(
                     source_frame,
                     &frame,
                     None,
-                    None,
-                    stream.presentation(),
+                    Layers::Fields(stream.presentation()),
                 )
             }),
         Format::Hex => output::frame::Captured::try_from(frame)

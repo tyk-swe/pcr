@@ -9,9 +9,7 @@ use self::output::MAX_REPORTED_CHANGES;
 use crate::command_options::Bounded as _;
 use crate::output::contract::Command;
 use crate::{
-    errors::CliError,
-    filtering,
-    rendering::{Retained, write_summary_line},
+    commands::retained::Retained, errors::CliError, filtering, terminal::write_summary_line,
 };
 use packetcraftr_core::{
     budget::Deadline,
@@ -45,7 +43,6 @@ impl crate::commands::Spec for Args {
     ];
     const FORMATS: &'static [crate::output::contract::Format] =
         crate::output::contract::TEXT_JSON_NDJSON;
-    const CANCELLATION: bool = true;
     const OFFLINE: bool = true;
 
     fn run_time(&self) -> Option<&dyn crate::command_options::Bounded> {
@@ -235,10 +232,12 @@ pub(crate) fn run(invocation: &crate::invocation::Invocation, args: Args) -> Res
         report,
         |report| report,
         |invocation, report| {
-            invocation
-                .output
-                .presentation()
-                .details(invocation, "Rewrite evidence", report)?;
+            crate::terminal::write_details(
+                invocation,
+                invocation.output.presentation(),
+                "Rewrite evidence",
+                report,
+            )?;
             render_text(invocation, report)
         },
     )
@@ -249,7 +248,7 @@ fn render_text(
     report: &output::Report,
 ) -> Result<(), CliError> {
     for change in &report.changes {
-        crate::rendering::write_stdout_line(
+        crate::terminal::write_stdout_line(
             invocation,
             format_args!(
                 "frame={} layer={} field={} {} -> {} origin={}",

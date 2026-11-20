@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v20",
+  "schema": "packetcraftr.output/v22",
   "command": "differential",
   "mode": "stream",
   "sequence": 18,
@@ -14,54 +14,63 @@
         "variant": "baseline",
         "verdict": "accepted",
         "answered": 1,
+        "rewritten": 0,
         "attempts": 1
       },
       {
         "variant": "ttl-255",
         "verdict": "accepted",
         "answered": 1,
+        "rewritten": 0,
         "attempts": 1
       },
       {
         "variant": "ttl-1",
         "verdict": "accepted",
         "answered": 1,
+        "rewritten": 0,
         "attempts": 1
       },
       {
         "variant": "dscp-ecn",
         "verdict": "accepted",
         "answered": 1,
+        "rewritten": 0,
         "attempts": 1
       },
       {
         "variant": "ecn-ce",
         "verdict": "accepted",
         "answered": 1,
+        "rewritten": 0,
         "attempts": 1
       },
       {
         "variant": "ip-id-max",
         "verdict": "accepted",
         "answered": 1,
+        "rewritten": 0,
         "attempts": 1
       },
       {
         "variant": "df-set",
         "verdict": "accepted",
         "answered": 1,
+        "rewritten": 0,
         "attempts": 1
       },
       {
         "variant": "ip-options-router-alert",
         "verdict": "accepted",
         "answered": 1,
+        "rewritten": 0,
         "attempts": 1
       },
       {
         "variant": "udp-checksum-zero",
         "verdict": "accepted",
         "answered": 1,
+        "rewritten": 0,
         "attempts": 1
       }
     ]

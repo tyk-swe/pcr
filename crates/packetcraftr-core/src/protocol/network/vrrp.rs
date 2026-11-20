@@ -430,7 +430,11 @@ impl Codec for VrrpCodec {
         let auth_data = input.slice(addresses_end..);
 
         let mut diagnostics = Vec::new();
-        let checksum_failed = if version == 2 {
+        let checksum_failed = if version == 2
+            || context
+                .network
+                .is_some_and(|network| network.destination.is_ipv4())
+        {
             checksum_parts(&[&input]) != 0
         } else {
             match context.network {

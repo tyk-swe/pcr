@@ -71,6 +71,17 @@ class CheckDocumentsTests(unittest.TestCase):
         })
         self.assertTrue(any("indicators.json" in problem for problem in problems))
 
+    def test_invalid_schema_fails_even_when_document_omits_the_affected_property(self):
+        schema_path = "schemas/packetcraftr.indicators.v1.schema.json"
+        invalid_schema = SCHEMA | {
+            "properties": SCHEMA["properties"] | {"count": {"type": "integeer"}},
+        }
+        with self.assertRaisesRegex(documents.CheckError, r"indicators\.v1\.schema\.json: invalid schema"):
+            self.check({
+                "examples/documents/indicators.json": '{"schema": "packetcraftr.indicators/v1"}',
+                schema_path: json.dumps(invalid_schema),
+            })
+
     def test_unclaimed_schema_fails(self):
         problems = self.check({
             "examples/documents/other.json": "{}",

@@ -10,7 +10,7 @@ from pathlib import Path
 import re
 import sys
 
-from rust_source import blank_comments_and_strings, is_test_path, without_test_items
+from rust_source import blank_comments, blank_comments_and_strings, is_test_path, without_test_items
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -169,7 +169,6 @@ BOUNDARY_MODULES = (
     "document/",
     "filter/",
     "layer/model.rs",
-    "layer/reflection.rs",
     "layer/selector.rs",
     "codec.rs",
     "build.rs",
@@ -180,7 +179,7 @@ BOUNDARY_MODULES = (
 
 def production_sources(root: Path = ROOT) -> dict[Path, str]:
     return {
-        path: without_test_items(path.read_text())
+        path: blank_comments(without_test_items(path.read_text(encoding='utf-8')))
         for path in sorted((root / "crates").rglob("*.rs"))
         if not is_test_path(path.relative_to(root))
     }

@@ -2,7 +2,10 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 import copy
 import json
+import os
 import posixpath
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path, PurePosixPath
@@ -126,6 +129,36 @@ class ReleaseAssetTests(unittest.TestCase):
             (root / 'examples/documents/new.txt').write_text('unlisted')
             with self.assertRaisesRegex(ValueError, 'drifted'):
                 assets.load_inventory(root)
+
+    def test_release_inventory_skips_ignored_local_files_but_keeps_package_inputs(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            subprocess.run(['git', 'init', '--quiet'], cwd=root, check=True)
+            (root / '.gitignore').write_text('local.tmp\n')
+            base = root / 'examples/documents'
+            base.mkdir(parents=True)
+            for name in ('local.tmp', 'new.json'):
+                (base / name).touch()
+            candidate, ignored = ('examples/documents/new.json', 'examples/documents/local.tmp')
+            generated = assets.generated_inventory(root)
+            self.assertIn(candidate, generated.source_assets)
+            self.assertNotIn(ignored, generated.source_assets)
+            subprocess.run(['git', 'add', '-f', '--', ignored], cwd=root, check=True)
+            self.assertIn(ignored, assets.generated_inventory(root).source_assets)
+
+    @unittest.skipUnless(sys.platform.startswith('linux'), 'needs arbitrary filename bytes')
+    def test_release_inventory_ignores_unrelated_non_utf8_paths(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            subprocess.run(['git', 'init', '--quiet'], cwd=root, check=True)
+            historic = root / 'schemas/historical'
+            historic.mkdir(parents=True)
+            (historic / os.fsdecode(b'local-\xff')).touch()
+            candidate = root / 'schemas/current.schema.json'
+            candidate.touch()
+            inventory = assets.generated_inventory(root)
+            self.assertIn('schemas/current.schema.json', inventory.source_assets)
+            self.assertFalse(any(path.startswith('schemas/historical/') for path in inventory.source_assets))
 
 
 if __name__ == '__main__':

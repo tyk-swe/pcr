@@ -2074,6 +2074,48 @@ fn quic_exports_exact_contiguous_ranges_and_refuses_to_overwrite_them() {
 }
 
 #[test]
+fn quic_export_budget_includes_the_complete_manifest() {
+    let directory = tempfile::tempdir().unwrap();
+    let capture = capture_path("quic-demo-v2.pcapng");
+    let keys = capture_path("quic-demo.keys");
+    let args = [
+        "analyze",
+        "quic",
+        capture.to_str().unwrap(),
+        "--keylog",
+        keys.to_str().unwrap(),
+        "--write",
+        directory.path().to_str().unwrap(),
+    ];
+    assert_success(&run(&args), &args);
+    let exported_bytes: u64 = std::fs::read_dir(directory.path())
+        .unwrap()
+        .map(|entry| {
+            let entry = entry.unwrap();
+            let bytes = entry.metadata().unwrap().len();
+            std::fs::remove_file(entry.path()).unwrap();
+            bytes
+        })
+        .sum();
+
+    let too_small = (exported_bytes - 1).to_string();
+    let limited = [&args[..], &["--max-application-output-bytes", &too_small]].concat();
+    let output = run(&limited);
+    assert!(!output.status.success(), "{}", stdout(&output));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("QUIC application output"));
+    assert!(
+        std::fs::read_dir(directory.path())
+            .unwrap()
+            .next()
+            .is_none()
+    );
+
+    let exact = exported_bytes.to_string();
+    let limited = [&args[..], &["--max-application-output-bytes", &exact]].concat();
+    assert_success(&run(&limited), &limited);
+}
+
+#[test]
 fn quic_missing_secrets_and_payload_limits_are_explicit() {
     let capture = capture_path("quic-demo-v1.pcap");
     let args = [
@@ -2294,6 +2336,22 @@ fn security_modes_observe_each_frame_and_finish_their_run() {
     assert_eq!(
         anomalies["measurements"]["thresholds"]["window_seconds"],
         60
+    );
+}
+
+#[test]
+fn verbose_security_findings_show_details_on_separate_lines() {
+    let capture = capture_path("beacon-periodic.pcap");
+    let args = ["--verbose", "analyze", "beacons", capture.to_str().unwrap()];
+    let text = assert_success(&run(&args), &args);
+    let lines: Vec<_> = text.lines().collect();
+    assert!(
+        lines.windows(3).any(|lines| {
+            lines[0].starts_with("  frames: [")
+                && lines[1].starts_with("  evidence: {")
+                && lines[2].starts_with("  remediation: ")
+        }),
+        "{text}"
     );
 }
 

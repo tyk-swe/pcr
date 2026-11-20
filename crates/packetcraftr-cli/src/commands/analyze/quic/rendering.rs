@@ -16,7 +16,7 @@ pub(super) struct State {
     pub retained: Vec<Connection>,
     pub selected: u64,
     pub omitted: u64,
-    pub output_bytes: u64,
+    output_limit: usize,
     remaining: usize,
     exporter: Option<Exporter>,
 }
@@ -26,7 +26,7 @@ impl State {
             retained: Vec::new(),
             selected: 0,
             omitted: 0,
-            output_bytes: 0,
+            output_limit: args.max_application_output_bytes,
             remaining: args.max_application_output_bytes,
             exporter: args
                 .write
@@ -47,8 +47,10 @@ impl State {
         self.remaining = self.remaining.checked_sub(bytes).ok_or_else(|| {
             CliError::new(Kind::Policy, "QUIC application output byte limit exceeded")
         })?;
-        self.output_bytes = self.output_bytes.saturating_add(bytes as u64);
         Ok(())
+    }
+    pub(super) fn output_bytes(&self) -> u64 {
+        (self.output_limit - self.remaining) as u64
     }
     pub(super) fn event(
         &mut self,
@@ -239,7 +241,7 @@ impl State {
     }
     pub(super) fn publish(&mut self) -> Result<(), CliError> {
         if let Some(exporter) = self.exporter.take() {
-            exporter.finish()?;
+            self.remaining = exporter.finish(self.remaining)?;
         }
         Ok(())
     }

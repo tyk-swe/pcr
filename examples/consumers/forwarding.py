@@ -299,7 +299,7 @@ def validate_details(report: dict[str, Any], declared: list[dict[str, Any]]) -> 
         require(canonical not in identities, "identity occurs in multiple correspondence groups")
         identities.add(canonical)
 
-    ranks = {side: set() for side in seen}
+    ranks: dict[str, dict[int, int]] = {side: {} for side in seen}
     previous_ingress = -1
     maximum_egress = -1
     reordered = 0
@@ -310,7 +310,7 @@ def validate_details(report: dict[str, Any], declared: list[dict[str, Any]]) -> 
             rank = integer(pair[side + "_order"], side + "_order")
             require(rank < captures[side]["keyed"] and rank < frame, "invalid keyed observation rank")
             require(rank not in ranks[side], "duplicate keyed observation rank")
-            ranks[side].add(rank)
+            ranks[side][rank] = frame
         require(pair["ingress_order"] > previous_ingress, "matches are not in ingress order")
         previous_ingress = pair["ingress_order"]
         require(type(pair["reordered"]) is bool, "reordered flag must be boolean")
@@ -321,6 +321,10 @@ def validate_details(report: dict[str, Any], declared: list[dict[str, Any]]) -> 
             require(pair["reordered"] == inversion, "reorder flag contradicts complete pair order")
         maximum_egress = max(maximum_egress, pair["egress_order"])
         reordered += pair["reordered"]
+    for frames_by_rank in ranks.values():
+        frames = [frames_by_rank[rank] for rank in sorted(frames_by_rank)]
+        require(all(before < after for before, after in zip(frames, frames[1:])),
+                "keyed observation rank contradicts capture frame order")
     require(reordered <= summary["reordered_pairs"] <= reordered + omitted["matches"],
             "reorder summary disagrees with retained flags")
 

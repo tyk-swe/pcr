@@ -187,7 +187,7 @@ fn finish(
             input_incomplete,
             connections_selected: state.selected,
             connections_omitted: state.omitted,
-            application_output_bytes: state.output_bytes,
+            application_output_bytes: state.output_bytes(),
         };
         match invocation.format {
             Format::Text => write_stdout_line(

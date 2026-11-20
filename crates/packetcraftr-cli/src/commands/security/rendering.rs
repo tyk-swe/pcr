@@ -90,12 +90,11 @@ pub(crate) fn text(i: &Invocation, report: &Report<'_>) -> Result<(), CliError> 
             }
         }
         if i.output.presentation().verbose {
+            crate::terminal::write_stdout_line(i, format_args!("  frames: {:?}", f.frames))?;
+            crate::terminal::write_stdout_line(i, format_args!("  evidence: {}", f.evidence))?;
             crate::terminal::write_stdout_line(
                 i,
-                format_args!(
-                    "  frames: {:?}\n  evidence: {}\n  remediation: {}",
-                    f.frames, f.evidence, f.remediation
-                ),
+                format_args!("  remediation: {}", f.remediation),
             )?;
         }
     }

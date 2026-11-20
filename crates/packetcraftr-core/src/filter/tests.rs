@@ -1,6 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use std::net::Ipv6Addr;
+
 use bytes::Bytes;
 
 use super::{Context, Error, Filter, Projection};
@@ -9,13 +11,14 @@ use crate::{
     decode::DecodedPacket,
     field,
     frame::{Frame, LinkType},
+    layer::Raw,
     packet::Packet,
     protocol::{
         application::resp::{Resp, RespValue},
         builtin,
         link::Ethernet,
-        network::Ipv4,
-        transport::Tcp,
+        network::{Ipv4, Ipv6},
+        transport::{Tcp, Udp},
     },
     registry::Registry,
 };
@@ -51,6 +54,51 @@ fn decoded_with(registry: &std::sync::Arc<Registry>, value: RespValue) -> Decode
             Default::default(),
         )
         .unwrap()
+}
+
+#[test]
+fn expanded_ipv6_words_match_addresses_and_still_match_bytes_on_byte_fields() {
+    let registry = builtin::registry();
+    let mut packet = Packet::default();
+    packet.push(Ipv6 {
+        source: Ipv6Addr::LOCALHOST,
+        destination: Ipv6Addr::LOCALHOST,
+        ..Default::default()
+    });
+    packet.push(Udp {
+        destination_port: 54_321,
+        ..Default::default()
+    });
+    packet.push(Raw::new(Bytes::from_static(&[0, 0, 0, 0, 0, 0, 0, 1])));
+    let built = crate::build::Builder::new(registry.clone())
+        .build(packet, Addresses::default(), Default::default())
+        .unwrap();
+    let decoded = crate::decode::Dissector::new(registry.clone())
+        .decode(
+            Frame::new(None, LinkType::IPV6, built.bytes).unwrap(),
+            Default::default(),
+        )
+        .unwrap();
+    let context = Context::frame(&decoded, 1);
+
+    for (source, expected) in [
+        ("raw.bytes == 00:00:00:00:00:00:00:01", true),
+        ("ipv6.source == ::1", true),
+        ("ipv6.source == 00:00:00:00:00:00:00:01", true),
+        ("ipv6.src in { 00:00:00:00:00:00:00:01, ::3 }", true),
+        (
+            "ipv6.source in 00:00:00:00:00:00:00:00..00:00:00:00:00:00:00:02",
+            true,
+        ),
+        (
+            "ipv6.source in 00:00:00:00:00:00:00:02..00:00:00:00:00:00:00:03",
+            false,
+        ),
+    ] {
+        let filter = Filter::compile(source, &registry, Default::default())
+            .unwrap_or_else(|error| panic!("{source}: {error}"));
+        assert_eq!(filter.matches(&context).unwrap(), expected, "{source}");
+    }
 }
 
 #[test]

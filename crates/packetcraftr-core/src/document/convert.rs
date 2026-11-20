@@ -53,7 +53,7 @@ impl Packet {
                         protocol: layer.protocol.clone(),
                     })?;
             let value = codec
-                .construct(&layer.fields)
+                .construct_from_document(&layer.fields, packet.iter().next_back(), registry)
                 .map_err(|source| Error::Layer {
                     layer: index,
                     protocol: layer.protocol.clone(),

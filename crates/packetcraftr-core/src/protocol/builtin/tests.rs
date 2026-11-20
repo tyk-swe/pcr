@@ -215,6 +215,63 @@ fn packet_documents_round_trip_through_build() {
 }
 
 #[test]
+fn compressed_dns_replies_round_trip_through_packet_documents() {
+    use crate::protocol::application::dns::{Dns, RecordValue};
+
+    let registry = super::registry();
+    let dissector = crate::decode::Dissector::new(registry.clone());
+    let builder = crate::build::Builder::new(registry.clone());
+    let reply = "00008400000000020000000004686f7374056c6f63616c0000018001000000780004c0000201c00c00018001000000780004c0000202";
+    for (name, ip_udp_header, multicast) in [
+        (
+            "unicast",
+            "45000052000000004011f697c0000201c0000202003514e9003e0000",
+            false,
+        ),
+        (
+            "multicast",
+            "4500005200000000ff11189ec0000201e00000fb14e914e9003e0000",
+            true,
+        ),
+    ] {
+        let bytes = crate::layer::parse_hex(&format!("{ip_udp_header}{reply}")).unwrap();
+        let frame =
+            crate::frame::Frame::new(None, crate::frame::LinkType::IPV4, bytes.clone()).unwrap();
+        let decoded = dissector.decode(frame, Default::default()).unwrap();
+        assert!(
+            decoded.diagnostics.is_empty(),
+            "{name}: {:?}",
+            decoded.diagnostics
+        );
+
+        let document = crate::document::Packet::from_packet(&decoded.packet);
+        let json = serde_json::to_string(&document).unwrap();
+        let document =
+            crate::document::Packet::parse(&json, crate::document::Format::Json, json.len())
+                .unwrap();
+        let packet = document.to_packet(&registry, 64).unwrap();
+        let dns = packet.get::<Dns>().unwrap();
+        assert_eq!(dns.answers.len(), 2);
+        for answer in &dns.answers {
+            assert_eq!(answer.class, 0x8001);
+            assert!(
+                match answer.value {
+                    RecordValue::A(_) => multicast,
+                    RecordValue::Unknown { type_code: 1, .. } => !multicast,
+                    _ => false,
+                },
+                "{name}: {:?}",
+                answer.value
+            );
+        }
+        let rebuilt = builder
+            .build(packet, Addresses::default(), Default::default())
+            .unwrap_or_else(|error| panic!("{name}: {error:?}"));
+        assert_eq!(rebuilt.bytes, bytes, "{name}");
+    }
+}
+
+#[test]
 fn yaml_packet_document_builds() {
     let text = include_str!("../../../../../examples/documents/packet-raw.yaml");
     let document = crate::document::Packet::parse(text, crate::document::Format::Yaml, text.len())

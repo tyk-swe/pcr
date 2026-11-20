@@ -76,6 +76,16 @@ impl Default for Udp {
     }
 }
 
+impl Udp {
+    pub(crate) fn payload_discriminators(&self, payload: &[u8]) -> Vec<Discriminator> {
+        child_discriminators(preferred_ports(
+            self.source_port,
+            self.destination_port,
+            payload,
+        ))
+    }
+}
+
 reflective_layer! {
     fn udp_schema() => { protocol: Id::new(NAME), name: "UDP" }
     impl Udp {
@@ -207,26 +217,22 @@ impl Codec for UdpCodec {
             }
         }
         let payload_len = length.saturating_sub(UDP_LEN);
-        let source_port = u16::from_be_bytes([header[0], header[1]]);
-        let destination_port = u16::from_be_bytes([header[2], header[3]]);
+        let layer = Udp {
+            source_port: u16::from_be_bytes([header[0], header[1]]),
+            destination_port: u16::from_be_bytes([header[2], header[3]]),
+            length: WireValue::Exact(length_field),
+            checksum: WireValue::Exact(checksum_value),
+        };
+        let next = if payload_len == 0 {
+            Vec::new()
+        } else {
+            layer.payload_discriminators(datagram.get(UDP_LEN..).unwrap_or_default())
+        };
         Ok(Decoded {
-            layer: Box::new(Udp {
-                source_port,
-                destination_port,
-                length: WireValue::Exact(length_field),
-                checksum: WireValue::Exact(checksum_value),
-            }),
+            layer: Box::new(layer),
             consumed: UDP_LEN,
             payload_len,
-            next: if payload_len == 0 {
-                Vec::new()
-            } else {
-                child_discriminators(preferred_ports(
-                    source_port,
-                    destination_port,
-                    datagram.get(UDP_LEN..).unwrap_or_default(),
-                ))
-            },
+            next,
             fields: udp_layout(),
             diagnostics,
             stop: payload_len == 0,

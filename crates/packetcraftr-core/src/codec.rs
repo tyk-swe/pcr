@@ -353,52 +353,17 @@ pub trait Codec: Send + Sync + fmt::Debug {
     }
 
     fn construct(&self, fields: &BTreeMap<String, field::Value>) -> Result<Box<dyn Layer>, Error> {
-        let Some(schema) = self.schema() else {
-            return self.new_layer();
-        };
-        let fields = self.prepare_fields(fields.clone())?;
-        reject_aliased_duplicates(schema, &fields)?;
-        let mut resolved = Vec::with_capacity(fields.len());
-        for (name, value) in &fields {
-            let unknown = || field::Error::UnknownField {
-                protocol: schema.protocol,
-                field: name.clone(),
-            };
-            let path: field::Path = name.parse().map_err(|_| unknown())?;
-            let root = schema.field_index(path.root()).ok_or_else(unknown)?;
-            resolved.push(ResolvedField { root, path, value });
-        }
-        let root_fields: Vec<(usize, &field::Value)> = resolved
-            .iter()
-            .filter(|field| !field.path.is_nested())
-            .map(|field| (field.root, field.value))
-            .collect();
-        let seeded = self.seed_layer(&root_fields)?;
-        let (mut layer, seeded, consumed) = match seeded {
-            Some(seeded) => (seeded.layer, true, seeded.consumed),
-            None => (self.new_layer()?, false, None),
-        };
-        for field in &resolved {
-            if field.path.is_nested() {
-                layer.set_field_path(&field.path, field.value.clone())?;
-                continue;
-            }
-            if consumed == Some(field.root) {
-                continue;
-            }
-            if seeded && layer.field_by_index(field.root).as_ref() == Some(field.value) {
-                continue;
-            }
-            if let Some(result) =
-                self.apply_constructed_field(layer.as_mut(), field.root, field.value.clone())
-            {
-                result?;
-            } else {
-                layer.set_field_by_index(field.root, field.value.clone())?;
-            }
-        }
-        self.finish_constructed(layer.as_mut(), &root_fields)?;
-        Ok(layer)
+        construct_layer(self, fields, |fields| self.seed_layer(fields))
+    }
+
+    /// Constructs a document layer with access to the preceding layer, if any.
+    fn construct_from_document(
+        &self,
+        fields: &BTreeMap<String, field::Value>,
+        _parent: Option<&dyn Layer>,
+        _registry: &Registry,
+    ) -> Result<Box<dyn Layer>, Error> {
+        self.construct(fields)
     }
 
     fn encode(
@@ -409,6 +374,59 @@ pub trait Codec: Send + Sync + fmt::Debug {
     ) -> Result<Encoded, Error>;
 
     fn decode(&self, input: Bytes, context: &DecodeContext<'_>) -> Result<Decoded, Error>;
+}
+
+pub(crate) fn construct_layer(
+    codec: &(impl Codec + ?Sized),
+    fields: &BTreeMap<String, field::Value>,
+    seed_layer: impl FnOnce(&[(usize, &field::Value)]) -> Result<Option<SeededLayer>, Error>,
+) -> Result<Box<dyn Layer>, Error> {
+    let Some(schema) = codec.schema() else {
+        return codec.new_layer();
+    };
+    let fields = codec.prepare_fields(fields.clone())?;
+    reject_aliased_duplicates(schema, &fields)?;
+    let mut resolved = Vec::with_capacity(fields.len());
+    for (name, value) in &fields {
+        let unknown = || field::Error::UnknownField {
+            protocol: schema.protocol,
+            field: name.clone(),
+        };
+        let path: field::Path = name.parse().map_err(|_| unknown())?;
+        let root = schema.field_index(path.root()).ok_or_else(unknown)?;
+        resolved.push(ResolvedField { root, path, value });
+    }
+    let root_fields: Vec<(usize, &field::Value)> = resolved
+        .iter()
+        .filter(|field| !field.path.is_nested())
+        .map(|field| (field.root, field.value))
+        .collect();
+    let seeded = seed_layer(&root_fields)?;
+    let (mut layer, seeded, consumed) = match seeded {
+        Some(seeded) => (seeded.layer, true, seeded.consumed),
+        None => (codec.new_layer()?, false, None),
+    };
+    for field in &resolved {
+        if field.path.is_nested() {
+            layer.set_field_path(&field.path, field.value.clone())?;
+            continue;
+        }
+        if consumed == Some(field.root) {
+            continue;
+        }
+        if seeded && layer.field_by_index(field.root).as_ref() == Some(field.value) {
+            continue;
+        }
+        if let Some(result) =
+            codec.apply_constructed_field(layer.as_mut(), field.root, field.value.clone())
+        {
+            result?;
+        } else {
+            layer.set_field_by_index(field.root, field.value.clone())?;
+        }
+    }
+    codec.finish_constructed(layer.as_mut(), &root_fields)?;
+    Ok(layer)
 }
 
 struct ResolvedField<'a> {

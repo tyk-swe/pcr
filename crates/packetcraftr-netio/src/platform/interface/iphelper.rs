@@ -1,7 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#![allow(unsafe_code)]
+#![allow(
+    unsafe_code,
+    reason = "GetAdaptersAddresses fills a caller-sized buffer through unsafe FFI"
+)]
 
 pub(in crate::platform) mod adapter;
 

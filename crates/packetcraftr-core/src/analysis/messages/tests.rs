@@ -1502,6 +1502,109 @@ fn fragmented_tcp_resolves_event_filter_and_stream_dependencies() {
 }
 
 #[test]
+fn capture_clock_includes_time_excluded_frames_without_ip_reassembly() {
+    use crate::analysis::{ClockReport, Options, Plan};
+    use crate::capture_file::{Format, Reader, Writer};
+    use crate::frame::{Frame, LinkType, TimeBounds};
+    use std::time::Duration;
+
+    let mut writer = Writer::new(Vec::new(), Format::Pcap, LinkType::ETHERNET).unwrap();
+    for seconds in [10, 17, 13] {
+        writer
+            .write_frame(
+                &Frame::new(
+                    Some(UNIX_EPOCH + Duration::from_secs(seconds)),
+                    LinkType::ETHERNET,
+                    Bytes::from_static(&[0; 14]),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+    }
+    let capture = writer.into_inner();
+    let time_bounds = TimeBounds::new(None, Some(UNIX_EPOCH + Duration::from_secs(13))).unwrap();
+    for plan in [Plan::default(), Plan::physical(Default::default())] {
+        let mut reader = Reader::with_limits(&capture[..], Default::default()).unwrap();
+        let mut regressions = Vec::new();
+        let summary = crate::analysis::run(
+            &mut reader,
+            crate::protocol::builtin::registry(),
+            &Options {
+                plan,
+                time_bounds: Some(time_bounds),
+                ..Options::default()
+            },
+            |record| {
+                regressions.push((record.number, record.clock_regression));
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(regressions, [(1, None), (3, Some(Duration::from_secs(4)))]);
+        assert_eq!(
+            summary.clock,
+            ClockReport {
+                regressions: 1,
+                max_regression: Duration::from_secs(4),
+                max_forward_step: Duration::from_secs(7),
+                max_forward_step_frame: Some(2),
+            }
+        );
+    }
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn physical_capture_clock_accepts_timestamps_beyond_the_reassembly_clock_range() {
+    use crate::analysis::{FramePipeline, Options, Plan};
+    use crate::frame::{Frame, LinkType};
+    use std::time::{Duration, Instant};
+
+    let span = Duration::from_secs(1 << 62);
+    let (Some(start), Some(end)) = (UNIX_EPOCH.checked_sub(span), UNIX_EPOCH.checked_add(span))
+    else {
+        return;
+    };
+    let forward_step = end.duration_since(start).unwrap();
+    if Instant::now().checked_add(forward_step).is_some() {
+        return;
+    }
+    let mut pipeline = FramePipeline::new(
+        crate::protocol::builtin::registry(),
+        Options {
+            plan: Plan::physical(Default::default()),
+            ..Options::default()
+        },
+    )
+    .unwrap();
+    let mut matched = Vec::new();
+    for (number, timestamp) in [(1, start), (2, end)] {
+        let frame = Frame::new(
+            Some(timestamp),
+            LinkType::ETHERNET,
+            Bytes::from_static(&[0; 14]),
+        )
+        .unwrap();
+        pipeline
+            .push(
+                number,
+                frame,
+                |_| Ok(()),
+                |record| {
+                    matched.push(record.number);
+                    Ok(())
+                },
+            )
+            .unwrap();
+    }
+
+    let summary = pipeline.finish(Vec::new(), |_| Ok(())).unwrap();
+    assert_eq!(matched, [1, 2]);
+    assert_eq!(summary.clock.max_forward_step, forward_step);
+    assert_eq!(summary.clock.max_forward_step_frame, Some(2));
+}
+
+#[test]
 fn capture_run_restores_reader_control_after_success_and_sink_failure() {
     use crate::analysis::Options;
     use crate::budget::{Cancellation, Deadline};

@@ -11,7 +11,7 @@ use packetcraftr_core::registry::Registry;
 use crate::client::admission::approve_operation;
 use crate::clock::Clock;
 use crate::engine::execution::Context;
-use crate::engine::execution::{Executor, publisher};
+use crate::engine::execution::publisher;
 use crate::engine::operation::{Workflow as OperationWorkflow, WorkflowSetup};
 use crate::evidence::retention::EvidenceState;
 use crate::exchange::WorkflowExecutor;
@@ -23,7 +23,6 @@ use crate::{Client, Sink, Stats};
 
 use super::EVIDENCE_DIAGNOSTICS;
 use super::error::Error;
-use super::executor::{Exchange, TcpQuerier};
 use super::plan::{OperationLimits, operation_limits};
 use super::{Event, EventContext, Outcome, Report, Request, batch};
 
@@ -153,15 +152,15 @@ fn send_options(request: &Request) -> crate::send::Options {
     }
 }
 
-pub(super) fn run<A, E, C, F>(
+pub(super) fn run<A, P, C, F>(
     request: &Request,
     workflow: &mut OperationWorkflow<A, C>,
-    executor: &mut E,
+    executor: &mut WorkflowExecutor<'_, P, C>,
     emit: F,
 ) -> Result<Report, Error>
 where
     A: Authorizer + ResolveTarget,
-    E: Executor<Exchange> + TcpQuerier,
+    P: PacketProviders + TcpProviders,
     C: Clock,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
@@ -225,18 +224,18 @@ impl<'a> PreparedOperation<'a> {
     }
 
     /// The caller authorizes the cost first; endpoint authorization still runs per attempt.
-    pub(super) fn execute<A, E, C, F>(
+    pub(super) fn execute<A, P, C, F>(
         &mut self,
         authorizer: &mut A,
         registry: &Registry,
-        executor: &mut E,
+        executor: &mut WorkflowExecutor<'_, P, C>,
         clock: &mut C,
         deadline: &mut Deadline,
         mut emit: F,
     ) -> Result<(), Error>
     where
         A: Authorizer + ResolveTarget,
-        E: Executor<Exchange> + TcpQuerier,
+        P: PacketProviders + TcpProviders,
         C: Clock,
         F: FnMut(Event, &Deadline) -> Result<(), Error>,
     {

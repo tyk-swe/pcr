@@ -7,7 +7,23 @@ use bytes::Bytes;
 
 use super::{Error, Limit};
 
-mod huffman;
+use crate::protocol::application::header_compression::{self, IntegerError, huffman};
+
+impl From<huffman::Error> for Error {
+    fn from(error: huffman::Error) -> Self {
+        match error {
+            huffman::Error::InvalidCode => Self::Compression("invalid Huffman code"),
+            huffman::Error::EndOfString => Self::Compression("Huffman end-of-string symbol"),
+            huffman::Error::PaddingLength => {
+                Self::Compression("Huffman padding exceeds seven bits")
+            }
+            huffman::Error::PaddingPrefix => {
+                Self::Compression("Huffman padding is not an EOS prefix")
+            }
+            huffman::Error::Limit => Self::Limit(Limit::HeaderBytes),
+        }
+    }
+}
 
 const STATIC: &[(&[u8], &[u8])] = &[
     (b":authority", b""),
@@ -500,7 +516,12 @@ impl Decoder {
         let raw = &block[*pos..end];
         *pos = end;
         if huffman_coded {
-            Ok(Bytes::from(huffman::decode(raw, max_output, check)?))
+            Ok(Bytes::from(huffman::decode(
+                raw,
+                max_output,
+                check,
+                |error| Error::from(error).into(),
+            )?))
         } else {
             if length > max_output {
                 return Err(Error::Limit(Limit::HeaderBytes).into());
@@ -558,31 +579,8 @@ fn compact(bytes: &Bytes) -> Bytes {
 }
 
 fn integer(input: &[u8], pos: &mut usize, prefix: u32) -> Result<u64, Error> {
-    let first = *input
-        .get(*pos)
-        .ok_or(Error::Compression("truncated integer"))?;
-    *pos += 1;
-    let mask = (1u64 << prefix) - 1;
-    let mut value = u64::from(first) & mask;
-    if value < mask {
-        return Ok(value);
-    }
-    let mut shift = 0u32;
-    loop {
-        let byte = *input
-            .get(*pos)
-            .ok_or(Error::Compression("truncated integer"))?;
-        *pos += 1;
-        let digit = u64::from(byte & 0x7f);
-        if shift >= 64 || digit > (u64::MAX >> shift) {
-            return Err(Error::Compression("integer overflows"));
-        }
-        value = value
-            .checked_add(digit << shift)
-            .ok_or(Error::Compression("integer overflows"))?;
-        if byte & 0x80 == 0 {
-            return Ok(value);
-        }
-        shift += 7;
-    }
+    header_compression::integer(input, pos, prefix).map_err(|error| match error {
+        IntegerError::Truncated => Error::Compression("truncated integer"),
+        IntegerError::Overflow => Error::Compression("integer overflows"),
+    })
 }

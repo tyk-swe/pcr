@@ -59,6 +59,7 @@ pub(super) struct ScheduleInputs {
     pub(super) adaptive: AdaptiveArgs,
     pub(super) timeout: TimeoutArgs,
     pub(super) rate: Option<u32>,
+    pub(super) shuffle_seed: Option<u64>,
 }
 
 pub(super) struct RequestInputs {
@@ -175,7 +176,7 @@ pub(super) fn build_request(
         },
     };
     scan_limits.validate().map_err(CliError::classified)?;
-    let selected = if scanning {
+    let mut selected = if scanning {
         endpoint_request.select()?
     } else if endpoint_request.has_includes() {
         return Err(CliError::new(
@@ -188,6 +189,9 @@ pub(super) fn build_request(
             excluded: 0,
         }
     };
+    if let Some(seed) = schedule.shuffle_seed {
+        packetcraftr::scan::shuffle_endpoints(&mut selected.endpoints, seed);
+    }
     let (udp_profiles, curated) = if udp.curated {
         let mut planned = selected.endpoints.clone();
         for probe in &prepared_discovery.options.probes {

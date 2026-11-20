@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use super::*;
+use crate::capture::{ObservationQuality, Realized, RealizedSettings, TimestampPrecision};
+use packetcraftr_core::budget::Cancellation;
 use packetcraftr_core::frame::Frame;
 use std::sync::{
     Arc, Condvar, Mutex,
@@ -18,6 +20,10 @@ struct Control {
     changed: Condvar,
     entered: Mutex<Option<mpsc::SyncSender<()>>>,
     shutdowns: AtomicUsize,
+    cancel_on_arm: Option<Cancellation>,
+    expire_on_arm: bool,
+    native: RealizedSettings,
+    observation_quality: ObservationQuality,
 }
 
 impl Control {
@@ -47,12 +53,18 @@ struct Capture {
 impl Provider for Backend {
     type Capture = Capture;
     fn arm_capture(&self, request: &Request, _: &Deadline) -> Result<Capture, Error> {
+        if let Some(cancellation) = &self.control.cancel_on_arm {
+            cancellation.cancel();
+        }
+        if self.control.expire_on_arm {
+            self.control.advance(31);
+        }
         Ok(Capture {
             metadata: Metadata {
                 interface: request.interface.clone(),
                 link_type: LinkType(1),
                 snap_length: request.settings.limits.snap_length,
-                native: Default::default(),
+                native: self.control.native,
             },
             control: Arc::clone(&self.control),
             expire_ready: self.expire_ready,
@@ -111,6 +123,9 @@ impl Session for Capture {
     fn stats(&self) -> Stats {
         Stats::default()
     }
+    fn observation_quality(&self) -> ObservationQuality {
+        self.control.observation_quality
+    }
     fn request_stop(&mut self) -> Result<(), Error> {
         self.control.stop();
         Ok(())
@@ -151,6 +166,39 @@ fn group(control: &Arc<Control>, expire_ready: bool, queued: bool) -> Group<Capt
         .unwrap();
     group
 }
+
+#[test]
+fn group_observation_quality_reflects_available_sources() {
+    let mut group = Group::new(&GroupRequest::new(
+        vec![Id {
+            index: 1,
+            name: "controlled".into(),
+        }],
+        Limits::default(),
+    ))
+    .unwrap();
+    assert_eq!(group.observation_quality(), ObservationQuality::Unknown);
+    let deadline = Deadline::new(Duration::from_secs(5));
+    group
+        .arm(
+            &Backend {
+                control: Arc::new(Control {
+                    observation_quality: ObservationQuality::NoReportedLoss,
+                    ..Default::default()
+                }),
+                expire_ready: false,
+                queued: false,
+            },
+            &deadline,
+        )
+        .unwrap();
+    group.wait_ready(&deadline).unwrap();
+    assert_eq!(
+        group.observation_quality(),
+        ObservationQuality::NoReportedLoss
+    );
+}
+
 fn control(control: &Arc<Control>) -> Deadline {
     let clock = Arc::clone(control);
     let origin = Instant::now();
@@ -158,6 +206,118 @@ fn control(control: &Arc<Control>) -> Deadline {
         origin + Duration::from_secs(clock.advanced.load(Ordering::SeqCst))
     });
     Deadline::new(Duration::from_secs(30)).with_parent(Some(Arc::new(parent)))
+}
+
+#[test]
+fn cancelled_activation_shuts_down_returned_source() {
+    let cancellation = Cancellation::default();
+    let observed = Arc::new(Control {
+        cancel_on_arm: Some(cancellation.clone()),
+        ..Default::default()
+    });
+    let mut group = Group::new(&GroupRequest::new(
+        vec![Id {
+            index: 1,
+            name: "controlled".into(),
+        }],
+        Limits::default(),
+    ))
+    .unwrap();
+    let deadline = control(&observed).with_cancellation(Some(cancellation));
+    let result = group.arm(
+        &Backend {
+            control: Arc::clone(&observed),
+            expire_ready: false,
+            queued: false,
+        },
+        &deadline,
+    );
+    assert!(matches!(result, Err(Error::Cancelled(_))), "{result:?}");
+    assert_eq!(observed.shutdowns.load(Ordering::SeqCst), 1);
+    drop(group);
+    assert_eq!(observed.shutdowns.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn expired_parent_prevents_further_activation_and_shuts_down_returned_source() {
+    let observed = Arc::new(Control {
+        expire_on_arm: true,
+        ..Default::default()
+    });
+    let mut group = Group::new(&GroupRequest::new(
+        (1..=2)
+            .map(|index| Id {
+                index,
+                name: format!("controlled{index}"),
+            })
+            .collect(),
+        Limits::default(),
+    ))
+    .unwrap();
+    let result = group.arm(
+        &Backend {
+            control: Arc::clone(&observed),
+            expire_ready: false,
+            queued: false,
+        },
+        &control(&observed),
+    );
+    assert!(
+        matches!(result, Err(Error::DeadlineExceeded { .. })),
+        "{result:?}"
+    );
+    assert_eq!(group.sources().len(), 1);
+    assert_eq!(observed.shutdowns.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn capture_group_rejects_confirmed_timestamp_precision_mismatch() {
+    let nano = Some(TimestampPrecision::Nano);
+    let micro = Some(TimestampPrecision::Micro);
+    let mut request = GroupRequest::new(
+        vec![Id {
+            index: 1,
+            name: "controlled".into(),
+        }],
+        Limits::default(),
+    );
+    for (requested, effective, valid) in [
+        (None, micro, true),
+        (nano, None, true),
+        (nano, nano, true),
+        (nano, micro, false),
+    ] {
+        request.settings.native.timestamp_precision = requested;
+        let observed = Arc::new(Control {
+            native: RealizedSettings {
+                timestamp_precision: Realized {
+                    requested,
+                    applied: requested,
+                    effective,
+                },
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        let mut group = Group::new(&request).unwrap();
+        let result = group.arm(
+            &Backend {
+                control: Arc::clone(&observed),
+                expire_ready: false,
+                queued: false,
+            },
+            &control(&observed),
+        );
+        if valid {
+            result.unwrap();
+        } else {
+            assert!(
+                matches!(result, Err(Error::CaptureSourceContract { .. })),
+                "{result:?}"
+            );
+            assert_eq!(observed.shutdowns.load(Ordering::SeqCst), 1);
+        }
+    }
 }
 
 #[test]

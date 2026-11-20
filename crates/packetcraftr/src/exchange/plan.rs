@@ -84,7 +84,10 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
     }
 
     /// Internal ordered batches share the complete template admission path.
-    #[expect(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the expansion closure and the send, operation, and pinned-route borrows stay separate"
+    )]
     pub(super) fn prepare_packet_exchange<I>(
         &self,
         expansion_len: usize,

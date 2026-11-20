@@ -4,6 +4,7 @@
 //! Message construction, resource accounting, and ordered publication.
 
 use super::super::{ConnectionState, Context, Fault, Head};
+use crate::analysis::http_headers::final_status_forbids_content;
 use crate::analysis::http2::Error;
 use crate::analysis::http2::IssueCode;
 use crate::analysis::http2::budget;
@@ -180,8 +181,9 @@ impl ConnectionState {
         msg.promised_by = stream.promised_by;
         if let Some(status) = meta.status {
             let head_request = stream.method.as_deref() == Some(b"HEAD");
-            stream.response_bodyless =
-                head_request || (100..200).contains(&status) || matches!(status, 204 | 205 | 304);
+            stream.response_bodyless = head_request
+                || (100..200).contains(&status)
+                || final_status_forbids_content(status);
         }
         let unprocessed = stream.unprocessed;
         if kind == MessageKind::Informational {

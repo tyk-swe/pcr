@@ -1,7 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#![allow(unsafe_code)]
+#![allow(
+    unsafe_code,
+    reason = "BPF filter compilation goes through the libpcap pcap_compile FFI"
+)]
 
 use std::{
     ffi::{CStr, CString, c_char, c_int, c_uint, c_void},

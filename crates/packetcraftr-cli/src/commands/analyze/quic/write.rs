@@ -1,7 +1,11 @@
 use super::output::{EarlyData, Stream};
-use crate::{errors::CliError, invocation::Invocation, staged_output::StagedFile};
+use crate::{
+    errors::CliError, invocation::Invocation, publication::bounded_json_len,
+    staged_output::StagedFile,
+};
 use packetcraftr_core::error::Kind;
 use serde::Serialize;
+use serde_json::ser::{CompactFormatter, PrettyFormatter};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
@@ -23,6 +27,7 @@ pub(super) struct Exporter {
     max_connections: usize,
     files: Vec<(PathBuf, StagedFile)>,
     connections: Vec<ExportedConnection>,
+    charged_connection_bytes: usize,
 }
 impl Exporter {
     pub(super) fn new(
@@ -42,6 +47,7 @@ impl Exporter {
             max_connections,
             files: Vec::new(),
             connections: Vec::new(),
+            charged_connection_bytes: 0,
         })
     }
     pub(super) fn range(&mut self, name: &str, data: &[u8]) -> Result<(), CliError> {
@@ -88,18 +94,10 @@ impl Exporter {
                 })
                 .collect(),
         };
-        let length = crate::publication::bounded_json_len(
-            &exported,
-            remaining,
-            serde_json::ser::CompactFormatter,
-        )
-        .map_err(|_| {
-            CliError::new(
-                Kind::Policy,
-                "QUIC application output limit exceeded by export manifest",
-            )
-        })?;
+        let length = bounded_json_len(&exported, remaining, CompactFormatter)
+            .map_err(|error| error.into_cli_error(manifest_limit_error))?;
         self.connections.push(exported);
+        self.charged_connection_bytes += length;
         Ok(length)
     }
     pub(super) fn mark_capture_incomplete(&mut self) {
@@ -107,24 +105,27 @@ impl Exporter {
             connection.incomplete = true;
         }
     }
-    pub(super) fn finish(mut self) -> Result<(), CliError> {
+    pub(super) fn finish(mut self, remaining: usize) -> Result<usize, CliError> {
+        let contents = Manifest {
+            schema: "packetcraftr.quic-streams/v1",
+            connections: self.connections,
+        };
+        let json_limit = (remaining + self.charged_connection_bytes)
+            .checked_sub(1)
+            .ok_or_else(manifest_limit_error)?;
+        let length = bounded_json_len(&contents, json_limit, PrettyFormatter::new())
+            .map_err(|error| error.into_cli_error(manifest_limit_error))?;
         let path = self.directory.join("quic-manifest.json");
         let mut manifest = self.manifest;
         let mut writer = io::BufWriter::with_capacity(64 * 1024, manifest.as_file_mut());
-        let written = serde_json::to_writer_pretty(
-            &mut writer,
-            &Manifest {
-                schema: "packetcraftr.quic-streams/v1",
-                connections: self.connections,
-            },
-        )
-        .map_err(|e| CliError::caused(Kind::Io, &e))
-        .and_then(|()| {
-            writer
-                .write_all(b"\n")
-                .and_then(|()| writer.flush())
-                .map_err(|e| CliError::caused(Kind::Io, &e))
-        });
+        let written = serde_json::to_writer_pretty(&mut writer, &contents)
+            .map_err(|e| CliError::caused(Kind::Io, &e))
+            .and_then(|()| {
+                writer
+                    .write_all(b"\n")
+                    .and_then(|()| writer.flush())
+                    .map_err(|e| CliError::caused(Kind::Io, &e))
+            });
         // BufWriter's Drop would retry buffered output after a failed write or flush.
         let _ = writer.into_parts();
         written?;
@@ -145,6 +146,13 @@ impl Exporter {
             }
             published.push(path.display().to_string());
         }
-        Ok(())
+        Ok(json_limit - length)
     }
+}
+
+fn manifest_limit_error() -> CliError {
+    CliError::new(
+        Kind::Policy,
+        "QUIC application output limit exceeded by export manifest",
+    )
 }

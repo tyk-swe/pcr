@@ -91,12 +91,11 @@ where
     let frame = read_frame(&mut stream, &window, request.max_message_bytes)?;
     let received_at = clock.wall_now();
     let completed = clock.now();
-    if completed >= window.deadline {
-        return Err(Error::Timeout {
-            phase: Phase::ReadMessage,
-            transferred: frame.len() - LENGTH_PREFIX_BYTES,
-        });
-    }
+    window.remaining_at(
+        completed,
+        Phase::ReadMessage,
+        frame.len() - LENGTH_PREFIX_BYTES,
+    )?;
     Ok(Response {
         peer_address,
         local_address,
@@ -144,14 +143,15 @@ struct Window<'a, K> {
 
 impl<K: Clock> Window<'_, K> {
     fn remaining(&self, phase: Phase, transferred: usize) -> Result<Duration, Error> {
-        self.deadline
-            .checked_duration_since(self.clock.now())
-            .filter(|remaining| !remaining.is_zero())
-            .ok_or(Error::Timeout { phase, transferred })
+        self.remaining_at(self.clock.now(), phase, transferred)
     }
 
-    /// The next socket wait, at most [`POLL_INTERVAL`], once cancellation is checked.
-    fn next_wait(&self, phase: Phase, transferred: usize) -> Result<Duration, Error> {
+    fn remaining_at(
+        &self,
+        now: Instant,
+        phase: Phase,
+        transferred: usize,
+    ) -> Result<Duration, Error> {
         if let Some(cancellation) = self.cancellation {
             cancellation.check().map_err(|cancelled| Error::Cancelled {
                 phase,
@@ -159,6 +159,14 @@ impl<K: Clock> Window<'_, K> {
                 cancelled,
             })?;
         }
+        self.deadline
+            .checked_duration_since(now)
+            .filter(|remaining| !remaining.is_zero())
+            .ok_or(Error::Timeout { phase, transferred })
+    }
+
+    /// The next socket wait, at most [`POLL_INTERVAL`], once cancellation is checked.
+    fn next_wait(&self, phase: Phase, transferred: usize) -> Result<Duration, Error> {
         self.remaining(phase, transferred)
             .map(|remaining| remaining.min(POLL_INTERVAL))
     }
@@ -433,10 +441,16 @@ mod tests {
     impl Read for BufferedStream {
         fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
             self.reads.fetch_add(1, Ordering::SeqCst);
-            match &mut self.response {
-                Some(response) => response.read(bytes),
-                None => Err(io::ErrorKind::WouldBlock.into()),
+            let Some(response) = &mut self.response else {
+                return Err(io::ErrorKind::WouldBlock.into());
+            };
+            let count = response.read(bytes)?;
+            if response.position() == response.get_ref().len() as u64
+                && let Some(cancellation) = self.cancellation.take()
+            {
+                cancellation.cancel();
             }
+            Ok(count)
         }
     }
 
@@ -576,6 +590,79 @@ mod tests {
             } if transferred == QUERY.len() + LENGTH_PREFIX_BYTES
         ));
         assert_eq!(reads, 0);
+    }
+
+    #[test]
+    fn cancellation_during_final_read_prevents_a_response() {
+        let cancellation = Cancellation::default();
+        let (result, _) = buffered_query(VecDeque::new(), Some(&cancellation));
+        assert!(matches!(
+            result.unwrap_err(),
+            Error::Cancelled {
+                phase: Phase::ReadMessage,
+                transferred,
+                ..
+            } if transferred == QUERY.len()
+        ));
+    }
+
+    #[test]
+    fn cancellation_while_recording_the_response_preserves_message_bytes() {
+        #[derive(Clone)]
+        struct CancelOnReceive {
+            reads: Arc<AtomicUsize>,
+            cancellation: Cancellation,
+        }
+
+        impl Clock for CancelOnReceive {
+            type Error = std::convert::Infallible;
+
+            fn now(&self) -> Instant {
+                SystemClock.now()
+            }
+
+            fn wall_now(&self) -> SystemTime {
+                if self.reads.load(Ordering::SeqCst) > 0 {
+                    self.cancellation.cancel();
+                }
+                SystemClock.wall_now()
+            }
+
+            fn sleep(&self, delay: Duration, deadline: &Deadline) -> Result<(), Self::Error> {
+                SystemClock.sleep(delay, deadline)
+            }
+        }
+
+        let clock = CancelOnReceive {
+            reads: Arc::new(AtomicUsize::new(0)),
+            cancellation: Cancellation::default(),
+        };
+        let provider = Arc::new(BufferedProvider(Mutex::new(Some(BufferedStream {
+            pending: Vec::new(),
+            response: None,
+            flush_errors: VecDeque::new(),
+            cancellation: None,
+            reads: Arc::clone(&clock.reads),
+        }))));
+        let result = query_with_clock(
+            Request {
+                endpoint: SocketAddr::from(([127, 0, 0, 1], 53)),
+                query: QUERY,
+                timeout: Duration::from_secs(2),
+                cancellation: Some(&clock.cancellation),
+                max_message_bytes: 512,
+            },
+            provider,
+            &clock,
+        );
+        assert!(matches!(
+            result.unwrap_err(),
+            Error::Cancelled {
+                phase: Phase::ReadMessage,
+                transferred,
+                ..
+            } if transferred == QUERY.len()
+        ));
     }
 
     /// Advances one millisecond on every read.

@@ -70,6 +70,13 @@ fn deadline_interrupts_pipe_read() {
 }
 
 #[test]
+fn empty_pipe_read_does_not_wait_for_data() {
+    let control = test_control(Some(LATER), Cancellation::default());
+    let (mut source, _writer) = polled_pipe(&control);
+    assert_eq!(source.read(&mut []).unwrap(), 0);
+}
+
+#[test]
 fn delayed_data_precedes_writer_eof() {
     let control = test_control(Some(PROMPTLY), Cancellation::default());
     let (mut source, mut writer) = polled_pipe(&control);

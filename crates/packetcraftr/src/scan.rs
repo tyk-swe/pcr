@@ -39,6 +39,7 @@ pub mod profile;
 mod report;
 mod request;
 mod sctp;
+pub mod segmentation;
 mod selection;
 mod tcp;
 

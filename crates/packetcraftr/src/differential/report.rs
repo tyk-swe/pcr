@@ -309,6 +309,67 @@ pub fn hex(bytes: &[u8]) -> String {
     packetcraftr_core::field::hex::compact_hex(bytes)
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NatBehavior {
+    NoReceptions,
+    Preserved,
+    StableTuple,
+    StableAddressVaryingPort,
+    VaryingAddress,
+}
+
+impl NatBehavior {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::NoReceptions => "no_receptions",
+            Self::Preserved => "preserved",
+            Self::StableTuple => "stable_tuple",
+            Self::StableAddressVaryingPort => "stable_address_varying_port",
+            Self::VaryingAddress => "varying_address",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NatMapping {
+    pub records: usize,
+    pub sources: Vec<std::net::SocketAddr>,
+    pub behavior: NatBehavior,
+}
+
+/// Classify source-tuple stability from Responder reception records. This
+/// observes one destination only: stable here does not prove endpoint
+/// independent mapping to other destinations.
+#[must_use]
+pub fn nat_mapping(
+    records: &[ReceptionRecord],
+    expected_source: Option<std::net::SocketAddr>,
+) -> NatMapping {
+    let sources: Vec<std::net::SocketAddr> = records
+        .iter()
+        .map(|record| record.source)
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let behavior = if sources.is_empty() {
+        NatBehavior::NoReceptions
+    } else if expected_source.is_some_and(|expected| sources == [expected]) {
+        NatBehavior::Preserved
+    } else if sources.len() == 1 {
+        NatBehavior::StableTuple
+    } else if sources.iter().all(|source| source.ip() == sources[0].ip()) {
+        NatBehavior::StableAddressVaryingPort
+    } else {
+        NatBehavior::VaryingAddress
+    };
+    NatMapping {
+        records: records.len(),
+        sources,
+        behavior,
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SensorObservation {
     pub variant_index: u16,
@@ -472,6 +533,26 @@ mod tests {
         let joined = join_receptions(aggregate, &records);
         assert!(joined.attempts[0].answered);
         assert!(!joined.attempts[1].answered);
+    }
+
+    #[test]
+    fn nat_mapping_classifies_tuple_stability() {
+        let record = |source: &str| ReceptionRecord {
+            variant_index: 0,
+            attempt_seq: 0,
+            source: source.parse().unwrap(),
+            payload_sha256: "00".repeat(32),
+        };
+        let preserved = nat_mapping(
+            &[record("192.0.2.1:53210")],
+            Some("192.0.2.1:53210".parse().unwrap()),
+        );
+        assert_eq!(preserved.behavior, NatBehavior::Preserved);
+        let varying_port = nat_mapping(&[record("192.0.2.1:1000"), record("192.0.2.1:1001")], None);
+        assert_eq!(varying_port.behavior, NatBehavior::StableAddressVaryingPort);
+        let varying_ip = nat_mapping(&[record("192.0.2.1:1000"), record("192.0.2.2:1000")], None);
+        assert_eq!(varying_ip.behavior, NatBehavior::VaryingAddress);
+        assert_eq!(nat_mapping(&[], None).behavior, NatBehavior::NoReceptions);
     }
 
     #[test]

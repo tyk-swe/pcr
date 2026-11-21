@@ -315,6 +315,12 @@ commands! {
     /// Generate a deterministic labelled synthetic capture from a scenario.
     #[command(after_long_help = packet::scenario::AFTER_LONG_HELP)]
     ScenarioBuild(packet::scenario::ScenarioBuild) => ("packet", "scenario-build", 58),
+    /// Run a TCP segmentation matrix from this host.
+    #[command(after_long_help = network::segmentation::AFTER_LONG_HELP)]
+    Segmentation(network::segmentation::Segmentation) => ("network", "segmentation", 59),
+    /// Classify NAT source-tuple stability from a Responder log.
+    #[command(after_long_help = network::nat_mapping::AFTER_LONG_HELP)]
+    NatMapping(network::nat_mapping::NatMapping) => ("network", "nat-mapping", 60),
     /// Generate shell completions and man pages under a directory.
     #[command(after_long_help = "Writes completions for Bash, Elvish, Fish, PowerShell, and Zsh, and man pages for all grouped paths. Requires a writable directory.\n\nExample:\n  packetcraftr reference documentation --directory ./cli-docs")]
     Documentation(reference::documentation::Args) => ("reference", "documentation", 30),

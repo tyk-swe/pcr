@@ -3958,4 +3958,18 @@ fn retest_plan_verifies_an_anchored_bundle_and_orders_steps() {
     assert!(text.contains("bundle_anchored=true"), "{text}");
     assert!(text.contains("step=1 rerun_command=scan"), "{text}");
     assert!(text.contains("step=2 rerun_command=hunt"), "{text}");
+
+    let mut gated = args.clone();
+    gated.push("--fail-on".into());
+    gated.push("high".into());
+    let output = run(&gated);
+    assert_eq!(output.status.code(), Some(1), "{}", stdout(&output));
+    assert!(stdout(&output).contains("bundle_anchored=true"));
+
+    let mut limited = args;
+    limited.push("--max-result-bytes".into());
+    limited.push("1".into());
+    let output = run(&limited);
+    assert!(!output.status.success(), "{}", stdout(&output));
+    assert!(!stdout(&output).contains("retest_plan"));
 }

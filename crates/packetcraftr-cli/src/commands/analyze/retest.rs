@@ -215,6 +215,7 @@ impl Generate for RetestPlan {
         )?;
         let journal = packetcraftr_core::security::journal::Journal::parse(&journal_bytes)
             .map_err(CliError::classified)?;
+        let mut bundle_fails = false;
         let anchored = if let Some(bundle_path) = &self.bundle {
             let bundle_bytes = read(invocation, bundle_path, bundle::MAX_BUNDLE_DOCUMENT_BYTES)?;
             let bundle = bundle::Bundle::parse(&bundle_bytes).map_err(CliError::classified)?;
@@ -229,6 +230,7 @@ impl Generate for RetestPlan {
                     "bundle journal head does not match the supplied journal",
                 ));
             }
+            bundle_fails = self.bounds.fails(&bundle.report);
             true
         } else {
             false
@@ -261,6 +263,6 @@ impl Generate for RetestPlan {
             ));
         }
         emit_stdout_document(invocation, &text)?;
-        Ok(CommandExit::SUCCESS)
+        Ok(CommandExit::status(u8::from(bundle_fails)))
     }
 }

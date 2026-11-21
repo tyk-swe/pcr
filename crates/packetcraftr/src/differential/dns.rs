@@ -599,7 +599,7 @@ fn poll_tcp_connection<S>(
     sink: &mut S,
     report: &mut ResponderReport,
     last_received: &mut Option<Instant>,
-    seen: &mut HashSet<(u16, u32, [u8; 32])>,
+    seen: &mut HashSet<(u16, u32)>,
 ) -> Result<bool, Error>
 where
     S: Sink<ResponderEvent, Ack = ()>,
@@ -653,7 +653,7 @@ where
         return Ok(true);
     };
     let digest: [u8; 32] = Sha256::digest(&message).into();
-    if !seen.insert((variant_index, attempt_seq, digest)) {
+    if !seen.insert((variant_index, attempt_seq)) {
         report.ignored += 1;
         return Ok(true);
     }
@@ -714,7 +714,7 @@ where
     let mut report = ResponderReport::default();
     let mut buffer = vec![0_u8; 65_535];
     let mut tcp_connections: Vec<TcpConnection> = Vec::new();
-    let mut seen: HashSet<(u16, u32, [u8; 32])> = HashSet::new();
+    let mut seen: HashSet<(u16, u32)> = HashSet::new();
     loop {
         deadline.check_cancelled().map_err(Error::from)?;
         if deadline.check().is_err() {
@@ -797,7 +797,7 @@ where
             continue;
         };
         let digest: [u8; 32] = Sha256::digest(&bytes).into();
-        if !seen.insert((variant_index, attempt_seq, digest)) {
+        if !seen.insert((variant_index, attempt_seq)) {
             report.ignored += 1;
             continue;
         }

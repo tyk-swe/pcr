@@ -63,7 +63,7 @@ fn observations_from_frame(
     frame: &Frame,
     assembler: &mut FragmentAssembler,
 ) -> Vec<lib::SensorObservation> {
-    let Some(datagram) = assembler.push(frame) else {
+    let Some((key, datagram)) = assembler.push(frame) else {
         return Vec::new();
     };
     let Some(payload) = udp_payload(&datagram) else {
@@ -75,6 +75,14 @@ fn observations_from_frame(
     vec![lib::SensorObservation {
         variant_index: probe.variant_index,
         attempt_seq: probe.attempt_seq,
+        source: std::net::SocketAddr::new(
+            std::net::IpAddr::V4(key.source),
+            u16::from_be_bytes([datagram[0], datagram[1]]),
+        ),
+        destination: std::net::SocketAddr::new(
+            std::net::IpAddr::V4(key.destination),
+            u16::from_be_bytes([datagram[2], datagram[3]]),
+        ),
         payload_sha256: lib::hex(&probe.payload_sha256),
     }]
 }
@@ -119,13 +127,13 @@ const MAX_ASSEMBLIES: usize = 128;
 const MAX_DATAGRAM_BYTES: usize = 65_535;
 
 impl FragmentAssembler {
-    fn push(&mut self, frame: &Frame) -> Option<Bytes> {
+    fn push(&mut self, frame: &Frame) -> Option<(FragmentKey, Bytes)> {
         let piece = ipv4_piece(frame)?;
         if piece.payload.is_empty() {
             return None;
         }
         if piece.offset == 0 && !piece.more {
-            return Some(piece.payload);
+            return Some((piece.key, piece.payload));
         }
         self.tick = self.tick.saturating_add(1);
         if !self.assemblies.contains_key(&piece.key) && self.assemblies.len() >= MAX_ASSEMBLIES {
@@ -184,7 +192,7 @@ impl FragmentAssembler {
         for chunk in assembly.chunks.into_values() {
             datagram.extend_from_slice(&chunk);
         }
-        Some(Bytes::from(datagram))
+        Some((piece.key, Bytes::from(datagram)))
     }
 }
 
@@ -312,6 +320,11 @@ mod tests {
         assert_eq!(observations.len(), 1);
         assert_eq!(observations[0].variant_index, 3);
         assert_eq!(observations[0].attempt_seq, 9);
+        assert_eq!(observations[0].source.to_string(), "192.0.2.1:53210");
+        assert_eq!(
+            observations[0].destination.to_string(),
+            "198.51.100.2:40101"
+        );
         assert_eq!(
             observations[0].payload_sha256,
             lib::hex(&lib::canary::payload_sha256(&probe))

@@ -34,9 +34,10 @@ pub(super) struct PreviewInputs {
     pub(super) attempts: u32,
     pub(super) rate: Option<u32>,
     pub(super) timeout: Duration,
+    pub(super) portless_endpoints: usize,
 }
 
-fn preview_lines(
+pub(super) fn preview_lines(
     targets: usize,
     endpoints_per_target: usize,
     inputs: PreviewInputs,
@@ -278,7 +279,7 @@ fn render_text(
         let endpoints_per_target = ports
             .map(|ports| ports.endpoints.len())
             .or_else(|| ip_protocols.map(|protocols| protocols.protocols.len()))
-            .unwrap_or(0);
+            .unwrap_or(inputs.portless_endpoints);
         for line in preview_lines(report.targets.len(), endpoints_per_target, inputs) {
             write_stdout_line(invocation, format_args!("{line}"))?;
         }
@@ -350,6 +351,7 @@ mod tests {
             attempts,
             rate: Some(100),
             timeout: Duration::from_millis(timeout_ms),
+            portless_endpoints: 0,
         }
     }
 

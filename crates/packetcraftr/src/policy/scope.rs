@@ -362,6 +362,11 @@ mod tests {
         )
         .unwrap();
         assert_ne!(windowed.digest(), later_end.digest());
+        let v2_canonical = "packetcraftr.scope/v2\nlabel=lab\nallowed=10.0.0.1,192.0.2.0/24\ndenied=\npublic=false\nhostname=false\npermissive=false\nspoofing=false\nmax_packets=10\nmax_bytes=-\nnot_before=100\nnot_after=200\n";
+        assert_eq!(
+            windowed.digest(),
+            packetcraftr_core::field::hex::compact_hex(&Sha256::digest(v2_canonical.as_bytes()))
+        );
     }
 
     #[test]

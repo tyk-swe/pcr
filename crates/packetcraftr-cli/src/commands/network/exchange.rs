@@ -168,8 +168,15 @@ impl LiveDraft for Draft {
             packetcraftr::exchange::StopCondition::AllAnswered => "all_answered",
         };
         format!(
-            "timeout_ms={}\nstop={stop}\nmax_template_packets={max_template_packets}\n",
+            "timeout_ms={}\nstop={stop}\nmax_template_packets={max_template_packets}\nmax_responses={}\nmax_unmatched_frames={}\ncapture_max_frames={}\ncapture_max_bytes={}\ncapture_snap_length={}\ncapture_overflow={:?}\ndecode_max_packet_size={}\n",
             self.timeout.as_millis(),
+            self.collection.max_responses,
+            self.collection.max_unmatched_frames,
+            self.collection.capture.max_frames,
+            self.collection.capture.max_bytes,
+            self.collection.capture.snap_length,
+            self.collection.capture.overflow_policy,
+            self.collection.decode.limits.max_packet_size,
         )
     }
     fn validate(self, max_template_packets: usize) -> Result<Self::Parameters, CliError> {

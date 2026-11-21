@@ -474,6 +474,63 @@ mod tests {
     }
 
     #[test]
+    fn policy_digest_uses_the_documented_canonical_form() {
+        use sha2::{Digest, Sha256};
+
+        let policy = Policy {
+            allow_public_destinations: true,
+            allow_hostname_resolution: false,
+            allow_permissive_packets: true,
+            allow_source_spoofing: false,
+            allowed_destinations: vec![
+                "192.0.2.0/24".parse().unwrap(),
+                "10.0.0.1".parse().unwrap(),
+            ],
+            denied_destinations: vec!["10.0.0.9".parse().unwrap()],
+            required_destination_groups: vec![
+                vec!["192.0.2.0/24".parse().unwrap(), "10.0.0.1".parse().unwrap()],
+                vec!["172.16.0.0/12".parse().unwrap()],
+            ],
+            max_packets_per_operation: 10,
+            max_bytes_per_operation: 100,
+            max_resolved_addresses: 7,
+            window: Some(crate::policy::Window {
+                not_before_unix_seconds: Some(100),
+                not_after_unix_seconds: None,
+            }),
+        };
+        let canonical = "packetcraftr.policy/v1\npublic=true\nhostname=false\npermissive=true\nspoofing=false\nallowed=10.0.0.1,192.0.2.0/24\ndenied=10.0.0.9\ngroups=10.0.0.1,192.0.2.0/24;172.16.0.0/12\nmax_packets=10\nmax_bytes=100\nmax_resolved=7\nwindow=100..-\n";
+        let expected =
+            packetcraftr_core::field::hex::compact_hex(&Sha256::digest(canonical.as_bytes()));
+        assert_eq!(policy.digest(), expected);
+    }
+
+    #[test]
+    fn window_intersection_keeps_the_tighter_bound_on_each_side() {
+        use crate::policy::Window;
+        let window = |start: Option<u64>, end: Option<u64>| Window {
+            not_before_unix_seconds: start,
+            not_after_unix_seconds: end,
+        };
+        assert_eq!(
+            window(Some(100), None).intersect(window(None, Some(200))),
+            window(Some(100), Some(200))
+        );
+        assert_eq!(
+            window(None, None).intersect(window(None, None)),
+            window(None, None)
+        );
+        assert_eq!(
+            window(Some(100), Some(300)).intersect(window(Some(100), Some(300))),
+            window(Some(100), Some(300))
+        );
+        assert_eq!(
+            window(None, Some(300)).intersect(window(Some(200), None)),
+            window(Some(200), Some(300))
+        );
+    }
+
+    #[test]
     fn policy_digest_binds_every_admission_field_and_ignores_constraint_order() {
         let first = Policy {
             allowed_destinations: vec![

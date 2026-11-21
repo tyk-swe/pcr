@@ -30,6 +30,10 @@ pub(super) enum Planned {
     List(list::Request),
     Connect(connect::Request),
     Raw(raw::Request),
+    PlanOnly {
+        plan: crate::system::PlanSummary,
+        preview_lines: Vec<String>,
+    },
 }
 
 pub(super) fn prepare(
@@ -136,8 +140,33 @@ pub(super) fn prepare(
             "--preview sends no probe; combine it with --list or --plan-only",
         ));
     }
-    let gate_active = list || gate.plan_only || gate.plan_digest.is_some() || preview;
-    let plan = if gate_active {
+    if gate.plan_only && invocation.format != crate::output::contract::Format::Text {
+        return Err(CliError::new(
+            Kind::Usage,
+            format!(
+                "--plan-only prints text only, not --output {}",
+                invocation.format
+            ),
+        ));
+    }
+    let plan_only_needs_build =
+        gate.plan_only && !list && (discovery.is_some() || reverse_dns.is_some() || traceroute);
+    let gate_active = gate.plan_only || gate.plan_digest.is_some() || preview;
+    let gate_plan = if gate_active {
+        let schedule_lines = format!(
+            "ports={ports:?}\nexclude_ports={exclude_ports:?}\nip_protocols={ip_protocols:?}\nexclude_ip_protocols={exclude_ip_protocols:?}\ndiscovery_probes={discovery_probes:?}\ndiscovery_ports={discovery_ports:?}\ndiscovery_ip_protocols={discovery_ip_protocols:?}\nunresponsive_hosts={unresponsive_hosts:?}\nadaptive={adaptive:?}\nlink_mode={:?}\nmax_targets={max_targets}\nmax_probes={max_probes}\nmax_prepared_bytes={max_prepared_bytes}\nmax_undecoded={max_undecoded}\nmax_duration_ms={}\ncapture_limits={limits:?}\n{}",
+            route.link_mode,
+            duration.max_duration().as_millis(),
+            if traceroute {
+                format!(
+                    "traceroute_strategy={traceroute_strategy:?}\ntraceroute_port={traceroute_port:?}\ntraceroute_first_hop={traceroute_first_hop}\ntraceroute_max_hops={traceroute_max_hops}\ntraceroute_attempts={traceroute_attempts}\ntraceroute_max_probes={traceroute_max_probes}\ntraceroute_reuse_max_age_ms={traceroute_reuse_max_age_ms:?}\n"
+                )
+            } else {
+                String::new()
+            },
+        );
+        let udp_required = transports.contains(&Transport::Udp)
+            || discovery_probes.contains(&arguments::DiscoveryProbe::Udp);
         let summary = scan_plan_summary(
             invocation,
             ScanPlanInputs {
@@ -167,6 +196,9 @@ pub(super) fn prepare(
                 udp_payload_file: &udp_payload_file,
                 udp_profiles: &udp_profiles,
                 curated_udp_payloads,
+                schedule_lines: &schedule_lines,
+                udp_required,
+                max_targets,
             },
         )?;
         if gate.plan_digest.is_some() {
@@ -181,7 +213,7 @@ pub(super) fn prepare(
         None
     };
 
-    if list || gate.plan_only {
+    if list || (gate.plan_only && !plan_only_needs_build) {
         validate_list_options(true, discovery, &reverse_dns, traceroute)?;
 
         let diagnostic = !tcp_scan.is_syn();
@@ -199,6 +231,7 @@ pub(super) fn prepare(
             ));
         }
         let ip_only = transports == [Transport::Ip];
+        let portless_endpoints = usize::from(transports == [Transport::Icmp]);
         if ip_only && requested == method::Requested::Connect {
             return Err(CliError::new(
                 Kind::Usage,
@@ -257,11 +290,12 @@ pub(super) fn prepare(
             max_duration: duration.max_duration(),
             shuffle_seed,
             policy,
-            plan,
+            plan: gate_plan,
             preview: preview.then_some(list::PreviewInputs {
                 attempts,
                 rate,
                 timeout: timeout.timeout(),
+                portless_endpoints,
             }),
         }));
     }
@@ -363,6 +397,49 @@ pub(super) fn prepare(
     let reverse_dns = reverse_dns
         .map(crate::command_options::parse_target)
         .transpose()?;
+    if gate.plan_only {
+        if selected_method == method::Method::Connect
+            && let Some(server) = reverse_dns.clone()
+        {
+            super::validated_reverse_dns(
+                followup::ReverseDns {
+                    server,
+                    server_port: reverse_dns_port,
+                    transport: packetcraftr::dns::TransportMode::Tcp,
+                },
+                &built.request,
+            )?;
+        }
+        let mut plan = gate_plan.ok_or_else(|| {
+            CliError::new(Kind::Internal, "scan plan-only preparation lost its plan")
+        })?;
+        let candidates = candidate_upper_bound(
+            &built.request.targets,
+            &policy.clone().into_policy(),
+            max_targets,
+        );
+        plan.packets = candidates
+            .saturating_mul(built.request.endpoints.len() as u64)
+            .saturating_mul(u64::from(built.request.attempts));
+        let preview_lines = if preview {
+            list::preview_lines(
+                usize::try_from(candidates).unwrap_or(usize::MAX),
+                built.request.endpoints.len(),
+                list::PreviewInputs {
+                    attempts: built.request.attempts,
+                    rate: built.request.probes_per_second,
+                    timeout: built.request.timeout,
+                    portless_endpoints: 0,
+                },
+            )
+        } else {
+            Vec::new()
+        };
+        return Ok(Planned::PlanOnly {
+            plan,
+            preview_lines,
+        });
+    }
     if selected_method == method::Method::Connect {
         let reverse = reverse_dns
             .map(|server| {
@@ -510,6 +587,39 @@ struct ScanPlanInputs<'a> {
     udp_payload_file: &'a Option<std::path::PathBuf>,
     udp_profiles: &'a Option<std::path::PathBuf>,
     curated_udp_payloads: bool,
+    schedule_lines: &'a str,
+    udp_required: bool,
+    max_targets: usize,
+}
+
+fn candidate_upper_bound(
+    selection: &packetcraftr::target::Selection,
+    policy: &packetcraftr::policy::Policy,
+    max_targets: usize,
+) -> u64 {
+    use packetcraftr::target::{Specification, Target};
+    use std::collections::HashSet;
+
+    let mut seen = HashSet::new();
+    let mut total: u64 = 0;
+    for spec in &selection.include {
+        if !seen.insert(spec) {
+            continue;
+        }
+        let count = match spec {
+            Specification::Target(Target::Hostname(_)) => policy.max_resolved_addresses as u64,
+            Specification::Target(_) => 1,
+            Specification::Network(network) => network
+                .cardinality(max_targets)
+                .map(|count| count as u64)
+                .unwrap_or(max_targets as u64),
+        };
+        total = total.saturating_add(count);
+        if total >= max_targets as u64 {
+            return max_targets as u64;
+        }
+    }
+    total.min(max_targets as u64)
 }
 
 fn scan_plan_summary(
@@ -543,10 +653,13 @@ fn scan_plan_summary(
         max_ports: inputs.max_ports,
     }
     .select_if_requested()?;
-    let endpoints: Vec<String> = selected
-        .as_ref()
-        .map(|selected| selected.endpoints.iter().map(ToString::to_string).collect())
-        .unwrap_or_default();
+    let endpoints: Vec<String> = match &selected {
+        Some(selected) => selected.endpoints.iter().map(ToString::to_string).collect(),
+        None if inputs.transports == [Transport::Icmp] => {
+            vec![packetcraftr::probe::Endpoint::Icmp.to_string()]
+        }
+        None => Vec::new(),
+    };
     let mut hasher = Sha256::new();
     hasher.update(
         format!(
@@ -573,6 +686,7 @@ fn scan_plan_summary(
         )
         .as_bytes(),
     );
+    hasher.update(inputs.schedule_lines.as_bytes());
     for spec in &inputs.targets.include {
         hasher.update(format!("include={spec}\n").as_bytes());
     }
@@ -582,17 +696,33 @@ fn scan_plan_summary(
     for endpoint in &endpoints {
         hasher.update(format!("endpoint={endpoint}\n").as_bytes());
     }
+    if inputs.curated_udp_payloads && !inputs.udp_required {
+        return Err(CliError::new(
+            Kind::Usage,
+            "--curated-udp-payloads requires UDP scan or discovery probes",
+        ));
+    }
+    hasher.update(b"udp_payload=");
     if inputs.udp_payload_hex.is_some() || inputs.udp_payload_file.is_some() {
         let payload = super::inputs::read_udp_payload(
             invocation,
-            true,
+            inputs.udp_required,
             inputs.udp_payload_hex.as_deref(),
             inputs.udp_payload_file.as_deref(),
         )?;
         hasher.update((payload.len() as u64).to_be_bytes());
         hasher.update(&payload);
+    } else {
+        hasher.update(b"absent\n");
     }
+    hasher.update(b"udp_profiles=");
     if let Some(profiles) = inputs.udp_profiles {
+        if !inputs.udp_required {
+            return Err(CliError::new(
+                Kind::Usage,
+                "--udp-profiles requires --transport udp",
+            ));
+        }
         let bytes = crate::input::read_document(
             &invocation.control,
             profiles,
@@ -601,8 +731,10 @@ fn scan_plan_summary(
         )?;
         hasher.update((bytes.len() as u64).to_be_bytes());
         hasher.update(&bytes);
+    } else {
+        hasher.update(b"absent\n");
     }
-    let packets = (inputs.targets.include.len() as u64)
+    let packets = candidate_upper_bound(inputs.targets, &policy, inputs.max_targets)
         .saturating_mul(endpoints.len() as u64)
         .saturating_mul(u64::from(inputs.attempts));
     Ok(crate::system::PlanSummary {

@@ -330,6 +330,64 @@ fn plain_units_and_bytes() -> (u64, u64) {
     (2, REQUEST.len() as u64)
 }
 
+#[derive(Clone)]
+struct FixedClock {
+    wall: std::time::SystemTime,
+}
+
+impl Clock for FixedClock {
+    type Error = Infallible;
+
+    fn now(&self) -> Instant {
+        Instant::now()
+    }
+
+    fn wall_now(&self) -> std::time::SystemTime {
+        self.wall
+    }
+
+    fn sleep(&self, _delay: Duration, _deadline: &Deadline) -> Result<(), Self::Error> {
+        Ok(())
+    }
+}
+
+#[test]
+fn scope_window_uses_the_injected_clock_before_connecting() {
+    let (units, bytes) = plain_units_and_bytes();
+    let policy = Policy {
+        window: Some(crate::policy::Window {
+            not_before_unix_seconds: Some(100),
+            not_after_unix_seconds: Some(200),
+        }),
+        ..budget(units, bytes)
+    };
+    let at = |seconds: u64| FixedClock {
+        wall: std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(seconds),
+    };
+
+    let (client, observed) = fake_client(&policy, Server::Plain, None);
+    let denied = client
+        .with_clock(at(200))
+        .audit_http(&HttpRequest::new(ENDPOINT));
+    assert!(
+        matches!(
+            denied,
+            Err(Error::Policy(PolicyError::OutsideScopeWindow {
+                now_unix_seconds: 200
+            }))
+        ),
+        "{denied:?}"
+    );
+    observed.lock().unwrap().assert_untouched();
+
+    let (client, observed) = fake_client(&policy, Server::Plain, None);
+    client
+        .with_clock(at(100))
+        .audit_http(&HttpRequest::new(ENDPOINT))
+        .unwrap();
+    assert!(observed.lock().unwrap().connects > 0);
+}
+
 fn assert_traffic_unit_limit<T: std::fmt::Debug>(result: Result<T, Error>) {
     assert!(
         matches!(

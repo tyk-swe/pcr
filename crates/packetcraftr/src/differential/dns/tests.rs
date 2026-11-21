@@ -35,6 +35,114 @@ fn reservation_covers_generated_queries_beyond_the_response_limit() {
     assert!(expected > attempts.len() as u64 * 32);
 }
 
+struct TimeoutUdp;
+
+impl packetcraftr_netio::udp::Provider for TimeoutUdp {
+    fn exchange(
+        &self,
+        endpoint: SocketAddr,
+        request: &[u8],
+        _max_response: usize,
+        _deadline: &Deadline,
+    ) -> Result<packetcraftr_netio::udp::Reply, packetcraftr_netio::udp::Error> {
+        Ok(packetcraftr_netio::udp::Reply {
+            peer: endpoint,
+            local: "127.0.0.1:40000".parse().unwrap(),
+            exchange: packetcraftr_netio::bounded::Exchange {
+                response: Bytes::new(),
+                bytes_sent: request.len(),
+                outcome: packetcraftr_netio::bounded::Outcome::TimedOut,
+            },
+        })
+    }
+}
+
+struct CancellingStream {
+    peer: SocketAddr,
+    cancellation: packetcraftr_core::budget::Cancellation,
+}
+
+impl std::io::Read for CancellingStream {
+    fn read(&mut self, _bytes: &mut [u8]) -> std::io::Result<usize> {
+        self.cancellation.cancel();
+        Err(std::io::Error::from(std::io::ErrorKind::WouldBlock))
+    }
+}
+
+impl std::io::Write for CancellingStream {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl packetcraftr_netio::tcp::Stream for CancellingStream {
+    fn peer_addr(&self) -> std::io::Result<SocketAddr> {
+        Ok(self.peer)
+    }
+
+    fn local_addr(&self) -> std::io::Result<SocketAddr> {
+        Ok("127.0.0.1:40001".parse().unwrap())
+    }
+
+    fn set_read_timeout(&self, _timeout: Option<Duration>) -> std::io::Result<()> {
+        Ok(())
+    }
+
+    fn set_write_timeout(&self, _timeout: Option<Duration>) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+#[derive(Clone)]
+struct CancellingTcp {
+    cancellation: packetcraftr_core::budget::Cancellation,
+}
+
+impl packetcraftr_netio::tcp::Provider for CancellingTcp {
+    type Stream = CancellingStream;
+
+    fn connect(
+        &self,
+        endpoint: SocketAddr,
+        _deadline: &Deadline,
+    ) -> Result<Self::Stream, packetcraftr_netio::tcp::Error> {
+        Ok(CancellingStream {
+            peer: endpoint,
+            cancellation: self.cancellation.clone(),
+        })
+    }
+}
+
+#[test]
+fn cancellation_during_final_tcp_attempt_is_propagated() {
+    let cancellation = packetcraftr_core::budget::Cancellation::default();
+    let client = crate::Client::new(
+        packetcraftr_core::protocol::builtin::registry(),
+        crate::policy::Policy::default(),
+        crate::ProviderSet::tcp(
+            CancellingTcp {
+                cancellation: cancellation.clone(),
+            },
+            (),
+        )
+        .with_udp(TimeoutUdp),
+    )
+    .with_cancellation(cancellation);
+    let mut request = Request::new(
+        SocketAddrV4::new(Ipv4Addr::LOCALHOST, 53),
+        [7_u8; TOKEN_LEN],
+    );
+    request.repeats = 1;
+    request.timeout = Duration::from_millis(200);
+    request.max_duration = Duration::from_secs(10);
+    let result = client.dns_differential(&request);
+    assert!(matches!(result, Err(Error::Execution { .. })), "{result:?}");
+}
+
 #[test]
 fn junk_datagrams_do_not_consume_the_matching_budget() {
     let port = free_port();
@@ -184,15 +292,15 @@ fn tcp_reception_limit_is_checked_between_simultaneous_queries() {
             .expect("TCP responder should connect");
         streams.push(stream);
     }
-    let (query, _, _) = build_query(&token, 0, &CATALOG[0], 0).unwrap();
     let barrier = Arc::new(std::sync::Barrier::new(streams.len() + 1));
     let writers: Vec<_> = streams
         .iter()
-        .map(|stream| {
+        .enumerate()
+        .map(|(index, stream)| {
             let mut stream = stream.try_clone().unwrap();
             let barrier = Arc::clone(&barrier);
-            let query = query.clone();
             std::thread::spawn(move || {
+                let (query, _, _) = build_query(&token, 0, &CATALOG[0], index as u32).unwrap();
                 barrier.wait();
                 std::thread::sleep(Duration::from_millis(250));
                 let _ = stream.write_all(&(query.len() as u16).to_be_bytes());

@@ -84,10 +84,11 @@ impl<P: UdpProviders + TcpProviders, K: Clock> Client<P, K> {
 
         let connections = if request.tcp_fallback { 2 } else { 1 };
         let messages = connections * 2;
+        let framing_bytes = if request.tcp_fallback { 4 } else { 0 };
         let application_bytes = count(query.len())
             .saturating_mul(connections)
             .saturating_add(count(request.max_response_bytes).saturating_mul(connections))
-            .saturating_add(2);
+            .saturating_add(framing_bytes);
         admit(
             &self.policy,
             request.connection.endpoint,

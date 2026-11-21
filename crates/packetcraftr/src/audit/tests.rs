@@ -537,6 +537,37 @@ fn dns_audit_falls_back_to_tcp_without_charging_tcp_amplification_to_udp() {
 }
 
 #[test]
+fn dns_audit_reserves_tcp_framing_bytes_before_exchange() {
+    let query_len = 30_u64;
+    let exact = 2 * query_len + 2 * 65_535 + 4;
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let client = Client::new(
+        Arc::new(Registry::default()),
+        budget(6, exact - 1),
+        ProviderSet::tcp(FakeDnsTcp, ()).with_udp(FakeDnsUdp {
+            truncated: false,
+            calls: Arc::clone(&calls),
+        }),
+    );
+    let result = client.audit_dns(&DnsRequest::new(ENDPOINT, "example.test"));
+    assert!(result.is_err(), "{result:?}");
+    assert_eq!(calls.load(Ordering::Relaxed), 0);
+
+    let client = Client::new(
+        Arc::new(Registry::default()),
+        budget(6, exact),
+        ProviderSet::tcp(FakeDnsTcp, ()).with_udp(FakeDnsUdp {
+            truncated: false,
+            calls: Arc::clone(&calls),
+        }),
+    );
+    client
+        .audit_dns(&DnsRequest::new(ENDPOINT, "example.test"))
+        .unwrap();
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
+}
+
+#[test]
 fn scope_window_uses_the_injected_clock_before_connecting() {
     let (units, bytes) = plain_units_and_bytes();
     let policy = Policy {

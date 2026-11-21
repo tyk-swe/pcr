@@ -284,7 +284,21 @@ fn scrub_frame(
         patch.destination_ip = Some(pseudonyms.ip(destination));
     }
     if patch.is_empty() {
-        return Ok(fallback_patch(frame, pseudonyms).unwrap_or_else(|| frame.clone()));
+        if let Some(patched) = fallback_patch(frame, pseudonyms) {
+            return Ok(patched);
+        }
+        if decoded
+            .packet
+            .iter()
+            .find_map(identity::network_endpoints)
+            .is_some()
+        {
+            return Err(CliError::new(
+                Kind::Policy,
+                "scrub cannot pseudonymize IP addresses on this link type",
+            ));
+        }
+        return Ok(frame.clone());
     }
     match transform::rewrite(frame, &patch, RewriteLimits { max_output_bytes }) {
         Ok(frame) => Ok(frame),
@@ -857,6 +871,21 @@ mod tests {
         bytes[64..].copy_from_slice(&segment);
         let frame = Frame::new(None, LinkType::RAW, bytes).unwrap();
         assert!(fallback_patch(&frame, &mut Pseudonyms::default()).is_none());
+        assert!(scrub_frame(&frame, &dissector, &mut Pseudonyms::default(), 1_000_000).is_err());
+    }
+
+    #[test]
+    fn scrub_refuses_ip_on_unsupported_link_types() {
+        let segment = udp_segment(
+            IpAddr::from(V4_SOURCE),
+            IpAddr::from(V4_DESTINATION),
+            b"loopback-link",
+        );
+        let raw = ipv4_frame(17, &segment, 0);
+        let mut bytes = vec![0, 0, 0, 2];
+        bytes.extend_from_slice(raw.bytes());
+        let frame = Frame::new(None, LinkType::LOOP, bytes).unwrap();
+        let dissector = Dissector::new(packetcraftr_core::protocol::builtin::registry());
         assert!(scrub_frame(&frame, &dissector, &mut Pseudonyms::default(), 1_000_000).is_err());
     }
 

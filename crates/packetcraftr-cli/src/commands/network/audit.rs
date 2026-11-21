@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::commands::security::{Bounds, invalid, publish, read};
+use crate::commands::security::{Bounds, check_result_size, invalid, publish, read};
 use crate::commands::{CommandExit, Generate, Spec};
 use crate::invocation::Invocation;
 use crate::output::contract::{Command, Format};
@@ -125,7 +125,7 @@ impl Generate for AuditDns {
                 format!("audit-dns prints text only, not --output {format}"),
             ));
         }
-        self.bounds.core()?;
+        let limits = self.bounds.core()?;
         let mut request = packetcraftr::audit::DnsRequest::new(self.endpoint, self.name.clone());
         request.connection.timeout = Duration::from_millis(self.timeout_ms);
         request.query_type = self.query_type;
@@ -139,14 +139,20 @@ impl Generate for AuditDns {
             crate::system::Runtime::Workflow,
         );
         let report = client.audit_dns(&request).map_err(CliError::classified)?;
-        if report.findings.len() > self.bounds.core()?.max_findings {
+        if report.findings.len() > limits.max_findings {
             return Err(CliError::classified(
                 packetcraftr_core::security::Error::Limit {
                     field: "max_findings",
-                    limit: self.bounds.core()?.max_findings,
+                    limit: limits.max_findings,
                 },
             ));
         }
+        check_result_size(
+            format,
+            &crate::commands::security::output::Report::from(&report),
+            self.bounds.max_result_bytes,
+            "security result exceeds --max-result-bytes",
+        )?;
         let mut text = format!(
             "audit-dns endpoint={} findings={} complete={}\n",
             self.endpoint,

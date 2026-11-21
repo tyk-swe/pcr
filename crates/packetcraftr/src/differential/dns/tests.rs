@@ -211,7 +211,10 @@ fn junk_datagrams_do_not_consume_the_matching_budget() {
                 .ok()
         })
         .expect("responder TCP listener should become ready");
-    udp.send_to(b"junk", (Ipv4Addr::LOCALHOST, port)).unwrap();
+    for _ in 0..3 {
+        udp.send_to(b"junk", (Ipv4Addr::LOCALHOST, port)).unwrap();
+        std::thread::sleep(Duration::from_millis(60));
+    }
     let (query, _, _) = build_query(&token, 0, &CATALOG[0], 0).unwrap();
     let mut received = false;
     for _ in 0..20 {
@@ -292,6 +295,70 @@ fn replayed_dns_identities_do_not_consume_budget_or_poison_records() {
             .collect::<Vec<_>>(),
         [0, 1]
     );
+}
+
+#[test]
+fn dns_responder_does_not_reply_after_a_blocked_sink_outlives_its_duration() {
+    let report = respond_with_blocked_sink(None).expect("responder stops normally");
+    assert_eq!(report.received, 1);
+    assert_eq!(report.replies_sent, 0);
+}
+
+#[test]
+fn dns_responder_reports_cancellation_after_a_blocked_sink_outlives_its_duration() {
+    let cancellation = packetcraftr_core::budget::Cancellation::default();
+    let outcome = respond_with_blocked_sink(Some(cancellation));
+    assert!(
+        matches!(
+            &outcome,
+            Err(Error::Cancelled(packetcraftr_core::budget::Cancelled))
+        ),
+        "expected cancellation, got {outcome:?}"
+    );
+}
+
+fn respond_with_blocked_sink(
+    cancellation: Option<packetcraftr_core::budget::Cancellation>,
+) -> Result<ResponderReport, Error> {
+    use std::time::Instant;
+
+    let port = free_port();
+    let token = [7_u8; TOKEN_LEN];
+    let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let responder_cancellation = cancellation.clone();
+    let handle = std::thread::spawn(move || {
+        let mut request = ResponderRequest::new(Ipv4Addr::LOCALHOST, port, token);
+        request.max_duration = Duration::from_millis(400);
+        request.cancellation = responder_cancellation;
+        respond(request, move |_| {
+            entered_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+            Ok(())
+        })
+    });
+    let udp = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    udp.set_read_timeout(Some(Duration::from_millis(250)))
+        .unwrap();
+    let (query, _, _) = build_query(&token, 0, &CATALOG[0], 7).unwrap();
+    let start_deadline = Instant::now() + Duration::from_secs(2);
+    let mut entered = false;
+    while Instant::now() < start_deadline && !handle.is_finished() {
+        udp.send_to(&query, (Ipv4Addr::LOCALHOST, port)).unwrap();
+        if entered_rx.recv_timeout(Duration::from_millis(20)).is_ok() {
+            entered = true;
+            break;
+        }
+    }
+    assert!(entered, "sink received the query");
+    if let Some(cancellation) = cancellation {
+        cancellation.cancel();
+    }
+    std::thread::sleep(Duration::from_millis(550));
+    release_tx.send(()).unwrap();
+    let mut reply = [0_u8; 2048];
+    assert!(udp.recv_from(&mut reply).is_err(), "no late UDP reply");
+    handle.join().unwrap()
 }
 
 #[test]

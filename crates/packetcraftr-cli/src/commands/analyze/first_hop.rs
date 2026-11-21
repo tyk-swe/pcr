@@ -65,8 +65,9 @@ impl Generate for FirstHop {
         let report = analysis::first_hop::run(&mut reader, prepared.registry.clone(), &options)
             .map_err(CliError::classified)?;
         let mut text = format!(
-            "frames_read={} arp_conflicts={} dhcp_servers={} dhcpv6_servers={} router_advertisers={} multiple_dhcp={} multiple_dhcpv6={} multiple_routers={}\n",
+            "frames_read={} identities_truncated={} arp_conflicts={} dhcp_servers={} dhcpv6_servers={} router_advertisers={} multiple_dhcp={} multiple_dhcpv6={} multiple_routers={}\n",
             report.frames_read,
+            report.identities_truncated,
             report.arp_conflicts.len(),
             report.dhcp_servers.len(),
             report.dhcpv6_servers.len(),

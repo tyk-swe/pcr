@@ -16,6 +16,10 @@ use crate::protocol::BuiltinProtocol;
 use crate::protocol::application::dhcp::{Dhcpv4, Dhcpv6, Value4, Value6};
 use crate::protocol::identity::{self, EncapsulationIdentifier};
 use crate::registry::Registry;
+use sha2::{Digest, Sha256};
+
+const MAX_RETAINED_IDENTITIES: usize = 4_096;
+const MAX_FULL_DUID_BYTES: usize = 128;
 
 type ArpScope = Vec<(u16, u16)>;
 
@@ -29,6 +33,7 @@ pub struct ArpConflict {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Report {
     pub frames_read: u64,
+    pub identities_truncated: bool,
     pub arp_conflicts: Vec<ArpConflict>,
     pub dhcp_servers: Vec<String>,
     pub dhcpv6_servers: Vec<String>,
@@ -71,6 +76,8 @@ pub struct Collector {
     dhcp_servers: BTreeSet<String>,
     dhcpv6_servers: BTreeSet<String>,
     router_advertisers: BTreeSet<String>,
+    retained_identities: usize,
+    identities_truncated: bool,
 }
 
 impl Collector {
@@ -83,13 +90,25 @@ impl Collector {
         self.observe_packet(&record.decoded.packet);
     }
 
+    fn retain_identity(&mut self) -> bool {
+        if self.retained_identities >= MAX_RETAINED_IDENTITIES {
+            self.identities_truncated = true;
+            return false;
+        }
+        self.retained_identities += 1;
+        true
+    }
+
     fn observe_packet(&mut self, packet: &Packet) {
         self.observe_frame(packet);
         if let Some(dhcp) = packet.get::<Dhcpv4>()
             && dhcp.operation == 2
             && matches!(dhcp.message_type(), Some(2 | 5))
         {
-            self.dhcp_servers.insert(dhcp_server_identity(packet, dhcp));
+            let identity = dhcp_server_identity(packet, dhcp);
+            if !self.dhcp_servers.contains(&identity) && self.retain_identity() {
+                self.dhcp_servers.insert(identity);
+            }
         }
         if let Some(dhcp) = packet.get::<Dhcpv6>() {
             self.observe_dhcpv6(packet, dhcp);
@@ -98,8 +117,10 @@ impl Collector {
 
     fn observe_dhcpv6(&mut self, packet: &Packet, dhcp: &Dhcpv6) {
         if matches!(dhcp.message_type, 2 | 7) {
-            self.dhcpv6_servers
-                .insert(dhcpv6_server_identity(packet, dhcp));
+            let identity = dhcpv6_server_identity(packet, dhcp);
+            if !self.dhcpv6_servers.contains(&identity) && self.retain_identity() {
+                self.dhcpv6_servers.insert(identity);
+            }
         }
         for option in &dhcp.options {
             if let Value6::Relay(inner) = &option.value {
@@ -125,10 +146,14 @@ impl Collector {
             if let Some(arp) = identity::arp_message(layer)
                 && !arp.sender_protocol.is_unspecified()
             {
-                self.arp
-                    .entry((arp.sender_protocol, broadcast_domain.clone()))
-                    .or_default()
-                    .insert(arp.sender_hardware);
+                let key = (arp.sender_protocol, broadcast_domain.clone());
+                let is_new = !self
+                    .arp
+                    .get(&key)
+                    .is_some_and(|macs| macs.contains(&arp.sender_hardware));
+                if is_new && self.retain_identity() {
+                    self.arp.entry(key).or_default().insert(arp.sender_hardware);
+                }
             }
             if identity::icmp_message(layer).is_some_and(|message| {
                 message.protocol == BuiltinProtocol::Icmpv6 && message.icmp_type == 134
@@ -137,7 +162,10 @@ impl Collector {
                     .map_or_else(|| "unknown-ip".to_owned(), |address| address.to_string());
                 let mac =
                     link_source.map_or_else(|| "-".to_owned(), |mac| MacAddress(mac).to_string());
-                self.router_advertisers.insert(format!("{source}@{mac}"));
+                let identity = format!("{source}@{mac}");
+                if !self.router_advertisers.contains(&identity) && self.retain_identity() {
+                    self.router_advertisers.insert(identity);
+                }
             }
         }
     }
@@ -146,6 +174,7 @@ impl Collector {
     pub fn finish(self, summary: &RunSummary) -> Report {
         Report {
             frames_read: summary.frames_read,
+            identities_truncated: self.identities_truncated,
             arp_conflicts: self
                 .arp
                 .into_iter()
@@ -211,6 +240,16 @@ fn dhcpv6_server_identity(packet: &Packet, dhcp: &Dhcpv6) -> String {
             _ => None,
         }
     }) {
+        if duid.data.len() > MAX_FULL_DUID_BYTES {
+            let mut hasher = Sha256::new();
+            hasher.update(duid.kind.to_be_bytes());
+            hasher.update(&duid.data);
+            return format!(
+                "duid:{}:sha256:{}",
+                duid.kind,
+                crate::field::hex::compact_hex(&hasher.finalize())
+            );
+        }
         return format!(
             "duid:{}:{}",
             duid.kind,
@@ -362,6 +401,57 @@ mod tests {
         assert!(
             report.dhcpv6_servers[0].starts_with("duid:2:"),
             "{report:?}"
+        );
+    }
+
+    #[test]
+    fn retained_first_hop_identities_are_bounded() {
+        let mut collector = Collector::new();
+        let mut packet = Packet::default();
+        let mut large = Dhcpv6::default();
+        large.edit(|dhcp| {
+            dhcp.message_type = 7;
+            dhcp.options = vec![Option6::server_identifier(Duid {
+                kind: 99,
+                data: vec![0xAB; 65_533].into(),
+            })];
+        });
+        packet.push(large);
+        collect(packet, &mut collector);
+        for enterprise in 0_u32..5_000 {
+            let mut packet = Packet::default();
+            let mut dhcp = Dhcpv6::default();
+            dhcp.edit(|dhcp| {
+                dhcp.message_type = 7;
+                dhcp.options = vec![Option6::server_identifier(
+                    Duid::enterprise(enterprise, [1]).unwrap(),
+                )];
+            });
+            packet.push(dhcp);
+            collect(packet, &mut collector);
+        }
+
+        let report = collector.finish(&RunSummary::default());
+        assert!(
+            report.dhcpv6_servers.len() <= 4_096,
+            "retained {} identities",
+            report.dhcpv6_servers.len()
+        );
+        assert!(
+            report
+                .dhcpv6_servers
+                .iter()
+                .all(|identity| identity.len() <= 128),
+            "an identity string retained unbounded DUID bytes"
+        );
+        assert!(report.identities_truncated);
+        assert!(
+            report
+                .dhcpv6_servers
+                .iter()
+                .any(|identity| identity.starts_with("duid:99:sha256:")),
+            "{:?}",
+            report.dhcpv6_servers.first()
         );
     }
 

@@ -47,11 +47,16 @@ pub(super) fn preview_lines(
     let probes = (targets as u64)
         .saturating_mul(endpoints_per_target as u64)
         .saturating_mul(u64::from(inputs.attempts));
+    let pacing_seconds = inputs
+        .rate
+        .filter(|rate| *rate > 0)
+        .map_or(0.0, |rate| 1.0 / f64::from(rate));
+    let effective_interval = inputs.timeout.as_secs_f64().max(pacing_seconds);
     let beacons = if !inputs.beacon_eligible {
         "not_applicable_non_tcp"
     } else if (inputs.attempts as usize) < thresholds.min_attempts {
         "below_attempt_threshold"
-    } else if inputs.timeout.as_secs_f64() < thresholds.min_interval_seconds {
+    } else if effective_interval < thresholds.min_interval_seconds {
         "below_interval_threshold"
     } else {
         "possible_if_unanswered"

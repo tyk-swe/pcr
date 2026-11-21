@@ -17,7 +17,8 @@ pub(crate) fn read_frames(
     let max_frames = arguments.max_frames;
     let max_bytes = arguments.max_bytes;
     let limits = arguments.limits()?;
-    let mut reader = crate::input::open_capture_file(&invocation.control, path, limits)?;
+    let mut reader =
+        crate::input::open_capture(&invocation.control, &invocation.output, path, limits)?;
     let mut frames = Vec::new();
     let mut bytes: u64 = 0;
     while let Some(frame) = reader.next_frame().map_err(CliError::classified)? {

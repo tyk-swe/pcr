@@ -137,18 +137,21 @@ impl Generate for BundleVerify {
         for path in &self.results {
             let bytes = read(invocation, path, self.bounds.max_result_bytes)?;
             let supplied = source(path, &bytes);
-            let Some(index) = bundle
+            let matching: Vec<usize> = bundle
                 .sources
                 .iter()
-                .position(|source| source.sha256 == supplied.sha256)
-            else {
+                .enumerate()
+                .filter(|(_, source)| source.sha256 == supplied.sha256)
+                .map(|(index, _)| index)
+                .collect();
+            if matching.is_empty() {
                 return Err(invalid(format!(
                     "result {} with sha256 {} is not a bundle source",
                     path.display(),
                     supplied.sha256
                 )));
-            };
-            matched_sources.insert(index);
+            }
+            matched_sources.extend(matching);
         }
         let scope = bundle.scope.as_ref().map_or_else(
             || "-".to_owned(),

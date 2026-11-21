@@ -247,6 +247,12 @@ pub struct Omissions {
     pub group_members: u64,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ViolatedCheck {
+    pub check: Check,
+    pub count: usize,
+}
+
 #[derive(Clone, Debug)]
 pub struct Report {
     pub verdict: Verdict,
@@ -257,6 +263,8 @@ pub struct Report {
     pub summary: Summary,
     pub matches: Vec<Match>,
     pub violations: Vec<Violation>,
+    /// Every violated check counted before detail retention caps `violations`.
+    pub violated_checks: Vec<ViolatedCheck>,
     /// Keyed observations with no counterpart.
     pub unmatched: Sided<Vec<Evidence>>,
     /// Selected observations without a complete identity.

@@ -69,14 +69,18 @@ pub fn diff_reports(before: &Report, after: &Report) -> FindingsDiff {
             before_severities: severities(before_findings),
             after_severities: severities(after_findings),
         };
-        match (row.before, row.after) {
-            (0, _) => diff.new_findings.push(row),
-            (_, 0) => diff.fixed.push(row),
-            _ if row.before_severities != row.after_severities => {
+        if row.after > row.before {
+            diff.new_findings.push(row.clone());
+        }
+        if row.before > row.after {
+            diff.fixed.push(row.clone());
+        }
+        let paired = row.before.min(row.after);
+        if paired > 0 {
+            if row.before_severities[..paired] != row.after_severities[..paired] {
                 diff.severity_changed.push(row.clone());
-                diff.still_present.push(row);
             }
-            _ => diff.still_present.push(row),
+            diff.still_present.push(row);
         }
     }
     diff
@@ -119,8 +123,13 @@ mod tests {
         let diff = diff_reports(&before, &after);
         assert_eq!(diff.new_findings.len(), 1);
         assert_eq!(diff.new_findings[0].key.rule_id, "rule.d");
-        assert_eq!(diff.fixed.len(), 1);
-        assert_eq!(diff.fixed[0].key.rule_id, "rule.c");
+        assert_eq!(diff.fixed.len(), 2);
+        assert!(
+            diff.fixed
+                .iter()
+                .any(|row| row.key.rule_id == "rule.a" && row.before == 2 && row.after == 1)
+        );
+        assert!(diff.fixed.iter().any(|row| row.key.rule_id == "rule.c"));
         assert_eq!(diff.still_present.len(), 2);
         assert_eq!(diff.severity_changed.len(), 1);
         let changed = &diff.severity_changed[0];

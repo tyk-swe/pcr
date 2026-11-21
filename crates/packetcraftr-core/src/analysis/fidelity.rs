@@ -55,6 +55,102 @@ fn median(values: &mut [u128]) -> Option<u128> {
     Some(values[values.len() / 2])
 }
 
+#[derive(Default)]
+struct TrieNode {
+    children: BTreeMap<u8, usize>,
+    parent: Option<usize>,
+    operator: VecDeque<usize>,
+    sensor: VecDeque<usize>,
+}
+
+/// Maximum matching for the ancestor relation in a byte trie: pair surplus
+/// terminals inside each subtree before carrying the remainder upward.
+fn prefix_pairs(
+    operator: &[Frame],
+    sensor: &[Frame],
+    operator_matched: &[bool],
+    sensor_matched: &[bool],
+) -> Vec<(usize, usize)> {
+    let mut nodes = vec![TrieNode::default()];
+    let insert = |nodes: &mut Vec<TrieNode>, bytes: &[u8], index: usize, is_operator: bool| {
+        let mut node_index = 0_usize;
+        for byte in bytes {
+            let next = match nodes[node_index].children.get(byte) {
+                Some(next) => *next,
+                None => {
+                    let next = nodes.len();
+                    nodes.push(TrieNode {
+                        parent: Some(node_index),
+                        ..TrieNode::default()
+                    });
+                    nodes[node_index].children.insert(*byte, next);
+                    next
+                }
+            };
+            node_index = next;
+        }
+        if is_operator {
+            nodes[node_index].operator.push_back(index);
+        } else {
+            nodes[node_index].sensor.push_back(index);
+        }
+    };
+    for (index, frame) in operator.iter().enumerate() {
+        if !operator_matched[index] {
+            insert(&mut nodes, frame.bytes(), index, true);
+        }
+    }
+    for (index, frame) in sensor.iter().enumerate() {
+        if !sensor_matched[index] {
+            insert(&mut nodes, frame.bytes(), index, false);
+        }
+    }
+
+    let own_counts: Vec<(usize, usize)> = nodes
+        .iter()
+        .map(|node| (node.operator.len(), node.sensor.len()))
+        .collect();
+    let mut pairs = Vec::new();
+    for node_index in (0..nodes.len()).rev() {
+        let (own_operator, own_sensor) = own_counts[node_index];
+        let mut own_a: VecDeque<usize> = nodes[node_index].operator.drain(..own_operator).collect();
+        let mut child_a = std::mem::take(&mut nodes[node_index].operator);
+        let mut own_b: VecDeque<usize> = nodes[node_index].sensor.drain(..own_sensor).collect();
+        let mut child_b = std::mem::take(&mut nodes[node_index].sensor);
+        while !own_a.is_empty() && !child_b.is_empty() {
+            pairs.push((
+                own_a.pop_front().expect("checked non-empty"),
+                child_b.pop_front().expect("checked non-empty"),
+            ));
+        }
+        while !child_a.is_empty() && !own_b.is_empty() {
+            pairs.push((
+                child_a.pop_front().expect("checked non-empty"),
+                own_b.pop_front().expect("checked non-empty"),
+            ));
+        }
+        while !own_a.is_empty() && !own_b.is_empty() {
+            pairs.push((
+                own_a.pop_front().expect("checked non-empty"),
+                own_b.pop_front().expect("checked non-empty"),
+            ));
+        }
+        child_a.append(&mut own_a);
+        child_b.append(&mut own_b);
+        nodes[node_index].operator = child_a;
+        nodes[node_index].sensor = child_b;
+        if let Some(parent) = nodes[node_index].parent {
+            debug_assert!(parent < node_index);
+            let (left, right) = nodes.split_at_mut(node_index);
+            let remaining = &mut right[0];
+            let parent_node = &mut left[parent];
+            parent_node.operator.append(&mut remaining.operator);
+            parent_node.sensor.append(&mut remaining.sensor);
+        }
+    }
+    pairs
+}
+
 #[must_use]
 pub fn compare(operator: &[Frame], sensor: &[Frame]) -> Report {
     let mut report = Report {
@@ -91,48 +187,19 @@ pub fn compare(operator: &[Frame], sensor: &[Frame]) -> Report {
         }
     }
 
-    // A truncated capture keeps a strict prefix of the full frame. Index the
-    // remaining operator frames by their lexicographic byte order so a
-    // sensor prefix finds its candidate without a pairwise scan.
-    let mut operator_by_bytes: BTreeMap<&[u8], VecDeque<usize>> = BTreeMap::new();
-    for (index, frame) in operator.iter().enumerate() {
-        if !operator_matched[index] {
-            operator_by_bytes
-                .entry(frame.bytes())
-                .or_default()
-                .push_back(index);
-        }
-    }
-    for (sensor_index, frame) in sensor.iter().enumerate() {
-        if sensor_matched[sensor_index] {
-            continue;
-        }
-        let candidate = operator_by_bytes
-            .range(frame.bytes().as_ref()..)
-            .next()
-            .filter(|(bytes, _)| {
-                bytes.starts_with(frame.bytes()) || frame.bytes().starts_with(bytes)
-            })
-            .map(|(bytes, _)| (**bytes).to_owned());
-        let Some(candidate) = candidate else {
-            continue;
-        };
-        let Some(queue) = operator_by_bytes.get_mut(candidate.as_slice()) else {
-            continue;
-        };
-        let Some(operator_index) = queue.pop_front() else {
-            continue;
-        };
-        if queue.is_empty() {
-            operator_by_bytes.remove(candidate.as_slice());
-        }
+    for (operator_index, sensor_index) in
+        prefix_pairs(operator, sensor, &operator_matched, &sensor_matched)
+    {
         operator_matched[operator_index] = true;
         sensor_matched[sensor_index] = true;
         report.truncated_matches += 1;
-        if frame.link_type != operator[operator_index].link_type {
+        if sensor[sensor_index].link_type != operator[operator_index].link_type {
             report.link_type_mismatches += 1;
         }
-        if let Some(skew) = skew_ms(operator[operator_index].timestamp, frame.timestamp) {
+        if let Some(skew) = skew_ms(
+            operator[operator_index].timestamp,
+            sensor[sensor_index].timestamp,
+        ) {
             skews.push(skew);
         }
     }
@@ -193,6 +260,24 @@ mod tests {
         assert_eq!(report.exact_matches, 1);
         assert_eq!(report.operator_only, 1);
         assert_eq!(report.max_abs_skew_ms, Some(5));
+    }
+
+    #[test]
+    fn prefix_matching_is_symmetric_and_maximum() {
+        let operator = vec![
+            frame(b"abcdef", 100, LinkType::ETHERNET),
+            frame(b"abcxyz", 200, LinkType::ETHERNET),
+            frame(b"short", 300, LinkType::ETHERNET),
+        ];
+        let sensor = vec![
+            frame(b"abc", 110, LinkType::ETHERNET),
+            frame(b"abcd", 210, LinkType::ETHERNET),
+            frame(b"shorter", 310, LinkType::ETHERNET),
+        ];
+        let report = compare(&operator, &sensor);
+        assert_eq!(report.truncated_matches, 3);
+        assert_eq!(report.operator_only, 0);
+        assert_eq!(report.sensor_only, 0);
     }
 
     #[test]

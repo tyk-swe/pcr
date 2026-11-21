@@ -452,13 +452,19 @@ pub(super) fn prepare(
             &policy.clone().into_policy(),
             max_targets,
         );
+        let probes_per_target = built.request.endpoints.len()
+            + if built.request.discovery.runs() {
+                built.request.discovery.probes.len()
+            } else {
+                0
+            };
         plan.packets = candidates
-            .saturating_mul(built.request.endpoints.len() as u64)
+            .saturating_mul(probes_per_target as u64)
             .saturating_mul(u64::from(built.request.attempts));
         let preview_lines = if preview {
             list::preview_lines(
                 usize::try_from(candidates).unwrap_or(usize::MAX),
-                built.request.endpoints.len(),
+                probes_per_target,
                 list::PreviewInputs {
                     attempts: built.request.attempts,
                     rate: built.request.probes_per_second,
@@ -802,8 +808,12 @@ fn scan_plan_summary(
     } else {
         hasher.update(b"absent\n");
     }
+    let discovery_probes = inputs
+        .prepared_discovery
+        .filter(|prepared| prepared.options.runs())
+        .map_or(0, |prepared| prepared.options.probes.len());
     let packets = candidate_upper_bound(inputs.targets, &policy, inputs.max_targets)
-        .saturating_mul(endpoints.len() as u64)
+        .saturating_mul((endpoints.len() + discovery_probes) as u64)
         .saturating_mul(u64::from(inputs.attempts));
     Ok(ScanPlanArtifacts {
         summary: crate::system::PlanSummary {

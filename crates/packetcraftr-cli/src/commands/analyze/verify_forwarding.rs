@@ -176,12 +176,7 @@ pub(super) fn run(
         },
     )?;
     if arguments.profile_digest {
-        let (digest, lines) = middlebox_profile(
-            report
-                .violations
-                .iter()
-                .map(|violation| (violation.check.kind, violation.check.field.as_str())),
-        );
+        let (digest, lines) = middlebox_profile(&report.violated_checks);
         crate::terminal::write_stdout_line(
             invocation,
             format_args!("middlebox_profile_digest={digest}"),
@@ -193,17 +188,18 @@ pub(super) fn run(
     Ok(exit)
 }
 
-fn middlebox_profile<'a>(
-    checks: impl Iterator<Item = (forwarding::CheckKind, &'a str)>,
-) -> (String, Vec<String>) {
+fn middlebox_profile(checks: &[forwarding::ViolatedCheck]) -> (String, Vec<String>) {
     use sha2::{Digest, Sha256};
     use std::collections::BTreeMap;
 
     let mut counts: BTreeMap<(String, String), usize> = BTreeMap::new();
-    for (kind, field) in checks {
+    for violated in checks {
         *counts
-            .entry((format!("{kind:?}"), field.to_owned()))
-            .or_default() += 1;
+            .entry((
+                format!("{:?}", violated.check.kind),
+                violated.check.field.clone(),
+            ))
+            .or_default() += violated.count;
     }
     let mut canonical = "packetcraftr.middlebox-profile/v1\n".to_owned();
     let mut lines = Vec::new();
@@ -293,28 +289,30 @@ impl Collection<'_> {
 #[cfg(test)]
 mod profile_tests {
     use super::middlebox_profile;
-    use packetcraftr_core::analysis::forwarding::CheckKind;
+    use packetcraftr_core::analysis::forwarding::{Check, CheckKind, ViolatedCheck};
 
     #[test]
     fn middlebox_profile_is_order_independent_and_field_sensitive() {
-        let first = middlebox_profile(
-            [
-                (CheckKind::Preserve, "ipv4.ttl"),
-                (CheckKind::Preserve, "ipv4.ttl"),
-                (CheckKind::Expect, "ipv4.destination"),
-            ]
-            .into_iter(),
-        );
-        let reordered = middlebox_profile(
-            [
-                (CheckKind::Expect, "ipv4.destination"),
-                (CheckKind::Preserve, "ipv4.ttl"),
-                (CheckKind::Preserve, "ipv4.ttl"),
-            ]
-            .into_iter(),
-        );
+        fn violated(kind: CheckKind, field: &str, count: usize) -> ViolatedCheck {
+            ViolatedCheck {
+                check: Check {
+                    kind,
+                    field: field.to_owned(),
+                    value: None,
+                },
+                count,
+            }
+        }
+        let first = middlebox_profile(&[
+            violated(CheckKind::Preserve, "ipv4.ttl", 2),
+            violated(CheckKind::Expect, "ipv4.destination", 1),
+        ]);
+        let reordered = middlebox_profile(&[
+            violated(CheckKind::Expect, "ipv4.destination", 1),
+            violated(CheckKind::Preserve, "ipv4.ttl", 2),
+        ]);
         assert_eq!(first, reordered);
-        let changed = middlebox_profile([(CheckKind::Preserve, "ipv4.dscp_ecn")].into_iter());
+        let changed = middlebox_profile(&[violated(CheckKind::Preserve, "ipv4.dscp_ecn", 1)]);
         assert_ne!(first.0, changed.0);
     }
 }

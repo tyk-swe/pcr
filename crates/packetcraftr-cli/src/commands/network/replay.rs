@@ -292,11 +292,12 @@ fn replay_plan_summary(
         };
         hasher.update(
             format!(
-                "frame ts={timestamp} link={} interface={} captured={} original={}\n",
+                "frame ts={timestamp} link={} interface={} direction={:?} captured={} original={}\n",
                 frame.link_type,
                 frame
                     .interface
                     .map_or_else(|| "-".to_owned(), |value| value.to_string()),
+                frame.direction,
                 frame.captured_length(),
                 frame.original_length(),
             )

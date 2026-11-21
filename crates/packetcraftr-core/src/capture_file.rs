@@ -27,7 +27,7 @@ pub use limits::{
     DEFAULT_MAX_METADATA_BYTES_PER_FRAME, DEFAULT_MAX_OPTIONS_PER_BLOCK, DEFAULT_MAX_STREAM_BYTES,
     DEFAULT_MAX_STREAM_FRAMES, DEFAULT_MAX_TOTAL_INTERFACES, Limits, ReaderLimits,
 };
-pub use map::{MapReport, map_frames};
+pub use map::{MapReport, map_frames, map_frames_with_interface_options};
 pub use merge::{
     MAX_MERGE_SOURCES, MAX_REORDER_FRAMES, MergeLimits, MergeOrder, MergeReport, MergeSource,
     MergedInterface, merge,

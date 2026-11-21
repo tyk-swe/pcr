@@ -142,21 +142,33 @@ impl Generate for Scrub {
         .map_err(CliError::classified)?;
         let dissector = Dissector::new(registry);
         let mut pseudonyms = Pseudonyms::default();
-        let report = capture_file::map_frames(&mut reader, &mut writer, limits, 0, |_, frame| {
-            scrub_frame(
-                frame,
-                &dissector,
-                &mut pseudonyms,
-                capture_limits.reader_bounds().max_frame_bytes,
-            )
-            .map(|mut frame| {
-                if let Some(limit) = self.truncate {
-                    frame = frame.truncated(limit as usize);
-                }
-                frame
-            })
-            .map_err(CliError::into_boundary_error)
-        })
+        let report = capture_file::map_frames_with_interface_options(
+            &mut reader,
+            &mut writer,
+            limits,
+            0,
+            |_, frame| {
+                scrub_frame(
+                    frame,
+                    &dissector,
+                    &mut pseudonyms,
+                    capture_limits.reader_bounds().max_frame_bytes,
+                )
+                .map(|mut frame| {
+                    if let Some(limit) = self.truncate {
+                        frame = frame.truncated(limit as usize);
+                    }
+                    frame
+                })
+                .map_err(CliError::into_boundary_error)
+            },
+            |_, options| {
+                options
+                    .into_iter()
+                    .filter(|option| !matches!(option.code, 2..=7))
+                    .collect()
+            },
+        )
         .map_err(CliError::classified)?;
         writer
             .into_inner()

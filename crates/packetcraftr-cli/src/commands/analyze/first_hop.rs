@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use clap::Args;
 use packetcraftr_core::analysis;
 use packetcraftr_core::error::Kind;
+use packetcraftr_core::protocol::identity::EncapsulationIdentifier;
 
 use crate::command_options::{DecodeArgs, OfflineLimitsArgs};
 use crate::commands::Generate;
@@ -27,6 +28,23 @@ pub(crate) struct FirstHop {
     decode: DecodeArgs,
     #[command(flatten)]
     limits: OfflineLimitsArgs,
+}
+
+fn broadcast_domain_text(domain: &[EncapsulationIdentifier]) -> String {
+    if domain.is_empty() {
+        return "-".to_owned();
+    }
+    domain
+        .iter()
+        .map(|tag| match tag {
+            EncapsulationIdentifier::Vlan { vlan_id } => format!("vlan:{vlan_id}"),
+            EncapsulationIdentifier::Vlan8021ad { vlan_id } => {
+                format!("vlan8021ad:{vlan_id}")
+            }
+            _ => "other".to_owned(),
+        })
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 impl Generate for FirstHop {
@@ -59,8 +77,9 @@ impl Generate for FirstHop {
         );
         for conflict in &report.arp_conflicts {
             text.push_str(&format!(
-                "arp_conflict address={} mac={}\n",
+                "arp_conflict address={} broadcast_domain={} mac={}\n",
                 conflict.address,
+                broadcast_domain_text(&conflict.broadcast_domain),
                 conflict
                     .mac_addresses
                     .iter()

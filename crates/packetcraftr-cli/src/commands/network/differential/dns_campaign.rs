@@ -9,7 +9,7 @@ use packetcraftr::differential as lib;
 use packetcraftr_core::error::Kind;
 
 use crate::command_options::{Bounded, IdentificationPolicyArgs, MaxDurationArgs};
-use crate::commands::Generate;
+use crate::commands::{CommandExit, Generate};
 use crate::errors::CliError;
 use crate::output::contract::Format;
 use crate::terminal::{emit_stdout_document, write_stdout_line};
@@ -68,7 +68,7 @@ impl Generate for DnsDifferential {
         self,
         invocation: &crate::invocation::Invocation,
         format: Format,
-    ) -> Result<(), CliError> {
+    ) -> Result<CommandExit, CliError> {
         if format != Format::Text {
             return Err(CliError::new(
                 Kind::Usage,
@@ -84,14 +84,15 @@ impl Generate for DnsDifferential {
         let digest = plan_digest(self.server, &token, self.repeats, timeout, max_duration);
         let attempts = lib::dns::catalog().len() * self.repeats as usize;
         if self.plan_only {
-            return emit_stdout_document(
+            emit_stdout_document(
                 invocation,
                 &format!(
                     "plan_only=true token={} plan_digest={digest} attempts={attempts} worst_case_ms={}\n",
                     lib::hex(&token),
                     timeout.as_millis().saturating_mul(attempts as u128),
                 ),
-            );
+            )?;
+            return Ok(CommandExit::SUCCESS);
         }
         match &self.plan_digest {
             None => {
@@ -151,6 +152,6 @@ impl Generate for DnsDifferential {
                 ),
             )?;
         }
-        Ok(())
+        Ok(CommandExit::SUCCESS)
     }
 }

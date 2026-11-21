@@ -118,7 +118,7 @@ Example:
   packetcraftr network audit-dns 192.0.2.53:53 example.test";
 
 impl Generate for AuditDns {
-    fn generate(self, invocation: &Invocation, format: Format) -> Result<(), CliError> {
+    fn generate(self, invocation: &Invocation, format: Format) -> Result<CommandExit, CliError> {
         if format != Format::Text {
             return Err(crate::errors::CliError::new(
                 packetcraftr_core::error::Kind::Usage,
@@ -165,7 +165,8 @@ impl Generate for AuditDns {
         for reason in &report.completeness.reasons {
             text.push_str(&format!("incomplete: {reason}\n"));
         }
-        crate::terminal::emit_stdout_document(invocation, &text)
+        crate::terminal::emit_stdout_document(invocation, &text)?;
+        Ok(CommandExit::status(u8::from(self.bounds.fails(&report))))
     }
 }
 

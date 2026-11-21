@@ -19,7 +19,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use crate::command_options::{link_type, parse_timestamp};
-use crate::commands::Generate;
+use crate::commands::{CommandExit, Generate};
 use crate::errors::CliError;
 use crate::output::contract::Format;
 use crate::terminal::emit_stdout_document;
@@ -101,7 +101,7 @@ impl Generate for ScenarioBuild {
         self,
         invocation: &crate::invocation::Invocation,
         format: Format,
-    ) -> Result<(), CliError> {
+    ) -> Result<CommandExit, CliError> {
         if format != Format::Text {
             return Err(CliError::new(
                 Kind::Usage,
@@ -236,6 +236,7 @@ impl Generate for ScenarioBuild {
                 self.write.display(),
                 self.labels.display(),
             ),
-        )
+        )?;
+        Ok(CommandExit::SUCCESS)
     }
 }

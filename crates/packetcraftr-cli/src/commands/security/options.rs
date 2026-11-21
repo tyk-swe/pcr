@@ -47,7 +47,7 @@ pub(in crate::commands) struct Bounds {
     pub(super) fail_incomplete: bool,
 }
 impl Bounds {
-    pub(super) fn fails(&self, report: &security::Report) -> bool {
+    pub(in crate::commands) fn fails(&self, report: &security::Report) -> bool {
         report.meets(self.fail_on.map(Into::into))
             || (self.fail_incomplete
                 && (!report.completeness.complete

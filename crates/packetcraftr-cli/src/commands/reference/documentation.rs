@@ -23,7 +23,11 @@ pub(crate) struct Args {
 }
 
 impl crate::commands::Generate for Args {
-    fn generate(self, invocation: &Invocation, format: Format) -> Result<(), CliError> {
+    fn generate(
+        self,
+        invocation: &Invocation,
+        format: Format,
+    ) -> Result<crate::commands::CommandExit, CliError> {
         if format != Format::Text {
             return Err(CliError::from_classification(
                 Classification::new(
@@ -36,6 +40,7 @@ impl crate::commands::Generate for Args {
             ));
         }
         run_with(&self, invocation, render, |_, _| Ok(()))
+            .map(|()| crate::commands::CommandExit::SUCCESS)
     }
 }
 

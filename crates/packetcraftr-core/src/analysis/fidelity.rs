@@ -56,67 +56,69 @@ fn median(values: &mut [u128]) -> Option<u128> {
 }
 
 #[derive(Default)]
-struct TrieNode {
-    children: BTreeMap<u8, usize>,
-    parent: Option<usize>,
+struct DistinctFrames {
     operator: VecDeque<usize>,
     sensor: VecDeque<usize>,
 }
 
-/// Maximum matching for the ancestor relation in a byte trie: pair surplus
-/// terminals inside each subtree before carrying the remainder upward.
+/// Maximum matching for the prefix ancestor relation over distinct frame
+/// bytes. Sorted distinct strings form the compressed trie, so memory is
+/// proportional to distinct frames rather than every input byte.
 fn prefix_pairs(
     operator: &[Frame],
     sensor: &[Frame],
     operator_matched: &[bool],
     sensor_matched: &[bool],
 ) -> Vec<(usize, usize)> {
-    let mut nodes = vec![TrieNode::default()];
-    let insert = |nodes: &mut Vec<TrieNode>, bytes: &[u8], index: usize, is_operator: bool| {
-        let mut node_index = 0_usize;
-        for byte in bytes {
-            let next = match nodes[node_index].children.get(byte) {
-                Some(next) => *next,
-                None => {
-                    let next = nodes.len();
-                    nodes.push(TrieNode {
-                        parent: Some(node_index),
-                        ..TrieNode::default()
-                    });
-                    nodes[node_index].children.insert(*byte, next);
-                    next
-                }
-            };
-            node_index = next;
-        }
-        if is_operator {
-            nodes[node_index].operator.push_back(index);
-        } else {
-            nodes[node_index].sensor.push_back(index);
-        }
-    };
+    let mut distinct: BTreeMap<&[u8], DistinctFrames> = BTreeMap::new();
     for (index, frame) in operator.iter().enumerate() {
         if !operator_matched[index] {
-            insert(&mut nodes, frame.bytes(), index, true);
+            distinct
+                .entry(frame.bytes())
+                .or_default()
+                .operator
+                .push_back(index);
         }
     }
     for (index, frame) in sensor.iter().enumerate() {
         if !sensor_matched[index] {
-            insert(&mut nodes, frame.bytes(), index, false);
+            distinct
+                .entry(frame.bytes())
+                .or_default()
+                .sensor
+                .push_back(index);
         }
     }
-
-    let own_counts: Vec<(usize, usize)> = nodes
+    let keys: Vec<&[u8]> = distinct.keys().copied().collect();
+    let mut queues: Vec<DistinctFrames> = distinct.into_values().collect();
+    let own_counts: Vec<(usize, usize)> = queues
         .iter()
         .map(|node| (node.operator.len(), node.sensor.len()))
         .collect();
+
+    let mut parents = vec![None; keys.len()];
+    let mut stack: Vec<usize> = Vec::new();
+    for (index, key) in keys.iter().enumerate() {
+        while let Some(&top) = stack.last() {
+            if key.starts_with(keys[top]) {
+                break;
+            }
+            stack.pop();
+        }
+        parents[index] = stack.last().copied();
+        stack.push(index);
+    }
+
+    let mut order: Vec<usize> = (0..keys.len()).collect();
+    order.sort_unstable_by_key(|&index| std::cmp::Reverse(keys[index].len()));
     let mut pairs = Vec::new();
-    for node_index in (0..nodes.len()).rev() {
+    for node_index in order {
         let (own_operator, own_sensor) = own_counts[node_index];
-        let mut own_a: VecDeque<usize> = nodes[node_index].operator.drain(..own_operator).collect();
-        let mut child_a = std::mem::take(&mut nodes[node_index].operator);
-        let mut own_b: VecDeque<usize> = nodes[node_index].sensor.drain(..own_sensor).collect();
-        let mut child_b = std::mem::take(&mut nodes[node_index].sensor);
+        let mut own_a: VecDeque<usize> =
+            queues[node_index].operator.drain(..own_operator).collect();
+        let mut child_a = std::mem::take(&mut queues[node_index].operator);
+        let mut own_b: VecDeque<usize> = queues[node_index].sensor.drain(..own_sensor).collect();
+        let mut child_b = std::mem::take(&mut queues[node_index].sensor);
         while !own_a.is_empty() && !child_b.is_empty() {
             pairs.push((
                 own_a.pop_front().expect("checked non-empty"),
@@ -137,15 +139,9 @@ fn prefix_pairs(
         }
         child_a.append(&mut own_a);
         child_b.append(&mut own_b);
-        nodes[node_index].operator = child_a;
-        nodes[node_index].sensor = child_b;
-        if let Some(parent) = nodes[node_index].parent {
-            debug_assert!(parent < node_index);
-            let (left, right) = nodes.split_at_mut(node_index);
-            let remaining = &mut right[0];
-            let parent_node = &mut left[parent];
-            parent_node.operator.append(&mut remaining.operator);
-            parent_node.sensor.append(&mut remaining.sensor);
+        if let Some(parent) = parents[node_index] {
+            queues[parent].operator.append(&mut child_a);
+            queues[parent].sensor.append(&mut child_b);
         }
     }
     pairs

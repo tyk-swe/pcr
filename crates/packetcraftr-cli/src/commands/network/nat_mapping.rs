@@ -8,8 +8,8 @@ use clap::Args;
 use packetcraftr::differential as lib;
 use packetcraftr_core::error::Kind;
 
-use crate::commands::Generate;
 use crate::commands::security::read;
+use crate::commands::{CommandExit, Generate};
 use crate::errors::CliError;
 use crate::output::contract::Format;
 use crate::terminal::emit_stdout_document;
@@ -36,7 +36,7 @@ impl Generate for NatMapping {
         self,
         invocation: &crate::invocation::Invocation,
         format: Format,
-    ) -> Result<(), CliError> {
+    ) -> Result<CommandExit, CliError> {
         if format != Format::Text {
             return Err(CliError::new(
                 Kind::Usage,
@@ -65,17 +65,7 @@ impl Generate for NatMapping {
                     )
                 })?,
             );
-            if records.len() == MAX_RECORDS
-                && text
-                    .lines()
-                    .skip(records.len())
-                    .any(|line| !line.is_empty())
-            {
-                return Err(CliError::new(
-                    Kind::Usage,
-                    format!("responder log exceeds {MAX_RECORDS} records"),
-                ));
-            }
+
         }
         let mapping = lib::nat_mapping(&records, self.expected_source);
         let mut text = format!(
@@ -87,6 +77,7 @@ impl Generate for NatMapping {
         for source in &mapping.sources {
             text.push_str(&format!("source {source}\n"));
         }
-        emit_stdout_document(invocation, &text)
+        emit_stdout_document(invocation, &text)?;
+        Ok(CommandExit::SUCCESS)
     }
 }

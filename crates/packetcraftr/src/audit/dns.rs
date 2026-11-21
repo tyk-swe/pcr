@@ -60,6 +60,7 @@ impl DnsRequest {
     }
 }
 
+#[derive(Clone)]
 struct ExchangeResult {
     transport: &'static str,
     response_bytes: usize,
@@ -102,6 +103,7 @@ impl<P: UdpProviders + TcpProviders, K: Clock> Client<P, K> {
             &deadline,
         )?;
         let mut result = self.decode_udp(request, transaction_id, &reply.exchange)?;
+        let udp_result = result.clone();
         let mut fallback_attempted = false;
         let mut fallback_error = None;
         if result
@@ -120,6 +122,7 @@ impl<P: UdpProviders + TcpProviders, K: Clock> Client<P, K> {
             request,
             query.len(),
             &result,
+            &udp_result,
             fallback_attempted,
             fallback_error.as_deref(),
         ))
@@ -201,6 +204,7 @@ fn dns_report(
     request: &DnsRequest,
     query_bytes: usize,
     result: &ExchangeResult,
+    udp_result: &ExchangeResult,
     fallback_attempted: bool,
     fallback_error: Option<&str>,
 ) -> Report {
@@ -208,7 +212,7 @@ fn dns_report(
     let ratio_x100 = if query_bytes == 0 {
         0
     } else {
-        (result.response_bytes as u128 * 100 / query_bytes as u128) as u64
+        (udp_result.response_bytes as u128 * 100 / query_bytes as u128) as u64
     };
     let mut report = Report::new("audit-dns");
     report
@@ -232,6 +236,10 @@ fn dns_report(
     report
         .measurements
         .insert("response_bytes".into(), json!(result.response_bytes));
+    report.measurements.insert(
+        "udp_response_bytes".into(),
+        json!(udp_result.response_bytes),
+    );
     report
         .measurements
         .insert("amplification_ratio_x100".into(), json!(ratio_x100));
@@ -286,8 +294,17 @@ fn dns_report(
             .completeness
             .note(format!("TCP fallback failed: {error}"));
     }
+    if metadata.truncated && result.transport == "udp" {
+        report
+            .completeness
+            .note("truncated DNS response was not recovered over TCP");
+    }
 
-    if metadata.recursion_available && !metadata.authoritative && answers > 0 {
+    if request.recursion_desired
+        && metadata.recursion_available
+        && !metadata.authoritative
+        && answers > 0
+    {
         report.findings.push(Finding::new(
             "dns.open_recursion",
             Severity::High,
@@ -311,7 +328,7 @@ fn dns_report(
             "Confirm recursion is intended for clients that can reach this endpoint.",
         ));
     }
-    if ratio_x100 >= 1_000 && result.response_bytes > 512 {
+    if ratio_x100 >= 1_000 && udp_result.response_bytes > 512 {
         report.findings.push(Finding::new(
             "dns.amplification",
             Severity::Medium,
@@ -319,7 +336,7 @@ fn dns_report(
             "DNS response is at least ten times the query size",
             json!({
                 "query_bytes": query_bytes,
-                "response_bytes": result.response_bytes,
+                "response_bytes": udp_result.response_bytes,
                 "amplification_ratio_x100": ratio_x100,
             }),
             "Limit response size, rate-limit repeated queries, and restrict recursion to trusted clients.",
@@ -368,7 +385,7 @@ mod tests {
             }),
             outcome: "response".to_owned(),
         };
-        let report = dns_report(&request, 30, &result, false, None);
+        let report = dns_report(&request, 30, &result, &result, false, None);
         assert_eq!(report.measurements["amplification_ratio_x100"], json!(2000));
         assert!(
             report

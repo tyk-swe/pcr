@@ -184,7 +184,7 @@ pub(super) fn prepare(
         } else {
             None
         };
-        let summary = scan_plan_summary(
+        let artifacts = scan_plan_summary(
             invocation,
             ScanPlanInputs {
                 policy: &policy,
@@ -224,9 +224,9 @@ pub(super) fn prepare(
                 plan_only: false,
                 plan_digest: gate.plan_digest.clone(),
             };
-            crate::system::enforce_plan_gate(invocation, &check, "scan", Some(&summary))?;
+            crate::system::enforce_plan_gate(invocation, &check, "scan", Some(&artifacts.summary))?;
         }
-        Some(summary)
+        Some(artifacts)
     } else {
         None
     };
@@ -315,7 +315,7 @@ pub(super) fn prepare(
             max_duration: duration.max_duration(),
             shuffle_seed,
             policy,
-            plan: gate_plan,
+            plan: gate_plan.map(|artifacts| artifacts.summary),
             preview: preview.then_some(list::PreviewInputs {
                 attempts,
                 rate,
@@ -348,6 +348,12 @@ pub(super) fn prepare(
             payload_file: udp_payload_file,
             profiles: udp_profiles,
             curated: curated_udp_payloads,
+            preloaded_payload: gate_plan
+                .as_ref()
+                .and_then(|artifacts| artifacts.udp_payload.clone()),
+            preloaded_profiles: gate_plan
+                .as_ref()
+                .and_then(|artifacts| artifacts.udp_profiles_document.clone()),
         },
         limits: LimitInputs {
             capture: limits,
@@ -436,9 +442,11 @@ pub(super) fn prepare(
                 &built.request,
             )?;
         }
-        let mut plan = gate_plan.ok_or_else(|| {
-            CliError::new(Kind::Internal, "scan plan-only preparation lost its plan")
-        })?;
+        let mut plan = gate_plan
+            .ok_or_else(|| {
+                CliError::new(Kind::Internal, "scan plan-only preparation lost its plan")
+            })?
+            .summary;
         let candidates = candidate_upper_bound(
             &built.request.targets,
             &policy.clone().into_policy(),
@@ -623,6 +631,12 @@ struct ScanPlanInputs<'a> {
     max_targets: usize,
 }
 
+struct ScanPlanArtifacts {
+    summary: crate::system::PlanSummary,
+    udp_payload: Option<bytes::Bytes>,
+    udp_profiles_document: Option<Vec<u8>>,
+}
+
 fn candidate_upper_bound(
     selection: &packetcraftr::target::Selection,
     policy: &packetcraftr::policy::Policy,
@@ -656,23 +670,8 @@ fn candidate_upper_bound(
 fn scan_plan_summary(
     invocation: &crate::invocation::Invocation,
     inputs: ScanPlanInputs<'_>,
-) -> Result<crate::system::PlanSummary, CliError> {
+) -> Result<ScanPlanArtifacts, CliError> {
     use sha2::{Digest, Sha256};
-
-    if inputs
-        .udp_payload_file
-        .as_deref()
-        .is_some_and(|path| path == Path::new("-"))
-        || inputs
-            .udp_profiles
-            .as_deref()
-            .is_some_and(|path| path == Path::new("-"))
-    {
-        return Err(CliError::new(
-            Kind::Usage,
-            "the scan plan gate cannot bind stdin payload inputs; use files for --udp-payload-file and --udp-profiles",
-        ));
-    }
     let policy = inputs.policy.clone().into_policy();
     let policy_digest = policy.digest();
     let mut endpoint_request = EndpointRequest {
@@ -768,6 +767,7 @@ fn scan_plan_summary(
         ));
     }
     hasher.update(b"udp_payload=");
+    let mut preloaded_payload = None;
     if inputs.udp_payload_hex.is_some() || inputs.udp_payload_file.is_some() {
         let payload = super::inputs::read_udp_payload(
             invocation,
@@ -777,10 +777,12 @@ fn scan_plan_summary(
         )?;
         hasher.update((payload.len() as u64).to_be_bytes());
         hasher.update(&payload);
+        preloaded_payload = Some(payload);
     } else {
         hasher.update(b"absent\n");
     }
     hasher.update(b"udp_profiles=");
+    let mut preloaded_profiles = None;
     if let Some(profiles) = inputs.udp_profiles {
         if !udp_required {
             return Err(CliError::new(
@@ -791,23 +793,28 @@ fn scan_plan_summary(
         let bytes = crate::input::read_document(
             &invocation.control,
             profiles,
-            1024 * 1024,
+            packetcraftr_core::document::udp_profiles::MAX_PROFILE_BYTES,
             crate::input::InputKind::UdpProfiles,
         )?;
         hasher.update((bytes.len() as u64).to_be_bytes());
         hasher.update(&bytes);
+        preloaded_profiles = Some(bytes);
     } else {
         hasher.update(b"absent\n");
     }
     let packets = candidate_upper_bound(inputs.targets, &policy, inputs.max_targets)
         .saturating_mul(endpoints.len() as u64)
         .saturating_mul(u64::from(inputs.attempts));
-    Ok(crate::system::PlanSummary {
-        digest: packetcraftr_core::field::hex::compact_hex(&hasher.finalize()),
-        packets,
-        wire_bytes: 0,
-        destination: None,
-        policy_digest,
+    Ok(ScanPlanArtifacts {
+        summary: crate::system::PlanSummary {
+            digest: packetcraftr_core::field::hex::compact_hex(&hasher.finalize()),
+            packets,
+            wire_bytes: 0,
+            destination: None,
+            policy_digest,
+        },
+        udp_payload: preloaded_payload,
+        udp_profiles_document: preloaded_profiles,
     })
 }
 

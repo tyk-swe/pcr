@@ -85,7 +85,20 @@ pub(super) fn load_udp_profiles(
         MAX_PROFILE_BYTES,
         InputKind::UdpProfiles,
     )?;
-    let assignments = udp_profiles::parse(&document).map_err(CliError::classified)?;
+    compile_udp_profiles(&document, udp)
+}
+
+pub(super) fn compile_udp_profiles(
+    document: &[u8],
+    udp: bool,
+) -> Result<BTreeMap<u16, Arc<UdpProfile>>, CliError> {
+    if !udp {
+        return Err(CliError::new(
+            Kind::Usage,
+            "--udp-profiles requires --transport udp",
+        ));
+    }
+    let assignments = udp_profiles::parse(document).map_err(CliError::classified)?;
     profile::compile(assignments).map_err(CliError::classified)
 }
 

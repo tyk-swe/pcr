@@ -9,6 +9,7 @@ use bytes::Bytes;
 use packetcraftr::differential as lib;
 use packetcraftr_core::error::{Classification, Kind};
 use packetcraftr_core::frame::{Frame, LinkType};
+use packetcraftr_core::protocol::headers::LinkHeader;
 
 use crate::command_options::OfflineCaptureLimitsArgs;
 use crate::errors::CliError;
@@ -178,25 +179,13 @@ struct FragmentPiece {
 
 fn ip_offset(frame: &Frame) -> Option<usize> {
     let bytes = frame.bytes();
-    if frame.link_type.is_raw_ip() {
-        return Some(0);
+    if let Ok(Some(link)) = LinkHeader::walk(frame.link_type, bytes) {
+        if matches!(link.announced_ip_version(), Some(6)) {
+            return None;
+        }
+        return link.carries_ip().then(|| link.network_offset());
     }
     match frame.link_type {
-        LinkType::ETHERNET => {
-            let mut type_offset = 12_usize;
-            for _ in 0..4 {
-                let ether_type =
-                    u16::from_be_bytes([*bytes.get(type_offset)?, *bytes.get(type_offset + 1)?]);
-                if ether_type == 0x0800 {
-                    return Some(type_offset + 2);
-                }
-                if !matches!(ether_type, 0x8100 | 0x88a8) {
-                    return None;
-                }
-                type_offset += 4;
-            }
-            None
-        }
         LinkType::LINUX_SLL => (bytes.len() >= 16
             && u16::from_be_bytes([bytes[14], bytes[15]]) == 0x0800)
             .then_some(16),
@@ -260,6 +249,29 @@ mod tests {
         Frame::new(None, LinkType::ETHERNET, bytes).unwrap()
     }
 
+    fn tagged_ip_frame(tags: usize, chunk: &[u8]) -> Frame {
+        let total = 20 + chunk.len();
+        let link_len = 14 + tags * 4;
+        let mut bytes = vec![0_u8; link_len + total];
+        bytes[12..14].copy_from_slice(&0x8100_u16.to_be_bytes());
+        for tag in 0..tags {
+            let tci = 14 + tag * 4;
+            bytes[tci..tci + 2].copy_from_slice(&((tag as u16) + 1).to_be_bytes());
+            let next: u16 = if tag + 1 == tags { 0x0800 } else { 0x8100 };
+            bytes[tci + 2..tci + 4].copy_from_slice(&next.to_be_bytes());
+        }
+        let ip = &mut bytes[link_len..];
+        ip[0] = 0x45;
+        ip[2..4].copy_from_slice(&(total as u16).to_be_bytes());
+        ip[4..6].copy_from_slice(&7_u16.to_be_bytes());
+        ip[8] = 64;
+        ip[9] = 17;
+        ip[12..16].copy_from_slice(&[192, 0, 2, 1]);
+        ip[16..20].copy_from_slice(&[198, 51, 100, 2]);
+        ip[20..].copy_from_slice(chunk);
+        Frame::new(None, LinkType::ETHERNET, bytes).unwrap()
+    }
+
     fn udp_datagram(payload: &[u8]) -> Vec<u8> {
         let mut datagram = Vec::new();
         datagram.extend_from_slice(&53210_u16.to_be_bytes());
@@ -286,6 +298,16 @@ mod tests {
             observations[0].payload_sha256,
             lib::hex(&lib::canary::payload_sha256(&probe))
         );
+    }
+
+    #[test]
+    fn observations_survive_deeper_vlan_stacks() {
+        let probe = lib::canary::build_probe(&[7_u8; lib::canary::TOKEN_LEN], 4, 11, 96);
+        let frame = tagged_ip_frame(5, &udp_datagram(&probe));
+        let observations = observations_from_frame(&frame, &mut FragmentAssembler::default());
+        assert_eq!(observations.len(), 1);
+        assert_eq!(observations[0].variant_index, 4);
+        assert_eq!(observations[0].attempt_seq, 11);
     }
 
     #[test]

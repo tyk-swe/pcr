@@ -321,6 +321,12 @@ commands! {
     /// Classify NAT source-tuple stability from a Responder log.
     #[command(after_long_help = network::nat_mapping::AFTER_LONG_HELP)]
     NatMapping(network::nat_mapping::NatMapping) => ("network", "nat-mapping", 60),
+    /// Classify crafted TCP SYNs in a responder-side capture.
+    #[command(after_long_help = analyze::tcp_vantage::AFTER_LONG_HELP)]
+    TcpVantage(analyze::tcp_vantage::TcpVantage) => ("analyze", "tcp-vantage", 61),
+    /// Emit an ordered retest checklist from an engagement journal.
+    #[command(after_long_help = analyze::retest::PLAN_AFTER_LONG_HELP)]
+    RetestPlan(analyze::retest::RetestPlan) => ("analyze", "retest-plan", 62),
     /// Generate shell completions and man pages under a directory.
     #[command(after_long_help = "Writes completions for Bash, Elvish, Fish, PowerShell, and Zsh, and man pages for all grouped paths. Requires a writable directory.\n\nExample:\n  packetcraftr reference documentation --directory ./cli-docs")]
     Documentation(reference::documentation::Args) => ("reference", "documentation", 30),

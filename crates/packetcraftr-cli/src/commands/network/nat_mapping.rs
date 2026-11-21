@@ -57,14 +57,14 @@ impl Generate for NatMapping {
                     format!("responder log exceeds {MAX_RECORDS} records"),
                 ));
             }
-            records.push(serde_json::from_str::<lib::ReceptionRecord>(line).map_err(
-                |error| {
+            records.push(
+                serde_json::from_str::<lib::ReceptionRecord>(line).map_err(|error| {
                     CliError::new(
                         Kind::Usage,
                         format!("invalid responder log record: {error}"),
                     )
-                },
-            )?);
+                })?,
+            );
             if records.len() == MAX_RECORDS
                 && text
                     .lines()

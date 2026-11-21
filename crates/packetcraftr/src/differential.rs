@@ -7,6 +7,7 @@
 pub mod canary;
 pub mod catalog;
 pub mod dns;
+pub mod tcp_vantage;
 
 mod engine;
 mod error;

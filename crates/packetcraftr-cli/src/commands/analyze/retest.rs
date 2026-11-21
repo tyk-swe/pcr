@@ -13,6 +13,23 @@ use crate::errors::CliError;
 use crate::output::contract::Format;
 use crate::terminal::emit_stdout_document;
 
+pub(crate) const PLAN_AFTER_LONG_HELP: &str = r"Emit an ordered retest checklist from an engagement journal. Bundles and journals deliberately do not record command arguments, so each step names the command and the digests a rerun must reproduce or consciously supersede rather than pretending the original invocation can be replayed. With --bundle, the bundle must be anchored to this journal head. Compare the rerun results with analyze findings-diff.
+
+Example:
+  packetcraftr analyze retest-plan --journal journal.json --bundle bundle.json";
+
+#[derive(Debug, Args)]
+pub(crate) struct RetestPlan {
+    /// Engagement journal to turn into a retest checklist.
+    #[arg(long)]
+    journal: PathBuf,
+    /// Evidence bundle that must be anchored to the journal head.
+    #[arg(long)]
+    bundle: Option<PathBuf>,
+    #[command(flatten)]
+    bounds: Bounds,
+}
+
 pub(crate) const FINDINGS_AFTER_LONG_HELP: &str = r"Compare findings from two aggregate JSON results by rule and subject. Repeated findings keep their multiplicity, a severity change is reported separately from presence, and coverage is never inferred: this compares the supplied reports, it does not rerun either assessment.
 
 Example:
@@ -63,6 +80,10 @@ fn check_stdin(paths: impl IntoIterator<Item = impl AsRef<Path>>) -> Result<(), 
         return Err(invalid("stdin may serve at most one input"));
     }
     Ok(())
+}
+
+fn absent(value: &Option<String>) -> &str {
+    value.as_deref().unwrap_or("-")
 }
 
 fn severities(values: &[packetcraftr_core::security::Severity]) -> String {
@@ -170,5 +191,62 @@ impl Generate for BundleVerify {
                 bundle.sources.len() - matched_sources.len(),
             ),
         )
+    }
+}
+
+impl Generate for RetestPlan {
+    fn generate(
+        self,
+        invocation: &crate::invocation::Invocation,
+        format: Format,
+    ) -> Result<(), CliError> {
+        require_text(format, "retest-plan")?;
+        check_stdin(std::iter::once(&self.journal).chain(self.bundle.iter()))?;
+        let journal_bytes = read(
+            invocation,
+            &self.journal,
+            packetcraftr_core::security::journal::MAX_JOURNAL_DOCUMENT_BYTES,
+        )?;
+        let journal = packetcraftr_core::security::journal::Journal::parse(&journal_bytes)
+            .map_err(CliError::classified)?;
+        let anchored = if let Some(bundle_path) = &self.bundle {
+            let bundle_bytes = read(invocation, bundle_path, bundle::MAX_BUNDLE_DOCUMENT_BYTES)?;
+            let bundle = bundle::Bundle::parse(&bundle_bytes).map_err(CliError::classified)?;
+            let anchored_head = bundle
+                .report
+                .measurements
+                .get("journal_head")
+                .and_then(serde_json::Value::as_str)
+                .ok_or_else(|| invalid("bundle is not anchored to a journal head"))?;
+            if anchored_head != journal.head() {
+                return Err(invalid(
+                    "bundle journal head does not match the supplied journal",
+                ));
+            }
+            true
+        } else {
+            false
+        };
+        let mut text = format!(
+            "retest_plan journal_label={} journal_head={} records={} bundle_anchored={anchored} arguments_recorded=false\n",
+            journal.label,
+            journal.head(),
+            journal.records.len(),
+        );
+        for record in &journal.records {
+            text.push_str(&format!(
+                "step={} rerun_command={} result_sha256={} scope_digest={} plan_digest={}\n",
+                record.sequence,
+                record.command,
+                record.result_sha256,
+                absent(&record.scope_digest),
+                absent(&record.plan_digest),
+            ));
+        }
+        text.push_str(
+            "note: rerun each named command with its engagement inputs, then compare with analyze findings-diff\n",
+        );
+        let _ = self.bounds;
+        emit_stdout_document(invocation, &text)
     }
 }

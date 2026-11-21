@@ -149,19 +149,19 @@ impl Generate for DefenderView {
             aggregate.alpn.len(),
         );
         for value in &aggregate.sni {
-            text.push_str(&format!("sni {value}\n"));
+            text.push_str(&format!("sni {}\n", crate::terminal::escaped(value)));
         }
         for value in &aggregate.alpn {
-            text.push_str(&format!("alpn {value}\n"));
+            text.push_str(&format!("alpn {}\n", crate::terminal::escaped(value)));
         }
         for value in &aggregate.ja3 {
-            text.push_str(&format!("ja3 {value}\n"));
+            text.push_str(&format!("ja3 {}\n", crate::terminal::escaped(value)));
         }
         for value in &aggregate.ja4 {
-            text.push_str(&format!("ja4 {value}\n"));
+            text.push_str(&format!("ja4 {}\n", crate::terminal::escaped(value)));
         }
         for value in &aggregate.ja3s {
-            text.push_str(&format!("ja3s {value}\n"));
+            text.push_str(&format!("ja3s {}\n", crate::terminal::escaped(value)));
         }
         for (version, count) in &aggregate.selected_versions {
             text.push_str(&format!("selected_version 0x{version:04x} count={count}\n"));

@@ -116,10 +116,11 @@ See also `packetcraftr reference topics expressions`.
 
 pub(super) const SCOPE: &str = r"Engagement scope
 
-Commands accept `--scope-file PATH` with a `packetcraftr.scope/v1` JSON
-document (a regular file, at most 1 MiB). One Scope can be reused across
+Commands accept `--scope-file PATH` with a `packetcraftr.scope/v1` or
+`packetcraftr.scope/v2` JSON document (a regular file, at most 1 MiB). One
+Scope can be reused across
 `network preflight`, `network plan`, `network send`, `network exchange`,
-`network capture` (budgets only), `network replay`, `network scan`,
+`network capture` (budgets and Window only), `network replay`, `network scan`,
 `network identify`, `network identify-os`, `network traceroute`, `network dns`,
 `network audit-tls`, `network audit-http`, `network differential`,
 `packet fuzz` (with `--live`), and `analyze report` (records the Scope digest
@@ -132,8 +133,16 @@ destination must satisfy the flag allowlist, every Scope `allowed_destinations`
 group, and no `denied_destinations` entry, and the public destination check
 still applies after all of those.
 
+A v2 Scope also carries a Window, the half-open time interval in which a
+live operation may be admitted. Admission at `not_before_unix_seconds` is
+inside the Window and admission at `not_after_unix_seconds` is already
+outside it. An operation admitted inside the Window is not failed for
+running past its end, so combine the Window with the existing duration
+limits when a hard stop is required.
+
 Fields:
-  schema (required)         the string `packetcraftr.scope/v1`
+  schema (required)         the string `packetcraftr.scope/v1` or
+                            `packetcraftr.scope/v2`
   label (required)          printable string, 1 to 128 characters
   allowed_destinations      up to 1024 IP addresses or canonical CIDR networks
   denied_destinations       up to 1024 IP addresses or canonical CIDR networks
@@ -141,15 +150,20 @@ Fields:
   allow_permissive_packets, allow_source_spoofing
                             boolean ceilings, false when omitted
   max_packets, max_bytes    optional budget ceilings
+  not_before_unix_seconds, not_after_unix_seconds
+                            v2 only, at least one required, start before end
 
 Unknown fields are rejected. Destination entries must spell the canonical
 network address, so `192.0.2.0/24` is accepted and `192.0.2.1/24` is not.
 
 Run `packetcraftr network preflight --scope-file PATH` to validate a Scope
-without sending anything. It prints the label and a digest of the Scope
-contents, which is stable across JSON formatting and list order, so an
-engagement record can name the exact Scope a run used.
+without sending anything. It prints the label, a digest of the Scope
+contents, and the Window state, which is `none`, `before`, `active`, or
+`after`. The digest is stable across JSON formatting and list order, so an
+engagement record can name the exact Scope a run used. A v1 digest is
+unchanged by the v2 addition.
 
-See `examples/documents/scope.json` and
-`schemas/packetcraftr.scope.v1.schema.json`.
+See `examples/documents/scope.json`, `examples/documents/scope-v2.json`,
+`schemas/packetcraftr.scope.v1.schema.json`, and
+`schemas/packetcraftr.scope.v2.schema.json`.
 ";

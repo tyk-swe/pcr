@@ -168,11 +168,12 @@ fn admit(
     policy: &crate::policy::Policy,
     endpoint: SocketAddr,
     limits: SocketLimits,
+    now: std::time::SystemTime,
 ) -> Result<(), Error> {
     let endpoints = [endpoint];
     let operation =
         SocketOperation::new(&endpoints, limits).map_err(|e| Error::Invalid(e.to_string()))?;
-    policy.authorize(Operation::Socket(operation))?;
+    policy.authorize_at(Operation::Socket(operation), now)?;
     Ok(())
 }
 /// A saturated count fails policy ceilings closed.
@@ -301,7 +302,7 @@ impl<P: TcpProviders, K: Clock> Client<P, K> {
     ) -> Result<(Connection<P>, SocketAddr), Error> {
         request.validate()?;
         self.policy.validate()?;
-        admit(&self.policy, request.endpoint, limits)?;
+        admit(&self.policy, request.endpoint, limits, self.wall_now())?;
         deadline.enforce()?;
         let provider = Arc::new(Authorized {
             providers: Arc::clone(&self.providers),

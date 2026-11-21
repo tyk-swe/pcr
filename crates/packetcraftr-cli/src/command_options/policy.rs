@@ -50,7 +50,7 @@ pub(crate) struct DestinationAllowlistArgs {
 
 #[derive(Clone, Debug, Args)]
 pub(crate) struct ScopeArgs {
-    /// Engagement scope document (packetcraftr.scope/v1 JSON, regular file).
+    /// Engagement scope document (packetcraftr.scope/v1 or v2 JSON, regular file).
     /// A scope only narrows this command's policy and budgets, it never
     /// grants an opt-in the command flags did not give.
     #[arg(long, value_name = "PATH", value_parser = load_scope)]

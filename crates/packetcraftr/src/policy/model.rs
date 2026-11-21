@@ -26,6 +26,81 @@ pub struct Policy {
     pub max_packets_per_operation: u64,
     pub max_bytes_per_operation: u64,
     pub max_resolved_addresses: usize,
+    /// The engagement Window an operation may be admitted in. Absent means
+    /// no time bound. A present Window only ever denies admission outside
+    /// itself and never grants what the other checks deny.
+    pub window: Option<Window>,
+}
+
+/// One half-open engagement time interval in Unix seconds. The start bound
+/// is included and the end bound is excluded, so an instant exactly at
+/// `not_after_unix_seconds` is already outside the Window.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Window {
+    pub not_before_unix_seconds: Option<u64>,
+    pub not_after_unix_seconds: Option<u64>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WindowState {
+    Before,
+    Active,
+    After,
+}
+
+impl WindowState {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Before => "before",
+            Self::Active => "active",
+            Self::After => "after",
+        }
+    }
+}
+
+impl Window {
+    #[must_use]
+    pub const fn state_at(self, unix_seconds: u64) -> WindowState {
+        if let Some(start) = self.not_before_unix_seconds
+            && unix_seconds < start
+        {
+            return WindowState::Before;
+        }
+        if let Some(end) = self.not_after_unix_seconds
+            && unix_seconds >= end
+        {
+            return WindowState::After;
+        }
+        WindowState::Active
+    }
+
+    #[must_use]
+    pub const fn contains_at(self, unix_seconds: u64) -> bool {
+        matches!(self.state_at(unix_seconds), WindowState::Active)
+    }
+
+    /// The time both Windows allow. Disjoint Windows intersect to an empty
+    /// Window that contains no instant, so narrowing fails closed.
+    #[must_use]
+    pub const fn intersect(self, other: Self) -> Self {
+        let not_before_unix_seconds =
+            match (self.not_before_unix_seconds, other.not_before_unix_seconds) {
+                (Some(left), Some(right)) => Some(if left >= right { left } else { right }),
+                (Some(value), None) | (None, Some(value)) => Some(value),
+                (None, None) => None,
+            };
+        let not_after_unix_seconds =
+            match (self.not_after_unix_seconds, other.not_after_unix_seconds) {
+                (Some(left), Some(right)) => Some(if left <= right { left } else { right }),
+                (Some(value), None) | (None, Some(value)) => Some(value),
+                (None, None) => None,
+            };
+        Self {
+            not_before_unix_seconds,
+            not_after_unix_seconds,
+        }
+    }
 }
 
 pub const DEFAULT_MAX_PACKETS_PER_OPERATION: u64 = 10_000;
@@ -107,6 +182,7 @@ impl Default for Policy {
             max_packets_per_operation: DEFAULT_MAX_PACKETS_PER_OPERATION,
             max_bytes_per_operation: DEFAULT_MAX_BYTES_PER_OPERATION,
             max_resolved_addresses: DEFAULT_MAX_RESOLVED_ADDRESSES,
+            window: None,
         }
     }
 }
@@ -171,6 +247,10 @@ pub enum Error {
     TrafficUnitLimit { actual: u64, limit: u64 },
     #[error("operation wire/application byte count {actual} exceeds policy limit {limit}")]
     TrafficByteLimit { actual: u64, limit: u64 },
+    #[error(
+        "traffic policy denies operation at unix time {now_unix_seconds} outside the engagement scope window"
+    )]
+    OutsideScopeWindow { now_unix_seconds: u64 },
 }
 
 const INVALID_PACKET_SEMANTICS: Classification = Classification::new(
@@ -210,7 +290,7 @@ impl Classified for Error {
             ),
             Self::InvalidScopeDocument { .. } => (
                 packetcraftr_core::error::Code::CliLiveTarget,
-                "provide a packetcraftr.scope/v1 JSON document with a label and IP or canonical CIDR destinations",
+                "provide a packetcraftr.scope/v1 or packetcraftr.scope/v2 JSON document with a label and IP or canonical CIDR destinations",
             ),
             Self::InvalidPacketSemantics { .. }
             | Self::WireFrame { .. }
@@ -248,6 +328,10 @@ impl Classified for Error {
             Self::TrafficByteLimit { .. } => (
                 packetcraftr_core::error::Code::PolicyTrafficByteLimit,
                 "reduce the application or query bytes, or deliberately raise the wire/application byte budget",
+            ),
+            Self::OutsideScopeWindow { .. } => (
+                packetcraftr_core::error::Code::PolicyScopeWindow,
+                "run inside the engagement scope window, or amend the scope window with approval",
             ),
         };
         let kind = match self {

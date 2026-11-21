@@ -41,7 +41,11 @@ impl<'c, C: Clock> WorkflowSetup<Admission<'c>, C> {
         Self::with_authorizer(
             client,
             operation,
-            Admission::new(std::borrow::Cow::Owned(policy), client.providers.resolver()),
+            Admission::new(
+                std::borrow::Cow::Owned(policy),
+                client.providers.resolver(),
+                client.wall_now(),
+            ),
         )
     }
 }

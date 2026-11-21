@@ -11,6 +11,7 @@ pub(crate) use approval::{approve_operation, resolve_selected, wire_limits};
 pub(crate) use selection::{DeclaredTargets, FamilyGate, admit_operation, admit_selection};
 
 use std::borrow::Cow;
+use std::time::SystemTime;
 
 use packetcraftr_core::error::BoundaryError;
 
@@ -22,13 +23,19 @@ use crate::target::{Authorized, ResolveTarget, Resolver, Target};
 pub(crate) struct Admission<'c> {
     policy: Cow<'c, Policy>,
     resolver: &'c dyn Resolver,
+    now: SystemTime,
 }
 
 impl<'c> Admission<'c> {
-    pub(crate) fn new(policy: impl Into<Cow<'c, Policy>>, resolver: &'c dyn Resolver) -> Self {
+    pub(crate) fn new(
+        policy: impl Into<Cow<'c, Policy>>,
+        resolver: &'c dyn Resolver,
+        now: SystemTime,
+    ) -> Self {
         Self {
             policy: policy.into(),
             resolver,
+            now,
         }
     }
 }
@@ -36,7 +43,7 @@ impl<'c> Admission<'c> {
 impl Authorizer for Admission<'_> {
     fn authorize_operation(&mut self, request: Operation<'_>) -> Result<(), BoundaryError> {
         self.policy
-            .authorize(request)
+            .authorize_at(request, self.now)
             .map_err(BoundaryError::from_error)
     }
 }
@@ -48,16 +55,20 @@ impl ResolveTarget for Admission<'_> {
         deadline: &packetcraftr_core::budget::Deadline,
     ) -> Result<Authorized, BoundaryError> {
         self.policy
+            .authorize_window_at(self.now)
+            .map_err(BoundaryError::from_error)?;
+        self.policy
             .resolve_target(target, self.resolver, deadline)
             .map_err(BoundaryError::from_error)
     }
 }
 
-impl<P: TargetProviders, K> Client<P, K> {
+impl<P: TargetProviders, K: crate::clock::Clock> Client<P, K> {
     pub(crate) fn admission(&self) -> Admission<'_> {
         Admission::new(
             Cow::Borrowed(self.policy.as_ref()),
             self.providers.resolver(),
+            self.wall_now(),
         )
     }
 }

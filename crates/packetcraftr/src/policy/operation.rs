@@ -4,6 +4,7 @@
 //! Operation declarations and the policy/resolver boundary used by live workflows.
 
 use std::net::IpAddr;
+use std::time::SystemTime;
 
 use packetcraftr_core::error::BoundaryError;
 use packetcraftr_core::packet::Packet;
@@ -274,7 +275,14 @@ impl Authorizer for &Policy {
 impl Policy {
     /// Exact materialized bytes are checked separately after route discovery.
     pub fn authorize(&self, request: Operation<'_>) -> Result<(), Error> {
+        use packetcraftr_core::clock::{Clock, SystemClock};
+
+        self.authorize_at(request, SystemClock.wall_now())
+    }
+
+    pub fn authorize_at(&self, request: Operation<'_>, now: SystemTime) -> Result<(), Error> {
         self.validate()?;
+        self.authorize_window_at(now)?;
         let limits = request.limits();
         if matches!(request, Operation::Dns(_) | Operation::Socket(_)) {
             self.authorize_traffic_limits(limits.packets(), limits.wire_bytes())?;
@@ -467,6 +475,45 @@ mod tests {
                 .is_ok()
         );
         assert!(policy.authorize(declared(None)).is_ok());
+    }
+
+    #[test]
+    fn scope_window_admits_at_its_start_and_denies_at_its_end() {
+        use std::time::Duration;
+
+        let policy = Policy {
+            window: Some(crate::policy::Window {
+                not_before_unix_seconds: Some(100),
+                not_after_unix_seconds: Some(200),
+            }),
+            ..ceilings(10, 100)
+        };
+        let at = |seconds: u64| SystemTime::UNIX_EPOCH + Duration::from_secs(seconds);
+        let wire = Operation::Wire(WireLimits::new(1, 1));
+        assert!(matches!(
+            policy.authorize_at(wire, at(99)),
+            Err(Error::OutsideScopeWindow {
+                now_unix_seconds: 99
+            })
+        ));
+        assert!(policy.authorize_at(wire, at(100)).is_ok());
+        assert!(policy.authorize_at(wire, at(199)).is_ok());
+        assert!(matches!(
+            policy.authorize_at(wire, at(200)),
+            Err(Error::OutsideScopeWindow {
+                now_unix_seconds: 200
+            })
+        ));
+        let error = policy.authorize_at(wire, at(99)).unwrap_err();
+        assert_eq!(error.classification().code.as_str(), "policy.scope_window");
+        assert_eq!(error.classification().kind, Kind::Policy);
+
+        let before_epoch = SystemTime::UNIX_EPOCH - Duration::from_secs(1);
+        assert!(matches!(
+            policy.authorize_window_at(before_epoch),
+            Err(Error::OutsideScopeWindow { .. })
+        ));
+        assert!(ceilings(10, 100).authorize_window_at(before_epoch).is_ok());
     }
 
     #[test]

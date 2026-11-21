@@ -40,6 +40,10 @@ _Avoid_: Token, cookie, probe ID
 The operator-declared boundary of one engagement, naming the destinations, exclusions, policy opt-ins, and budgets a live workflow may use. A Scope only narrows what command flags allow.
 _Avoid_: Allowlist, profile, config
 
+**Window**:
+The optional half-open time interval in a Scope during which live operations may be admitted, including its start and excluding its end.
+_Avoid_: Schedule, expiry, deadline
+
 **Evidence bundle**:
 One self-contained record of a finished assessment that embeds its report and binds every input result, and the Scope when one was used, by digest.
 _Avoid_: Export, archive, dump

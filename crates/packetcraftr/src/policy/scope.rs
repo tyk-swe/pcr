@@ -4,9 +4,10 @@
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
-use super::model::{DestinationConstraint, Error, MAX_DESTINATION_CONSTRAINTS, Policy};
+use super::model::{DestinationConstraint, Error, MAX_DESTINATION_CONSTRAINTS, Policy, Window};
 
 pub const SCHEMA: &str = "packetcraftr.scope/v1";
+pub const SCHEMA_V2: &str = "packetcraftr.scope/v2";
 pub const MAX_SCOPE_DOCUMENT_BYTES: usize = 1024 * 1024;
 const MAX_LABEL_CHARS: usize = 128;
 
@@ -31,6 +32,10 @@ struct RawScope {
     max_packets: Option<u64>,
     #[serde(default)]
     max_bytes: Option<u64>,
+    #[serde(default)]
+    not_before_unix_seconds: Option<u64>,
+    #[serde(default)]
+    not_after_unix_seconds: Option<u64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -44,6 +49,40 @@ pub struct Scope {
     pub allow_source_spoofing: bool,
     pub max_packets: Option<u64>,
     pub max_bytes: Option<u64>,
+    pub window: Option<Window>,
+}
+
+fn parse_window(raw: &RawScope) -> Result<Option<Window>, Error> {
+    let window = Window {
+        not_before_unix_seconds: raw.not_before_unix_seconds,
+        not_after_unix_seconds: raw.not_after_unix_seconds,
+    };
+    let declared =
+        window.not_before_unix_seconds.is_some() || window.not_after_unix_seconds.is_some();
+    if raw.schema == SCHEMA {
+        if declared {
+            return Err(invalid(
+                "window bounds require schema packetcraftr.scope/v2".to_owned(),
+            ));
+        }
+        return Ok(None);
+    }
+    if !declared {
+        return Err(invalid(
+            "packetcraftr.scope/v2 requires not_before_unix_seconds or not_after_unix_seconds"
+                .to_owned(),
+        ));
+    }
+    if let (Some(start), Some(end)) = (
+        window.not_before_unix_seconds,
+        window.not_after_unix_seconds,
+    ) && start >= end
+    {
+        return Err(invalid(format!(
+            "scope window start {start} must be before its end {end}"
+        )));
+    }
+    Ok(Some(window))
 }
 
 fn invalid(reason: String) -> Error {
@@ -82,12 +121,13 @@ impl Scope {
         }
         let raw: RawScope =
             serde_json::from_slice(bytes).map_err(|source| invalid(source.to_string()))?;
-        if raw.schema != SCHEMA {
+        if raw.schema != SCHEMA && raw.schema != SCHEMA_V2 {
             return Err(invalid(format!(
-                "expected schema {SCHEMA:?}, got {:?}",
+                "expected schema {SCHEMA:?} or {SCHEMA_V2:?}, got {:?}",
                 raw.schema
             )));
         }
+        let window = parse_window(&raw)?;
         if raw.label.trim().is_empty()
             || raw.label.chars().count() > MAX_LABEL_CHARS
             || raw.label.chars().any(char::is_control)
@@ -109,6 +149,7 @@ impl Scope {
             allow_source_spoofing: raw.allow_source_spoofing,
             max_packets: raw.max_packets,
             max_bytes: raw.max_bytes,
+            window,
         })
     }
 
@@ -116,8 +157,8 @@ impl Scope {
     pub fn digest(&self) -> String {
         let allowed = sorted(&self.allowed_destinations);
         let denied = sorted(&self.denied_destinations);
-        let canonical = format!(
-            "packetcraftr.scope/v1\nlabel={}\nallowed={}\ndenied={}\npublic={}\nhostname={}\npermissive={}\nspoofing={}\nmax_packets={}\nmax_bytes={}\n",
+        let body = format!(
+            "label={}\nallowed={}\ndenied={}\npublic={}\nhostname={}\npermissive={}\nspoofing={}\nmax_packets={}\nmax_bytes={}\n",
             self.label,
             allowed.join(","),
             denied.join(","),
@@ -130,6 +171,18 @@ impl Scope {
             self.max_bytes
                 .map_or_else(|| "-".to_owned(), |value| value.to_string()),
         );
+        let canonical = match self.window {
+            None => format!("packetcraftr.scope/v1\n{body}"),
+            Some(window) => format!(
+                "packetcraftr.scope/v2\n{body}not_before={}\nnot_after={}\n",
+                window
+                    .not_before_unix_seconds
+                    .map_or_else(|| "-".to_owned(), |value| value.to_string()),
+                window
+                    .not_after_unix_seconds
+                    .map_or_else(|| "-".to_owned(), |value| value.to_string()),
+            ),
+        };
         packetcraftr_core::field::hex::compact_hex(&Sha256::digest(canonical.as_bytes()))
     }
 
@@ -149,6 +202,12 @@ impl Scope {
         }
         if let Some(max_bytes) = self.max_bytes {
             narrowed.max_bytes_per_operation = narrowed.max_bytes_per_operation.min(max_bytes);
+        }
+        if let Some(window) = self.window {
+            narrowed.window = Some(match narrowed.window {
+                Some(existing) => existing.intersect(window),
+                None => window,
+            });
         }
         narrowed
             .denied_destinations
@@ -179,7 +238,7 @@ mod tests {
     #[test]
     fn rejects_wrong_schema_unknown_fields_and_bad_constraints() {
         for document in [
-            r#"{"schema":"packetcraftr.scope/v2","label":"lab"}"#,
+            r#"{"schema":"packetcraftr.scope/v3","label":"lab"}"#,
             r#"{"schema":"packetcraftr.scope/v1","label":"lab","extra":true}"#,
             r#"{"schema":"packetcraftr.scope/v1","label":"  "}"#,
             r#"{"schema":"packetcraftr.scope/v1","label":"lab","allowed_destinations":["example.test"]}"#,
@@ -255,6 +314,93 @@ mod tests {
                 ),
                 "{field}"
             );
+        }
+    }
+
+    #[test]
+    fn window_bounds_require_v2_and_a_nonempty_interval() {
+        for document in [
+            r#"{"schema":"packetcraftr.scope/v1","label":"lab","not_before_unix_seconds":10}"#,
+            r#"{"schema":"packetcraftr.scope/v1","label":"lab","not_after_unix_seconds":20}"#,
+            r#"{"schema":"packetcraftr.scope/v2","label":"lab"}"#,
+            r#"{"schema":"packetcraftr.scope/v2","label":"lab","not_before_unix_seconds":20,"not_after_unix_seconds":20}"#,
+            r#"{"schema":"packetcraftr.scope/v2","label":"lab","not_before_unix_seconds":21,"not_after_unix_seconds":20}"#,
+        ] {
+            assert!(
+                matches!(parse(document), Err(Error::InvalidScopeDocument { .. })),
+                "{document}"
+            );
+        }
+        for document in [
+            r#"{"schema":"packetcraftr.scope/v2","label":"lab","not_before_unix_seconds":10}"#,
+            r#"{"schema":"packetcraftr.scope/v2","label":"lab","not_after_unix_seconds":20}"#,
+            r#"{"schema":"packetcraftr.scope/v2","label":"lab","not_before_unix_seconds":10,"not_after_unix_seconds":11}"#,
+        ] {
+            let scope = parse(document).unwrap();
+            assert!(scope.window.is_some(), "{document}");
+        }
+    }
+
+    #[test]
+    fn v1_digest_keeps_its_original_canonical_form() {
+        let scope = parse(
+            r#"{"schema":"packetcraftr.scope/v1","label":"lab","allowed_destinations":["192.0.2.0/24","10.0.0.1"],"max_packets":10}"#,
+        )
+        .unwrap();
+        let canonical = "packetcraftr.scope/v1\nlabel=lab\nallowed=10.0.0.1,192.0.2.0/24\ndenied=\npublic=false\nhostname=false\npermissive=false\nspoofing=false\nmax_packets=10\nmax_bytes=-\n";
+        let expected =
+            packetcraftr_core::field::hex::compact_hex(&Sha256::digest(canonical.as_bytes()));
+        assert_eq!(scope.digest(), expected);
+
+        let windowed = parse(
+            r#"{"schema":"packetcraftr.scope/v2","label":"lab","allowed_destinations":["192.0.2.0/24","10.0.0.1"],"max_packets":10,"not_before_unix_seconds":100,"not_after_unix_seconds":200}"#,
+        )
+        .unwrap();
+        assert_ne!(windowed.digest(), expected);
+        let later_end = parse(
+            r#"{"schema":"packetcraftr.scope/v2","label":"lab","allowed_destinations":["192.0.2.0/24","10.0.0.1"],"max_packets":10,"not_before_unix_seconds":100,"not_after_unix_seconds":201}"#,
+        )
+        .unwrap();
+        assert_ne!(windowed.digest(), later_end.digest());
+    }
+
+    #[test]
+    fn narrowing_intersects_windows_and_disjoint_windows_deny_everything() {
+        let scope = parse(
+            r#"{"schema":"packetcraftr.scope/v2","label":"lab","not_before_unix_seconds":100,"not_after_unix_seconds":300}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            scope.narrow(&Policy::default()).window,
+            Some(Window {
+                not_before_unix_seconds: Some(100),
+                not_after_unix_seconds: Some(300),
+            })
+        );
+        let policy = Policy {
+            window: Some(Window {
+                not_before_unix_seconds: Some(200),
+                not_after_unix_seconds: Some(400),
+            }),
+            ..Policy::default()
+        };
+        assert_eq!(
+            scope.narrow(&policy).window,
+            Some(Window {
+                not_before_unix_seconds: Some(200),
+                not_after_unix_seconds: Some(300),
+            })
+        );
+        let disjoint = Policy {
+            window: Some(Window {
+                not_before_unix_seconds: Some(400),
+                not_after_unix_seconds: Some(500),
+            }),
+            ..Policy::default()
+        };
+        let empty = scope.narrow(&disjoint).window.unwrap();
+        for instant in [0, 100, 250, 400, 499, u64::MAX] {
+            assert!(!empty.contains_at(instant), "{instant}");
         }
     }
 

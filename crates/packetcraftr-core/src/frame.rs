@@ -134,6 +134,20 @@ impl Frame {
         })
     }
 
+    /// A copy retaining at most `max_bytes` captured bytes, preserving the
+    /// original length so writers can still emit a valid truncated record.
+    #[must_use]
+    pub fn truncated(&self, max_bytes: usize) -> Self {
+        if self.bytes.len() <= max_bytes {
+            return self.clone();
+        }
+        Self {
+            captured_length: u32::try_from(max_bytes).unwrap_or(u32::MAX),
+            bytes: self.bytes.slice(..max_bytes),
+            ..self.clone()
+        }
+    }
+
     pub fn captured_length(&self) -> u32 {
         self.captured_length
     }
@@ -240,5 +254,23 @@ impl<'de> Deserialize<'de> for Frame {
         frame.interface = record.interface;
         frame.direction = record.direction;
         Ok(frame)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn truncated_preserves_original_length_and_metadata() {
+        let mut frame = Frame::new(None, LinkType::ETHERNET, vec![1, 2, 3, 4]).unwrap();
+        frame.interface = Some(3);
+        let truncated = frame.truncated(2);
+        assert_eq!(&truncated.bytes()[..], &[1, 2]);
+        assert_eq!(truncated.captured_length(), 2);
+        assert_eq!(truncated.original_length(), 4);
+        assert!(truncated.is_truncated());
+        assert_eq!(truncated.interface, Some(3));
+        assert_eq!(frame.truncated(99), frame);
     }
 }

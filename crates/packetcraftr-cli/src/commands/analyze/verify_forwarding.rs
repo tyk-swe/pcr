@@ -81,6 +81,17 @@ pub(super) fn run(
 ) -> Result<CommandExit, CliError> {
     let format = invocation.format;
     let stream = &invocation.output;
+    if arguments.profile_digest && format != crate::output::contract::Format::Text {
+        return Err(CliError::from_classification(
+            Classification::new(
+                packetcraftr_core::error::Code::CliOutputFormat,
+                Kind::Usage,
+                Some("use --output text with --profile-digest"),
+            ),
+            format!("--profile-digest prints text only, not --output {format}"),
+            Vec::new(),
+        ));
+    }
     let stdin = Path::new("-");
     if arguments.ingress == stdin && arguments.egress == stdin {
         return Err(CliError::from_classification(
@@ -164,7 +175,44 @@ pub(super) fn run(
             egress: egress_source,
         },
     )?;
+    if arguments.profile_digest {
+        let (digest, lines) = middlebox_profile(&report.violated_checks);
+        crate::terminal::write_stdout_line(
+            invocation,
+            format_args!("middlebox_profile_digest={digest}"),
+        )?;
+        for line in lines {
+            crate::terminal::write_stdout_line(invocation, format_args!("{line}"))?;
+        }
+    }
     Ok(exit)
+}
+
+fn middlebox_profile(checks: &[forwarding::ViolatedCheck]) -> (String, Vec<String>) {
+    use sha2::{Digest, Sha256};
+    use std::collections::BTreeMap;
+
+    let mut counts: BTreeMap<(String, String), usize> = BTreeMap::new();
+    for violated in checks {
+        *counts
+            .entry((
+                format!("{:?}", violated.check.kind),
+                violated.check.field.clone(),
+            ))
+            .or_default() += violated.count;
+    }
+    let mut canonical = "packetcraftr.middlebox-profile/v1\n".to_owned();
+    let mut lines = Vec::new();
+    for ((kind, field), count) in &counts {
+        canonical.push_str(&format!("{kind} {field} {count}\n"));
+        lines.push(format!(
+            "middlebox_rewrite kind={kind} field={field} count={count}"
+        ));
+    }
+    (
+        packetcraftr_core::field::hex::compact_hex(&Sha256::digest(canonical.as_bytes())),
+        lines,
+    )
 }
 
 fn compile_selection(
@@ -235,5 +283,36 @@ impl Collection<'_> {
             },
             fingerprint.finish(),
         ))
+    }
+}
+
+#[cfg(test)]
+mod profile_tests {
+    use super::middlebox_profile;
+    use packetcraftr_core::analysis::forwarding::{Check, CheckKind, ViolatedCheck};
+
+    #[test]
+    fn middlebox_profile_is_order_independent_and_field_sensitive() {
+        fn violated(kind: CheckKind, field: &str, count: usize) -> ViolatedCheck {
+            ViolatedCheck {
+                check: Check {
+                    kind,
+                    field: field.to_owned(),
+                    value: None,
+                },
+                count,
+            }
+        }
+        let first = middlebox_profile(&[
+            violated(CheckKind::Preserve, "ipv4.ttl", 2),
+            violated(CheckKind::Expect, "ipv4.destination", 1),
+        ]);
+        let reordered = middlebox_profile(&[
+            violated(CheckKind::Expect, "ipv4.destination", 1),
+            violated(CheckKind::Preserve, "ipv4.ttl", 2),
+        ]);
+        assert_eq!(first, reordered);
+        let changed = middlebox_profile(&[violated(CheckKind::Preserve, "ipv4.dscp_ecn", 1)]);
+        assert_ne!(first.0, changed.0);
     }
 }

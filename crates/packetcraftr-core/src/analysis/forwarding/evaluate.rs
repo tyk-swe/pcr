@@ -64,6 +64,7 @@ pub fn verify_with_limits(
         items: Vec::new(),
         omitted: 0,
         budget: DetailBudget::new(limits.max_details, limits.max_detail_bytes),
+        counts: BTreeMap::new(),
     };
     let mut scratch_budget = ScratchBudget::new(limits.max_scratch_bytes);
     scratch_budget.reserve(
@@ -251,6 +252,11 @@ pub fn verify_with_limits(
         summary,
         matches,
         violations: sink.items,
+        violated_checks: sink
+            .counts
+            .into_values()
+            .map(|(check, count)| super::ViolatedCheck { check, count })
+            .collect(),
         unmatched,
         unkeyed,
         ambiguous,
@@ -341,11 +347,13 @@ struct ViolationSink {
     items: Vec<Violation>,
     omitted: u64,
     budget: DetailBudget,
+    counts: BTreeMap<(String, String), (Check, usize)>,
 }
 
 impl ViolationSink {
     fn record(
         &mut self,
+        check: &Check,
         outcome: Outcome,
         summary: &mut Summary,
         violation: impl FnOnce() -> Violation,
@@ -354,6 +362,10 @@ impl ViolationSink {
             Outcome::Violated => {
                 summary.checks_evaluated += 1;
                 summary.checks_violated += 1;
+                self.counts
+                    .entry((format!("{:?}", check.kind), check.field.clone()))
+                    .or_insert_with(|| (check.clone(), 0))
+                    .1 += 1;
                 if self.budget.has_slot(self.items.len()) {
                     push_bounded(
                         &mut self.items,
@@ -390,24 +402,21 @@ fn evaluate_pair(
         let expected_state = ingress.preserved_states[index];
         let actual_state = egress.preserved_states[index];
         let outcome = preservation_outcome(kind, expected_state, actual_state, &expected, &actual);
+        let check = Check {
+            kind,
+            field: field.to_owned(),
+            value: None,
+        };
         checks.push(CheckEvaluation {
-            check: Check {
-                kind,
-                field: field.to_owned(),
-                value: None,
-            },
+            check: check.clone(),
             outcome,
             expected_state: Some(expected_state),
             actual_state,
             expected: expected.clone(),
             actual: actual.clone(),
         });
-        sink.record(outcome, summary, || Violation {
-            check: Check {
-                kind,
-                field: field.to_owned(),
-                value: None,
-            },
+        sink.record(&check, outcome, summary, || Violation {
+            check: check.clone(),
             key: ingress.key(),
             ingress: Some(Evidence::from(ingress)),
             egress: Evidence::from(egress),
@@ -420,24 +429,21 @@ fn evaluate_pair(
         let field = &expectation.field;
         let declared = &expectation.declared;
         let (outcome, actual) = evaluate_expectation(kind, stored);
+        let check = Check {
+            kind,
+            field: field.to_owned(),
+            value: (kind == CheckKind::Expect).then(|| declared.to_owned()),
+        };
         checks.push(CheckEvaluation {
-            check: Check {
-                kind,
-                field: field.to_owned(),
-                value: (kind == CheckKind::Expect).then(|| declared.to_owned()),
-            },
+            check: check.clone(),
             outcome,
             expected_state: None,
             actual_state: stored.state,
             expected: None,
             actual: actual.clone(),
         });
-        sink.record(outcome, summary, || Violation {
-            check: Check {
-                kind,
-                field: field.to_owned(),
-                value: (kind == CheckKind::Expect).then(|| declared.to_owned()),
-            },
+        sink.record(&check, outcome, summary, || Violation {
+            check: check.clone(),
             key: egress.key(),
             ingress: Some(Evidence::from(ingress)),
             egress: Evidence::from(egress),
@@ -465,12 +471,13 @@ fn record_egress_expectations(
     for (expectation, stored) in rules.expectations.iter().zip(&egress.expectations) {
         let kind = expectation.kind();
         let (outcome, actual) = evaluate_expectation(kind, stored);
-        sink.record(outcome, summary, || Violation {
-            check: Check {
-                kind,
-                field: expectation.field.clone(),
-                value: (kind == CheckKind::Expect).then(|| expectation.declared.clone()),
-            },
+        let check = Check {
+            kind,
+            field: expectation.field.clone(),
+            value: (kind == CheckKind::Expect).then(|| expectation.declared.clone()),
+        };
+        sink.record(&check, outcome, summary, || Violation {
+            check: check.clone(),
             key: egress.key(),
             ingress: None,
             egress: Evidence::from(egress),

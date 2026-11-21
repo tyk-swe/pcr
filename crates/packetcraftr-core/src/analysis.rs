@@ -11,6 +11,8 @@ pub mod dns;
 mod error;
 pub mod expert;
 pub mod export;
+pub mod fidelity;
+pub mod first_hop;
 pub mod follow;
 pub mod forwarding;
 pub mod http;

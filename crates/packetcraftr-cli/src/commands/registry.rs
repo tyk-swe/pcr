@@ -185,7 +185,7 @@ commands! {
     #[command(after_long_help = "Requires successful aggregate JSON from matching native scan methods. Missing endpoints are coverage changes, never presumed closed.\n\nExample: packetcraftr analyze scan-diff before.json after.json")]
     ScanDiff(analyze::scan_diff::ScanDiff) = "scan-diff" => ("analyze", "scan-diff", 34),
     /// Combine security results into a standalone local HTML assessment.
-    #[command(after_long_help = "Accepts aggregate JSON from the security analysis and audit commands plus scan, differential, fuzz, exchange, and traceroute results, which are summarized as observations. Escapes captured content, records source-file hashes, and refuses existing HTML and Evidence bundle destinations.\n\nExample: packetcraftr analyze report hunt.json scan.json --html assessment.html --bundle bundle.json --scope-file scope.json")]
+    #[command(after_long_help = "Accepts aggregate JSON from the security analysis and audit commands, prior report outputs, and scan, differential, fuzz, exchange, and traceroute results, which are summarized as observations. Escapes captured content, records source-file hashes, and refuses existing HTML and Evidence bundle destinations.\n\nExample: packetcraftr analyze report hunt.json scan.json --html assessment.html --bundle bundle.json --scope-file scope.json")]
     Assessment(analyze::report::Assessment) = "report" => ("analyze", "report", 35),
     /// Audit an observed TLS handshake, certificate chain, and name matching.
     #[command(after_long_help = "Uses ordinary TCP sockets. Bundled WebPKI roots are replaced by --ca-file. --server-name sets SNI and certificate identity without resolving another target. No revocation fetching or protocol enumeration.\n\nExample: packetcraftr network audit-tls 192.0.2.10:443 --server-name example.test")]
@@ -324,6 +324,27 @@ commands! {
     /// Verify an engagement journal chain and supplied result files against it.
     #[command(after_long_help = analyze::journal::VERIFY_AFTER_LONG_HELP)]
     JournalVerify(analyze::journal::Verify) => ("analyze", "journal-verify", 47),
+    /// Measure how much of an operator capture a sensor capture can see.
+    #[command(after_long_help = analyze::capture_fidelity::AFTER_LONG_HELP)]
+    CaptureFidelity(analyze::capture_fidelity::CaptureFidelity) => ("analyze", "capture-fidelity", 48),
+    /// Compare findings between two aggregate JSON results for retest.
+    #[command(after_long_help = analyze::retest::FINDINGS_AFTER_LONG_HELP)]
+    FindingsDiff(analyze::retest::FindingsDiff) => ("analyze", "findings-diff", 49),
+    /// Validate an Evidence bundle and any supplied source files.
+    #[command(after_long_help = analyze::retest::BUNDLE_AFTER_LONG_HELP)]
+    BundleVerify(analyze::retest::BundleVerify) => ("analyze", "bundle-verify", 50),
+    /// Compare passive inventories from baseline and later captures.
+    #[command(after_long_help = analyze::capture_diff::AFTER_LONG_HELP)]
+    CaptureDiff(analyze::capture_diff::CaptureDiff) => ("analyze", "capture-diff", 51),
+    /// Report ARP, DHCP and router-advertisement identity conflicts.
+    #[command(after_long_help = analyze::first_hop::AFTER_LONG_HELP)]
+    FirstHop(analyze::first_hop::FirstHop) => ("analyze", "first-hop", 52),
+    /// Show TLS metadata available to a defender without key logs.
+    #[command(after_long_help = analyze::defender_view::AFTER_LONG_HELP)]
+    DefenderView(analyze::defender_view::DefenderView) => ("analyze", "defender-view", 53),
+    /// Write a pseudonymized PCAPNG copy of a capture for sharing.
+    #[command(after_long_help = analyze::scrub::AFTER_LONG_HELP)]
+    Scrub(analyze::scrub::Scrub) => ("analyze", "scrub", 54),
 }
 
 /// Workflow placement and compact identifiers used in machine output.

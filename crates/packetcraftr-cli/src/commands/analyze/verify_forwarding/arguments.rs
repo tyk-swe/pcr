@@ -83,6 +83,10 @@ pub(crate) struct Args {
     pub(crate) decode: DecodeArgs,
     #[command(flatten)]
     pub(crate) limits: OfflineLimitsArgs,
+    /// In text output, also print a stable digest of the violated check
+    /// fields so middlebox rewrite behavior can be compared across runs.
+    #[arg(long)]
+    pub(crate) profile_digest: bool,
 }
 
 fn detail_bytes(value: &str) -> Result<usize, String> {

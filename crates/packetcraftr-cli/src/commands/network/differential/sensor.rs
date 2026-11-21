@@ -105,11 +105,13 @@ struct Assembly {
     total: Option<usize>,
     contiguous: usize,
     stored: usize,
+    last_seen: u64,
 }
 
 #[derive(Default)]
 struct FragmentAssembler {
     assemblies: BTreeMap<FragmentKey, Assembly>,
+    tick: u64,
 }
 
 const MAX_ASSEMBLIES: usize = 128;
@@ -124,10 +126,20 @@ impl FragmentAssembler {
         if piece.offset == 0 && !piece.more {
             return Some(piece.payload);
         }
+        self.tick = self.tick.saturating_add(1);
         if !self.assemblies.contains_key(&piece.key) && self.assemblies.len() >= MAX_ASSEMBLIES {
-            return None;
+            let oldest = self
+                .assemblies
+                .iter()
+                .min_by_key(|(_, assembly)| assembly.last_seen)
+                .map(|(key, _)| *key);
+            if let Some(oldest) = oldest {
+                self.assemblies.remove(&oldest);
+            }
         }
+        let tick = self.tick;
         let assembly = self.assemblies.entry(piece.key).or_default();
+        assembly.last_seen = tick;
         if assembly.chunks.contains_key(&piece.offset) {
             return None;
         }
@@ -227,13 +239,17 @@ mod tests {
     use super::*;
 
     fn ip_frame(fragment_offset: u16, more: bool, chunk: &[u8]) -> Frame {
+        ip_frame_id(7, fragment_offset, more, chunk)
+    }
+
+    fn ip_frame_id(identification: u16, fragment_offset: u16, more: bool, chunk: &[u8]) -> Frame {
         let total = 20 + chunk.len();
         let mut bytes = vec![0_u8; 14 + total];
         bytes[12..14].copy_from_slice(&0x0800_u16.to_be_bytes());
         let ip = &mut bytes[14..];
         ip[0] = 0x45;
         ip[2..4].copy_from_slice(&(total as u16).to_be_bytes());
-        ip[4..6].copy_from_slice(&7_u16.to_be_bytes());
+        ip[4..6].copy_from_slice(&identification.to_be_bytes());
         let field = (u16::from(more) << 13) | (fragment_offset / 8);
         ip[6..8].copy_from_slice(&field.to_be_bytes());
         ip[8] = 64;
@@ -270,6 +286,23 @@ mod tests {
             observations[0].payload_sha256,
             lib::hex(&lib::canary::payload_sha256(&probe))
         );
+    }
+
+    #[test]
+    fn stale_fragment_assemblies_are_evicted_for_new_flows() {
+        let mut assembler = FragmentAssembler::default();
+        for id in 0..MAX_ASSEMBLIES as u16 {
+            let frame = ip_frame_id(id, 0, true, &[0_u8; 8]);
+            assert!(observations_from_frame(&frame, &mut assembler).is_empty());
+        }
+        let probe = lib::canary::build_probe(&[7_u8; lib::canary::TOKEN_LEN], 3, 9, 96);
+        let datagram = udp_datagram(&probe);
+        let first = ip_frame_id(999, 0, true, &datagram[..24]);
+        let second = ip_frame_id(999, 24, false, &datagram[24..]);
+        assert!(observations_from_frame(&first, &mut assembler).is_empty());
+        let observations = observations_from_frame(&second, &mut assembler);
+        assert_eq!(observations.len(), 1);
+        assert_eq!(observations[0].variant_index, 3);
     }
 
     #[test]

@@ -200,9 +200,14 @@ fn scrub_frame(
     pseudonyms: &mut Pseudonyms,
     max_output_bytes: usize,
 ) -> Result<Frame, CliError> {
-    let decoded = dissector
+    let decoded = match dissector
         .decode(frame.clone(), packetcraftr_core::decode::Options::default())
-        .map_err(CliError::classified)?;
+    {
+        Ok(decoded) => decoded,
+        Err(error) => {
+            return fallback_patch(frame, pseudonyms).ok_or_else(|| CliError::classified(error));
+        }
+    };
     let mut patch = HeaderRewrite::default();
     if frame.link_type == LinkType::ETHERNET
         && let Some((source, destination)) =
@@ -217,10 +222,127 @@ fn scrub_frame(
         patch.destination_ip = Some(pseudonyms.ip(destination));
     }
     if patch.is_empty() {
-        return Ok(frame.clone());
+        return Ok(fallback_patch(frame, pseudonyms).unwrap_or_else(|| frame.clone()));
     }
-    transform::rewrite(frame, &patch, RewriteLimits { max_output_bytes })
-        .map_err(CliError::classified)
+    match transform::rewrite(frame, &patch, RewriteLimits { max_output_bytes }) {
+        Ok(frame) => Ok(frame),
+        Err(error) => fallback_patch(frame, pseudonyms).ok_or_else(|| CliError::classified(error)),
+    }
+}
+
+fn fallback_patch(frame: &Frame, pseudonyms: &mut Pseudonyms) -> Option<Frame> {
+    let mut bytes = frame.bytes().to_vec();
+    let ip_offset = patch_link_bytes(&mut bytes, frame.link_type, pseudonyms)?;
+    let ip = bytes.get_mut(ip_offset..)?;
+    match ip.first().map(|byte| byte >> 4) {
+        Some(4) if ip.len() >= 20 => {
+            let source = IpAddr::from(<[u8; 4]>::try_from(&ip[12..16]).ok()?);
+            let destination = IpAddr::from(<[u8; 4]>::try_from(&ip[16..20]).ok()?);
+            ip[12..16].copy_from_slice(&ipv4_bytes(pseudonyms.ip(source)));
+            ip[16..20].copy_from_slice(&ipv4_bytes(pseudonyms.ip(destination)));
+            let header_len = usize::from(ip[0] & 0x0f) * 4;
+            if header_len >= 20 && ip.len() >= header_len {
+                ip[10] = 0;
+                ip[11] = 0;
+                let checksum = !packetcraftr_core::protocol::checksum_parts(&[&ip[..header_len]]);
+                ip[10..12].copy_from_slice(&checksum.to_be_bytes());
+            }
+        }
+        Some(6) if ip.len() >= 40 => {
+            let source = IpAddr::from(<[u8; 16]>::try_from(&ip[8..24]).ok()?);
+            let destination = IpAddr::from(<[u8; 16]>::try_from(&ip[24..40]).ok()?);
+            ip[8..24].copy_from_slice(&ipv6_bytes(pseudonyms.ip(source)));
+            ip[24..40].copy_from_slice(&ipv6_bytes(pseudonyms.ip(destination)));
+        }
+        _ => return None,
+    }
+    let mut patched = Frame::try_with_optional_timestamp(
+        frame.timestamp,
+        frame.link_type,
+        packetcraftr_core::frame::Lengths {
+            captured: frame.captured_length(),
+            original: frame.original_length(),
+        },
+        bytes,
+    )
+    .ok()?;
+    patched.interface = frame.interface;
+    patched.direction = frame.direction;
+    Some(patched)
+}
+
+fn ipv4_bytes(address: IpAddr) -> [u8; 4] {
+    match address {
+        IpAddr::V4(address) => address.octets(),
+        IpAddr::V6(_) => [0; 4],
+    }
+}
+
+fn ipv6_bytes(address: IpAddr) -> [u8; 16] {
+    match address {
+        IpAddr::V6(address) => address.octets(),
+        IpAddr::V4(_) => [0; 16],
+    }
+}
+
+fn patch_link_bytes(
+    bytes: &mut [u8],
+    link_type: LinkType,
+    pseudonyms: &mut Pseudonyms,
+) -> Option<usize> {
+    if link_type.is_raw_ip() {
+        return Some(0);
+    }
+    match link_type {
+        LinkType::ETHERNET => {
+            if bytes.len() >= 14 {
+                let destination = <[u8; 6]>::try_from(&bytes[0..6]).ok()?;
+                let source = <[u8; 6]>::try_from(&bytes[6..12]).ok()?;
+                bytes[0..6].copy_from_slice(&pseudonyms.mac(destination));
+                bytes[6..12].copy_from_slice(&pseudonyms.mac(source));
+            }
+            let mut type_offset = 12_usize;
+            for _ in 0..4 {
+                let ether_type =
+                    u16::from_be_bytes([*bytes.get(type_offset)?, *bytes.get(type_offset + 1)?]);
+                if matches!(ether_type, 0x0800 | 0x86dd) {
+                    return Some(type_offset + 2);
+                }
+                if !matches!(ether_type, 0x8100 | 0x88a8) {
+                    return None;
+                }
+                type_offset += 4;
+            }
+            None
+        }
+        LinkType::LINUX_SLL => {
+            if bytes.len() < 16
+                || !matches!(u16::from_be_bytes([bytes[14], bytes[15]]), 0x0800 | 0x86dd)
+            {
+                return None;
+            }
+            let address_len = usize::from(u16::from_be_bytes([bytes[4], bytes[5]]));
+            if address_len >= 6 && bytes.len() >= 12 {
+                let source = <[u8; 6]>::try_from(&bytes[6..12]).ok()?;
+                bytes[6..12].copy_from_slice(&pseudonyms.mac(source));
+            }
+            Some(16)
+        }
+        LinkType::LINUX_SLL2 => {
+            if bytes.len() < 20
+                || !matches!(u16::from_be_bytes([bytes[0], bytes[1]]), 0x0800 | 0x86dd)
+            {
+                return None;
+            }
+            if usize::from(bytes[11]) >= 6 && bytes.len() >= 18 {
+                let source = <[u8; 6]>::try_from(&bytes[12..18]).ok()?;
+                bytes[12..18].copy_from_slice(&pseudonyms.mac(source));
+                bytes[18..20].fill(0);
+            }
+            Some(20)
+        }
+        _ => None,
+    }
 }
 
 #[cfg(test)]

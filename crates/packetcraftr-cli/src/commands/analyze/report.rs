@@ -26,6 +26,11 @@ pub(crate) struct Assessment {
     /// destinations are refused.
     #[arg(long)]
     bundle: Option<PathBuf>,
+    /// Engagement journal every result must appear in. Its verified head
+    /// digest is anchored in the report measurements, and therefore inside
+    /// the Evidence bundle when one is written.
+    #[arg(long)]
+    journal: Option<PathBuf>,
     #[command(flatten)]
     bounds: Bounds,
     #[command(flatten)]
@@ -51,7 +56,12 @@ impl Spec for Assessment {
         if self.results.len() > 128 {
             return Err(invalid("reports accept at most 128 result files"));
         }
-        input::validate_stdin_sources(self.results.iter().map(PathBuf::as_path))?;
+        input::validate_stdin_sources(
+            self.results
+                .iter()
+                .map(PathBuf::as_path)
+                .chain(self.journal.as_deref()),
+        )?;
         if self
             .bundle
             .as_deref()
@@ -65,6 +75,20 @@ impl Spec for Assessment {
             .as_ref()
             .map(|path| crate::staged_output::StagedFile::stage(i, path))
             .transpose()?;
+        let journal = self
+            .journal
+            .as_deref()
+            .map(|path| -> Result<_, CliError> {
+                let bytes = read(
+                    i,
+                    path,
+                    packetcraftr_core::security::journal::MAX_JOURNAL_DOCUMENT_BYTES,
+                )?;
+                packetcraftr_core::security::journal::Journal::parse(&bytes)
+                    .map_err(CliError::classified)
+            })
+            .transpose()?;
+        let mut journaled_inputs: Vec<(String, String)> = Vec::new();
         let mut report = Report::new("report");
         let mut seen_inputs = BTreeSet::new();
         let mut seen_sources = BTreeSet::new();
@@ -74,6 +98,10 @@ impl Spec for Assessment {
             let input_source = source(path, &bytes);
             if !seen_inputs.insert((path.as_os_str(), input_source.sha256.clone())) {
                 continue;
+            }
+            if journal.is_some() {
+                let record = super::journal::record_input(&bytes, None)?;
+                journaled_inputs.push((record.command, record.result_sha256));
             }
             let result = input::report(&bytes)?;
             if !result.completeness.complete {
@@ -121,6 +149,9 @@ impl Spec for Assessment {
             report
                 .measurements
                 .insert("scope_digest".into(), serde_json::json!(scope.digest()));
+        }
+        if let Some(journal) = &journal {
+            anchor_journal(&mut report, journal, &journaled_inputs)?;
         }
         let published = crate::commands::security::output::Report::from(&report);
         check_result_size(
@@ -176,6 +207,31 @@ impl Spec for Assessment {
         }
         publish(i, Command::Assessment, report, self.bounds)
     }
+}
+
+fn anchor_journal(
+    report: &mut Report,
+    journal: &packetcraftr_core::security::journal::Journal,
+    inputs: &[(String, String)],
+) -> Result<(), CliError> {
+    for (command, digest) in inputs {
+        if journal.find(command, digest).is_none() {
+            return Err(invalid(format!(
+                "result {command} with sha256 {digest} is not in the journal"
+            )));
+        }
+    }
+    report
+        .measurements
+        .insert("journal_head".into(), serde_json::json!(journal.head()));
+    report.measurements.insert(
+        "journal_records".into(),
+        serde_json::json!(journal.records.len()),
+    );
+    report
+        .measurements
+        .insert("journal_label".into(), serde_json::json!(journal.label));
+    Ok(())
 }
 
 fn same_destination(left: &std::path::Path, right: &std::path::Path) -> bool {
@@ -278,6 +334,44 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![("result.json", "a"), ("ioc.json", "b"), ("ioc.json", "c")]
         );
+    }
+
+    #[test]
+    fn journal_anchor_binds_head_only_when_every_input_is_journaled() {
+        use super::*;
+        use packetcraftr_core::security::journal::{Journal, RecordInput};
+        let mut journal = Journal::new("lab").unwrap();
+        journal
+            .append(RecordInput {
+                command: "scan".to_owned(),
+                result_sha256: "b".repeat(64),
+                scope_digest: None,
+                plan_digest: None,
+            })
+            .unwrap();
+        let mut report = Report::new("report");
+        super::anchor_journal(
+            &mut report,
+            &journal,
+            &[("scan".to_owned(), "b".repeat(64))],
+        )
+        .unwrap();
+        assert_eq!(
+            report.measurements["journal_head"],
+            serde_json::json!(journal.head())
+        );
+        assert_eq!(report.measurements["journal_records"], serde_json::json!(1));
+
+        let mut unjournaled = Report::new("report");
+        assert!(
+            super::anchor_journal(
+                &mut unjournaled,
+                &journal,
+                &[("scan".to_owned(), "e".repeat(64))],
+            )
+            .is_err()
+        );
+        assert!(!unjournaled.measurements.contains_key("journal_head"));
     }
 
     #[test]

@@ -17,7 +17,7 @@ pub use model::{
     DEFAULT_MAX_BYTES_PER_OPERATION, DEFAULT_MAX_PACKETS_PER_OPERATION,
     DEFAULT_MAX_RESOLVED_ADDRESSES, MAX_DESTINATION_CONSTRAINTS, MAX_RESOLVED_ADDRESSES,
 };
-pub use model::{DestinationConstraint, Error, Policy};
+pub use model::{DestinationConstraint, Error, Policy, Window, WindowState};
 
 pub(crate) use operation::Authorizer;
 pub use operation::{
@@ -25,7 +25,9 @@ pub use operation::{
     SocketOperation, WireLimits,
 };
 pub use resolution::ResolutionError;
-pub use scope::{MAX_SCOPE_DOCUMENT_BYTES, SCHEMA as SCOPE_SCHEMA, Scope};
+pub use scope::{
+    MAX_SCOPE_DOCUMENT_BYTES, SCHEMA as SCOPE_SCHEMA, SCHEMA_V2 as SCOPE_SCHEMA_V2, Scope,
+};
 pub use wire::requires_live_opt_in;
 pub(crate) use wire::{
     authorize_permissive_live, authorize_wire, authorize_wire_destinations, decode_wire,

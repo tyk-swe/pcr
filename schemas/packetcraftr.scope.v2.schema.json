@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:packetcraftr:scope:v2",
+  "title": "PacketcraftR engagement scope v2",
+  "type": "object",
+  "required": [
+    "schema",
+    "label"
+  ],
+  "anyOf": [
+    {
+      "required": [
+        "not_before_unix_seconds"
+      ]
+    },
+    {
+      "required": [
+        "not_after_unix_seconds"
+      ]
+    }
+  ],
+  "properties": {
+    "schema": {
+      "const": "packetcraftr.scope/v2"
+    },
+    "label": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "allowed_destinations": {
+      "type": "array",
+      "maxItems": 1024,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "denied_destinations": {
+      "type": "array",
+      "maxItems": 1024,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "allow_public_destinations": {
+      "type": "boolean"
+    },
+    "allow_hostname_resolution": {
+      "type": "boolean"
+    },
+    "allow_permissive_packets": {
+      "type": "boolean"
+    },
+    "allow_source_spoofing": {
+      "type": "boolean"
+    },
+    "max_packets": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "max_bytes": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "not_before_unix_seconds": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "not_after_unix_seconds": {
+      "type": "integer",
+      "minimum": 0
+    }
+  },
+  "additionalProperties": false
+}

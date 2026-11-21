@@ -4,7 +4,7 @@
 //! Private state shared by the stages of one live operation.
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use packetcraftr_core::{budget::Deadline, registry::Registry};
 
@@ -41,7 +41,11 @@ impl<'c, C: Clock> WorkflowSetup<Admission<'c>, C> {
         Self::with_authorizer(
             client,
             operation,
-            Admission::new(std::borrow::Cow::Owned(policy), client.providers.resolver()),
+            Admission::new(
+                std::borrow::Cow::Owned(policy),
+                client.providers.resolver(),
+                operation.admitted_at,
+            ),
         )
     }
 }
@@ -72,6 +76,10 @@ impl<A, C: Clock> WorkflowSetup<A, C> {
 
 #[derive(Clone, Debug)]
 pub(crate) struct Operation {
+    /// The wall-clock instant this top-level operation was admitted.
+    /// Cloned and isolated child operations retain it, so stages of one
+    /// operation judge the Scope Window at the same instant.
+    pub(crate) admitted_at: SystemTime,
     pub(crate) deadline: Arc<Deadline>,
     pub(crate) spent: Stats,
     pub(crate) neighbor_mode: NeighborMode,
@@ -87,6 +95,7 @@ pub(crate) struct Operation {
 impl Operation {
     pub(crate) fn new<P, K: Clock>(client: &Client<P, K>, limit: Duration) -> Self {
         Self {
+            admitted_at: client.wall_now(),
             deadline: Arc::new(client.deadline(limit)),
             spent: Stats::default(),
             neighbor_mode: NeighborMode::Ordinary,

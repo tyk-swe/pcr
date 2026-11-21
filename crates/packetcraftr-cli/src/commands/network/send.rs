@@ -25,9 +25,10 @@ fn prepare(
         template,
         repeat,
         rate,
+        gate,
     } = arguments;
     let draft = Draft { repeat, rate };
-    prepare_live(invocation, send, template, draft)
+    prepare_live(invocation, send, template, draft, gate.active())
 }
 
 fn writing(
@@ -85,7 +86,11 @@ fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<()
     let format = invocation.format;
     let presentation = invocation.output.presentation();
     let compression = arguments.send.compression.for_output(format)?;
+    let gate = arguments.gate.clone();
     let prepared = prepare(invocation, arguments)?;
+    if crate::system::enforce_plan_gate(invocation, &gate, "send", prepared.plan.as_ref())? {
+        return Ok(());
+    }
     match format {
         Format::Text => {
             let diagnostics = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -214,6 +219,15 @@ struct Draft {
 }
 impl LiveDraft for Draft {
     type Parameters = packetcraftr::send::Parameters;
+    const COMMAND: &'static str = "send";
+    fn plan_lines(&self, max_template_packets: usize) -> String {
+        format!(
+            "repeat={}\nrate={}\nmax_template_packets={max_template_packets}\n",
+            self.repeat,
+            self.rate
+                .map_or_else(|| "-".to_owned(), |value| value.to_string()),
+        )
+    }
     fn validate(self, max_template_packets: usize) -> Result<Self::Parameters, CliError> {
         Self::Parameters::new(self.repeat, self.rate, max_template_packets)
             .map_err(CliError::classified)

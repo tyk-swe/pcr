@@ -11,7 +11,7 @@ use packetcraftr_core::error::Kind;
 use super::super::arguments::{
     self, AdaptiveArgs, DiscoveryProbe, IpProtocolTerm, PortTerm, UnresponsiveHosts,
 };
-use super::super::inputs::{load_udp_profiles, read_udp_payload};
+use super::super::inputs::{compile_udp_profiles, load_udp_profiles, read_udp_payload};
 use super::super::selection::{DiscoveryRequest, EndpointRequest};
 use crate::command_options::{AddressFamily, CaptureLimitsArgs, MaxDurationArgs, TimeoutArgs};
 use crate::errors::CliError;
@@ -41,6 +41,8 @@ pub(super) struct UdpInputs {
     pub(super) payload_file: Option<std::path::PathBuf>,
     pub(super) profiles: Option<std::path::PathBuf>,
     pub(super) curated: bool,
+    pub(super) preloaded_payload: Option<bytes::Bytes>,
+    pub(super) preloaded_profiles: Option<Vec<u8>>,
 }
 
 pub(super) struct LimitInputs {
@@ -148,13 +150,27 @@ pub(super) fn build_request(
             .probes
             .iter()
             .any(|probe| probe.transport() == Transport::Udp);
-    let udp_payload = read_udp_payload(
-        invocation,
-        udp_required,
-        udp.payload_hex.as_deref(),
-        udp.payload_file.as_deref(),
-    )?;
-    let operator_profiles = load_udp_profiles(invocation, udp.profiles.as_deref(), udp_required)?;
+    let udp_payload = match udp.preloaded_payload {
+        Some(payload) => {
+            if !udp_required {
+                return Err(CliError::new(
+                    Kind::Usage,
+                    "--udp-payload-hex and --udp-payload-file require --transport udp",
+                ));
+            }
+            payload
+        }
+        None => read_udp_payload(
+            invocation,
+            udp_required,
+            udp.payload_hex.as_deref(),
+            udp.payload_file.as_deref(),
+        )?,
+    };
+    let operator_profiles = match &udp.preloaded_profiles {
+        Some(document) => compile_udp_profiles(document, udp_required)?,
+        None => load_udp_profiles(invocation, udp.profiles.as_deref(), udp_required)?,
+    };
     if udp.curated && !udp_required {
         return Err(CliError::new(
             Kind::Usage,

@@ -36,6 +36,12 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
         E: Sink<Event, Ack = ()>,
     {
         request.validate()?;
+        self.policy
+            .authorize_window_at(self.wall_now())
+            .map_err(|source| Error::Authorization {
+                source_index: 0,
+                source: BoundaryError::from_error(source),
+            })?;
         let deadline = self.deadline(request.options.limits.max_duration);
         enforce_deadline(&deadline, 0)?;
         let mut publish =

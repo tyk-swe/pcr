@@ -25,6 +25,61 @@ pub(super) struct Request {
     pub(super) max_duration: Duration,
     pub(super) shuffle_seed: Option<u64>,
     pub(super) policy: HostnamePolicyArgs,
+    pub(super) plan: Option<crate::system::PlanSummary>,
+    pub(super) preview: Option<PreviewInputs>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(super) struct PreviewInputs {
+    pub(super) attempts: u32,
+    pub(super) rate: Option<u32>,
+    pub(super) timeout: Duration,
+    pub(super) portless_endpoints: usize,
+    pub(super) beacon_eligible: bool,
+}
+
+pub(super) fn preview_lines(
+    targets: usize,
+    endpoints_per_target: usize,
+    inputs: PreviewInputs,
+) -> Vec<String> {
+    let thresholds = packetcraftr_core::security::capture::BeaconOptions::default();
+    let probes = (targets as u64)
+        .saturating_mul(endpoints_per_target as u64)
+        .saturating_mul(u64::from(inputs.attempts));
+    let pacing_seconds = inputs
+        .rate
+        .filter(|rate| *rate > 0)
+        .map_or(0.0, |rate| 1.0 / f64::from(rate));
+    let effective_interval = inputs.timeout.as_secs_f64().max(pacing_seconds);
+    let beacons = if !inputs.beacon_eligible {
+        "not_applicable_non_tcp"
+    } else if (inputs.attempts as usize) < thresholds.min_attempts {
+        "below_attempt_threshold"
+    } else if effective_interval < thresholds.min_interval_seconds {
+        "below_interval_threshold"
+    } else {
+        "possible_if_unanswered"
+    };
+    vec![
+        format!(
+            "preview targets={targets} endpoints_per_target={endpoints_per_target} probes_max={probes} attempts_per_endpoint={} timeout_ms={} effective_interval_ms={} rate={}",
+            inputs.attempts,
+            inputs.timeout.as_millis(),
+            (effective_interval * 1000.0).round() as u64,
+            inputs
+                .rate
+                .map_or_else(|| "unbounded".to_owned(), |value| value.to_string()),
+        ),
+        format!(
+            "preview beacons={beacons} thresholds: attempts>={} interval>={}s cv<={} (projection; responses and retransmissions are not simulated)",
+            thresholds.min_attempts, thresholds.min_interval_seconds, thresholds.max_cv,
+        ),
+        format!(
+            "preview fanout distinct_destination_endpoints_max={} (no built-in detector covers destination fan-out)",
+            (targets as u64).saturating_mul(endpoints_per_target as u64),
+        ),
+    ]
 }
 
 pub(super) fn run(
@@ -43,7 +98,15 @@ pub(super) fn run(
         max_duration,
         shuffle_seed,
         policy,
+        plan,
+        preview,
     } = request;
+    if preview.is_some() && format != Format::Text {
+        return Err(CliError::new(
+            packetcraftr_core::error::Kind::Usage,
+            format!("--preview prints text only, not --output {format}"),
+        ));
+    }
     let policy = policy.into_policy();
     policy.validate().map_err(CliError::classified)?;
     let client = client(
@@ -68,7 +131,11 @@ pub(super) fn run(
                 &origins,
                 ports.as_ref(),
                 ip_protocols.as_ref(),
-                shuffle_seed,
+                RenderExtras {
+                    shuffle_seed,
+                    plan: plan.as_ref(),
+                    preview,
+                },
             )?;
             crate::terminal::render_diagnostics_text(invocation, &diagnostics)
         }
@@ -142,14 +209,25 @@ fn duplicate_diagnostics(duplicates: &[u32], origins: &[Declaration]) -> Vec<Dia
         .collect()
 }
 
+struct RenderExtras<'a> {
+    shuffle_seed: Option<u64>,
+    plan: Option<&'a crate::system::PlanSummary>,
+    preview: Option<PreviewInputs>,
+}
+
 fn render_text(
     invocation: &crate::invocation::Invocation,
     report: &plan::Report,
     origins: &[Declaration],
     ports: Option<&super::output::plan::Ports>,
     ip_protocols: Option<&super::output::plan::IpProtocols>,
-    shuffle_seed: Option<u64>,
+    extras: RenderExtras<'_>,
 ) -> Result<(), CliError> {
+    let RenderExtras {
+        shuffle_seed,
+        plan: plan_summary,
+        preview,
+    } = extras;
     write_stdout_line(
         invocation,
         format_args!(
@@ -196,6 +274,24 @@ fn render_text(
     }
     if let Some(seed) = shuffle_seed {
         write_stdout_line(invocation, format_args!("shuffle_seed={seed}"))?;
+    }
+    if let Some(plan) = plan_summary {
+        write_stdout_line(
+            invocation,
+            format_args!(
+                "plan_digest={} planned_probes_max={} policy_digest={}",
+                plan.digest, plan.packets, plan.policy_digest
+            ),
+        )?;
+    }
+    if let Some(inputs) = preview {
+        let endpoints_per_target = ports
+            .map(|ports| ports.endpoints.len())
+            .or_else(|| ip_protocols.map(|protocols| protocols.protocols.len()))
+            .unwrap_or(inputs.portless_endpoints);
+        for line in preview_lines(report.targets.len(), endpoints_per_target, inputs) {
+            write_stdout_line(invocation, format_args!("{line}"))?;
+        }
     }
     if let Some(ports) = ports {
         if let Some(tcp_scan) = ports.tcp_scan {
@@ -253,4 +349,66 @@ fn render_text(
             report.duplicates.len()
         ),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn inputs(attempts: u32, timeout_ms: u64) -> PreviewInputs {
+        PreviewInputs {
+            attempts,
+            rate: Some(100),
+            timeout: Duration::from_millis(timeout_ms),
+            portless_endpoints: 0,
+            beacon_eligible: true,
+        }
+    }
+
+    #[test]
+    fn preview_projects_against_detector_threshold_boundaries() {
+        let thresholds = packetcraftr_core::security::capture::BeaconOptions::default();
+        let below_attempts = preview_lines(2, 3, inputs(thresholds.min_attempts as u32 - 1, 5_000));
+        assert!(
+            below_attempts[1].contains("beacons=below_attempt_threshold"),
+            "{below_attempts:?}"
+        );
+        assert!(
+            below_attempts[0].contains("probes_max=30"),
+            "{below_attempts:?}"
+        );
+
+        let below_interval = preview_lines(2, 3, inputs(thresholds.min_attempts as u32, 999));
+        assert!(
+            below_interval[1].contains("beacons=below_interval_threshold"),
+            "{below_interval:?}"
+        );
+
+        let mut paced = inputs(thresholds.min_attempts as u32, 100);
+        paced.rate = Some(1);
+        let paced = preview_lines(2, 3, paced);
+        assert!(
+            paced[1].contains("beacons=possible_if_unanswered"),
+            "{paced:?}"
+        );
+        assert!(paced[0].contains("effective_interval_ms=1000"), "{paced:?}");
+
+        let possible = preview_lines(2, 3, inputs(thresholds.min_attempts as u32, 1_000));
+        assert!(
+            possible[1].contains("beacons=possible_if_unanswered"),
+            "{possible:?}"
+        );
+        assert!(
+            possible[2].contains("distinct_destination_endpoints_max=6"),
+            "{possible:?}"
+        );
+
+        let mut non_tcp = inputs(thresholds.min_attempts as u32, 1_000);
+        non_tcp.beacon_eligible = false;
+        let non_tcp = preview_lines(2, 3, non_tcp);
+        assert!(
+            non_tcp[1].contains("beacons=not_applicable_non_tcp"),
+            "{non_tcp:?}"
+        );
+    }
 }

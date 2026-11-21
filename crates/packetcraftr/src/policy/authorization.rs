@@ -3,6 +3,7 @@
 
 use packetcraftr_core::protocol::identity;
 use std::net::IpAddr;
+use std::time::SystemTime;
 
 use crate::route::Plan;
 use packetcraftr_core::{packet::MacAddress, packet::Packet, protocol::semantics};
@@ -39,6 +40,26 @@ impl Policy {
                     maximum: MAX_DESTINATION_CONSTRAINTS,
                 });
             }
+        }
+        Ok(())
+    }
+
+    pub fn authorize_window(&self) -> Result<(), Error> {
+        use packetcraftr_core::clock::{Clock, SystemClock};
+
+        self.authorize_window_at(SystemClock.wall_now())
+    }
+
+    pub fn authorize_window_at(&self, now: SystemTime) -> Result<(), Error> {
+        let Some(window) = self.window else {
+            return Ok(());
+        };
+        let now_unix_seconds = now
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_secs())
+            .unwrap_or(0);
+        if now < SystemTime::UNIX_EPOCH || !window.contains_at(now_unix_seconds) {
+            return Err(Error::OutsideScopeWindow { now_unix_seconds });
         }
         Ok(())
     }
@@ -201,11 +222,24 @@ impl Policy {
         resolver: &R,
         deadline: &packetcraftr_core::budget::Deadline,
     ) -> Result<Authorized, ResolutionError> {
+        use packetcraftr_core::clock::{Clock, SystemClock};
+
+        self.resolve_target_at(target, resolver, deadline, SystemClock.wall_now())
+    }
+
+    pub fn resolve_target_at<R: Resolver + ?Sized>(
+        &self,
+        target: &Target,
+        resolver: &R,
+        deadline: &packetcraftr_core::budget::Deadline,
+        now: SystemTime,
+    ) -> Result<Authorized, ResolutionError> {
         deadline
             .live_remaining()
             .map_err(packetcraftr_core::error::BoundaryError::from_error)
             .map_err(crate::target::Error::from)?;
         self.validate()?;
+        self.authorize_window_at(now)?;
         let result = (|| {
             let selected = match target {
                 Target::Address(address) => vec![crate::target::SelectedAddress::new(*address)],

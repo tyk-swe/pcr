@@ -50,7 +50,7 @@ pub(crate) struct DestinationAllowlistArgs {
 
 #[derive(Clone, Debug, Args)]
 pub(crate) struct ScopeArgs {
-    /// Engagement scope document (packetcraftr.scope/v1 JSON, regular file).
+    /// Engagement scope document (packetcraftr.scope/v1 or v2 JSON, regular file).
     /// A scope only narrows this command's policy and budgets, it never
     /// grants an opt-in the command flags did not give.
     #[arg(long, value_name = "PATH", value_parser = load_scope)]
@@ -87,6 +87,25 @@ fn load_scope(path: &str) -> Result<packetcraftr::policy::Scope, String> {
         .read_to_end(&mut bytes)
         .map_err(|error| format!("cannot read scope file {}: {error}", path.display()))?;
     packetcraftr::policy::Scope::parse(&bytes).map_err(|error| error.to_string())
+}
+
+#[derive(Clone, Debug, Args)]
+pub(crate) struct PlanGateArgs {
+    /// Print the prepared live plan and its digest without sending. Text
+    /// output only; hostname resolution for an explicit destination may
+    /// still run during preparation.
+    #[arg(long, conflicts_with = "plan_digest")]
+    pub(crate) plan_only: bool,
+    /// Digest printed by a --plan-only run of the same command. The live
+    /// run refuses to send unless its prepared plan reproduces this digest.
+    #[arg(long, value_name = "HEX")]
+    pub(crate) plan_digest: Option<String>,
+}
+
+impl PlanGateArgs {
+    pub(crate) fn active(&self) -> bool {
+        self.plan_only || self.plan_digest.is_some()
+    }
 }
 
 #[derive(Clone, Debug, Args)]

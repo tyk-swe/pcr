@@ -188,6 +188,82 @@ fn packet(bytes: usize) -> Packet {
     packet
 }
 
+#[derive(Clone)]
+struct FixedClock {
+    wall: std::time::SystemTime,
+}
+
+impl crate::clock::Clock for FixedClock {
+    type Error = Infallible;
+
+    fn now(&self) -> std::time::Instant {
+        std::time::Instant::now()
+    }
+
+    fn wall_now(&self) -> std::time::SystemTime {
+        self.wall
+    }
+
+    fn sleep(
+        &self,
+        _delay: Duration,
+        _deadline: &packetcraftr_core::budget::Deadline,
+    ) -> Result<(), Self::Error> {
+        Ok(())
+    }
+}
+
+#[test]
+fn streaming_checks_scope_window_at_operation_admission_before_providers() {
+    let (_client, routes, interfaces, tx) = fixture();
+    let policy = Policy {
+        allowed_destinations: vec![DestinationConstraint::Exact("10.0.0.1".parse().unwrap())],
+        window: Some(crate::policy::Window {
+            not_before_unix_seconds: Some(100),
+            not_after_unix_seconds: Some(200),
+        }),
+        ..Policy::default()
+    };
+    let client = Client::new(
+        builtin::registry(),
+        policy,
+        ProviderSet::packet(routes.clone(), interfaces, NoCapture, tx.clone()),
+    )
+    .with_clock(FixedClock {
+        wall: std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(200),
+    });
+    let operation = Execution::new(&client, Duration::from_secs(10));
+    let send_options = options();
+    let denied = client.streaming_in(&send_options, 1, &operation);
+    assert!(denied.is_err());
+    assert_eq!(routes.calls.load(Ordering::Relaxed), 0);
+    assert_eq!(tx.1.load(Ordering::Relaxed), 0);
+    assert!(tx.0.lock().unwrap().is_empty());
+
+    let (_client, routes, interfaces, tx) = fixture();
+    let policy = Policy {
+        allowed_destinations: vec![DestinationConstraint::Exact("10.0.0.1".parse().unwrap())],
+        window: Some(crate::policy::Window {
+            not_before_unix_seconds: Some(100),
+            not_after_unix_seconds: Some(200),
+        }),
+        ..Policy::default()
+    };
+    let client = Client::new(
+        builtin::registry(),
+        policy,
+        ProviderSet::packet(routes, interfaces, NoCapture, tx.clone()),
+    )
+    .with_clock(FixedClock {
+        wall: std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(100),
+    });
+    let operation = Execution::new(&client, Duration::from_secs(10));
+    let send_options = options();
+    let stream = client.streaming_in(&send_options, 1, &operation).unwrap();
+    drop(stream);
+    assert_eq!(tx.1.load(Ordering::Relaxed), 1);
+}
+
 #[test]
 fn streaming_session_respects_policy_and_cancellation() {
     let (client, _, _, tx) = fixture();

@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::command_options::{SendArgs, TemplateArgs};
+use crate::command_options::{PlanGateArgs, SendArgs, TemplateArgs};
 
 pub(crate) const AFTER_LONG_HELP: &str = r"Live transmission is policy-gated and may require native features, dependencies, and privileges.
 
@@ -22,4 +22,6 @@ pub(crate) struct Args {
     /// Ceiling on transmission starts in packets per second; unpaced when omitted.
     #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
     pub(crate) rate: Option<u32>,
+    #[command(flatten)]
+    pub(crate) gate: PlanGateArgs,
 }

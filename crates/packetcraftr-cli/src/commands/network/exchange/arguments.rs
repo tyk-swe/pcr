@@ -1,7 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::command_options::{CaptureLimitsArgs, LongTimeoutArgs, SendArgs, TemplateArgs};
+use crate::command_options::{
+    CaptureLimitsArgs, LongTimeoutArgs, PlanGateArgs, SendArgs, TemplateArgs,
+};
 
 pub(crate) const AFTER_LONG_HELP: &str = r"Live exchange is policy-gated and may require native features, dependencies, and privileges. NDJSON publishes provider-confirmed sends and definitively classified capture evidence during the single exchange; unanswered records follow capture completion and one complete record terminates success.
 
@@ -33,6 +35,8 @@ pub(crate) struct Args {
     pub(crate) max_unmatched_frames: usize,
     #[command(flatten)]
     pub(crate) limits: CaptureLimitsArgs,
+    #[command(flatten)]
+    pub(crate) gate: PlanGateArgs,
 }
 
 impl Args {

@@ -7,8 +7,8 @@ use clap::ValueEnum;
 use packetcraftr_core as core;
 
 use crate::command_options::{
-    AddressFamily, CaptureLimitsArgs, HostnamePolicyArgs, MaxDurationArgs, RouteSelectionArgs,
-    TimeoutArgs,
+    AddressFamily, CaptureLimitsArgs, HostnamePolicyArgs, MaxDurationArgs, PlanGateArgs,
+    RouteSelectionArgs, TimeoutArgs,
 };
 
 pub(crate) const AFTER_LONG_HELP: &str = r"Examples:
@@ -687,4 +687,14 @@ pub(crate) struct Args {
     pub(crate) limits: CaptureLimitsArgs,
     #[command(flatten)]
     pub(crate) policy: HostnamePolicyArgs,
+    /// For scans the plan digest binds target declarations, endpoint
+    /// selection, scheduling and policy before resolution, so hostname
+    /// answers are not themselves pinned by the digest.
+    #[command(flatten)]
+    pub(crate) gate: PlanGateArgs,
+    /// With --list or --plan-only, also project how the planned scan
+    /// compares with the built-in beacon detector thresholds. Responses
+    /// are not simulated, so this is a projection, not a detection run.
+    #[arg(long)]
+    pub(crate) preview: bool,
 }

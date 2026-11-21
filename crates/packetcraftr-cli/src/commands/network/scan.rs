@@ -155,6 +155,20 @@ pub(super) fn run(
         Planned::List(request) => list::run(invocation, request),
         Planned::Connect(request) => connect::run(invocation, request),
         Planned::Raw(request) => raw::run(invocation, request),
+        Planned::PlanOnly {
+            plan,
+            preview_lines,
+        } => {
+            let gate = crate::command_options::PlanGateArgs {
+                plan_only: true,
+                plan_digest: None,
+            };
+            crate::system::enforce_plan_gate(invocation, &gate, "scan", Some(&plan))?;
+            for line in preview_lines {
+                crate::terminal::write_stdout_line(invocation, format_args!("{line}"))?;
+            }
+            Ok(())
+        }
     }
 }
 

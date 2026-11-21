@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::fmt::Write as _;
+use std::time::SystemTime;
 
 use packetcraftr_core::error::Kind;
 use packetcraftr_netio::link::{Capability, Mode};
@@ -63,6 +64,7 @@ impl Generate for Args {
             digest: scope.digest(),
             allowed: scope.allowed_destinations.len(),
             denied: scope.denied_destinations.len(),
+            window: window_state(scope.window),
         });
         emit_stdout_document(
             invocation,
@@ -98,6 +100,21 @@ struct ScopeLine {
     digest: String,
     allowed: usize,
     denied: usize,
+    window: &'static str,
+}
+
+fn window_state(window: Option<packetcraftr::policy::Window>) -> &'static str {
+    use packetcraftr_core::clock::{Clock, SystemClock};
+
+    let Some(window) = window else {
+        return "none";
+    };
+    let now = SystemClock
+        .wall_now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs())
+        .unwrap_or(0);
+    window.state_at(now).as_str()
 }
 
 fn ready(built: bool, supported: bool) -> &'static str {
@@ -123,8 +140,8 @@ fn render(
         Some(scope) => {
             let _ = writeln!(
                 out,
-                "scope label={} digest={} allowed={} denied={}",
-                scope.label, scope.digest, scope.allowed, scope.denied
+                "scope label={} digest={} allowed={} denied={} window={}",
+                scope.label, scope.digest, scope.allowed, scope.denied, scope.window
             );
         }
         None => out.push_str("scope none\n"),
@@ -196,6 +213,7 @@ mod tests {
                 digest: "abc".to_owned(),
                 allowed: 1,
                 denied: 2,
+                window: "after",
             }),
             build_features(),
         );
@@ -204,8 +222,20 @@ mod tests {
             "{text}"
         );
         assert!(
-            text.contains("scope label=lab digest=abc allowed=1 denied=2"),
+            text.contains("scope label=lab digest=abc allowed=1 denied=2 window=after"),
             "{text}"
         );
+    }
+
+    #[test]
+    fn window_state_distinguishes_absent_and_bounded_scopes() {
+        assert_eq!(window_state(None), "none");
+        let past = packetcraftr::policy::Window {
+            not_before_unix_seconds: Some(10),
+            not_after_unix_seconds: Some(20),
+        };
+        assert_eq!(past.state_at(9).as_str(), "before");
+        assert_eq!(past.state_at(10).as_str(), "active");
+        assert_eq!(past.state_at(20).as_str(), "after");
     }
 }

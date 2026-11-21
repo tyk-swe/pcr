@@ -34,6 +34,9 @@ impl<P: CaptureProviders, K: Clock> Client<P, K> {
         if let Err(error) = validated {
             return Err(failure(Cause::Native(error), report, None));
         }
+        if let Err(error) = self.policy.authorize_window_at(self.wall_now()) {
+            return Err(failure(Cause::Budget(error), report, None));
+        }
         if window > packetcraftr_netio::deadline::MAX_WAIT || started.checked_add(window).is_none()
         {
             return Err(failure(

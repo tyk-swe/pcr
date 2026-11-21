@@ -31,6 +31,7 @@ impl<P: TcpProviders + UdpProviders, K: Clock> Client<P, K> {
                 .with_parent(request.parent_deadline.clone()),
         );
         operation.deadline.check_cancelled()?;
+        self.policy.authorize_window_at(self.wall_now())?;
         let plan = request.validate_plan(&self.policy)?;
         let corpus = request.corpus.validated()?;
         // Obtain entropy before any I/O, so an entropy failure cannot discard

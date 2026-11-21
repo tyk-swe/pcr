@@ -1,0 +1,18 @@
+{
+  "schema": "packetcraftr.scope/v2",
+  "label": "lab-segment-windowed",
+  "allowed_destinations": [
+    "192.0.2.0/24"
+  ],
+  "denied_destinations": [
+    "192.0.2.1"
+  ],
+  "allow_public_destinations": false,
+  "allow_hostname_resolution": false,
+  "allow_permissive_packets": false,
+  "allow_source_spoofing": false,
+  "max_packets": 1000,
+  "max_bytes": 1048576,
+  "not_before_unix_seconds": 1767225600,
+  "not_after_unix_seconds": 1798761600
+}

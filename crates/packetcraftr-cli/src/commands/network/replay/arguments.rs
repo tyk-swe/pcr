@@ -7,6 +7,7 @@ use crate::command_options::InterfaceSelector;
 
 use crate::command_options::{
     CaptureReaderBoundsArgs, CompressionArgs, LinkMode, MaxDurationArgs, NumericPolicyArgs,
+    PlanGateArgs,
 };
 use clap::ValueEnum;
 
@@ -101,4 +102,8 @@ pub(crate) struct Args {
     pub(crate) filter: Option<String>,
     #[command(flatten)]
     pub(crate) policy: NumericPolicyArgs,
+    /// For replay the plan digest binds every frame in the snapshotted
+    /// capture, the timing, routing and filter arguments, and the policy.
+    #[command(flatten)]
+    pub(crate) gate: PlanGateArgs,
 }

@@ -1,0 +1,24 @@
+{
+  "schema": "packetcraftr.journal/v1",
+  "label": "lab-segment",
+  "records": [
+    {
+      "sequence": 1,
+      "command": "scan",
+      "result_sha256": "730309eb00518cfa3ef2d0c7f9f38a8e727d542e124f35b037e5a7e16f57b9e9",
+      "scope_digest": "35269fd9055de3c873b33459fc79e16eebbdc120799bed1e1ddb9922c5f0635d",
+      "plan_digest": null,
+      "previous": "313dce02b063e4af5076c07c8c7b9af0435d1ee6ad53de80dfe0e2e06f73c20f",
+      "digest": "750e307d7019c32b835f37066cdac0e2597538ef650559f7ef38ad44e0219638"
+    },
+    {
+      "sequence": 2,
+      "command": "hunt",
+      "result_sha256": "f952be96b1bc1fac2fb91f5dc17e30ca33d386e8722954498b279961598f2fe1",
+      "scope_digest": "35269fd9055de3c873b33459fc79e16eebbdc120799bed1e1ddb9922c5f0635d",
+      "plan_digest": null,
+      "previous": "750e307d7019c32b835f37066cdac0e2597538ef650559f7ef38ad44e0219638",
+      "digest": "bfd0830969b93eae89c34bf5bb899492deaa42c0ff8adf4baa91119b60087f1e"
+    }
+  ]
+}

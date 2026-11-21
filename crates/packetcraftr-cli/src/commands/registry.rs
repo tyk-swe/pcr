@@ -318,6 +318,12 @@ commands! {
     /// Reconstruct HTTP/3 exchanges from an encrypted QUIC capture.
     #[command(after_long_help = "Requires --keylog with NSS TLS secrets for the captured QUIC connections.\n\nExample:\n  packetcraftr analyze http3 capture.pcapng --keylog keys.log")]
     Http3(analyze::http3::Args) = "http3" => ("analyze", "http3", 45),
+    /// Build a hash-chained engagement journal from aggregate JSON results.
+    #[command(after_long_help = analyze::journal::BUILD_AFTER_LONG_HELP)]
+    JournalBuild(analyze::journal::Build) => ("analyze", "journal-build", 46),
+    /// Verify an engagement journal chain and supplied result files against it.
+    #[command(after_long_help = analyze::journal::VERIFY_AFTER_LONG_HELP)]
+    JournalVerify(analyze::journal::Verify) => ("analyze", "journal-verify", 47),
 }
 
 /// Workflow placement and compact identifiers used in machine output.

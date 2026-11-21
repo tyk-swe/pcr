@@ -13,7 +13,7 @@ use std::{collections::BTreeSet, io::Write, path::PathBuf};
 #[derive(Debug, Args)]
 pub(crate) struct Assessment {
     /// Aggregate JSON from hunt, dns-anomalies, beacons, audit-tls, audit-http,
-    /// scan-diff, scan, differential, fuzz, exchange, or traceroute. Engagement
+    /// scan-diff, report, scan, differential, fuzz, exchange, or traceroute. Engagement
     /// results become one info observation each from typed counts, their raw
     /// frames are never copied, and --fail-on info therefore applies to them.
     /// One input may be - to read redirected JSON stdin.

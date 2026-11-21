@@ -509,6 +509,9 @@ impl ResponderRequest {
 }
 
 fn probe_identity(message: &core_dns::Dns, token: &[u8; TOKEN_LEN]) -> Option<(u16, u32)> {
+    if message.questions.len() != 1 {
+        return None;
+    }
     let question = message.questions.first()?;
     let labels = question.name.labels();
     if labels.len() != 4 {
@@ -523,7 +526,15 @@ fn probe_identity(message: &core_dns::Dns, token: &[u8; TOKEN_LEN]) -> Option<(u
     {
         return None;
     }
-    Some((variant.strip_prefix('v')?.parse().ok()?, seq.parse().ok()?))
+    let variant_index: u16 = variant.strip_prefix('v')?.parse().ok()?;
+    let attempt_seq: u32 = seq.parse().ok()?;
+    if usize::from(variant_index) >= CATALOG.len()
+        || attempt_seq >= super::request::MAX_REPEATS
+        || message.id != transaction_id(token, usize::from(variant_index), attempt_seq)
+    {
+        return None;
+    }
+    Some((variant_index, attempt_seq))
 }
 
 fn answer_message(

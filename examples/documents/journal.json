@@ -8,8 +8,8 @@
       "result_sha256": "730309eb00518cfa3ef2d0c7f9f38a8e727d542e124f35b037e5a7e16f57b9e9",
       "scope_digest": "35269fd9055de3c873b33459fc79e16eebbdc120799bed1e1ddb9922c5f0635d",
       "plan_digest": null,
-      "previous": "0000000000000000000000000000000000000000000000000000000000000000",
-      "digest": "4fb2b3b1c0e363f9860cce38f14848a1e2860220cdb6d9d476643e1b35c49566"
+      "previous": "313dce02b063e4af5076c07c8c7b9af0435d1ee6ad53de80dfe0e2e06f73c20f",
+      "digest": "750e307d7019c32b835f37066cdac0e2597538ef650559f7ef38ad44e0219638"
     },
     {
       "sequence": 2,
@@ -17,8 +17,8 @@
       "result_sha256": "f952be96b1bc1fac2fb91f5dc17e30ca33d386e8722954498b279961598f2fe1",
       "scope_digest": "35269fd9055de3c873b33459fc79e16eebbdc120799bed1e1ddb9922c5f0635d",
       "plan_digest": null,
-      "previous": "4fb2b3b1c0e363f9860cce38f14848a1e2860220cdb6d9d476643e1b35c49566",
-      "digest": "b249b261cce1306061049330565b6c1ad95be23b347faa40dca22c017adcf9ae"
+      "previous": "750e307d7019c32b835f37066cdac0e2597538ef650559f7ef38ad44e0219638",
+      "digest": "bfd0830969b93eae89c34bf5bb899492deaa42c0ff8adf4baa91119b60087f1e"
     }
   ]
 }

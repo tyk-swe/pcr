@@ -577,38 +577,30 @@ fn patch_link_bytes(
             if bytes.len() < 16 {
                 return None;
             }
-            let protocol = u16::from_be_bytes([bytes[14], bytes[15]]);
-            if !matches!(protocol, 0x0800 | 0x86dd | 0x0806) {
-                return None;
-            }
             let address_len = usize::from(u16::from_be_bytes([bytes[4], bytes[5]]));
-            if address_len >= 6 && bytes.len() >= 12 {
+            if address_len >= 6 {
                 let source = <[u8; 6]>::try_from(&bytes[6..12]).ok()?;
                 bytes[6..12].copy_from_slice(&pseudonyms.mac(source));
             }
-            if protocol == 0x0806 {
-                Some(LinkPatch::Arp(16))
-            } else {
-                Some(LinkPatch::Ip(16))
+            match u16::from_be_bytes([bytes[14], bytes[15]]) {
+                0x0806 => Some(LinkPatch::Arp(16)),
+                0x0800 | 0x86dd => Some(LinkPatch::Ip(16)),
+                _ => Some(LinkPatch::LinkOnly),
             }
         }
         LinkType::LINUX_SLL2 => {
             if bytes.len() < 20 {
                 return None;
             }
-            let protocol = u16::from_be_bytes([bytes[0], bytes[1]]);
-            if !matches!(protocol, 0x0800 | 0x86dd | 0x0806) {
-                return None;
-            }
-            if usize::from(bytes[11]) >= 6 && bytes.len() >= 18 {
+            if usize::from(bytes[11]) >= 6 {
                 let source = <[u8; 6]>::try_from(&bytes[12..18]).ok()?;
                 bytes[12..18].copy_from_slice(&pseudonyms.mac(source));
                 bytes[18..20].fill(0);
             }
-            if protocol == 0x0806 {
-                Some(LinkPatch::Arp(20))
-            } else {
-                Some(LinkPatch::Ip(20))
+            match u16::from_be_bytes([bytes[0], bytes[1]]) {
+                0x0806 => Some(LinkPatch::Arp(20)),
+                0x0800 | 0x86dd => Some(LinkPatch::Ip(20)),
+                _ => Some(LinkPatch::LinkOnly),
             }
         }
         _ => None,

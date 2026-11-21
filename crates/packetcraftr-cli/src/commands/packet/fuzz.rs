@@ -153,6 +153,7 @@ fn prepare_live(
         cases_per_second: arguments.rate,
         destination: arguments.destination,
         allow_permissive_live: arguments.allow_permissive_live,
+        liveness: arguments.liveness,
         max_evidence_frames: queue_limits.max_frames,
         max_evidence_bytes: queue_limits.max_bytes,
         ..packetcraftr::fuzz::Request::new(request.clone(), core::packet::Packet::default())

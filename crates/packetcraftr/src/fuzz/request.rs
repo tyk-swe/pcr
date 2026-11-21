@@ -29,6 +29,10 @@ pub struct Request {
     pub route: route::Options,
     pub collection: exchange::Collection,
     pub allow_permissive_live: bool,
+    /// Exchange the unmutated packet before the first built case and after
+    /// every built case. A baseline timeout marks later cases inconclusive
+    /// and stops executing them.
+    pub liveness: bool,
     pub max_evidence_frames: usize,
     pub max_evidence_bytes: usize,
 }
@@ -45,6 +49,7 @@ impl Request {
             route: route::Options::default(),
             collection: exchange::Collection::default(),
             allow_permissive_live: false,
+            liveness: false,
             max_evidence_frames: MAX_CAPTURE_QUEUE_FRAMES,
             max_evidence_bytes: MAX_CAPTURE_QUEUE_BYTES,
         }

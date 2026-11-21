@@ -2,11 +2,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::collections::BTreeMap;
+use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use clap::Args;
 use packetcraftr::scan::segmentation::{Matrix, Verdict, evaluate};
+use packetcraftr_core::clock::{Clock as _, SystemClock};
 use packetcraftr_core::error::Kind;
 
 use crate::command_options::{
@@ -76,13 +78,15 @@ impl Generate for Segmentation {
         let timeout = Duration::from_millis(self.timeout_ms);
         let queue_limits = self.limits.clone().into_limits();
         let max_duration = self.duration.max_duration();
+        let policy = self.policy.into_policy();
+        authorize_matrix(&policy, &groups, probes)?;
         let client = crate::system::client(
             invocation,
             packetcraftr_core::protocol::builtin::registry(),
-            self.policy.into_policy(),
+            policy,
             crate::system::Runtime::ScanConnect,
         );
-        let started = Instant::now();
+        let started = SystemClock.now();
         let mut endpoints = Vec::new();
         for (destination, ports) in &groups {
             let Some(remaining) = max_duration.checked_sub(started.elapsed()) else {
@@ -170,5 +174,49 @@ impl Generate for Segmentation {
             ));
         }
         Ok(CommandExit::SUCCESS)
+    }
+}
+
+fn authorize_matrix(
+    policy: &packetcraftr::policy::Policy,
+    groups: &[(std::net::IpAddr, Vec<u16>)],
+    probes: usize,
+) -> Result<(), CliError> {
+    let endpoints: Vec<SocketAddr> = groups
+        .iter()
+        .flat_map(|(destination, ports)| {
+            ports
+                .iter()
+                .map(move |port| SocketAddr::new(*destination, *port))
+        })
+        .collect();
+    let operation = packetcraftr::policy::SocketOperation::new(
+        &endpoints,
+        packetcraftr::policy::SocketLimits::new(u64::try_from(probes).unwrap_or(u64::MAX), 0, 0),
+    )
+    .map_err(CliError::classified)?;
+    policy
+        .authorize(packetcraftr::policy::Operation::Socket(operation))
+        .map_err(CliError::classified)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::IpAddr;
+
+    #[test]
+    fn matrix_authorization_counts_every_group() {
+        let groups: Vec<(IpAddr, Vec<u16>)> = vec![
+            ("10.0.0.1".parse().unwrap(), vec![443, 22]),
+            ("10.0.0.2".parse().unwrap(), vec![25]),
+        ];
+        let mut policy = packetcraftr::policy::Policy {
+            max_packets_per_operation: 2,
+            ..packetcraftr::policy::Policy::default()
+        };
+        assert!(authorize_matrix(&policy, &groups, 3).is_err());
+        policy.max_packets_per_operation = 3;
+        assert!(authorize_matrix(&policy, &groups, 3).is_ok());
     }
 }

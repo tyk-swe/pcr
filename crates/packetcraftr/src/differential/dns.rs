@@ -253,26 +253,60 @@ fn build_query(
     Ok((Bytes::from(wire), name, id))
 }
 
+struct PreparedAttempt {
+    transport: Transport,
+    query: Bytes,
+    name: String,
+    id: u16,
+}
+
+fn prepare_attempts(request: &Request) -> Result<Vec<PreparedAttempt>, Error> {
+    let mut attempts = Vec::with_capacity(catalog().len() * request.repeats as usize);
+    for (variant_index, variant) in catalog().iter().enumerate() {
+        for seq in 0..request.repeats {
+            let (query, name, id) = build_query(&request.token, variant_index, variant, seq)?;
+            attempts.push(PreparedAttempt {
+                transport: variant.transport,
+                query,
+                name,
+                id,
+            });
+        }
+    }
+    Ok(attempts)
+}
+
+fn socket_limits(request: &Request, attempts: &[PreparedAttempt]) -> SocketLimits {
+    let application_bytes = attempts.iter().fold(0_u64, |total, attempt| {
+        let framing = match attempt.transport {
+            Transport::Tcp => 2,
+            Transport::Udp => 0,
+        };
+        total
+            .saturating_add(attempt.query.len() as u64)
+            .saturating_add(framing)
+            .saturating_add(request.limits.max_message_bytes as u64)
+            .saturating_add(framing)
+    });
+    let attempts = attempts.len() as u64;
+    SocketLimits::new(attempts, attempts.saturating_mul(2), application_bytes)
+}
+
 impl<P: UdpProviders + TcpProviders, K: Clock> Client<P, K> {
     pub fn dns_differential(&self, request: &Request) -> Result<Report, Error> {
         request.validate()?;
         let operation = crate::engine::operation::Operation::new(self, request.max_duration);
-        let attempts = catalog().len() as u64 * u64::from(request.repeats);
-        let max_query = request.limits.max_message_bytes as u64;
-        let limits = SocketLimits::new(
-            attempts,
-            attempts * 2,
-            attempts * max_query.saturating_mul(2),
-        );
-        let endpoints = [SocketAddr::V4(request.server)];
-        let socket =
-            SocketOperation::new(&endpoints, limits).map_err(|error| Error::Execution {
-                attempt: 0,
-                source: BoundaryError::from_error(error),
-            })?;
         self.policy
             .authorize_window_at(operation.admitted_at)
             .map_err(|error| Error::Execution {
+                attempt: 0,
+                source: BoundaryError::from_error(error),
+            })?;
+        let prepared = prepare_attempts(request)?;
+        let limits = socket_limits(request, &prepared);
+        let endpoints = [SocketAddr::V4(request.server)];
+        let socket =
+            SocketOperation::new(&endpoints, limits).map_err(|error| Error::Execution {
                 attempt: 0,
                 source: BoundaryError::from_error(error),
             })?;
@@ -294,14 +328,17 @@ impl<P: UdpProviders + TcpProviders, K: Clock> Client<P, K> {
         let mut diagnostics = Vec::new();
         for (variant_index, variant) in catalog().iter().enumerate() {
             for seq in 0..request.repeats {
-                let (query, name, id) = build_query(&request.token, variant_index, variant, seq)?;
+                let attempt = &prepared[variant_index * request.repeats as usize + seq as usize];
+                let query = &attempt.query;
+                let name = &attempt.name;
+                let id = attempt.id;
                 let deadline = operation.deadline(self, request.timeout);
                 rows[variant_index].attempts += 1;
                 let validated = match variant.transport {
                     Transport::Udp => {
                         let reply = self.providers.udp().exchange(
                             SocketAddr::V4(request.server),
-                            &query,
+                            query,
                             request.limits.max_message_bytes,
                             &deadline,
                         );
@@ -309,7 +346,7 @@ impl<P: UdpProviders + TcpProviders, K: Clock> Client<P, K> {
                             Ok(reply) => match reply.exchange.outcome {
                                 Outcome::Complete => wire::decode_response(
                                     &reply.exchange.response,
-                                    &name,
+                                    name,
                                     QueryType::A,
                                     id,
                                     request.limits,
@@ -364,7 +401,7 @@ impl<P: UdpProviders + TcpProviders, K: Clock> Client<P, K> {
                         let response = crate::dns::tcp::query_with_clock(
                             crate::dns::tcp::Request {
                                 endpoint: SocketAddr::V4(request.server),
-                                query: &query,
+                                query,
                                 timeout,
                                 cancellation: self.cancellation.as_ref(),
                                 max_message_bytes: request.limits.max_message_bytes,
@@ -375,7 +412,7 @@ impl<P: UdpProviders + TcpProviders, K: Clock> Client<P, K> {
                         match response {
                             Ok(response) => wire::decode_tcp_frame(
                                 &response.frame,
-                                &name,
+                                name,
                                 QueryType::A,
                                 id,
                                 request.limits,
@@ -699,6 +736,10 @@ where
                 }
                 Err(error) => return Err(error),
             }
+            if report.received >= request.max_datagrams {
+                flush_tcp_connections(&mut tcp_connections);
+                return Ok(report);
+            }
         }
         match listener.accept() {
             Ok((stream, source)) => {
@@ -715,7 +756,6 @@ where
                         recorded: false,
                     });
                 }
-                continue;
             }
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
             Err(error) => {
@@ -761,135 +801,4 @@ where
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::differential::ResponderCollector;
-    use std::net::TcpStream;
-
-    fn free_port() -> u16 {
-        let udp = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
-        let port = udp.local_addr().unwrap().port();
-        drop(udp);
-        port
-    }
-
-    #[test]
-    fn junk_datagrams_do_not_consume_the_matching_budget() {
-        let port = free_port();
-        let token = [7_u8; TOKEN_LEN];
-        let collector = ResponderCollector::default();
-        let thread_collector = collector.clone();
-        let handle = std::thread::spawn(move || {
-            let mut request = ResponderRequest::new(Ipv4Addr::LOCALHOST, port, token);
-            request.max_duration = Duration::from_secs(3);
-            request.idle_after_first = Some(Duration::from_millis(200));
-            request.max_datagrams = 1;
-            respond(request, thread_collector)
-        });
-        let udp = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
-        udp.set_read_timeout(Some(Duration::from_millis(100)))
-            .unwrap();
-        let _ready = (0..100)
-            .find_map(|_| {
-                std::net::TcpStream::connect((Ipv4Addr::LOCALHOST, port))
-                    .inspect_err(|_| std::thread::sleep(Duration::from_millis(10)))
-                    .ok()
-            })
-            .expect("responder TCP listener should become ready");
-        udp.send_to(b"junk", (Ipv4Addr::LOCALHOST, port)).unwrap();
-        let (query, _, _) = build_query(&token, 0, &CATALOG[0], 0).unwrap();
-        let mut received = false;
-        for _ in 0..20 {
-            udp.send_to(&query, (Ipv4Addr::LOCALHOST, port)).unwrap();
-            let mut response = [0_u8; 2048];
-            if udp.recv(&mut response).is_ok() {
-                received = true;
-                break;
-            }
-        }
-        assert!(received, "junk consumed the one-datagram budget");
-        let report = handle.join().unwrap().unwrap();
-        assert_eq!(report.received, 1);
-        assert!(report.ignored >= 1);
-        assert_eq!(collector.into_records().len(), 1);
-    }
-
-    #[test]
-    fn tcp_reply_is_flushed_before_the_reception_limit_exits() {
-        let port = free_port();
-        let token = [7_u8; TOKEN_LEN];
-        let collector = ResponderCollector::default();
-        let thread_collector = collector.clone();
-        let handle = std::thread::spawn(move || {
-            let mut request = ResponderRequest::new(Ipv4Addr::LOCALHOST, port, token);
-            request.max_duration = Duration::from_secs(3);
-            request.max_datagrams = 1;
-            respond(request, thread_collector)
-        });
-        let mut stream = (0..100)
-            .find_map(|_| {
-                TcpStream::connect((Ipv4Addr::LOCALHOST, port))
-                    .inspect_err(|_| std::thread::sleep(Duration::from_millis(10)))
-                    .ok()
-            })
-            .expect("TCP responder should connect");
-        stream
-            .set_read_timeout(Some(Duration::from_secs(2)))
-            .unwrap();
-        let (query, _, _) = build_query(&token, 0, &CATALOG[0], 0).unwrap();
-        stream
-            .write_all(&(query.len() as u16).to_be_bytes())
-            .unwrap();
-        stream.write_all(&query).unwrap();
-        let mut header = [0_u8; 2];
-        stream.read_exact(&mut header).unwrap();
-        let length = usize::from(u16::from_be_bytes(header));
-        assert!(length > 0);
-        let mut response = vec![0_u8; length];
-        stream.read_exact(&mut response).unwrap();
-        let report = handle.join().unwrap().unwrap();
-        assert_eq!(report.received, 1);
-        assert_eq!(collector.into_records().len(), 1);
-    }
-
-    #[test]
-    fn idle_tcp_connection_does_not_block_udp_answers() {
-        let port = free_port();
-        let token = [7_u8; TOKEN_LEN];
-        let collector = ResponderCollector::default();
-        let thread_collector = collector.clone();
-        let handle = std::thread::spawn(move || {
-            let mut request = ResponderRequest::new(Ipv4Addr::LOCALHOST, port, token);
-            request.max_duration = Duration::from_secs(3);
-            request.idle_after_first = Some(Duration::from_millis(200));
-            respond(request, thread_collector)
-        });
-        let mut idle = (0..100)
-            .find_map(|_| {
-                TcpStream::connect((Ipv4Addr::LOCALHOST, port))
-                    .inspect_err(|_| std::thread::sleep(Duration::from_millis(10)))
-                    .ok()
-            })
-            .expect("idle TCP should connect");
-        idle.write_all(&[0]).unwrap();
-
-        let udp = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
-        udp.set_read_timeout(Some(Duration::from_millis(100)))
-            .unwrap();
-        let (query, _, _) = build_query(&token, 0, &CATALOG[0], 0).unwrap();
-        let mut received = false;
-        for _ in 0..20 {
-            udp.send_to(&query, (Ipv4Addr::LOCALHOST, port)).unwrap();
-            let mut response = [0_u8; 2048];
-            if udp.recv(&mut response).is_ok() {
-                received = true;
-                break;
-            }
-        }
-        assert!(received, "idle TCP connection blocked the UDP responder");
-        drop(idle);
-        let report = handle.join().unwrap().unwrap();
-        assert_eq!(report.received, 1);
-        assert_eq!(collector.into_records().len(), 1);
-    }
-}
+mod tests;

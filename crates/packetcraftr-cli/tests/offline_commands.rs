@@ -4050,9 +4050,9 @@ fn retest_plan_verifies_an_anchored_bundle_and_orders_steps() {
         "analyze".into(),
         "retest-plan".into(),
         "--journal".into(),
-        journal.into_os_string(),
+        journal.clone().into_os_string(),
         "--bundle".into(),
-        bundle.into_os_string(),
+        bundle.clone().into_os_string(),
     ];
     let text = assert_success(&run(&args), &args);
     assert!(text.contains("bundle_anchored=true"), "{text}");
@@ -4065,6 +4065,33 @@ fn retest_plan_verifies_an_anchored_bundle_and_orders_steps() {
     let output = run(&gated);
     assert_eq!(output.status.code(), Some(1), "{}", stdout(&output));
     assert!(stdout(&output).contains("bundle_anchored=true"));
+
+    let mut tampered: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&bundle).unwrap()).unwrap();
+    tampered["report"]["findings"] = serde_json::json!([]);
+    let tampered_bundle = dir.path().join("tampered-bundle.json");
+    std::fs::write(
+        &tampered_bundle,
+        serde_json::to_vec_pretty(&tampered).unwrap(),
+    )
+    .unwrap();
+    let tampered_args: Vec<std::ffi::OsString> = vec![
+        "analyze".into(),
+        "retest-plan".into(),
+        "--journal".into(),
+        journal.clone().into_os_string(),
+        "--bundle".into(),
+        tampered_bundle.into_os_string(),
+        "--fail-on".into(),
+        "high".into(),
+    ];
+    let output = run(&tampered_args);
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "tampered bundle should not pass the gate:\n{}",
+        stdout(&output)
+    );
 
     let mut limited = args;
     limited.push("--max-result-bytes".into());

@@ -13,7 +13,7 @@ use crate::errors::CliError;
 use crate::output::contract::Format;
 use crate::terminal::emit_stdout_document;
 
-pub(crate) const PLAN_AFTER_LONG_HELP: &str = r"Emit an ordered retest checklist from an engagement journal. Bundles and journals deliberately do not record command arguments, so each step names the command and the digests a rerun must reproduce or consciously supersede rather than pretending the original invocation can be replayed. With --bundle, the bundle must be anchored to this journal head. Compare the rerun results with analyze findings-diff.
+pub(crate) const PLAN_AFTER_LONG_HELP: &str = r"Emit an ordered retest checklist from an engagement journal. Bundles and journals deliberately do not record command arguments, so each step names the command and the digests a rerun must reproduce or consciously supersede rather than pretending the original invocation can be replayed. With --bundle, the bundle must be anchored to this journal head. Failure gates evaluate the journaled source reports named by the bundle, not the bundle embedded findings. Compare the rerun results with analyze findings-diff.
 
 Example:
   packetcraftr analyze retest-plan --journal journal.json --bundle bundle.json";
@@ -84,6 +84,46 @@ fn check_stdin(paths: impl IntoIterator<Item = impl AsRef<Path>>) -> Result<(), 
 
 fn absent(value: &Option<String>) -> &str {
     value.as_deref().unwrap_or("-")
+}
+
+fn journaled_gate_fails(
+    invocation: &crate::invocation::Invocation,
+    journal: &packetcraftr_core::security::journal::Journal,
+    bundle: &bundle::Bundle,
+    bounds: &Bounds,
+) -> Result<bool, CliError> {
+    let journaled: std::collections::BTreeSet<&str> = journal
+        .records
+        .iter()
+        .map(|record| record.result_sha256.as_str())
+        .collect();
+    let mut evaluated = 0_usize;
+    let mut fails = false;
+    for bundle_source in &bundle.sources {
+        if !journaled.contains(bundle_source.sha256.as_str()) {
+            continue;
+        }
+        let path = Path::new(&bundle_source.path);
+        if path == Path::new("-") {
+            return Err(invalid("failure gates cannot bind a stdin bundle source"));
+        }
+        let bytes = read(invocation, path, bounds.max_result_bytes)?;
+        if source(path, &bytes).sha256 != bundle_source.sha256 {
+            return Err(invalid(format!(
+                "bundle source {} does not match its journaled sha256",
+                bundle_source.path
+            )));
+        }
+        let report = input::report(&bytes)?;
+        evaluated += 1;
+        fails |= bounds.fails(&report);
+    }
+    if evaluated == 0 {
+        return Err(invalid(
+            "failure gates need at least one bundle source present in the journal",
+        ));
+    }
+    Ok(fails)
 }
 
 fn severities(values: &[packetcraftr_core::security::Severity]) -> String {
@@ -215,6 +255,11 @@ impl Generate for RetestPlan {
         )?;
         let journal = packetcraftr_core::security::journal::Journal::parse(&journal_bytes)
             .map_err(CliError::classified)?;
+        if self.bundle.is_none() && self.bounds.has_failure_gates() {
+            return Err(invalid(
+                "--fail-on and --fail-incomplete require --bundle so gates can bind to journaled sources",
+            ));
+        }
         let mut bundle_fails = false;
         let anchored = if let Some(bundle_path) = &self.bundle {
             let bundle_bytes = read(invocation, bundle_path, bundle::MAX_BUNDLE_DOCUMENT_BYTES)?;
@@ -230,7 +275,11 @@ impl Generate for RetestPlan {
                     "bundle journal head does not match the supplied journal",
                 ));
             }
-            bundle_fails = self.bounds.fails(&bundle.report);
+            bundle_fails = if self.bounds.has_failure_gates() {
+                journaled_gate_fails(invocation, &journal, &bundle, &self.bounds)?
+            } else {
+                false
+            };
             true
         } else {
             false

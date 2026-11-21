@@ -176,22 +176,22 @@ commands! {
     #[command(after_long_help = "Example: packetcraftr analyze hunt capture.pcapng --indicators indicators.json")]
     Hunt(analyze::security::Hunt) = "hunt" => ("analyze", "hunt", 31),
     /// Report high NXDOMAIN ratios and repeated high-entropy query labels.
-    #[command(after_long_help = "Defaults: 60-second windows; at least 20 matched responses and 50% NXDOMAIN; or 20 distinct leading labels of at least 32 characters and 4 bits/character entropy.\n\nExample: packetcraftr analyze dns-anomalies capture.pcapng")]
+    #[command(after_long_help = "Defaults: 60-second windows, at least 20 matched responses and 50% NXDOMAIN, or 20 distinct leading labels of at least 32 bytes and 4 bits/byte entropy.\n\nExample: packetcraftr analyze dns-anomalies capture.pcapng")]
     DnsAnomalies(analyze::security::Dns) = "dns-anomalies" => ("analyze", "dns-anomalies", 32),
     /// Detect regularly spaced TCP connection attempts.
-    #[command(after_long_help = "Defaults: six distinct SYN attempts, mean interval at least one second, coefficient of variation at most 0.10. Retransmissions are deduplicated; clock regressions suppress timing conclusions.\n\nExample: packetcraftr analyze beacons capture.pcapng")]
+    #[command(after_long_help = "Defaults: six distinct SYN attempts, mean interval at least one second, coefficient of variation at most 0.10. Retransmissions are deduplicated, and clock regressions suppress timing conclusions.\n\nExample: packetcraftr analyze beacons capture.pcapng")]
     Beacons(analyze::security::Beacons) = "beacons" => ("analyze", "beacons", 33),
     /// Compare scoped endpoint states and scan coverage from native aggregate JSON.
     #[command(after_long_help = "Requires successful aggregate JSON from matching native scan methods. Missing endpoints are coverage changes, never presumed closed.\n\nExample: packetcraftr analyze scan-diff before.json after.json")]
     ScanDiff(analyze::scan_diff::ScanDiff) = "scan-diff" => ("analyze", "scan-diff", 34),
     /// Combine security results into a standalone local HTML assessment.
-    #[command(after_long_help = "Accepts aggregate JSON from the security analysis and audit commands plus scan, differential, fuzz, exchange, and traceroute results, which are summarized as observations. Escapes captured content, records source-file hashes, and refuses existing HTML and bundle destinations.\n\nExample: packetcraftr analyze report hunt.json scan.json --html assessment.html --bundle bundle.json --scope-file scope.json")]
+    #[command(after_long_help = "Accepts aggregate JSON from the security analysis and audit commands plus scan, differential, fuzz, exchange, and traceroute results, which are summarized as observations. Escapes captured content, records source-file hashes, and refuses existing HTML and Evidence bundle destinations.\n\nExample: packetcraftr analyze report hunt.json scan.json --html assessment.html --bundle bundle.json --scope-file scope.json")]
     Assessment(analyze::report::Assessment) = "report" => ("analyze", "report", 35),
     /// Audit an observed TLS handshake, certificate chain, and name matching.
     #[command(after_long_help = "Uses ordinary TCP sockets. Bundled WebPKI roots are replaced by --ca-file. --server-name sets SNI and certificate identity without resolving another target. No revocation fetching or protocol enumeration.\n\nExample: packetcraftr network audit-tls 192.0.2.10:443 --server-name example.test")]
     AuditTls(network::audit::AuditTls) = "audit-tls" => ("network", "audit-tls", 36),
     /// Audit HTTP response headers and redacted cookie attributes with one HEAD request.
-    #[command(after_long_help = "Sends one HEAD / over HTTP/1.1 by default and follows no redirects. HTTPS sends the request only after certificate verification succeeds. Cookie values are redacted.\n\nExample: packetcraftr network audit-http 192.0.2.10:443 --tls --server-name example.test --host example.test")]
+    #[command(after_long_help = "Sends one HEAD request over HTTP/1.1 (path / by default) and follows no redirects. HTTPS sends the request only after certificate verification succeeds. Cookie values are redacted.\n\nExample: packetcraftr network audit-http 192.0.2.10:443 --tls --server-name example.test --host example.test")]
     AuditHttp(network::audit::AuditHttp) = "audit-http" => ("network", "audit-http", 37),
     /// Merge time-ordered captures into scoped PCAPNG.
     #[command(after_long_help = files::merge::arguments::AFTER_LONG_HELP)]
@@ -247,7 +247,8 @@ commands! {
     /// Compute aggregate statistics over a capture file.
     #[command(after_long_help = analyze::stats::arguments::AFTER_LONG_HELP)]
     Stats(analyze::stats::arguments::Args) = "stats" => ("analyze", "stats", 8),
-    #[command(about = "Decrypt QUIC v1/v2 captures and reconstruct streams, with optional live capture and TLS key logs") ]
+    /// Decrypt QUIC v1/v2 captures and reconstruct streams, with optional live capture and TLS key logs.
+    #[command(after_long_help = "Examples:\n  packetcraftr analyze quic capture.pcapng --keylog keys.log\n  packetcraftr --output json analyze quic capture.pcapng --keylog keys.log --include-data")]
     Quic(analyze::quic::arguments::Args) = "quic" => ("analyze", "quic", 42),
     /// Assemble TLS handshake sessions from a capture file.
     #[command(after_long_help = analyze::tls::arguments::AFTER_LONG_HELP)]
@@ -305,7 +306,7 @@ commands! {
     /// Generate shell completions and man pages under a directory.
     #[command(after_long_help = "Writes completions for Bash, Elvish, Fish, PowerShell, and Zsh, and man pages for all grouped paths. Requires a writable directory.\n\nExample:\n  packetcraftr reference documentation --directory ./cli-docs")]
     Documentation(reference::documentation::Args) => ("reference", "documentation", 30),
-    /// Print built-in references for packet expressions, filters, formats, and exit codes.
+    /// Print built-in references for packet expressions, filters, formats, scope, and exit codes.
     #[command(after_long_help = reference::topics::AFTER_LONG_HELP)]
     Topics(reference::topics::Args) => ("reference", "topics", 29),
     /// Passively report build, interface, and engagement scope readiness.
@@ -315,6 +316,7 @@ commands! {
     #[command(after_long_help = analyze::inventory::arguments::AFTER_LONG_HELP)]
     Inventory(analyze::inventory::arguments::Args) = "inventory" => ("analyze", "inventory", 44),
     /// Reconstruct HTTP/3 exchanges from an encrypted QUIC capture.
+    #[command(after_long_help = "Requires --keylog with NSS TLS secrets for the captured QUIC connections.\n\nExample:\n  packetcraftr analyze http3 capture.pcapng --keylog keys.log")]
     Http3(analyze::http3::Args) = "http3" => ("analyze", "http3", 45),
 }
 

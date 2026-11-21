@@ -14,6 +14,7 @@ use packetcraftr_core::error::Kind;
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::protocol::headers::{Ipv4Header, Ipv6Header, LinkHeader};
 use packetcraftr_core::protocol::identity;
+use packetcraftr_core::protocol::link::Arp;
 use packetcraftr_core::protocol::network::ip_protocol;
 use packetcraftr_core::transform::{self, HeaderRewrite, RewriteLimits};
 
@@ -199,6 +200,7 @@ fn scrub_interface_options(
 
 enum LinkPatch {
     Ip(usize),
+    Arp(usize),
     LinkOnly,
 }
 
@@ -270,6 +272,14 @@ fn scrub_frame(
             return fallback_patch(frame, pseudonyms).ok_or_else(|| CliError::classified(error));
         }
     };
+    if decoded.packet.get::<Arp>().is_some() {
+        return fallback_patch(frame, pseudonyms).ok_or_else(|| {
+            CliError::new(
+                Kind::Policy,
+                "scrub refuses ARP frames it cannot pseudonymize",
+            )
+        });
+    }
     let mut patch = HeaderRewrite::default();
     if frame.link_type == LinkType::ETHERNET
         && let Some((source, destination)) =
@@ -325,6 +335,28 @@ fn fallback_patch(frame: &Frame, pseudonyms: &mut Pseudonyms) -> Option<Frame> {
     let ip_offset = match patch_link_bytes(&mut bytes, frame.link_type, pseudonyms)? {
         LinkPatch::Ip(offset) => offset,
         LinkPatch::LinkOnly => return finish(bytes),
+        LinkPatch::Arp(offset) => {
+            {
+                let arp = bytes.get_mut(offset..)?;
+                if arp.len() < 28
+                    || arp[0..2] != 1_u16.to_be_bytes()
+                    || arp[2..4] != 0x0800_u16.to_be_bytes()
+                    || arp[4] != 6
+                    || arp[5] != 4
+                {
+                    return None;
+                }
+                let sender_mac = <[u8; 6]>::try_from(&arp[8..14]).ok()?;
+                let sender_ip = IpAddr::from(<[u8; 4]>::try_from(&arp[14..18]).ok()?);
+                let target_mac = <[u8; 6]>::try_from(&arp[18..24]).ok()?;
+                let target_ip = IpAddr::from(<[u8; 4]>::try_from(&arp[24..28]).ok()?);
+                arp[8..14].copy_from_slice(&pseudonyms.mac(sender_mac));
+                arp[14..18].copy_from_slice(&ipv4_bytes(pseudonyms.ip(sender_ip)));
+                arp[18..24].copy_from_slice(&pseudonyms.mac(target_mac));
+                arp[24..28].copy_from_slice(&ipv4_bytes(pseudonyms.ip(target_ip)));
+            }
+            return finish(bytes);
+        }
     };
     if embedded_outer_addresses(bytes.get(ip_offset..)?) {
         return None;
@@ -507,22 +539,30 @@ fn patch_link_bytes(
     match link_type {
         LinkType::ETHERNET => {
             let link = LinkHeader::walk(link_type, bytes).ok()??;
+            let ether_type = match &link {
+                LinkHeader::Ethernet(ethernet) => ethernet.ether_type(),
+                LinkHeader::RawIp { .. } => 0,
+            };
             if bytes.len() >= 14 {
                 let destination = <[u8; 6]>::try_from(&bytes[0..6]).ok()?;
                 let source = <[u8; 6]>::try_from(&bytes[6..12]).ok()?;
                 bytes[0..6].copy_from_slice(&pseudonyms.mac(destination));
                 bytes[6..12].copy_from_slice(&pseudonyms.mac(source));
             }
-            if link.carries_ip() {
+            if ether_type == 0x0806 {
+                Some(LinkPatch::Arp(link.network_offset()))
+            } else if link.carries_ip() {
                 Some(LinkPatch::Ip(link.network_offset()))
             } else {
                 Some(LinkPatch::LinkOnly)
             }
         }
         LinkType::LINUX_SLL => {
-            if bytes.len() < 16
-                || !matches!(u16::from_be_bytes([bytes[14], bytes[15]]), 0x0800 | 0x86dd)
-            {
+            if bytes.len() < 16 {
+                return None;
+            }
+            let protocol = u16::from_be_bytes([bytes[14], bytes[15]]);
+            if !matches!(protocol, 0x0800 | 0x86dd | 0x0806) {
                 return None;
             }
             let address_len = usize::from(u16::from_be_bytes([bytes[4], bytes[5]]));
@@ -530,12 +570,18 @@ fn patch_link_bytes(
                 let source = <[u8; 6]>::try_from(&bytes[6..12]).ok()?;
                 bytes[6..12].copy_from_slice(&pseudonyms.mac(source));
             }
-            Some(LinkPatch::Ip(16))
+            if protocol == 0x0806 {
+                Some(LinkPatch::Arp(16))
+            } else {
+                Some(LinkPatch::Ip(16))
+            }
         }
         LinkType::LINUX_SLL2 => {
-            if bytes.len() < 20
-                || !matches!(u16::from_be_bytes([bytes[0], bytes[1]]), 0x0800 | 0x86dd)
-            {
+            if bytes.len() < 20 {
+                return None;
+            }
+            let protocol = u16::from_be_bytes([bytes[0], bytes[1]]);
+            if !matches!(protocol, 0x0800 | 0x86dd | 0x0806) {
                 return None;
             }
             if usize::from(bytes[11]) >= 6 && bytes.len() >= 18 {
@@ -543,7 +589,11 @@ fn patch_link_bytes(
                 bytes[12..18].copy_from_slice(&pseudonyms.mac(source));
                 bytes[18..20].fill(0);
             }
-            Some(LinkPatch::Ip(20))
+            if protocol == 0x0806 {
+                Some(LinkPatch::Arp(20))
+            } else {
+                Some(LinkPatch::Ip(20))
+            }
         }
         _ => None,
     }
@@ -923,6 +973,48 @@ mod tests {
         let frame = Frame::new(None, LinkType::LOOP, bytes).unwrap();
         let dissector = Dissector::new(packetcraftr_core::protocol::builtin::registry());
         assert!(scrub_frame(&frame, &dissector, &mut Pseudonyms::default(), 1_000_000).is_err());
+    }
+
+    #[test]
+    fn scrub_pseudonymizes_arp_sender_and_target_addresses() {
+        let sender_mac = [2, 0, 0, 0, 0, 8];
+        let mut arp = vec![0_u8; 28];
+        arp[0..2].copy_from_slice(&1_u16.to_be_bytes());
+        arp[2..4].copy_from_slice(&0x0800_u16.to_be_bytes());
+        arp[4] = 6;
+        arp[5] = 4;
+        arp[6..8].copy_from_slice(&1_u16.to_be_bytes());
+        arp[8..14].copy_from_slice(&sender_mac);
+        arp[14..18].copy_from_slice(&V4_SOURCE);
+        arp[24..28].copy_from_slice(&V4_DESTINATION);
+        let dissector = Dissector::new(packetcraftr_core::protocol::builtin::registry());
+
+        let mut ethernet = Vec::new();
+        ethernet.extend_from_slice(&[0xff; 6]);
+        ethernet.extend_from_slice(&sender_mac);
+        ethernet.extend_from_slice(&0x0806_u16.to_be_bytes());
+        ethernet.extend_from_slice(&arp);
+        let frame = Frame::new(None, LinkType::ETHERNET, ethernet).unwrap();
+        let scrubbed =
+            scrub_frame(&frame, &dissector, &mut Pseudonyms::default(), 1_000_000).unwrap();
+        assert_eq!(&scrubbed.bytes()[6..12], &[2, 0, 0, 0, 0, 1]);
+        assert_eq!(&scrubbed.bytes()[22..28], &[2, 0, 0, 0, 0, 1]);
+        assert_eq!(&scrubbed.bytes()[28..32], &[10, 0, 0, 1]);
+        assert_eq!(&scrubbed.bytes()[32..38], &[0; 6]);
+        assert_eq!(&scrubbed.bytes()[38..42], &[10, 0, 0, 2]);
+
+        let mut sll = vec![0_u8; 16];
+        sll[4..6].copy_from_slice(&6_u16.to_be_bytes());
+        sll[6..12].copy_from_slice(&sender_mac);
+        sll[14..16].copy_from_slice(&0x0806_u16.to_be_bytes());
+        sll.extend_from_slice(&arp);
+        let frame = Frame::new(None, LinkType::LINUX_SLL, sll).unwrap();
+        let scrubbed =
+            scrub_frame(&frame, &dissector, &mut Pseudonyms::default(), 1_000_000).unwrap();
+        assert_eq!(&scrubbed.bytes()[6..12], &[2, 0, 0, 0, 0, 1]);
+        assert_eq!(&scrubbed.bytes()[24..30], &[2, 0, 0, 0, 0, 1]);
+        assert_eq!(&scrubbed.bytes()[30..34], &[10, 0, 0, 1]);
+        assert_eq!(&scrubbed.bytes()[40..44], &[10, 0, 0, 2]);
     }
 
     #[test]

@@ -246,7 +246,16 @@ fn prepare_campaign(
             Some(link_type) if !link_type.is_raw_ip() => 0,
             _ => super::SYNTHESIZED_ETHERNET_BYTES,
         };
-        let per_step = (request.campaign.limits.max_packet_bytes as u64)
+        let baseline_len = Builder::new(Arc::clone(registry))
+            .build(
+                request.packet.clone(),
+                packetcraftr_core::codec::Addresses::default(),
+                request.campaign.build.clone(),
+            )
+            .map_or(request.campaign.limits.max_packet_bytes as u64, |built| {
+                u64::try_from(built.bytes.len()).unwrap_or(u64::MAX)
+            });
+        let per_step = baseline_len
             .checked_add(overhead)
             .ok_or(Error::StatisticsOverflow {
                 case_index: last_case_index(&request.campaign),

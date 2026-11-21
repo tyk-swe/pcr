@@ -518,6 +518,35 @@ struct TcpConnection {
     recorded: bool,
 }
 
+fn flush_tcp_connections(connections: &mut [TcpConnection]) {
+    for _ in 0..50 {
+        let mut pending = false;
+        for connection in connections.iter_mut() {
+            while !connection.outbound.is_empty() {
+                let (front, _) = connection.outbound.as_slices();
+                match connection.stream.write(front) {
+                    Ok(0) => break,
+                    Ok(count) => {
+                        connection.outbound.drain(..count);
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        pending = true;
+                        break;
+                    }
+                    Err(_) => break,
+                }
+                if !connection.outbound.is_empty() {
+                    pending = true;
+                }
+            }
+        }
+        if !pending {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
 fn poll_tcp_connection<S>(
     connection: &mut TcpConnection,
     request: &ResponderRequest,
@@ -636,14 +665,17 @@ where
     loop {
         deadline.check_cancelled().map_err(Error::from)?;
         if deadline.check().is_err() {
+            flush_tcp_connections(&mut tcp_connections);
             return Ok(report);
         }
         if let (Some(idle), Some(last)) = (request.idle_after_first, last_received)
             && last.elapsed() >= idle
         {
+            flush_tcp_connections(&mut tcp_connections);
             return Ok(report);
         }
         if report.received >= request.max_datagrams {
+            flush_tcp_connections(&mut tcp_connections);
             return Ok(report);
         }
         let mut index = 0;
@@ -779,6 +811,44 @@ mod tests {
         let report = handle.join().unwrap().unwrap();
         assert_eq!(report.received, 1);
         assert!(report.ignored >= 1);
+        assert_eq!(collector.into_records().len(), 1);
+    }
+
+    #[test]
+    fn tcp_reply_is_flushed_before_the_reception_limit_exits() {
+        let port = free_port();
+        let token = [7_u8; TOKEN_LEN];
+        let collector = ResponderCollector::default();
+        let thread_collector = collector.clone();
+        let handle = std::thread::spawn(move || {
+            let mut request = ResponderRequest::new(Ipv4Addr::LOCALHOST, port, token);
+            request.max_duration = Duration::from_secs(3);
+            request.max_datagrams = 1;
+            respond(request, thread_collector)
+        });
+        let mut stream = (0..100)
+            .find_map(|_| {
+                TcpStream::connect((Ipv4Addr::LOCALHOST, port))
+                    .inspect_err(|_| std::thread::sleep(Duration::from_millis(10)))
+                    .ok()
+            })
+            .expect("TCP responder should connect");
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let (query, _, _) = build_query(&token, 0, &CATALOG[0], 0).unwrap();
+        stream
+            .write_all(&(query.len() as u16).to_be_bytes())
+            .unwrap();
+        stream.write_all(&query).unwrap();
+        let mut header = [0_u8; 2];
+        stream.read_exact(&mut header).unwrap();
+        let length = usize::from(u16::from_be_bytes(header));
+        assert!(length > 0);
+        let mut response = vec![0_u8; length];
+        stream.read_exact(&mut response).unwrap();
+        let report = handle.join().unwrap().unwrap();
+        assert_eq!(report.received, 1);
         assert_eq!(collector.into_records().len(), 1);
     }
 

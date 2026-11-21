@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::net::IpAddr;
 
 use serde::Deserialize;
@@ -151,6 +151,21 @@ impl Matrix {
             .into_iter()
             .collect()
     }
+
+    #[must_use]
+    pub fn probe_groups(&self) -> Vec<(IpAddr, Vec<u16>)> {
+        let mut groups: BTreeMap<IpAddr, BTreeSet<u16>> = BTreeMap::new();
+        for cell in &self.cells {
+            groups
+                .entry(cell.destination)
+                .or_default()
+                .insert(cell.port);
+        }
+        groups
+            .into_iter()
+            .map(|(destination, ports)| (destination, ports.into_iter().collect()))
+            .collect()
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -296,6 +311,19 @@ mod tests {
         assert_eq!(results[1].verdict, Verdict::Inconclusive);
         assert_eq!(results[2].verdict, Verdict::Mismatch);
         let _ = Arc::new(());
+    }
+
+    #[test]
+    fn probe_groups_preserve_exact_destination_port_pairs() {
+        let groups = matrix().probe_groups();
+        assert_eq!(
+            groups,
+            vec![
+                ("192.0.2.10".parse().unwrap(), vec![443]),
+                ("192.0.2.11".parse().unwrap(), vec![22]),
+                ("192.0.2.12".parse().unwrap(), vec![25]),
+            ]
+        );
     }
 
     #[test]

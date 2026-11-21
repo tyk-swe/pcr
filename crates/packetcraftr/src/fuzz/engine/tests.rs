@@ -76,6 +76,22 @@ fn liveness_timeout_stops_mutations_before_they_are_sent() {
 }
 
 #[test]
+fn liveness_budget_uses_actual_baseline_bytes() {
+    let mut request = request(Ipv4Addr::new(10, 0, 0, 1));
+    request.liveness = true;
+    request.campaign.cases = 16;
+    let registry = packetcraftr_core::protocol::builtin::registry();
+    let mut deadline = Deadline::new(Duration::from_secs(30));
+    let prepared = super::prepare_campaign(&request, &registry, &mut deadline).unwrap();
+    assert!(prepared.liveness_steps > 1);
+    assert!(
+        prepared.maximum_wire_bytes < 1_000_000,
+        "{}",
+        prepared.maximum_wire_bytes
+    );
+}
+
+#[test]
 fn first_event_output_failure_is_returned() {
     let (client, _) = testing::client(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)));
     let calls = AtomicUsize::new(0).into();

@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use clap::Args;
 use packetcraftr::scan::segmentation::{Matrix, Verdict, evaluate};
@@ -17,7 +17,7 @@ use crate::errors::CliError;
 use crate::output::contract::Format;
 use crate::terminal::emit_stdout_document;
 
-pub(crate) const AFTER_LONG_HELP: &str = r"Run a TCP segmentation matrix from this host. The packetcraftr.segmentation/v1 document lists numeric destination TCP cells as reachable, refused, or silent. One connect scan covers every distinct destination and port, then each cell is reported as pass, mismatch, or inconclusive. Silence is a connect timeout, a deadline expiry is inconclusive, and an unreachable result is never dressed up as a firewall proving the cell blocked. A mismatch returns an error after the matrix is printed.
+pub(crate) const AFTER_LONG_HELP: &str = r"Run a TCP segmentation matrix from this host. The packetcraftr.segmentation/v1 document lists numeric destination TCP cells as reachable, refused, or silent. Connect scans grouped by destination cover only the listed destination-port pairs, then each cell is reported as pass, mismatch, or inconclusive. Silence is a connect timeout, a deadline expiry is inconclusive, and an unreachable result is never dressed up as a firewall proving the cell blocked. A mismatch returns an error after the matrix is printed.
 
 Example:
   packetcraftr network segmentation segmentation.json";
@@ -59,12 +59,10 @@ impl Generate for Segmentation {
             crate::input::InputKind::Recipe,
         )?;
         let matrix = Matrix::parse(&bytes).map_err(CliError::classified)?;
-        let destinations = matrix.destinations();
-        let ports = matrix.ports();
-        let probes = destinations
-            .len()
-            .checked_mul(ports.len())
-            .and_then(|count| count.checked_mul(self.attempts as usize))
+        let groups = matrix.probe_groups();
+        let pairs = groups.iter().map(|(_, ports)| ports.len()).sum::<usize>();
+        let probes = pairs
+            .checked_mul(self.attempts as usize)
             .ok_or_else(|| CliError::new(Kind::Usage, "segmentation probe count overflowed"))?;
         if probes > packetcraftr::scan::MAX_PROBES {
             return Err(CliError::new(
@@ -77,58 +75,66 @@ impl Generate for Segmentation {
         }
         let timeout = Duration::from_millis(self.timeout_ms);
         let queue_limits = self.limits.clone().into_limits();
-        let limits = packetcraftr::scan::Limits {
-            max_targets: destinations.len(),
-            max_ports: ports.len(),
-            max_probes: probes,
-            max_duration: self.duration.max_duration(),
-            ..packetcraftr::scan::Limits::default()
-        };
-        let request = packetcraftr::scan::Request {
-            max_in_flight: self.max_in_flight,
-            targets: packetcraftr::target::Selection {
-                include: destinations
-                    .iter()
-                    .map(|address| {
-                        packetcraftr::target::Specification::Target(
-                            packetcraftr::target::Target::Address(*address),
-                        )
-                    })
-                    .collect(),
-                exclude: Vec::new(),
-            },
-            target_sources: Vec::new(),
-            endpoints: ports
-                .iter()
-                .map(|port| packetcraftr::probe::Endpoint::Tcp { port: *port })
-                .collect(),
-            tcp_scan: packetcraftr::scan::TcpScan::Syn,
-            sctp_scan: packetcraftr::scan::SctpScan::default(),
-            discovery: packetcraftr::scan::discovery::Options::default(),
-            udp_payload: bytes::Bytes::new(),
-            udp_profiles: BTreeMap::new(),
-            address_family: packetcraftr::target::Family::Any,
-            attempts: self.attempts,
-            adaptive: None,
-            timeout,
-            probes_per_second: None,
-            limits,
-            route: packetcraftr::route::Options::default(),
-            collection: crate::system::collection(timeout, queue_limits)?,
-        };
-        request.validate().map_err(CliError::classified)?;
+        let max_duration = self.duration.max_duration();
         let client = crate::system::client(
             invocation,
             packetcraftr_core::protocol::builtin::registry(),
             self.policy.into_policy(),
             crate::system::Runtime::ScanConnect,
         );
-        let collector = packetcraftr::scan::connect::Collector::default();
-        let report = client
-            .scan_connect(request, collector.clone())
-            .map_err(CliError::classified)?;
-        let aggregate = collector.finish(report).map_err(CliError::classified)?;
-        let results = evaluate(&matrix, &aggregate.endpoints);
+        let started = Instant::now();
+        let mut endpoints = Vec::new();
+        for (destination, ports) in &groups {
+            let Some(remaining) = max_duration.checked_sub(started.elapsed()) else {
+                break;
+            };
+            if remaining.is_zero() {
+                break;
+            }
+            let group_probes = ports.len() * self.attempts as usize;
+            let limits = packetcraftr::scan::Limits {
+                max_targets: 1,
+                max_ports: ports.len(),
+                max_probes: group_probes,
+                max_duration: remaining,
+                ..packetcraftr::scan::Limits::default()
+            };
+            let request = packetcraftr::scan::Request {
+                max_in_flight: self.max_in_flight,
+                targets: packetcraftr::target::Selection {
+                    include: vec![packetcraftr::target::Specification::Target(
+                        packetcraftr::target::Target::Address(*destination),
+                    )],
+                    exclude: Vec::new(),
+                },
+                target_sources: Vec::new(),
+                endpoints: ports
+                    .iter()
+                    .map(|port| packetcraftr::probe::Endpoint::Tcp { port: *port })
+                    .collect(),
+                tcp_scan: packetcraftr::scan::TcpScan::Syn,
+                sctp_scan: packetcraftr::scan::SctpScan::default(),
+                discovery: packetcraftr::scan::discovery::Options::default(),
+                udp_payload: bytes::Bytes::new(),
+                udp_profiles: BTreeMap::new(),
+                address_family: packetcraftr::target::Family::Any,
+                attempts: self.attempts,
+                adaptive: None,
+                timeout,
+                probes_per_second: None,
+                limits,
+                route: packetcraftr::route::Options::default(),
+                collection: crate::system::collection(timeout, queue_limits)?,
+            };
+            request.validate().map_err(CliError::classified)?;
+            let collector = packetcraftr::scan::connect::Collector::default();
+            let report = client
+                .scan_connect(request, collector.clone())
+                .map_err(CliError::classified)?;
+            let aggregate = collector.finish(report).map_err(CliError::classified)?;
+            endpoints.extend(aggregate.endpoints);
+        }
+        let results = evaluate(&matrix, &endpoints);
         let counts = |verdict: Verdict| {
             results
                 .iter()

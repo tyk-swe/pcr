@@ -429,6 +429,66 @@ impl tcp::Provider for FakeDnsTcp {
     }
 }
 
+struct CancellingDnsStream {
+    peer: SocketAddr,
+    cancellation: packetcraftr_core::budget::Cancellation,
+}
+
+impl Read for CancellingDnsStream {
+    fn read(&mut self, _bytes: &mut [u8]) -> io::Result<usize> {
+        self.cancellation.cancel();
+        Err(io::Error::from(io::ErrorKind::WouldBlock))
+    }
+}
+
+impl Write for CancellingDnsStream {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+impl tcp::Stream for CancellingDnsStream {
+    fn peer_addr(&self) -> io::Result<SocketAddr> {
+        Ok(self.peer)
+    }
+
+    fn local_addr(&self) -> io::Result<SocketAddr> {
+        Ok("127.0.0.1:40001".parse().unwrap())
+    }
+
+    fn set_read_timeout(&self, _timeout: Option<Duration>) -> io::Result<()> {
+        Ok(())
+    }
+
+    fn set_write_timeout(&self, _timeout: Option<Duration>) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+#[derive(Clone)]
+struct CancellingDnsTcp {
+    cancellation: packetcraftr_core::budget::Cancellation,
+}
+
+impl tcp::Provider for CancellingDnsTcp {
+    type Stream = CancellingDnsStream;
+
+    fn connect(
+        &self,
+        endpoint: SocketAddr,
+        _deadline: &packetcraftr_core::budget::Deadline,
+    ) -> Result<Self::Stream, tcp::Error> {
+        Ok(CancellingDnsStream {
+            peer: endpoint,
+            cancellation: self.cancellation.clone(),
+        })
+    }
+}
+
 fn budget(units: u64, bytes: u64) -> Policy {
     Policy {
         max_packets_per_operation: units,
@@ -533,6 +593,36 @@ fn dns_audit_falls_back_to_tcp_without_charging_tcp_amplification_to_udp() {
             .iter()
             .any(|finding| finding.rule_id == "dns.amplification"),
         "{report:?}"
+    );
+}
+
+#[test]
+fn dns_audit_propagates_cancellation_from_tcp_fallback() {
+    let cancellation = packetcraftr_core::budget::Cancellation::default();
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let client = Client::new(
+        Arc::new(Registry::default()),
+        budget(16, 200_000),
+        ProviderSet::tcp(
+            CancellingDnsTcp {
+                cancellation: cancellation.clone(),
+            },
+            (),
+        )
+        .with_udp(FakeDnsUdp {
+            truncated: true,
+            calls,
+        }),
+    )
+    .with_cancellation(cancellation);
+    let result = client.audit_dns(&DnsRequest::new(ENDPOINT, "example.test"));
+    assert!(
+        matches!(
+            &result,
+            Err(Error::DnsTcp(error))
+                if error.category() == crate::dns::tcp::Category::Cancelled
+        ),
+        "{result:?}"
     );
 }
 

@@ -116,7 +116,20 @@ impl<P: UdpProviders + TcpProviders, K: Clock> Client<P, K> {
             fallback_attempted = true;
             match self.tcp_fallback(request, transaction_id, &query, &deadline) {
                 Ok(tcp) => result = tcp,
-                Err(error) => fallback_error = Some(error.to_string()),
+                Err(error) => {
+                    let cancelled = matches!(
+                        &error,
+                        Error::Interrupted(packetcraftr_core::budget::Interrupted::Cancelled(_))
+                    ) || matches!(
+                        &error,
+                        Error::DnsTcp(tcp_error)
+                            if tcp_error.category() == crate::dns::tcp::Category::Cancelled
+                    );
+                    if cancelled {
+                        return Err(error);
+                    }
+                    fallback_error = Some(error.to_string());
+                }
             }
         }
         Ok(dns_report(

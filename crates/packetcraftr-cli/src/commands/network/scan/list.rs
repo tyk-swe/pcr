@@ -58,9 +58,10 @@ pub(super) fn preview_lines(
     };
     vec![
         format!(
-            "preview targets={targets} endpoints_per_target={endpoints_per_target} probes_max={probes} attempts_per_endpoint={} timeout_ms={} rate={}",
+            "preview targets={targets} endpoints_per_target={endpoints_per_target} probes_max={probes} attempts_per_endpoint={} timeout_ms={} effective_interval_ms={} rate={}",
             inputs.attempts,
             inputs.timeout.as_millis(),
+            (effective_interval * 1000.0).round() as u64,
             inputs
                 .rate
                 .map_or_else(|| "unbounded".to_owned(), |value| value.to_string()),
@@ -377,6 +378,15 @@ mod tests {
             below_interval[1].contains("beacons=below_interval_threshold"),
             "{below_interval:?}"
         );
+
+        let mut paced = inputs(thresholds.min_attempts as u32, 100);
+        paced.rate = Some(1);
+        let paced = preview_lines(2, 3, paced);
+        assert!(
+            paced[1].contains("beacons=possible_if_unanswered"),
+            "{paced:?}"
+        );
+        assert!(paced[0].contains("effective_interval_ms=1000"), "{paced:?}");
 
         let possible = preview_lines(2, 3, inputs(thresholds.min_attempts as u32, 1_000));
         assert!(

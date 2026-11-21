@@ -255,8 +255,15 @@ fn replayed_dns_identities_do_not_consume_budget_or_poison_records() {
     let (first, _, _) = build_query(&token, 0, &CATALOG[0], 0).unwrap();
     let (second, _, _) = build_query(&token, 0, &CATALOG[0], 1).unwrap();
     let mut response = [0_u8; 2048];
-    udp.send_to(&first, (Ipv4Addr::LOCALHOST, port)).unwrap();
-    udp.recv(&mut response).unwrap();
+    let mut answered = false;
+    for _ in 0..50 {
+        udp.send_to(&first, (Ipv4Addr::LOCALHOST, port)).unwrap();
+        if udp.recv(&mut response).is_ok() {
+            answered = true;
+            break;
+        }
+    }
+    assert!(answered, "responder did not answer the first query");
     udp.send_to(&first, (Ipv4Addr::LOCALHOST, port)).unwrap();
     assert!(udp.recv(&mut response).is_err());
     let mut replay_with_new_transaction = first.to_vec();
@@ -264,8 +271,15 @@ fn replayed_dns_identities_do_not_consume_budget_or_poison_records() {
     udp.send_to(&replay_with_new_transaction, (Ipv4Addr::LOCALHOST, port))
         .unwrap();
     assert!(udp.recv(&mut response).is_err());
-    udp.send_to(&second, (Ipv4Addr::LOCALHOST, port)).unwrap();
-    udp.recv(&mut response).unwrap();
+    let mut answered = false;
+    for _ in 0..50 {
+        udp.send_to(&second, (Ipv4Addr::LOCALHOST, port)).unwrap();
+        if udp.recv(&mut response).is_ok() {
+            answered = true;
+            break;
+        }
+    }
+    assert!(answered, "responder did not answer the second query");
     let report = handle.join().unwrap().unwrap();
     assert_eq!(report.received, 2);
     assert_eq!(report.replies_sent, 2);

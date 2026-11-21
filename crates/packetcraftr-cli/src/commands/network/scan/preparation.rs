@@ -197,6 +197,9 @@ pub(super) fn prepare(
                 max_ports,
                 connect,
                 method,
+                requested,
+                raw_capability: raw_capability(route.link_mode.into()),
+                packet_route: !route.supports_kernel_tcp(),
                 tcp_scan: &tcp_scan,
                 sctp_scan,
                 family,
@@ -615,6 +618,9 @@ struct ScanPlanInputs<'a> {
     max_ports: usize,
     connect: bool,
     method: arguments::Method,
+    requested: method::Requested,
+    raw_capability: Result<(), packetcraftr_netio::Unsupported>,
+    packet_route: bool,
     tcp_scan: &'a packetcraftr::scan::TcpScan,
     sctp_scan: packetcraftr::scan::SctpScan,
     family: crate::command_options::AddressFamily,
@@ -671,6 +677,49 @@ fn candidate_upper_bound(
         }
     }
     total.min(max_targets as u64)
+}
+
+fn effective_method(
+    requested: method::Requested,
+    raw_capability: Result<(), packetcraftr_netio::Unsupported>,
+    packet_route: bool,
+    endpoints: &[packetcraftr::probe::Endpoint],
+    tcp_scan: &packetcraftr::scan::TcpScan,
+    sctp_scan: packetcraftr::scan::SctpScan,
+    discovery: Option<&packetcraftr::scan::discovery::Options>,
+) -> method::Method {
+    let request = packetcraftr::scan::Request {
+        max_in_flight: 1,
+        targets: packetcraftr::target::Selection::default(),
+        target_sources: Vec::new(),
+        endpoints: endpoints.to_vec(),
+        tcp_scan: *tcp_scan,
+        sctp_scan,
+        discovery: discovery.cloned().unwrap_or_default(),
+        udp_payload: bytes::Bytes::new(),
+        udp_profiles: Default::default(),
+        address_family: packetcraftr::target::Family::Any,
+        attempts: 1,
+        adaptive: None,
+        timeout: Duration::from_secs(1),
+        probes_per_second: None,
+        limits: Default::default(),
+        route: Default::default(),
+        collection: Default::default(),
+    };
+    method::select(
+        requested,
+        &request,
+        method::Capabilities {
+            raw: raw_capability,
+            packet_route,
+        },
+    )
+    .map(|selection| selection.method)
+    .unwrap_or(match requested {
+        method::Requested::Connect => method::Method::Connect,
+        method::Requested::Raw | method::Requested::Automatic => method::Method::Raw,
+    })
 }
 
 fn scan_plan_summary(
@@ -730,12 +779,29 @@ fn scan_plan_summary(
         }
         None => Vec::new(),
     };
+    let selection_endpoints: Vec<packetcraftr::probe::Endpoint> = match &selected {
+        Some(selected) => selected.endpoints.clone(),
+        None if inputs.transports == [Transport::Icmp] => {
+            vec![packetcraftr::probe::Endpoint::Icmp]
+        }
+        None => Vec::new(),
+    };
+    let effective_method = effective_method(
+        inputs.requested,
+        inputs.raw_capability,
+        inputs.packet_route,
+        &selection_endpoints,
+        inputs.tcp_scan,
+        inputs.sctp_scan,
+        inputs.prepared_discovery.map(|prepared| &prepared.options),
+    );
     let mut hasher = Sha256::new();
     hasher.update(
         format!(
-            "packetcraftr.scan-plan/v1\npolicy={policy_digest}\nconnect={}\nmethod={:?}\ntcp_scan={:?}\nsctp_scan={:?}\nfamily={:?}\nattempts={}\nrate={}\ntimeout_ms={}\nmax_in_flight={}\nshuffle_seed={}\ndiscovery={:?}\nreverse_dns={}\nreverse_dns_port={}\ntraceroute={}\ncurated_udp_payloads={}\n",
+            "packetcraftr.scan-plan/v2\npolicy={policy_digest}\nconnect={}\nmethod={:?}\neffective_method={}\ntcp_scan={:?}\nsctp_scan={:?}\nfamily={:?}\nattempts={}\nrate={}\ntimeout_ms={}\nmax_in_flight={}\nshuffle_seed={}\ndiscovery={:?}\nreverse_dns={}\nreverse_dns_port={}\ntraceroute={}\ncurated_udp_payloads={}\n",
             inputs.connect,
             inputs.method,
+            effective_method.as_str(),
             inputs.tcp_scan,
             inputs.sctp_scan,
             inputs.family,

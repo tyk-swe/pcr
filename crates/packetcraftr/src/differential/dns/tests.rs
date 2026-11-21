@@ -144,6 +144,51 @@ fn cancellation_during_final_tcp_attempt_is_propagated() {
 }
 
 #[test]
+fn unplanned_dns_identities_are_ignored() {
+    let port = free_port();
+    let token = [7_u8; TOKEN_LEN];
+    let collector = ResponderCollector::default();
+    let thread_collector = collector.clone();
+    let handle = std::thread::spawn(move || {
+        let mut request = ResponderRequest::new(Ipv4Addr::LOCALHOST, port, token);
+        request.max_duration = Duration::from_secs(3);
+        request.idle_after_first = Some(Duration::from_millis(200));
+        request.max_datagrams = 1;
+        respond(request, thread_collector)
+    });
+    let udp = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    udp.set_read_timeout(Some(Duration::from_millis(100)))
+        .unwrap();
+    let _ready = (0..100)
+        .find_map(|_| {
+            TcpStream::connect((Ipv4Addr::LOCALHOST, port))
+                .inspect_err(|_| std::thread::sleep(Duration::from_millis(10)))
+                .ok()
+        })
+        .expect("responder TCP listener should become ready");
+    let (valid, _, _) = build_query(&token, 0, &CATALOG[0], 0).unwrap();
+    let mut wrong_transaction = valid.to_vec();
+    wrong_transaction[0..2].copy_from_slice(&0xbeef_u16.to_be_bytes());
+    let (unplanned_sequence, _, _) = build_query(&token, 0, &CATALOG[0], 999).unwrap();
+    let (unplanned_variant, _, _) = build_query(&token, 99, &CATALOG[0], 0).unwrap();
+    let mut response = [0_u8; 2048];
+    let queries: [&[u8]; 3] = [&wrong_transaction, &unplanned_sequence, &unplanned_variant];
+    for query in queries {
+        udp.send_to(query, (Ipv4Addr::LOCALHOST, port)).unwrap();
+        assert!(udp.recv(&mut response).is_err());
+    }
+    udp.send_to(&valid, (Ipv4Addr::LOCALHOST, port)).unwrap();
+    udp.recv(&mut response).unwrap();
+    let report = handle.join().unwrap().unwrap();
+    assert_eq!(report.received, 1);
+    assert_eq!(report.replies_sent, 1);
+    assert!(report.ignored >= 3);
+    let records = collector.into_records();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].attempt_seq, 0);
+}
+
+#[test]
 fn junk_datagrams_do_not_consume_the_matching_budget() {
     let port = free_port();
     let token = [7_u8; TOKEN_LEN];

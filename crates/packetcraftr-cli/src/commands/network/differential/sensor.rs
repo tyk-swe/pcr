@@ -118,6 +118,9 @@ const MAX_DATAGRAM_BYTES: usize = 65_535;
 impl FragmentAssembler {
     fn push(&mut self, frame: &Frame) -> Option<Bytes> {
         let piece = ipv4_piece(frame)?;
+        if piece.payload.is_empty() {
+            return None;
+        }
         if piece.offset == 0 && !piece.more {
             return Some(piece.payload);
         }

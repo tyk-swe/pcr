@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use std::collections::HashSet;
 use std::io::{Read as _, Write as _};
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpListener, TcpStream, UdpSocket};
 use std::sync::Arc;
@@ -590,6 +591,7 @@ fn poll_tcp_connection<S>(
     sink: &mut S,
     report: &mut ResponderReport,
     last_received: &mut Option<Instant>,
+    seen: &mut HashSet<(u16, u32, [u8; 32])>,
 ) -> Result<bool, Error>
 where
     S: Sink<ResponderEvent, Ack = ()>,
@@ -642,6 +644,11 @@ where
         report.ignored += 1;
         return Ok(true);
     };
+    let digest: [u8; 32] = Sha256::digest(&message).into();
+    if !seen.insert((variant_index, attempt_seq, digest)) {
+        report.ignored += 1;
+        return Ok(true);
+    }
     *last_received = Some(SystemClock.now());
     report.received += 1;
     connection.recorded = true;
@@ -650,7 +657,7 @@ where
             variant_index,
             attempt_seq,
             source: connection.source,
-            payload_sha256: hex(&Sha256::digest(&message)),
+            payload_sha256: hex(&digest),
         }),
         &connection.deadline,
     )
@@ -699,6 +706,7 @@ where
     let mut report = ResponderReport::default();
     let mut buffer = vec![0_u8; 65_535];
     let mut tcp_connections: Vec<TcpConnection> = Vec::new();
+    let mut seen: HashSet<(u16, u32, [u8; 32])> = HashSet::new();
     loop {
         deadline.check_cancelled().map_err(Error::from)?;
         if deadline.check().is_err() {
@@ -723,6 +731,7 @@ where
                 &mut sink,
                 &mut report,
                 &mut last_received,
+                &mut seen,
             ) {
                 Ok(true) => {
                     tcp_connections.remove(index);
@@ -779,6 +788,11 @@ where
             report.ignored += 1;
             continue;
         };
+        let digest: [u8; 32] = Sha256::digest(&bytes).into();
+        if !seen.insert((variant_index, attempt_seq, digest)) {
+            report.ignored += 1;
+            continue;
+        }
         last_received = Some(SystemClock.now());
         report.received += 1;
         sink.publish_controlled(
@@ -786,7 +800,7 @@ where
                 variant_index,
                 attempt_seq,
                 source,
-                payload_sha256: hex(&Sha256::digest(&bytes)),
+                payload_sha256: hex(&digest),
             }),
             &deadline,
         )

@@ -77,6 +77,52 @@ fn junk_datagrams_do_not_consume_the_matching_budget() {
 }
 
 #[test]
+fn replayed_dns_identities_do_not_consume_budget_or_poison_records() {
+    let port = free_port();
+    let token = [7_u8; TOKEN_LEN];
+    let collector = ResponderCollector::default();
+    let thread_collector = collector.clone();
+    let handle = std::thread::spawn(move || {
+        let mut request = ResponderRequest::new(Ipv4Addr::LOCALHOST, port, token);
+        request.max_duration = Duration::from_secs(3);
+        request.idle_after_first = Some(Duration::from_millis(200));
+        request.max_datagrams = 2;
+        respond(request, thread_collector)
+    });
+    let udp = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    udp.set_read_timeout(Some(Duration::from_millis(100)))
+        .unwrap();
+    let _ready = (0..100)
+        .find_map(|_| {
+            TcpStream::connect((Ipv4Addr::LOCALHOST, port))
+                .inspect_err(|_| std::thread::sleep(Duration::from_millis(10)))
+                .ok()
+        })
+        .expect("responder TCP listener should become ready");
+    let (first, _, _) = build_query(&token, 0, &CATALOG[0], 0).unwrap();
+    let (second, _, _) = build_query(&token, 0, &CATALOG[0], 1).unwrap();
+    let mut response = [0_u8; 2048];
+    udp.send_to(&first, (Ipv4Addr::LOCALHOST, port)).unwrap();
+    udp.recv(&mut response).unwrap();
+    udp.send_to(&first, (Ipv4Addr::LOCALHOST, port)).unwrap();
+    assert!(udp.recv(&mut response).is_err());
+    udp.send_to(&second, (Ipv4Addr::LOCALHOST, port)).unwrap();
+    udp.recv(&mut response).unwrap();
+    let report = handle.join().unwrap().unwrap();
+    assert_eq!(report.received, 2);
+    assert_eq!(report.replies_sent, 2);
+    assert!(report.ignored >= 1);
+    let records = collector.into_records();
+    assert_eq!(
+        records
+            .iter()
+            .map(|record| record.attempt_seq)
+            .collect::<Vec<_>>(),
+        [0, 1]
+    );
+}
+
+#[test]
 fn tcp_reply_is_flushed_before_the_reception_limit_exits() {
     let port = free_port();
     let token = [7_u8; TOKEN_LEN];

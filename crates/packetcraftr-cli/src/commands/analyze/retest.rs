@@ -30,12 +30,12 @@ pub(crate) struct RetestPlan {
     bounds: Bounds,
 }
 
-pub(crate) const FINDINGS_AFTER_LONG_HELP: &str = r"Compare findings from two aggregate JSON results by rule and subject. Repeated findings keep their multiplicity, a severity change is reported separately from presence, and coverage is never inferred: this compares the supplied reports, it does not rerun either assessment.
+pub(crate) const FINDINGS_AFTER_LONG_HELP: &str = r"Compare findings from two aggregate JSON results by rule and subject. Repeated findings keep their multiplicity, a severity change is reported separately from presence, and coverage is never inferred: this compares the supplied reports, it does not rerun either assessment. The shared --fail-on gate checks the after report and --fail-incomplete checks either report
 
 Example:
   packetcraftr analyze findings-diff before.json after.json";
 
-pub(crate) const BUNDLE_AFTER_LONG_HELP: &str = r"Parse and validate a packetcraftr.bundle/v1 Evidence bundle: its kind must match the embedded report, its sources must match the report exactly, and its inputs digest must recompute. Each optional result file is also required to match a bundle source by SHA-256. Sources without a supplied file are counted as unverified, because their bytes are not embedded in the bundle.
+pub(crate) const BUNDLE_AFTER_LONG_HELP: &str = r"Parse and validate a packetcraftr.bundle/v1 Evidence bundle: its kind must match the embedded report, its sources must match the report exactly, and its inputs digest must recompute. Each optional result file is also required to match a bundle source by SHA-256. Sources without a supplied file are counted as unverified, because their bytes are not embedded in the bundle. The shared failure gates check the embedded report
 
 Example:
   packetcraftr analyze bundle-verify bundle.json scan.json Hunt.json";
@@ -141,7 +141,9 @@ impl Generate for FindingsDiff {
             }
         }
         emit_stdout_document(invocation, &text)?;
-        Ok(CommandExit::SUCCESS)
+        Ok(CommandExit::status(u8::from(
+            self.bounds.fails_diff(&before, &after),
+        )))
     }
 }
 
@@ -192,7 +194,9 @@ impl Generate for BundleVerify {
                 bundle.sources.len() - matched_sources.len(),
             ),
         )?;
-        Ok(CommandExit::SUCCESS)
+        Ok(CommandExit::status(u8::from(
+            self.bounds.fails(&bundle.report),
+        )))
     }
 }
 

@@ -23,7 +23,7 @@ use crate::errors::CliError;
 use crate::output::contract::Format;
 use crate::terminal::emit_stdout_document;
 
-pub(crate) const AFTER_LONG_HELP: &str = r"Write a share-oriented PCAPNG copy with consistently pseudonymized outer Ethernet and IP addresses. IPv4 pseudonyms are sequential private addresses starting at 10.0.0.1, IPv6 pseudonyms are in 2001:db8::/32, and MAC pseudonyms are locally administered. Unspecified, loopback, multicast, and broadcast addresses are preserved. PCAPNG interface option metadata is dropped. Protocol payloads are retained unless --truncate caps captured bytes per frame, so review payload disclosures separately before sharing. Existing destinations are refused.
+pub(crate) const AFTER_LONG_HELP: &str = r"Write a share-oriented PCAPNG copy with consistently pseudonymized outer Ethernet and IP addresses. IPv4 pseudonyms are sequential private addresses starting at 10.0.0.1, IPv6 pseudonyms are in 2001:db8::/32, and MAC pseudonyms are locally administered. Unspecified, loopback, multicast, and broadcast addresses are preserved. PCAPNG interface option metadata is dropped and frames whose outer IP header carries embedded addresses scrub cannot rewrite are refused. Protocol payloads are retained unless --truncate caps captured bytes per frame, so review payload disclosures separately before sharing. Existing destinations are refused.
 
 Example:
   packetcraftr analyze scrub capture.pcapng --write scrubbed.pcapng --truncate 128";
@@ -198,12 +198,71 @@ fn scrub_interface_options(
     Vec::new()
 }
 
+enum LinkPatch {
+    Ip(usize),
+    LinkOnly,
+}
+
+fn outer_ip(frame: &Frame) -> Option<&[u8]> {
+    let link = LinkHeader::walk(frame.link_type, frame.bytes()).ok()??;
+    link.carries_ip()
+        .then(|| frame.bytes().get(link.network_offset()..))
+        .flatten()
+}
+
+fn outer_ip_addresses(frame: &Frame) -> Option<(IpAddr, IpAddr)> {
+    let link = LinkHeader::walk(frame.link_type, frame.bytes()).ok()??;
+    let header = link.walk_ip(frame.bytes()).ok()??;
+    header
+        .addresses(frame.bytes().get(link.network_offset()..)?)
+        .ok()
+}
+
+fn embedded_outer_addresses(ip: &[u8]) -> bool {
+    match ip.first().map(|byte| byte >> 4) {
+        Some(4) => match Ipv4Header::walk_prefix(ip) {
+            Ok(header) => header.options(ip).any(|option| match option {
+                Ok(option) if option.kind == 68 => ip
+                    .get(option.range.start + 3)
+                    .is_some_and(|flags| flags & 0x0f != 0),
+                Ok(option) => matches!(option.kind, 7 | 131 | 137),
+                Err(_) => header.header_length() > Ipv4Header::MIN_LENGTH,
+            }),
+            Err(_) => ip.len() >= 24 && usize::from(ip[0] & 0x0f) * 4 > Ipv4Header::MIN_LENGTH,
+        },
+        Some(6) => match Ipv6Header::walk_prefix(ip) {
+            Ok(header) => header.extensions().iter().any(|extension| {
+                extension.protocol() == ip_protocol::ROUTING
+                    || extension
+                        .options(ip)
+                        .any(|option| matches!(option, Ok(option) if option.kind == 201))
+            }),
+            Err(_) => {
+                ip.len() >= Ipv6Header::LENGTH
+                    && matches!(
+                        ip[6],
+                        ip_protocol::HOP_BY_HOP
+                            | ip_protocol::ROUTING
+                            | ip_protocol::DESTINATION_OPTIONS
+                    )
+            }
+        },
+        _ => false,
+    }
+}
+
 fn scrub_frame(
     frame: &Frame,
     dissector: &Dissector,
     pseudonyms: &mut Pseudonyms,
     max_output_bytes: usize,
 ) -> Result<Frame, CliError> {
+    if outer_ip(frame).is_some_and(embedded_outer_addresses) {
+        return Err(CliError::new(
+            Kind::Policy,
+            "scrub refuses an outer IP header with embedded addresses it cannot pseudonymize",
+        ));
+    }
     let decoded = match dissector
         .decode(frame.clone(), packetcraftr_core::decode::Options::default())
     {
@@ -220,8 +279,7 @@ fn scrub_frame(
         patch.source_mac = Some(pseudonyms.mac(source));
         patch.destination_mac = Some(pseudonyms.mac(destination));
     }
-    if let Some((source, destination)) = decoded.packet.iter().find_map(identity::network_endpoints)
-    {
+    if let Some((source, destination)) = outer_ip_addresses(frame) {
         patch.source_ip = Some(pseudonyms.ip(source));
         patch.destination_ip = Some(pseudonyms.ip(destination));
     }
@@ -235,8 +293,29 @@ fn scrub_frame(
 }
 
 fn fallback_patch(frame: &Frame, pseudonyms: &mut Pseudonyms) -> Option<Frame> {
+    let finish = |bytes: Vec<u8>| {
+        let mut patched = Frame::try_with_optional_timestamp(
+            frame.timestamp,
+            frame.link_type,
+            packetcraftr_core::frame::Lengths {
+                captured: frame.captured_length(),
+                original: frame.original_length(),
+            },
+            bytes,
+        )
+        .ok()?;
+        patched.interface = frame.interface;
+        patched.direction = frame.direction;
+        Some(patched)
+    };
     let mut bytes = frame.bytes().to_vec();
-    let ip_offset = patch_link_bytes(&mut bytes, frame.link_type, pseudonyms)?;
+    let ip_offset = match patch_link_bytes(&mut bytes, frame.link_type, pseudonyms)? {
+        LinkPatch::Ip(offset) => offset,
+        LinkPatch::LinkOnly => return finish(bytes),
+    };
+    if embedded_outer_addresses(bytes.get(ip_offset..)?) {
+        return None;
+    }
     let ip = bytes.get_mut(ip_offset..)?;
     match ip.first().map(|byte| byte >> 4) {
         Some(4) if ip.len() >= 20 => {
@@ -274,19 +353,7 @@ fn fallback_patch(frame: &Frame, pseudonyms: &mut Pseudonyms) -> Option<Frame> {
         }
         _ => return None,
     }
-    let mut patched = Frame::try_with_optional_timestamp(
-        frame.timestamp,
-        frame.link_type,
-        packetcraftr_core::frame::Lengths {
-            captured: frame.captured_length(),
-            original: frame.original_length(),
-        },
-        bytes,
-    )
-    .ok()?;
-    patched.interface = frame.interface;
-    patched.direction = frame.direction;
-    Some(patched)
+    finish(bytes)
 }
 
 fn transport_checksum_field(ip: &[u8]) -> Option<(u8, Range<usize>)> {
@@ -420,23 +487,24 @@ fn patch_link_bytes(
     bytes: &mut [u8],
     link_type: LinkType,
     pseudonyms: &mut Pseudonyms,
-) -> Option<usize> {
+) -> Option<LinkPatch> {
     if link_type.is_raw_ip() {
-        return Some(0);
+        return Some(LinkPatch::Ip(0));
     }
     match link_type {
         LinkType::ETHERNET => {
             let link = LinkHeader::walk(link_type, bytes).ok()??;
-            if !link.carries_ip() {
-                return None;
-            }
             if bytes.len() >= 14 {
                 let destination = <[u8; 6]>::try_from(&bytes[0..6]).ok()?;
                 let source = <[u8; 6]>::try_from(&bytes[6..12]).ok()?;
                 bytes[0..6].copy_from_slice(&pseudonyms.mac(destination));
                 bytes[6..12].copy_from_slice(&pseudonyms.mac(source));
             }
-            Some(link.network_offset())
+            if link.carries_ip() {
+                Some(LinkPatch::Ip(link.network_offset()))
+            } else {
+                Some(LinkPatch::LinkOnly)
+            }
         }
         LinkType::LINUX_SLL => {
             if bytes.len() < 16
@@ -449,7 +517,7 @@ fn patch_link_bytes(
                 let source = <[u8; 6]>::try_from(&bytes[6..12]).ok()?;
                 bytes[6..12].copy_from_slice(&pseudonyms.mac(source));
             }
-            Some(16)
+            Some(LinkPatch::Ip(16))
         }
         LinkType::LINUX_SLL2 => {
             if bytes.len() < 20
@@ -462,7 +530,7 @@ fn patch_link_bytes(
                 bytes[12..18].copy_from_slice(&pseudonyms.mac(source));
                 bytes[18..20].fill(0);
             }
-            Some(20)
+            Some(LinkPatch::Ip(20))
         }
         _ => None,
     }
@@ -543,6 +611,25 @@ mod tests {
         let checksum = checksum_parts(&[&bytes[..20]]);
         bytes[10..12].copy_from_slice(&checksum.to_be_bytes());
         bytes[20..].copy_from_slice(chunk);
+        Frame::new(None, LinkType::RAW, bytes).unwrap()
+    }
+
+    fn ipv4_option_frame(kind: u8, segment: &[u8]) -> Frame {
+        let total = 28 + segment.len();
+        let mut bytes = vec![0_u8; total];
+        bytes[0] = 0x47;
+        bytes[2..4].copy_from_slice(&(total as u16).to_be_bytes());
+        bytes[8] = 64;
+        bytes[9] = 17;
+        bytes[12..16].copy_from_slice(&V4_SOURCE);
+        bytes[16..20].copy_from_slice(&V4_DESTINATION);
+        bytes[20] = kind;
+        bytes[21] = 7;
+        bytes[22] = 4;
+        bytes[23..27].copy_from_slice(&V4_SOURCE);
+        let checksum = checksum_parts(&[&bytes[..28]]);
+        bytes[10..12].copy_from_slice(&checksum.to_be_bytes());
+        bytes[28..].copy_from_slice(segment);
         Frame::new(None, LinkType::RAW, bytes).unwrap()
     }
 
@@ -697,6 +784,80 @@ mod tests {
         assert_ipv4_header_checksum(ip);
         let (source, destination) = ipv4_addresses(ip);
         assert_eq!(transport_checksum(source, destination, 17, &ip[20..]), 0);
+    }
+
+    #[test]
+    fn scrub_pseudonymizes_outer_mac_on_encapsulated_ethernet() {
+        let segment = udp_segment(
+            IpAddr::from(V4_SOURCE),
+            IpAddr::from(V4_DESTINATION),
+            b"encapsulated",
+        );
+        let raw = ipv4_frame(17, &segment, 0);
+        for (ether_type, prefix) in [
+            (0x8864_u16, vec![0x11, 0, 0, 1, 0, 42, 0, 0x21]),
+            (0x8847_u16, vec![0, 0, 0x11, 64]),
+        ] {
+            let mut bytes = Vec::new();
+            bytes.extend_from_slice(&[2, 0, 0, 0, 0, 9]);
+            bytes.extend_from_slice(&[2, 0, 0, 0, 0, 8]);
+            bytes.extend_from_slice(&ether_type.to_be_bytes());
+            bytes.extend_from_slice(&prefix);
+            bytes.extend_from_slice(raw.bytes());
+            let frame = Frame::new(None, LinkType::ETHERNET, bytes).unwrap();
+            let dissector = Dissector::new(packetcraftr_core::protocol::builtin::registry());
+            let scrubbed =
+                scrub_frame(&frame, &dissector, &mut Pseudonyms::default(), 1_000_000).unwrap();
+            assert!(matches!(
+                &scrubbed.bytes()[0..6],
+                [2, 0, 0, 0, 0, 1] | [2, 0, 0, 0, 0, 2]
+            ));
+            assert!(matches!(
+                &scrubbed.bytes()[6..12],
+                [2, 0, 0, 0, 0, 1] | [2, 0, 0, 0, 0, 2]
+            ));
+            assert_ne!(&scrubbed.bytes()[0..6], &scrubbed.bytes()[6..12]);
+            let ip_offset = 14 + prefix.len();
+            assert_eq!(&scrubbed.bytes()[ip_offset..], raw.bytes());
+        }
+    }
+
+    #[test]
+    fn scrub_refuses_outer_headers_with_embedded_addresses() {
+        let segment = udp_segment(
+            IpAddr::from(V4_SOURCE),
+            IpAddr::from(V4_DESTINATION),
+            b"routed",
+        );
+        let dissector = Dissector::new(packetcraftr_core::protocol::builtin::registry());
+        for kind in [7_u8, 131] {
+            let frame = ipv4_option_frame(kind, &segment);
+            assert!(fallback_patch(&frame, &mut Pseudonyms::default()).is_none());
+            assert!(
+                scrub_frame(&frame, &dissector, &mut Pseudonyms::default(), 1_000_000).is_err()
+            );
+        }
+
+        let segment = udp_segment(
+            IpAddr::from(V6_SOURCE),
+            IpAddr::from(V6_DESTINATION),
+            b"routed",
+        );
+        let mut bytes = vec![0_u8; 64 + segment.len()];
+        bytes[0] = 0x60;
+        bytes[4..6].copy_from_slice(&((24 + segment.len()) as u16).to_be_bytes());
+        bytes[6] = 43;
+        bytes[7] = 64;
+        bytes[8..24].copy_from_slice(&V6_SOURCE);
+        bytes[24..40].copy_from_slice(&V6_DESTINATION);
+        bytes[40] = 17;
+        bytes[41] = 2;
+        bytes[43] = 1;
+        bytes[48..64].copy_from_slice(&V6_SOURCE);
+        bytes[64..].copy_from_slice(&segment);
+        let frame = Frame::new(None, LinkType::RAW, bytes).unwrap();
+        assert!(fallback_patch(&frame, &mut Pseudonyms::default()).is_none());
+        assert!(scrub_frame(&frame, &dissector, &mut Pseudonyms::default(), 1_000_000).is_err());
     }
 
     #[test]

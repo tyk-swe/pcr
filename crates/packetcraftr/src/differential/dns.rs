@@ -506,95 +506,97 @@ fn answer_message(
     Ok(Some((variant_index, attempt_seq, response)))
 }
 
-fn read_tcp_frame(stream: &mut TcpStream, deadline: &Deadline) -> Result<Option<Vec<u8>>, Error> {
-    let mut frame = Vec::new();
-    let mut chunk = [0_u8; 8192];
-    loop {
-        deadline.check_cancelled().map_err(Error::from)?;
-        if deadline.check().is_err() {
-            return Ok(None);
-        }
-        match stream.read(&mut chunk) {
-            Ok(0) => return Ok((!frame.is_empty()).then_some(frame)),
-            Ok(count) => {
-                frame.extend_from_slice(&chunk[..count]);
-                if frame.len() >= 2 {
-                    let declared = usize::from(u16::from_be_bytes([frame[0], frame[1]]));
-                    if frame.len() >= declared + 2 {
-                        frame.truncate(declared + 2);
-                        return Ok(Some(frame));
-                    }
-                }
-            }
-            Err(error) if packetcraftr_netio::bounded::retryable(&error) => continue,
-            Err(error) => {
-                return Err(Error::ResponderIo {
-                    message: error.to_string(),
-                });
-            }
-        }
-    }
+const TCP_CONNECTION_TIMEOUT: Duration = Duration::from_secs(5);
+const MAX_TCP_CONNECTIONS: usize = 128;
+
+struct TcpConnection {
+    stream: TcpStream,
+    source: SocketAddr,
+    inbound: Vec<u8>,
+    outbound: std::collections::VecDeque<u8>,
+    deadline: Deadline,
+    recorded: bool,
 }
 
-const TCP_CONNECTION_TIMEOUT: Duration = Duration::from_secs(5);
-
-fn handle_tcp_connection<S>(
-    mut stream: TcpStream,
-    source: SocketAddr,
+fn poll_tcp_connection<S>(
+    connection: &mut TcpConnection,
     request: &ResponderRequest,
     sink: &mut S,
-    deadline: &Arc<Deadline>,
     report: &mut ResponderReport,
     last_received: &mut Option<Instant>,
-) -> Result<(), Error>
+) -> Result<bool, Error>
 where
     S: Sink<ResponderEvent, Ack = ()>,
 {
-    stream
-        .set_read_timeout(Some(Duration::from_millis(50)))
-        .map_err(|source| Error::ResponderIo {
-            message: source.to_string(),
-        })?;
-    stream
-        .set_write_timeout(Some(Duration::from_millis(50)))
-        .map_err(|source| Error::ResponderIo {
-            message: source.to_string(),
-        })?;
-    let connection_deadline =
-        Deadline::new(TCP_CONNECTION_TIMEOUT).with_parent(Some(Arc::clone(deadline)));
-    let Some(frame) = read_tcp_frame(&mut stream, &connection_deadline)? else {
-        return Ok(());
-    };
-    let message = Bytes::copy_from_slice(frame.get(2..).unwrap_or_default());
+    connection.deadline.check_cancelled().map_err(Error::from)?;
+    if connection.deadline.check().is_err() {
+        return Ok(true);
+    }
+    if !connection.outbound.is_empty() {
+        let (front, _) = connection.outbound.as_slices();
+        match connection.stream.write(front) {
+            Ok(0) => return Ok(true),
+            Ok(count) => {
+                connection.outbound.drain(..count);
+                return Ok(connection.outbound.is_empty());
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(false),
+            Err(_) => return Ok(true),
+        }
+    }
+    let mut chunk = [0_u8; 8192];
+    match connection.stream.read(&mut chunk) {
+        Ok(0) => return Ok(true),
+        Ok(count) => connection.inbound.extend_from_slice(&chunk[..count]),
+        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(false),
+        Err(error) => {
+            return Err(Error::ResponderIo {
+                message: error.to_string(),
+            });
+        }
+    }
+    if connection.inbound.len() > 65_537 {
+        return Err(Error::ResponderIo {
+            message: "TCP DNS frame exceeded the maximum length".to_owned(),
+        });
+    }
+    if connection.inbound.len() < 2 {
+        return Ok(false);
+    }
+    let declared = usize::from(u16::from_be_bytes([
+        connection.inbound[0],
+        connection.inbound[1],
+    ]));
+    if connection.inbound.len() < declared + 2 {
+        return Ok(false);
+    }
+    let message = Bytes::copy_from_slice(&connection.inbound[2..declared + 2]);
     let Some((variant_index, attempt_seq, response)) = answer_message(&message, &request.token)?
     else {
         report.ignored += 1;
-        return Ok(());
+        return Ok(true);
     };
     *last_received = Some(SystemClock.now());
     report.received += 1;
+    connection.recorded = true;
     sink.publish_controlled(
         ResponderEvent::Received(ReceptionRecord {
             variant_index,
             attempt_seq,
-            source,
+            source: connection.source,
             payload_sha256: hex(&Sha256::digest(&message)),
         }),
-        &connection_deadline,
+        &connection.deadline,
     )
     .map_err(|source| Error::Output { source })?;
-    let mut framed = Vec::with_capacity(response.len() + 2);
-    framed.extend_from_slice(
-        &u16::try_from(response.len())
+    connection.outbound.extend(
+        u16::try_from(response.len())
             .unwrap_or(u16::MAX)
             .to_be_bytes(),
     );
-    framed.extend_from_slice(&response);
-    // A reset after the reception was recorded must not abort the responder.
-    if stream.write_all(&framed).is_ok() {
-        report.replies_sent += 1;
-    }
-    Ok(())
+    connection.outbound.extend(response);
+    report.replies_sent += 1;
+    Ok(false)
 }
 
 pub fn respond<S>(request: ResponderRequest, mut sink: S) -> Result<ResponderReport, Error>
@@ -630,6 +632,7 @@ where
     let mut last_received: Option<Instant> = None;
     let mut report = ResponderReport::default();
     let mut buffer = vec![0_u8; 65_535];
+    let mut tcp_connections: Vec<TcpConnection> = Vec::new();
     loop {
         deadline.check_cancelled().map_err(Error::from)?;
         if deadline.check().is_err() {
@@ -643,19 +646,42 @@ where
         if report.received + report.ignored >= request.max_datagrams {
             return Ok(report);
         }
+        let mut index = 0;
+        while index < tcp_connections.len() {
+            match poll_tcp_connection(
+                &mut tcp_connections[index],
+                &request,
+                &mut sink,
+                &mut report,
+                &mut last_received,
+            ) {
+                Ok(true) => {
+                    tcp_connections.remove(index);
+                }
+                Ok(false) => index += 1,
+                Err(Error::ResponderIo { .. }) => {
+                    if !tcp_connections[index].recorded {
+                        report.ignored += 1;
+                    }
+                    tcp_connections.remove(index);
+                }
+                Err(error) => return Err(error),
+            }
+        }
         match listener.accept() {
             Ok((stream, source)) => {
-                match handle_tcp_connection(
-                    stream,
-                    source,
-                    &request,
-                    &mut sink,
-                    &deadline,
-                    &mut report,
-                    &mut last_received,
-                ) {
-                    Ok(()) | Err(Error::ResponderIo { .. }) => {}
-                    Err(error) => return Err(error),
+                if tcp_connections.len() < MAX_TCP_CONNECTIONS
+                    && stream.set_nonblocking(true).is_ok()
+                {
+                    tcp_connections.push(TcpConnection {
+                        stream,
+                        source,
+                        inbound: Vec::new(),
+                        outbound: std::collections::VecDeque::new(),
+                        deadline: Deadline::new(TCP_CONNECTION_TIMEOUT)
+                            .with_parent(Some(Arc::clone(&deadline))),
+                        recorded: false,
+                    });
                 }
                 continue;
             }
@@ -699,5 +725,60 @@ where
                 message: source.to_string(),
             })?;
         report.replies_sent += 1;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::differential::ResponderCollector;
+    use std::net::TcpStream;
+
+    fn free_port() -> u16 {
+        let udp = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = udp.local_addr().unwrap().port();
+        drop(udp);
+        port
+    }
+
+    #[test]
+    fn idle_tcp_connection_does_not_block_udp_answers() {
+        let port = free_port();
+        let token = [7_u8; TOKEN_LEN];
+        let collector = ResponderCollector::default();
+        let thread_collector = collector.clone();
+        let handle = std::thread::spawn(move || {
+            let mut request = ResponderRequest::new(Ipv4Addr::LOCALHOST, port, token);
+            request.max_duration = Duration::from_secs(3);
+            request.idle_after_first = Some(Duration::from_millis(200));
+            respond(request, thread_collector)
+        });
+        let mut idle = (0..100)
+            .find_map(|_| {
+                TcpStream::connect((Ipv4Addr::LOCALHOST, port))
+                    .inspect_err(|_| std::thread::sleep(Duration::from_millis(10)))
+                    .ok()
+            })
+            .expect("idle TCP should connect");
+        idle.write_all(&[0]).unwrap();
+
+        let udp = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        udp.set_read_timeout(Some(Duration::from_millis(100)))
+            .unwrap();
+        let (query, _, _) = build_query(&token, 0, &CATALOG[0], 0).unwrap();
+        let mut received = false;
+        for _ in 0..20 {
+            udp.send_to(&query, (Ipv4Addr::LOCALHOST, port)).unwrap();
+            let mut response = [0_u8; 2048];
+            if udp.recv(&mut response).is_ok() {
+                received = true;
+                break;
+            }
+        }
+        assert!(received, "idle TCP connection blocked the UDP responder");
+        drop(idle);
+        let report = handle.join().unwrap().unwrap();
+        assert_eq!(report.received, 1);
+        assert_eq!(collector.into_records().len(), 1);
     }
 }

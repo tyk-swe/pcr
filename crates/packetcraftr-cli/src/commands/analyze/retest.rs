@@ -201,7 +201,7 @@ impl Generate for RetestPlan {
         self,
         invocation: &crate::invocation::Invocation,
         format: Format,
-    ) -> Result<(), CliError> {
+    ) -> Result<CommandExit, CliError> {
         require_text(format, "retest-plan")?;
         check_stdin(std::iter::once(&self.journal).chain(self.bundle.iter()))?;
         let journal_bytes = read(
@@ -248,7 +248,15 @@ impl Generate for RetestPlan {
         text.push_str(
             "note: rerun each named command with its engagement inputs, then compare with analyze findings-diff\n",
         );
-        let _ = self.bounds;
-        emit_stdout_document(invocation, &text)
+        if text.len() > self.bounds.max_result_bytes {
+            return Err(CliError::classified(
+                packetcraftr_core::security::Error::Limit {
+                    field: "max_result_bytes",
+                    limit: self.bounds.max_result_bytes,
+                },
+            ));
+        }
+        emit_stdout_document(invocation, &text)?;
+        Ok(CommandExit::SUCCESS)
     }
 }

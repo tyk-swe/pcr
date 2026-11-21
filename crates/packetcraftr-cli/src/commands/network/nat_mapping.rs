@@ -65,7 +65,6 @@ impl Generate for NatMapping {
                     )
                 })?,
             );
-
         }
         let mapping = lib::nat_mapping(&records, self.expected_source);
         let mut text = format!(

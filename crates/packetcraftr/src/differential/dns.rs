@@ -643,7 +643,7 @@ where
         {
             return Ok(report);
         }
-        if report.received + report.ignored >= request.max_datagrams {
+        if report.received >= request.max_datagrams {
             return Ok(report);
         }
         let mut index = 0;
@@ -739,6 +739,47 @@ mod tests {
         let port = udp.local_addr().unwrap().port();
         drop(udp);
         port
+    }
+
+    #[test]
+    fn junk_datagrams_do_not_consume_the_matching_budget() {
+        let port = free_port();
+        let token = [7_u8; TOKEN_LEN];
+        let collector = ResponderCollector::default();
+        let thread_collector = collector.clone();
+        let handle = std::thread::spawn(move || {
+            let mut request = ResponderRequest::new(Ipv4Addr::LOCALHOST, port, token);
+            request.max_duration = Duration::from_secs(3);
+            request.idle_after_first = Some(Duration::from_millis(200));
+            request.max_datagrams = 1;
+            respond(request, thread_collector)
+        });
+        let udp = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        udp.set_read_timeout(Some(Duration::from_millis(100)))
+            .unwrap();
+        let _ready = (0..100)
+            .find_map(|_| {
+                std::net::TcpStream::connect((Ipv4Addr::LOCALHOST, port))
+                    .inspect_err(|_| std::thread::sleep(Duration::from_millis(10)))
+                    .ok()
+            })
+            .expect("responder TCP listener should become ready");
+        udp.send_to(b"junk", (Ipv4Addr::LOCALHOST, port)).unwrap();
+        let (query, _, _) = build_query(&token, 0, &CATALOG[0], 0).unwrap();
+        let mut received = false;
+        for _ in 0..20 {
+            udp.send_to(&query, (Ipv4Addr::LOCALHOST, port)).unwrap();
+            let mut response = [0_u8; 2048];
+            if udp.recv(&mut response).is_ok() {
+                received = true;
+                break;
+            }
+        }
+        assert!(received, "junk consumed the one-datagram budget");
+        let report = handle.join().unwrap().unwrap();
+        assert_eq!(report.received, 1);
+        assert!(report.ignored >= 1);
+        assert_eq!(collector.into_records().len(), 1);
     }
 
     #[test]

@@ -38,7 +38,7 @@ pub(crate) struct DnsResponder {
     /// Stop this many milliseconds after the first matching query; 0 uses the duration bound.
     #[arg(long, default_value_t = 30_000)]
     idle_ms: u64,
-    /// Maximum datagrams processed before stopping.
+    /// Maximum matching datagrams received before stopping.
     #[arg(long, default_value_t = 4096, value_parser = clap::value_parser!(u64).range(1..))]
     max_datagrams: u64,
     /// Write the reception log as JSON lines to this new file.

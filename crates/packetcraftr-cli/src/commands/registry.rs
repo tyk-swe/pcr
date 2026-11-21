@@ -193,6 +193,9 @@ commands! {
     /// Audit HTTP response headers and redacted cookie attributes with one HEAD request.
     #[command(after_long_help = "Sends one HEAD request over HTTP/1.1 (path / by default) and follows no redirects. HTTPS sends the request only after certificate verification succeeds. Cookie values are redacted.\n\nExample: packetcraftr network audit-http 192.0.2.10:443 --tls --server-name example.test --host example.test")]
     AuditHttp(network::audit::AuditHttp) = "audit-http" => ("network", "audit-http", 37),
+    /// Audit recursion, truncation, amplification, and DNSSEC AD from one query.
+    #[command(after_long_help = network::audit::AUDIT_DNS_AFTER_LONG_HELP)]
+    AuditDns(network::audit::AuditDns) => ("network", "audit-dns", 55),
     /// Merge time-ordered captures into scoped PCAPNG.
     #[command(after_long_help = files::merge::arguments::AFTER_LONG_HELP)]
     Merge(files::merge::arguments::Args) = "merge" => ("files", "merge", 5),

@@ -22,6 +22,9 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
+mod dns;
+pub use dns::DnsRequest;
+
 #[derive(Clone, Debug)]
 pub struct ConnectionOptions {
     pub endpoint: SocketAddr,
@@ -135,9 +138,19 @@ pub enum Error {
     #[error(transparent)]
     Tcp(#[from] tcp::Error),
     #[error(transparent)]
+    Udp(#[from] packetcraftr_netio::udp::Error),
+    #[error(transparent)]
+    Dns(#[from] crate::dns::Error),
+    #[error(transparent)]
+    DnsWire(#[from] crate::dns::wire::Error),
+    #[error(transparent)]
+    DnsTcp(#[from] crate::dns::tcp::Error),
+    #[error(transparent)]
     Tls(#[from] tls::Error),
     #[error(transparent)]
     Interrupted(#[from] packetcraftr_core::budget::Interrupted),
+    #[error(transparent)]
+    Boundary(#[from] packetcraftr_core::error::BoundaryError),
     #[error("HTTP response ended or reached its byte limit without a complete final header")]
     IncompleteResponse,
     #[error("audit I/O: {0}")]
@@ -155,8 +168,13 @@ impl Classified for Error {
             ),
             Self::Policy(e) => e.classification(),
             Self::Tcp(e) => e.classification(),
+            Self::Udp(e) => e.classification(),
+            Self::Dns(e) => e.classification(),
+            Self::DnsWire(e) => e.classification(),
+            Self::DnsTcp(e) => e.classification(),
             Self::Tls(e) => e.classification(),
             Self::Interrupted(e) => e.classification(),
+            Self::Boundary(e) => e.classification(),
             Self::Http(e) => e.classification(),
             Self::IncompleteResponse | Self::Io(_) => {
                 Classification::new(packetcraftr_core::error::Code::IoAudit, Kind::Io, None)

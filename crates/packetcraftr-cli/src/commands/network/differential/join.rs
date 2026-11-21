@@ -15,7 +15,7 @@ use super::rendering;
 
 pub(crate) const AFTER_LONG_HELP: &str = r"Finalize a provisional (spoofed) differential Campaign offline. Reads the Campaign aggregate JSON published by `network differential --output json` or a previous `network differential-join --output json` and the Responder reception log written by `network differential-responder --log-file`, answers every attempt whose Variant, attempt sequence, and payload digest all match a reception record, and republishes the matrix. Reply frames stay in the original Campaign report. The joined report carries Verdicts and attempt identities.
 
-With --sensor-capture (text output only), exact Canary probes found in a third capture are classified against Responder delivery for every Variant, separating delivered traffic the sensor missed from probes the sensor saw that never arrived. A sensor observation counts only when its Variant, attempt sequence, and exact payload digest all match.
+With --sensor-capture (text output only), exact Canary probes found in a third capture are classified against Responder delivery for every Variant, separating delivered traffic the sensor missed from probes the sensor saw that never arrived. A sensor observation counts only when its Variant, attempt sequence, and exact payload digest all match and its source tuple matches the Campaign source port and spoofed source when one was planned.
 
 Examples:
   packetcraftr network differential-join campaign.json --responder-log responder-log.jsonl

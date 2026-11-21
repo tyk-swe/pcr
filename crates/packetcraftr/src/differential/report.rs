@@ -313,6 +313,8 @@ pub fn hex(bytes: &[u8]) -> String {
 pub struct SensorObservation {
     pub variant_index: u16,
     pub attempt_seq: u32,
+    pub source: SocketAddr,
+    pub destination: SocketAddr,
     pub payload_sha256: String,
 }
 
@@ -330,13 +332,20 @@ pub struct VantageRow {
 
 /// Classifies joined attempts by both Responder delivery and sensor-probe
 /// observation. A sensor observation only counts when its Variant, attempt
-/// sequence and exact payload digest match the attempt. `Delivered` means
-/// the Responder answered; rewritten attempts are kept separate because the
-/// exact payload arrived under a different source tuple.
+/// sequence and exact payload digest match the attempt and its source tuple
+/// matches the Campaign source port and spoofed source when one was planned.
+/// `Delivered` means the Responder answered; rewritten attempts are kept
+/// separate because the exact payload arrived under a different source tuple.
 #[must_use]
 pub fn three_vantage(aggregate: &Aggregate, sensor: &[SensorObservation]) -> Vec<VantageRow> {
     let seen: std::collections::HashSet<(u16, u32, &str)> = sensor
         .iter()
+        .filter(|observation| {
+            observation.source.port() == aggregate.source_port
+                && aggregate
+                    .spoof_source
+                    .is_none_or(|source| observation.source.ip() == std::net::IpAddr::V4(source))
+        })
         .map(|observation| {
             (
                 observation.variant_index,
@@ -503,12 +512,17 @@ mod tests {
             |variant_index: u16, attempt_seq: u32, payload_sha256: String| SensorObservation {
                 variant_index,
                 attempt_seq,
+                source: "192.0.2.10:53210".parse().unwrap(),
+                destination: "198.51.100.20:40101".parse().unwrap(),
                 payload_sha256,
             };
+        let mut wrong_source_port = sensor(0, 1, digest.clone());
+        wrong_source_port.source.set_port(40000);
         let rows = three_vantage(
             &aggregate,
             &[
                 sensor(0, 0, digest.clone()),
+                wrong_source_port,
                 sensor(0, 2, digest.clone()),
                 sensor(1, 5, digest.clone()),
                 sensor(0, 3, hex(&[0x22; 32])),

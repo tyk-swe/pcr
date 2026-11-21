@@ -7,8 +7,8 @@ use clap::Args;
 use packetcraftr_core::error::Kind;
 use packetcraftr_core::security::{bundle, diff};
 
-use crate::commands::Generate;
 use crate::commands::security::{Bounds, input, invalid, read, source};
+use crate::commands::{CommandExit, Generate};
 use crate::errors::CliError;
 use crate::output::contract::Format;
 use crate::terminal::emit_stdout_document;
@@ -78,7 +78,7 @@ impl Generate for FindingsDiff {
         self,
         invocation: &crate::invocation::Invocation,
         format: Format,
-    ) -> Result<(), CliError> {
+    ) -> Result<CommandExit, CliError> {
         require_text(format, "findings-diff")?;
         check_stdin([&self.before, &self.after])?;
         let before = input::report(&read(
@@ -120,13 +120,9 @@ impl Generate for FindingsDiff {
             }
         }
         emit_stdout_document(invocation, &text)?;
-        if self.bounds.fails_diff(&before, &after) {
-            return Err(CliError::new(
-                Kind::Policy,
-                "findings diff failed its severity or completeness gate",
-            ));
-        }
-        Ok(())
+        Ok(CommandExit::status(u8::from(
+            self.bounds.fails_diff(&before, &after),
+        )))
     }
 }
 
@@ -135,7 +131,7 @@ impl Generate for BundleVerify {
         self,
         invocation: &crate::invocation::Invocation,
         format: Format,
-    ) -> Result<(), CliError> {
+    ) -> Result<CommandExit, CliError> {
         require_text(format, "bundle-verify")?;
         check_stdin(std::iter::once(&self.bundle).chain(self.results.iter()))?;
         let bytes = read(invocation, &self.bundle, bundle::MAX_BUNDLE_DOCUMENT_BYTES)?;
@@ -177,12 +173,8 @@ impl Generate for BundleVerify {
                 bundle.sources.len() - matched_sources.len(),
             ),
         )?;
-        if self.bounds.fails(&bundle.report) {
-            return Err(CliError::new(
-                Kind::Policy,
-                "bundle report failed its severity or completeness gate",
-            ));
-        }
-        Ok(())
+        Ok(CommandExit::status(u8::from(
+            self.bounds.fails(&bundle.report),
+        )))
     }
 }

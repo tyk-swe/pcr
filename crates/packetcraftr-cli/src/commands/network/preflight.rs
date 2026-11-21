@@ -8,7 +8,7 @@ use packetcraftr_core::error::Kind;
 use packetcraftr_netio::link::{Capability, Mode};
 
 use crate::command_options::{InterfaceSelector, ScopeArgs};
-use crate::commands::Generate;
+use crate::commands::{CommandExit, Generate};
 use crate::errors::CliError;
 use crate::output::contract::Format;
 use crate::terminal::emit_stdout_document;
@@ -34,7 +34,7 @@ impl Generate for Args {
         self,
         invocation: &crate::invocation::Invocation,
         format: Format,
-    ) -> Result<(), CliError> {
+    ) -> Result<CommandExit, CliError> {
         if format != Format::Text {
             return Err(CliError::new(
                 Kind::Usage,
@@ -69,7 +69,8 @@ impl Generate for Args {
         emit_stdout_document(
             invocation,
             &render(&interfaces, scope.as_ref(), build_features()),
-        )
+        )?;
+        Ok(CommandExit::SUCCESS)
     }
 }
 

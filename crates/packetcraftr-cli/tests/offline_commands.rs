@@ -1965,6 +1965,48 @@ mod differential {
     }
 
     #[test]
+    fn nat_mapping_ignores_unplanned_reception_records() {
+        let dir = tempfile::tempdir().unwrap();
+        let campaign_path = dir.path().join("campaign.json");
+        let log_path = dir.path().join("receptions.jsonl");
+        std::fs::write(&campaign_path, campaign()).unwrap();
+        let poison = |attempt_seq: u32, source: &str, digest: u8| {
+            serde_json::to_vec(&lib::ReceptionRecord {
+                variant_index: 0,
+                attempt_seq,
+                source: source.parse().unwrap(),
+                payload_sha256: lib::hex(&[digest; 32]),
+            })
+            .unwrap()
+        };
+        let mut log = reception(u32::MAX);
+        log.push(b'\n');
+        log.extend(poison(999, "198.51.100.9:40000", 0x11));
+        log.push(b'\n');
+        log.extend(poison(7, "203.0.113.9:40000", 0x22));
+        log.push(b'\n');
+        log.extend(reception(7));
+        log.push(b'\n');
+        std::fs::write(&log_path, log).unwrap();
+        let args = [
+            "network",
+            "nat-mapping",
+            log_path.to_str().unwrap(),
+            "--campaign",
+            campaign_path.to_str().unwrap(),
+            "--expected-source",
+            "192.0.2.1:40000",
+        ];
+        let text = super::assert_success(&super::run(&args), &args);
+        assert!(
+            text.contains("records=2 sources=1 behavior=preserved"),
+            "{text}"
+        );
+        assert!(!text.contains("198.51.100.9"), "{text}");
+        assert!(!text.contains("203.0.113.9"), "{text}");
+    }
+
+    #[test]
     fn differential_join_rejects_reception_aliasing() {
         let mut value: Value = serde_json::from_slice(&campaign()).unwrap();
         value["result"]["attempts"][0]["attempt_seq"] = json!(u64::from(u32::MAX) + 1);
@@ -2921,6 +2963,43 @@ fn security_analysis_reports_capture_paths_with_invalid_utf8() {
         report["result"]["measurements"]["capture"],
         capture.to_string_lossy().as_ref(),
     );
+}
+
+#[test]
+fn audit_dns_enforces_max_result_bytes_before_printing() {
+    let server = std::net::UdpSocket::bind(("127.0.0.1", 0)).unwrap();
+    let endpoint = server.local_addr().unwrap().to_string();
+    let responder = std::thread::spawn(move || {
+        let mut query = [0_u8; 2048];
+        let (len, source) = server.recv_from(&mut query).unwrap();
+        let mut response = query[..len].to_vec();
+        response[2] = 0x81;
+        response[3] = 0x80;
+        response[6..8].copy_from_slice(&1_u16.to_be_bytes());
+        response.extend_from_slice(&[
+            0xc0, 0x0c, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x3c, 0x00, 0x04, 93, 184, 216,
+            34,
+        ]);
+        server.send_to(&response, source).unwrap();
+    });
+    let args = [
+        "network",
+        "audit-dns",
+        endpoint.as_str(),
+        "example.test",
+        "--timeout-ms",
+        "1000",
+        "--max-result-bytes",
+        "1",
+    ];
+    let output = run(&args);
+    responder.join().unwrap();
+    assert!(
+        !output.status.success(),
+        "expected result-size failure, got success:\n{}",
+        stdout(&output)
+    );
+    assert!(!stdout(&output).contains("audit-dns endpoint="));
 }
 
 #[test]

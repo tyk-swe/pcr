@@ -8,6 +8,7 @@ mod parse;
 pub mod payload;
 pub mod port_catalog;
 pub mod recipe;
+pub mod scenario;
 pub mod service_exclusions;
 pub mod service_probes;
 mod types;

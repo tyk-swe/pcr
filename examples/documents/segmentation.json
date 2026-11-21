@@ -1,0 +1,18 @@
+{
+  "schema": "packetcraftr.segmentation/v1",
+  "label": "lab-segmentation",
+  "cells": [
+    {
+      "from": "operator",
+      "destination": "192.0.2.10",
+      "port": 443,
+      "expect": "reachable"
+    },
+    {
+      "from": "operator",
+      "destination": "192.0.2.11",
+      "port": 22,
+      "expect": "silent"
+    }
+  ]
+}

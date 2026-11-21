@@ -1,8 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::commands::security::{Bounds, invalid, publish, read};
-use crate::commands::{CommandExit, Spec};
+use crate::commands::security::{Bounds, check_result_size, invalid, publish, read};
+use crate::commands::{CommandExit, Generate, Spec};
 use crate::invocation::Invocation;
 use crate::output::contract::{Command, Format};
 use crate::{
@@ -87,6 +87,95 @@ pub(crate) struct AuditHttp {
     #[arg(long, default_value_t = 65535)]
     max_response_bytes: usize,
 }
+#[derive(Debug, Args)]
+pub(crate) struct AuditDns {
+    /// Numeric IP:PORT server; use `[IPv6]:PORT` for IPv6.
+    endpoint: std::net::SocketAddr,
+    /// One DNS name to query.
+    name: String,
+    /// Query type name or TYPE code.
+    #[arg(long, default_value = "A")]
+    query_type: packetcraftr::dns::QueryType,
+    /// Disable the recursion-desired query flag.
+    #[arg(long)]
+    no_recursion: bool,
+    /// Do not retry a truncated UDP response over TCP.
+    #[arg(long)]
+    no_tcp_fallback: bool,
+    #[arg(long, default_value_t = 5000)]
+    timeout_ms: u64,
+    #[arg(long, default_value_t = 65535)]
+    max_response_bytes: usize,
+    #[command(flatten)]
+    policy: IdentificationPolicyArgs,
+    #[command(flatten)]
+    bounds: Bounds,
+}
+
+pub(crate) const AUDIT_DNS_AFTER_LONG_HELP: &str = r"Send one bounded DNS query to a numeric server and report recursion, truncation, TCP fallback, response-size amplification and DNSSEC AD metadata. The server is never resolved from a name, there are no retries beyond the optional TCP fallback after a truncated UDP response, and no zone transfer or name enumeration is performed. Text output only in this version.
+
+Example:
+  packetcraftr network audit-dns 192.0.2.53:53 example.test";
+
+impl Generate for AuditDns {
+    fn generate(self, invocation: &Invocation, format: Format) -> Result<CommandExit, CliError> {
+        if format != Format::Text {
+            return Err(crate::errors::CliError::new(
+                packetcraftr_core::error::Kind::Usage,
+                format!("audit-dns prints text only, not --output {format}"),
+            ));
+        }
+        let limits = self.bounds.core()?;
+        let mut request = packetcraftr::audit::DnsRequest::new(self.endpoint, self.name.clone());
+        request.connection.timeout = Duration::from_millis(self.timeout_ms);
+        request.query_type = self.query_type;
+        request.recursion_desired = !self.no_recursion;
+        request.tcp_fallback = !self.no_tcp_fallback;
+        request.max_response_bytes = self.max_response_bytes;
+        let client = crate::system::client(
+            invocation,
+            packetcraftr_core::protocol::builtin::registry(),
+            self.policy.into_policy(),
+            crate::system::Runtime::Workflow,
+        );
+        let report = client.audit_dns(&request).map_err(CliError::classified)?;
+        if report.findings.len() > limits.max_findings {
+            return Err(CliError::classified(
+                packetcraftr_core::security::Error::Limit {
+                    field: "max_findings",
+                    limit: limits.max_findings,
+                },
+            ));
+        }
+        check_result_size(
+            format,
+            &crate::commands::security::output::Report::from(&report),
+            self.bounds.max_result_bytes,
+            "security result exceeds --max-result-bytes",
+        )?;
+        let mut text = format!(
+            "audit-dns endpoint={} findings={} complete={}\n",
+            self.endpoint,
+            report.findings.len(),
+            report.completeness.complete,
+        );
+        for (key, value) in &report.measurements {
+            text.push_str(&format!("measurement {key}={value}\n"));
+        }
+        for finding in &report.findings {
+            text.push_str(&format!(
+                "finding severity={:?} rule={} subject={} summary={}\n",
+                finding.severity, finding.rule_id, finding.subject, finding.summary,
+            ));
+        }
+        for reason in &report.completeness.reasons {
+            text.push_str(&format!("incomplete: {reason}\n"));
+        }
+        crate::terminal::emit_stdout_document(invocation, &text)?;
+        Ok(CommandExit::status(u8::from(self.bounds.fails(&report))))
+    }
+}
+
 impl Spec for AuditTls {
     const PUBLISHED: &'static [PublishedType] = &[
         PublishedType {

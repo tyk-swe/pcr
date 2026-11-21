@@ -12,7 +12,7 @@ use packetcraftr_core::packet::Packet;
 use packetcraftr_core::protocol::{network::Ipv4, transport::Udp};
 
 use crate::engine::operation::testing;
-use crate::fuzz::{Event, Request};
+use crate::fuzz::{Collector, Event, Request};
 
 fn request(destination: Ipv4Addr) -> Request {
     let mut packet = Packet::default();
@@ -49,6 +49,82 @@ fn denied_destination_is_refused_before_transmission() {
         .unwrap_err();
     assert!(matches!(error, super::Error::Authorization(_)), "{error:?}");
     assert_eq!(sends.load(Ordering::Relaxed), 0);
+}
+
+#[test]
+fn liveness_timeout_stops_mutations_before_they_are_sent() {
+    let (client, sends) = testing::client(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)));
+    let mut request = request(Ipv4Addr::new(10, 0, 0, 1));
+    request.liveness = true;
+    request.timeout = Duration::from_millis(250);
+    let collector = Collector::default();
+    let report = client.fuzz(request, collector.clone()).unwrap();
+    assert_eq!(sends.load(Ordering::Relaxed), 1);
+    let aggregate = collector.finish(report);
+    assert_eq!(aggregate.trials.len(), 1);
+    let trial = &aggregate.trials[0];
+    assert!(trial.evidence.is_none());
+    assert!(
+        trial
+            .case
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "fuzz.liveness_timeout"),
+        "{:?}",
+        trial.case.diagnostics
+    );
+}
+
+#[test]
+fn liveness_loss_after_successful_baseline_stops_later_mutations() {
+    let (client, sends) = testing::client_with_reply_script(
+        IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
+        &[true, true, false],
+    );
+    let mut request = request(Ipv4Addr::new(10, 0, 0, 1));
+    request.liveness = true;
+    request.campaign.cases = 2;
+    let collector = Collector::default();
+    let report = client.fuzz(request, collector.clone()).unwrap();
+    assert_eq!(sends.load(Ordering::Relaxed), 3);
+    let aggregate = collector.finish(report);
+    assert_eq!(aggregate.trials.len(), 2);
+    assert!(aggregate.trials[0].evidence.is_some());
+    assert!(
+        aggregate.trials[0]
+            .case
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "fuzz.liveness_timeout"),
+        "{:?}",
+        aggregate.trials[0].case.diagnostics
+    );
+    assert!(aggregate.trials[1].evidence.is_none());
+    assert!(
+        aggregate.trials[1]
+            .case
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "fuzz.liveness_timeout"),
+        "{:?}",
+        aggregate.trials[1].case.diagnostics
+    );
+}
+
+#[test]
+fn liveness_budget_uses_actual_baseline_bytes() {
+    let mut request = request(Ipv4Addr::new(10, 0, 0, 1));
+    request.liveness = true;
+    request.campaign.cases = 16;
+    let registry = packetcraftr_core::protocol::builtin::registry();
+    let mut deadline = Deadline::new(Duration::from_secs(30));
+    let prepared = super::prepare_campaign(&request, &registry, &mut deadline).unwrap();
+    assert!(prepared.liveness_steps > 1);
+    assert!(
+        prepared.maximum_wire_bytes < 1_000_000,
+        "{}",
+        prepared.maximum_wire_bytes
+    );
 }
 
 #[test]

@@ -19,7 +19,7 @@ use packetcraftr_core::protocol::network::ip_protocol;
 use packetcraftr_core::transform::{self, HeaderRewrite, RewriteLimits};
 
 use crate::command_options::{DecodeArgs, OfflineCaptureLimitsArgs};
-use crate::commands::Generate;
+use crate::commands::{CommandExit, Generate};
 use crate::errors::CliError;
 use crate::output::contract::Format;
 use crate::terminal::emit_stdout_document;
@@ -104,7 +104,7 @@ impl Generate for Scrub {
         self,
         invocation: &crate::invocation::Invocation,
         format: Format,
-    ) -> Result<(), CliError> {
+    ) -> Result<CommandExit, CliError> {
         if format != Format::Text {
             return Err(CliError::new(
                 Kind::Usage,
@@ -188,7 +188,8 @@ impl Generate for Scrub {
                 },
                 self.write.display(),
             ),
-        )
+        )?;
+        Ok(CommandExit::SUCCESS)
     }
 }
 

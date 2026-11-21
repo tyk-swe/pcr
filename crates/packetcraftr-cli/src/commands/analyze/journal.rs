@@ -10,8 +10,8 @@ use packetcraftr_core::security::journal::{Journal, RecordInput};
 use packetcraftr_core::security::{self, input as aggregate_input};
 use serde_json::Value;
 
-use crate::commands::Generate;
 use crate::commands::security::{Bounds, input, invalid, read};
+use crate::commands::{CommandExit, Generate};
 use crate::errors::CliError;
 use crate::output::contract::Format;
 use crate::terminal::emit_stdout_document;
@@ -97,7 +97,7 @@ impl Generate for Build {
         self,
         invocation: &crate::invocation::Invocation,
         format: Format,
-    ) -> Result<(), CliError> {
+    ) -> Result<CommandExit, CliError> {
         require_text(format, "journal-build")?;
         if self.results.len() > security::journal::MAX_JOURNAL_RECORDS {
             return Err(invalid(format!(
@@ -148,7 +148,8 @@ impl Generate for Build {
                 journal.head(),
                 self.journal.display()
             ),
-        )
+        )?;
+        Ok(CommandExit::SUCCESS)
     }
 }
 
@@ -188,7 +189,7 @@ impl Generate for Verify {
         self,
         invocation: &crate::invocation::Invocation,
         format: Format,
-    ) -> Result<(), CliError> {
+    ) -> Result<CommandExit, CliError> {
         require_text(format, "journal-verify")?;
         input::validate_stdin_sources(
             std::iter::once(self.journal.as_path())
@@ -206,7 +207,8 @@ impl Generate for Verify {
             let input = record_input(&bytes, None)?;
             supplied.push((input.command, input.result_sha256));
         }
-        emit_stdout_document(invocation, &verify_report(&journal, &supplied)?)
+        emit_stdout_document(invocation, &verify_report(&journal, &supplied)?)?;
+        Ok(CommandExit::SUCCESS)
     }
 }
 

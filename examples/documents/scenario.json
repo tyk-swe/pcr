@@ -1,0 +1,16 @@
+{
+  "schema": "packetcraftr.scenario/v1",
+  "label": "periodic-beacon",
+  "steps": [
+    {
+      "label": "beacon-syn",
+      "packet": "ethernet(dst=02:00:00:00:00:02,src=02:00:00:00:00:01)/ipv4(src=192.0.2.10,dst=198.51.100.20)/tcp(source_port=40000,destination_port=443,flags=2,sequence=1000)",
+      "delay_ms": 1000,
+      "repeat": 3,
+      "tags": [
+        "beacon",
+        "tcp"
+      ]
+    }
+  ]
+}

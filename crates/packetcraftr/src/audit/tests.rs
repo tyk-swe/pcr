@@ -296,6 +296,222 @@ impl Clock for JumpClock {
     }
 }
 
+fn dns_response_message(
+    query: &[u8],
+    truncated: bool,
+    answers: usize,
+) -> packetcraftr_core::protocol::application::dns::Dns {
+    use packetcraftr_core::protocol::application::dns::{Dns, Record, RecordValue};
+    let mut message = Dns::from_wire_with_limits(
+        bytes::Bytes::copy_from_slice(query),
+        crate::dns::MessageLimits::default().into(),
+    )
+    .unwrap();
+    let owner = message.questions[0].name.clone();
+    message.edit(|message| {
+        message.response = true;
+        message.recursion_available = true;
+        message.truncated = truncated;
+        if !truncated {
+            message.answers = (0..answers)
+                .map(|_| Record {
+                    owner: owner.clone(),
+                    class: 1,
+                    ttl: 60,
+                    value: RecordValue::A("192.0.2.99".parse().unwrap()),
+                })
+                .collect();
+        }
+    });
+    message
+}
+
+#[derive(Clone)]
+struct FakeDnsUdp {
+    truncated: bool,
+    calls: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl packetcraftr_netio::udp::Provider for FakeDnsUdp {
+    fn exchange(
+        &self,
+        endpoint: SocketAddr,
+        request: &[u8],
+        _max_response: usize,
+        _deadline: &packetcraftr_core::budget::Deadline,
+    ) -> Result<packetcraftr_netio::udp::Reply, packetcraftr_netio::udp::Error> {
+        self.calls.fetch_add(1, Ordering::Relaxed);
+        let response = dns_response_message(request, self.truncated, 1)
+            .to_wire()
+            .unwrap();
+        Ok(packetcraftr_netio::udp::Reply {
+            peer: endpoint,
+            local: "127.0.0.1:40000".parse().unwrap(),
+            exchange: packetcraftr_netio::bounded::Exchange {
+                response,
+                bytes_sent: request.len(),
+                outcome: packetcraftr_netio::bounded::Outcome::Complete,
+            },
+        })
+    }
+}
+
+#[derive(Clone, Default)]
+struct CancelledDnsUdp;
+
+impl packetcraftr_netio::udp::Provider for CancelledDnsUdp {
+    fn exchange(
+        &self,
+        endpoint: SocketAddr,
+        request: &[u8],
+        _max_response: usize,
+        _deadline: &packetcraftr_core::budget::Deadline,
+    ) -> Result<packetcraftr_netio::udp::Reply, packetcraftr_netio::udp::Error> {
+        Ok(packetcraftr_netio::udp::Reply {
+            peer: endpoint,
+            local: "127.0.0.1:40000".parse().unwrap(),
+            exchange: packetcraftr_netio::bounded::Exchange {
+                response: bytes::Bytes::new(),
+                bytes_sent: request.len(),
+                outcome: packetcraftr_netio::bounded::Outcome::Cancelled,
+            },
+        })
+    }
+}
+
+struct DnsTcpStream {
+    peer: SocketAddr,
+    inbound: Vec<u8>,
+    outbound: VecDeque<u8>,
+    responded: bool,
+}
+
+impl Read for DnsTcpStream {
+    fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+        self.outbound.read(bytes)
+    }
+}
+
+impl Write for DnsTcpStream {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.inbound.extend_from_slice(bytes);
+        if !self.responded && self.inbound.len() >= 2 {
+            let declared = usize::from(u16::from_be_bytes([self.inbound[0], self.inbound[1]]));
+            if self.inbound.len() >= declared + 2 {
+                self.responded = true;
+                let response = dns_response_message(&self.inbound[2..declared + 2], false, 40)
+                    .to_wire()
+                    .unwrap();
+                self.outbound.extend((response.len() as u16).to_be_bytes());
+                self.outbound.extend(response);
+            }
+        }
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+impl tcp::Stream for DnsTcpStream {
+    fn peer_addr(&self) -> io::Result<SocketAddr> {
+        Ok(self.peer)
+    }
+
+    fn local_addr(&self) -> io::Result<SocketAddr> {
+        Ok("127.0.0.1:40001".parse().unwrap())
+    }
+
+    fn set_read_timeout(&self, _timeout: Option<Duration>) -> io::Result<()> {
+        Ok(())
+    }
+
+    fn set_write_timeout(&self, _timeout: Option<Duration>) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+#[derive(Clone, Default)]
+struct FakeDnsTcp;
+
+impl tcp::Provider for FakeDnsTcp {
+    type Stream = DnsTcpStream;
+
+    fn connect(
+        &self,
+        endpoint: SocketAddr,
+        _deadline: &packetcraftr_core::budget::Deadline,
+    ) -> Result<Self::Stream, tcp::Error> {
+        Ok(DnsTcpStream {
+            peer: endpoint,
+            inbound: Vec::new(),
+            outbound: VecDeque::new(),
+            responded: false,
+        })
+    }
+}
+
+struct CancellingDnsStream {
+    peer: SocketAddr,
+    cancellation: packetcraftr_core::budget::Cancellation,
+}
+
+impl Read for CancellingDnsStream {
+    fn read(&mut self, _bytes: &mut [u8]) -> io::Result<usize> {
+        self.cancellation.cancel();
+        Err(io::Error::from(io::ErrorKind::WouldBlock))
+    }
+}
+
+impl Write for CancellingDnsStream {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+impl tcp::Stream for CancellingDnsStream {
+    fn peer_addr(&self) -> io::Result<SocketAddr> {
+        Ok(self.peer)
+    }
+
+    fn local_addr(&self) -> io::Result<SocketAddr> {
+        Ok("127.0.0.1:40001".parse().unwrap())
+    }
+
+    fn set_read_timeout(&self, _timeout: Option<Duration>) -> io::Result<()> {
+        Ok(())
+    }
+
+    fn set_write_timeout(&self, _timeout: Option<Duration>) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+#[derive(Clone)]
+struct CancellingDnsTcp {
+    cancellation: packetcraftr_core::budget::Cancellation,
+}
+
+impl tcp::Provider for CancellingDnsTcp {
+    type Stream = CancellingDnsStream;
+
+    fn connect(
+        &self,
+        endpoint: SocketAddr,
+        _deadline: &packetcraftr_core::budget::Deadline,
+    ) -> Result<Self::Stream, tcp::Error> {
+        Ok(CancellingDnsStream {
+            peer: endpoint,
+            cancellation: self.cancellation.clone(),
+        })
+    }
+}
+
 fn budget(units: u64, bytes: u64) -> Policy {
     Policy {
         max_packets_per_operation: units,
@@ -349,6 +565,138 @@ impl Clock for FixedClock {
     fn sleep(&self, _delay: Duration, _deadline: &Deadline) -> Result<(), Self::Error> {
         Ok(())
     }
+}
+
+#[test]
+fn dns_audit_reports_open_recursion_from_a_udp_exchange() {
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let client = Client::new(
+        Arc::new(Registry::default()),
+        budget(16, 200_000),
+        ProviderSet::tcp(FakeDnsTcp, ()).with_udp(FakeDnsUdp {
+            truncated: false,
+            calls: Arc::clone(&calls),
+        }),
+    );
+    let report = client
+        .audit_dns(&DnsRequest::new(ENDPOINT, "example.test"))
+        .unwrap();
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
+    assert!(report.completeness.complete, "{report:?}");
+    assert!(
+        report
+            .findings
+            .iter()
+            .any(|finding| finding.rule_id == "dns.open_recursion"),
+        "{report:?}"
+    );
+}
+
+#[test]
+fn dns_audit_falls_back_to_tcp_without_charging_tcp_amplification_to_udp() {
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let client = Client::new(
+        Arc::new(Registry::default()),
+        budget(16, 200_000),
+        ProviderSet::tcp(FakeDnsTcp, ()).with_udp(FakeDnsUdp {
+            truncated: true,
+            calls: Arc::clone(&calls),
+        }),
+    );
+    let report = client
+        .audit_dns(&DnsRequest::new(ENDPOINT, "example.test"))
+        .unwrap();
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
+    assert!(report.completeness.complete, "{report:?}");
+    assert_eq!(report.measurements["transport"], serde_json::json!("tcp"));
+    assert_eq!(report.measurements["answers"], serde_json::json!(40));
+    assert!(
+        !report
+            .findings
+            .iter()
+            .any(|finding| finding.rule_id == "dns.amplification"),
+        "{report:?}"
+    );
+}
+
+#[test]
+fn dns_audit_propagates_cancellation_from_tcp_fallback() {
+    let cancellation = packetcraftr_core::budget::Cancellation::default();
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let client = Client::new(
+        Arc::new(Registry::default()),
+        budget(16, 200_000),
+        ProviderSet::tcp(
+            CancellingDnsTcp {
+                cancellation: cancellation.clone(),
+            },
+            (),
+        )
+        .with_udp(FakeDnsUdp {
+            truncated: true,
+            calls,
+        }),
+    )
+    .with_cancellation(cancellation);
+    let result = client.audit_dns(&DnsRequest::new(ENDPOINT, "example.test"));
+    assert!(
+        matches!(
+            &result,
+            Err(Error::DnsTcp(error))
+                if error.category() == crate::dns::tcp::Category::Cancelled
+        ),
+        "{result:?}"
+    );
+}
+
+#[test]
+fn dns_audit_propagates_cancellation_from_udp_reception() {
+    let client = Client::new(
+        Arc::new(Registry::default()),
+        budget(16, 200_000),
+        ProviderSet::tcp(FakeDnsTcp, ()).with_udp(CancelledDnsUdp),
+    );
+    let result = client.audit_dns(&DnsRequest::new(ENDPOINT, "example.test"));
+    assert!(
+        matches!(
+            &result,
+            Err(Error::Interrupted(
+                packetcraftr_core::budget::Interrupted::Cancelled(_)
+            ))
+        ),
+        "{result:?}"
+    );
+}
+
+#[test]
+fn dns_audit_reserves_tcp_framing_bytes_before_exchange() {
+    let query_len = 30_u64;
+    let exact = 2 * query_len + 2 * 65_535 + 4;
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let client = Client::new(
+        Arc::new(Registry::default()),
+        budget(6, exact - 1),
+        ProviderSet::tcp(FakeDnsTcp, ()).with_udp(FakeDnsUdp {
+            truncated: false,
+            calls: Arc::clone(&calls),
+        }),
+    );
+    let result = client.audit_dns(&DnsRequest::new(ENDPOINT, "example.test"));
+    assert!(result.is_err(), "{result:?}");
+    assert_eq!(calls.load(Ordering::Relaxed), 0);
+
+    let client = Client::new(
+        Arc::new(Registry::default()),
+        budget(6, exact),
+        ProviderSet::tcp(FakeDnsTcp, ()).with_udp(FakeDnsUdp {
+            truncated: false,
+            calls: Arc::clone(&calls),
+        }),
+    );
+    client
+        .audit_dns(&DnsRequest::new(ENDPOINT, "example.test"))
+        .unwrap();
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
 }
 
 #[test]

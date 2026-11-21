@@ -66,7 +66,7 @@ pub(crate) trait Generate: Sized {
         self,
         invocation: &crate::invocation::Invocation,
         format: Format,
-    ) -> Result<(), CliError>;
+    ) -> Result<CommandExit, CliError>;
 }
 
 pub(crate) struct CommandExit(u8);

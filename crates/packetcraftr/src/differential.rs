@@ -6,6 +6,7 @@
 
 pub mod canary;
 pub mod catalog;
+pub mod dns;
 
 mod engine;
 mod error;
@@ -17,9 +18,10 @@ mod responder;
 pub use error::Error;
 pub use plan::{PlanRow, PlanSummary};
 pub use report::{
-    Aggregate, AttemptEvidence, Collector, Event, ReceptionRecord, Report, ResponderAggregate,
-    ResponderCollector, ResponderEvent, ResponderReport, Row, SensorObservation, VantageRow,
-    Verdict, hex, join_receptions, rows_for, three_vantage, verdict_for,
+    Aggregate, AttemptEvidence, Collector, Event, NatBehavior, NatMapping, ReceptionRecord, Report,
+    ResponderAggregate, ResponderCollector, ResponderEvent, ResponderReport, Row,
+    SensorObservation, VantageRow, Verdict, hex, join_receptions, nat_mapping, rows_for,
+    three_vantage, verdict_for,
 };
 pub use request::{
     DEFAULT_PAYLOAD_LEN, DEFAULT_REPEATS, DEFAULT_SOURCE_PORT, MAX_PAYLOAD_LEN, MAX_REPEATS,

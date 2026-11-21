@@ -48,6 +48,49 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
     }
 }
 
+fn execute_baseline<E, C>(
+    context: &mut Context<'_, C, Error>,
+    executor: &mut E,
+    request: &Request,
+    builder: &Builder,
+    reference_case: &packet_fuzz::Case,
+    executed_before: &mut bool,
+    delay: std::time::Duration,
+) -> Result<bool, Error>
+where
+    E: Executor<CaseStep>,
+    C: Clock,
+{
+    if *executed_before {
+        context.pace(reference_case.index, delay)?;
+    }
+    *executed_before = true;
+    let mut baseline_case = reference_case.clone();
+    baseline_case.recipe = request.packet.clone();
+    let (execution, _) = context.step(
+        reference_case.index,
+        request.timeout,
+        executor,
+        |executor, grant| {
+            executor.execute(&CaseStep {
+                permit: grant.permit,
+                packet: request.packet.clone(),
+                timeout: grant.timeout,
+            })
+        },
+        |_, execution, grant, _| validate_case(request, builder, &baseline_case, execution, grant),
+    )?;
+    Ok(!execution.responses.is_empty())
+}
+
+fn liveness_timeout() -> packetcraftr_core::diagnostic::Diagnostic {
+    packetcraftr_core::diagnostic::Diagnostic::new(
+        packetcraftr_core::diagnostic::Severity::Warning,
+        "fuzz.liveness_timeout",
+        "baseline exchange timed out; later case outcomes are inconclusive",
+    )
+}
+
 pub(super) fn run<A, E, C, F>(
     request: &Request,
     workflow: &mut Workflow<A, C>,
@@ -87,9 +130,35 @@ where
     );
     let mut context = Context::new(deadline, clock);
     let mut executed_before = false;
+    let mut target_alive = true;
+    if request.liveness
+        && let Some(reference) = cases.iter().find(|case| case.built.is_some()).cloned()
+    {
+        target_alive = execute_baseline(
+            &mut context,
+            executor,
+            request,
+            &builder,
+            &reference,
+            &mut executed_before,
+            delay,
+        )?;
+    }
     for mut case in cases {
         let case_index = case.index;
         context.enforce(case_index)?;
+        if !target_alive {
+            case.diagnostics.push(liveness_timeout());
+            recorder.publish_diagnostics(&mut case)?;
+            emit(
+                Event::Case(Trial {
+                    case,
+                    evidence: None,
+                }),
+                context.deadline(),
+            )?;
+            continue;
+        }
         let mut evidence = None;
         if case.built.is_some() {
             if executed_before {
@@ -110,6 +179,20 @@ where
                 |_, execution, grant, _| validate_case(request, &builder, &case, execution, grant),
             )?;
             evidence = Some(recorder.record(&mut case, execution, context.deadline())?);
+            if request.liveness {
+                target_alive = execute_baseline(
+                    &mut context,
+                    executor,
+                    request,
+                    &builder,
+                    &case.clone(),
+                    &mut executed_before,
+                    delay,
+                )?;
+                if !target_alive {
+                    case.diagnostics.push(liveness_timeout());
+                }
+            }
         }
         recorder.publish_diagnostics(&mut case)?;
         emit(Event::Case(Trial { case, evidence }), context.deadline())?;
@@ -129,6 +212,7 @@ struct PreparedCampaign {
     stats: packet_fuzz::Stats,
     maximum_wire_bytes: u64,
     requires_permissive_live: bool,
+    liveness_steps: usize,
 }
 
 fn prepare_campaign(
@@ -147,11 +231,48 @@ fn prepare_campaign(
     let built_cases = cases.iter().filter(|case| case.built.is_some()).count();
 
     deadline.enforce()?;
-    let worst_case = worst_case_duration(request, built_cases)?;
+    let liveness_steps = if request.liveness && built_cases > 0 {
+        built_cases + 1
+    } else {
+        0
+    };
+    let worst_case = worst_case_duration(request, built_cases + liveness_steps)?;
     deadline
         .check_additional(worst_case)
         .map_err(duration_limit)?;
-    let maximum_wire_bytes = maximum_wire_bytes(&request.campaign, &cases)?;
+    let mut maximum_wire_bytes = maximum_wire_bytes(&request.campaign, &cases)?;
+    if liveness_steps > 0 {
+        let overhead = match packet_fuzz::packet_link_type(&request.packet) {
+            Some(link_type) if !link_type.is_raw_ip() => 0,
+            _ => super::SYNTHESIZED_ETHERNET_BYTES,
+        };
+        let baseline_len = Builder::new(Arc::clone(registry))
+            .build(
+                request.packet.clone(),
+                packetcraftr_core::codec::Addresses::default(),
+                request.campaign.build.clone(),
+            )
+            .map_or(request.campaign.limits.max_packet_bytes as u64, |built| {
+                u64::try_from(built.bytes.len()).unwrap_or(u64::MAX)
+            });
+        let per_step = baseline_len
+            .checked_add(overhead)
+            .ok_or(Error::StatisticsOverflow {
+                case_index: last_case_index(&request.campaign),
+            })?;
+        let baseline_bytes =
+            per_step
+                .checked_mul(liveness_steps as u64)
+                .ok_or(Error::StatisticsOverflow {
+                    case_index: last_case_index(&request.campaign),
+                })?;
+        maximum_wire_bytes =
+            maximum_wire_bytes
+                .checked_add(baseline_bytes)
+                .ok_or(Error::StatisticsOverflow {
+                    case_index: last_case_index(&request.campaign),
+                })?;
+    }
     // Whether the opt-in is *needed* is decided here; whether it was *given*
     // is decided later by the authorizer that `authorize_campaign` calls.
     let requires_permissive_live = cases.iter().any(|case| {
@@ -165,6 +286,7 @@ fn prepare_campaign(
         stats,
         maximum_wire_bytes,
         requires_permissive_live,
+        liveness_steps,
     })
 }
 
@@ -197,11 +319,14 @@ fn authorize_campaign<A>(
 where
     A: Authorizer,
 {
-    let packets = prepared
+    let mut packets = prepared
         .cases
         .iter()
         .filter_map(|case| case.built.as_ref().map(|built| &built.packet))
         .collect::<Vec<_>>();
+    if prepared.liveness_steps > 0 {
+        packets.push(&request.packet);
+    }
     // Unconditional: a campaign with no buildable case still has to clear
     // policy validation and the destination gate before anything else runs.
     let permissive_live = if prepared.requires_permissive_live {
@@ -213,7 +338,10 @@ where
     };
     authorizer
         .authorize_operation(Operation::Declared(DeclaredPackets::new(
-            WireLimits::new(prepared.stats.cases_built, prepared.maximum_wire_bytes),
+            WireLimits::new(
+                prepared.stats.cases_built + prepared.liveness_steps as u64,
+                prepared.maximum_wire_bytes,
+            ),
             &packets,
             request.destination,
             permissive_live,

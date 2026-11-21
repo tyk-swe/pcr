@@ -193,6 +193,9 @@ commands! {
     /// Audit HTTP response headers and redacted cookie attributes with one HEAD request.
     #[command(after_long_help = "Sends one HEAD request over HTTP/1.1 (path / by default) and follows no redirects. HTTPS sends the request only after certificate verification succeeds. Cookie values are redacted.\n\nExample: packetcraftr network audit-http 192.0.2.10:443 --tls --server-name example.test --host example.test")]
     AuditHttp(network::audit::AuditHttp) = "audit-http" => ("network", "audit-http", 37),
+    /// Audit recursion, truncation, amplification, and DNSSEC AD from one query.
+    #[command(after_long_help = network::audit::AUDIT_DNS_AFTER_LONG_HELP)]
+    AuditDns(network::audit::AuditDns) => ("network", "audit-dns", 55),
     /// Merge time-ordered captures into scoped PCAPNG.
     #[command(after_long_help = files::merge::arguments::AFTER_LONG_HELP)]
     Merge(files::merge::arguments::Args) = "merge" => ("files", "merge", 5),
@@ -303,6 +306,21 @@ commands! {
     /// Finalize a provisional Campaign from a Responder reception log.
     #[command(after_long_help = network::differential::join::AFTER_LONG_HELP)]
     DifferentialJoin(network::differential::join::Args) = "differential-join" => ("network", "differential-join", 41),
+    /// Run a DNS differential Campaign against a cooperating DNS Responder.
+    #[command(after_long_help = network::differential::dns_campaign::AFTER_LONG_HELP)]
+    DnsDifferential(network::differential::dns_campaign::DnsDifferential) => ("network", "dns-differential", 56),
+    /// Run the cooperating DNS Responder for a DNS differential Campaign.
+    #[command(after_long_help = network::differential::dns_responder::AFTER_LONG_HELP)]
+    DnsDifferentialResponder(network::differential::dns_responder::DnsResponder) => ("network", "dns-differential-responder", 57),
+    /// Generate a deterministic labelled synthetic capture from a scenario.
+    #[command(after_long_help = packet::scenario::AFTER_LONG_HELP)]
+    ScenarioBuild(packet::scenario::ScenarioBuild) => ("packet", "scenario-build", 58),
+    /// Run a TCP segmentation matrix from this host.
+    #[command(after_long_help = network::segmentation::AFTER_LONG_HELP)]
+    Segmentation(network::segmentation::Segmentation) => ("network", "segmentation", 59),
+    /// Classify NAT source-tuple stability from a Responder log.
+    #[command(after_long_help = network::nat_mapping::AFTER_LONG_HELP)]
+    NatMapping(network::nat_mapping::NatMapping) => ("network", "nat-mapping", 60),
     /// Generate shell completions and man pages under a directory.
     #[command(after_long_help = "Writes completions for Bash, Elvish, Fish, PowerShell, and Zsh, and man pages for all grouped paths. Requires a writable directory.\n\nExample:\n  packetcraftr reference documentation --directory ./cli-docs")]
     Documentation(reference::documentation::Args) => ("reference", "documentation", 30),

@@ -53,6 +53,7 @@ pub(in crate::commands) fn report(bytes: &[u8]) -> Result<Report, CliError> {
         Command::AuditTls.as_str(),
         Command::AuditHttp.as_str(),
         Command::ScanDiff.as_str(),
+        Command::Assessment.as_str(),
     ];
     let engagement_commands = [
         Command::Scan.as_str(),

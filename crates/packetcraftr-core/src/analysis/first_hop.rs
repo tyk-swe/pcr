@@ -14,12 +14,15 @@ use crate::capture_file::Reader;
 use crate::packet::{MacAddress, Packet};
 use crate::protocol::BuiltinProtocol;
 use crate::protocol::application::dhcp::{Dhcpv4, Dhcpv6, Value4, Value6};
-use crate::protocol::identity;
+use crate::protocol::identity::{self, EncapsulationIdentifier};
 use crate::registry::Registry;
+
+type ArpScope = Vec<(u16, u16)>;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ArpConflict {
     pub address: Ipv4Addr,
+    pub broadcast_domain: Vec<EncapsulationIdentifier>,
     pub mac_addresses: Vec<MacAddress>,
 }
 
@@ -64,7 +67,7 @@ pub fn run<R: Read>(
 
 #[derive(Default)]
 pub struct Collector {
-    arp: BTreeMap<Ipv4Addr, BTreeSet<[u8; 6]>>,
+    arp: BTreeMap<(Ipv4Addr, ArpScope), BTreeSet<[u8; 6]>>,
     dhcp_servers: BTreeSet<String>,
     dhcpv6_servers: BTreeSet<String>,
     router_advertisers: BTreeSet<String>,
@@ -108,9 +111,13 @@ impl Collector {
     fn observe_frame(&mut self, packet: &Packet) {
         let mut link_source: Option<[u8; 6]> = None;
         let mut network_source: Option<IpAddr> = None;
+        let mut broadcast_domain: ArpScope = Vec::new();
         for layer in packet.iter() {
             if let Some((source, _)) = identity::link_addresses(layer) {
                 link_source = Some(source);
+            }
+            if let Some(tag) = identity::vlan_tag(layer) {
+                broadcast_domain.push((tag.kind.ether_type(), tag.vlan_id));
             }
             if let Some((source, _)) = identity::network_endpoints(layer) {
                 network_source = Some(source);
@@ -119,7 +126,7 @@ impl Collector {
                 && !arp.sender_protocol.is_unspecified()
             {
                 self.arp
-                    .entry(arp.sender_protocol)
+                    .entry((arp.sender_protocol, broadcast_domain.clone()))
                     .or_default()
                     .insert(arp.sender_hardware);
             }
@@ -143,8 +150,18 @@ impl Collector {
                 .arp
                 .into_iter()
                 .filter(|(_, macs)| macs.len() > 1)
-                .map(|(address, macs)| ArpConflict {
+                .map(|((address, broadcast_domain), macs)| ArpConflict {
                     address,
+                    broadcast_domain: broadcast_domain
+                        .into_iter()
+                        .map(|(ether_type, vlan_id)| {
+                            if ether_type == crate::packet::VlanKind::Ieee8021Ad.ether_type() {
+                                EncapsulationIdentifier::Vlan8021ad { vlan_id }
+                            } else {
+                                EncapsulationIdentifier::Vlan { vlan_id }
+                            }
+                        })
+                        .collect(),
                     mac_addresses: macs.into_iter().map(MacAddress).collect(),
                 })
                 .collect(),
@@ -214,7 +231,7 @@ mod tests {
     use super::*;
     use crate::packet::Packet;
     use crate::protocol::application::dhcp::{Dhcpv6, Duid, Option4, Option6};
-    use crate::protocol::link::Arp;
+    use crate::protocol::link::{Arp, Vlan, Vlan8021ad};
     use crate::protocol::network::{Icmpv6, Ipv6};
 
     fn collect(packet: Packet, collector: &mut Collector) {
@@ -264,6 +281,61 @@ mod tests {
         assert_eq!(report.arp_conflicts[0].mac_addresses.len(), 2);
         assert!(report.has_multiple_dhcp_servers());
         assert!(report.has_multiple_router_advertisers());
+    }
+
+    #[test]
+    fn arp_conflicts_are_scoped_by_vlan_broadcast_domain() {
+        let mut collector = Collector::new();
+        let claims = [
+            (vec![(false, 10)], [1, 0, 0, 0, 0, 1]),
+            (vec![(false, 20)], [2, 0, 0, 0, 0, 2]),
+            (vec![(false, 10)], [3, 0, 0, 0, 0, 3]),
+            (vec![(true, 100), (false, 10)], [4, 0, 0, 0, 0, 4]),
+            (vec![(true, 100), (false, 10)], [5, 0, 0, 0, 0, 5]),
+        ];
+        for (tags, mac) in claims {
+            let mut packet = Packet::default();
+            for (service_tag, vlan_id) in tags {
+                if service_tag {
+                    packet.push(Vlan8021ad {
+                        vlan_id,
+                        ..Vlan8021ad::default()
+                    });
+                } else {
+                    packet.push(Vlan {
+                        vlan_id,
+                        ..Vlan::default()
+                    });
+                }
+            }
+            packet.push(Arp {
+                sender_hardware: mac,
+                sender_protocol: "10.0.0.1".parse().unwrap(),
+                ..Arp::default()
+            });
+            collect(packet, &mut collector);
+        }
+
+        let report = collector.finish(&RunSummary::default());
+        assert_eq!(report.arp_conflicts.len(), 2);
+        assert!(
+            report
+                .arp_conflicts
+                .iter()
+                .all(|conflict| conflict.mac_addresses.len() == 2),
+            "{report:?}"
+        );
+        assert_eq!(
+            report.arp_conflicts[0].broadcast_domain,
+            [EncapsulationIdentifier::Vlan { vlan_id: 10 }]
+        );
+        assert_eq!(
+            report.arp_conflicts[1].broadcast_domain,
+            [
+                EncapsulationIdentifier::Vlan8021ad { vlan_id: 100 },
+                EncapsulationIdentifier::Vlan { vlan_id: 10 },
+            ]
+        );
     }
 
     #[test]

@@ -261,6 +261,15 @@ fn scrub_frame(
     pseudonyms: &mut Pseudonyms,
     max_output_bytes: usize,
 ) -> Result<Frame, CliError> {
+    if frame.link_type == LinkType::ETHERNET
+        && !frame.bytes().is_empty()
+        && LinkHeader::walk(frame.link_type, frame.bytes()).is_err()
+    {
+        return Err(CliError::new(
+            Kind::Policy,
+            "scrub refuses an incomplete Ethernet header it cannot pseudonymize",
+        ));
+    }
     if outer_ip(frame).is_some_and(embedded_outer_addresses) {
         return Err(CliError::new(
             Kind::Policy,

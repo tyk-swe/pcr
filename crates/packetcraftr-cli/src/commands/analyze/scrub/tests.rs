@@ -434,6 +434,23 @@ fn scrub_refuses_malformed_fragment_to_routing_chain() {
 }
 
 #[test]
+fn scrub_refuses_incomplete_ethernet_headers() {
+    let dissector = Dissector::new(packetcraftr_core::protocol::builtin::registry());
+    for bytes in [
+        vec![2, 0, 0, 0, 0, 9],
+        vec![2, 0, 0, 0, 0, 9, 2, 0, 0, 0, 0, 8],
+        vec![2, 0, 0, 0, 0, 9, 2, 0, 0, 0, 0, 8, 0x81, 0x00, 0, 1],
+    ] {
+        let frame = Frame::new(None, LinkType::ETHERNET, bytes).unwrap();
+        assert!(
+            scrub_frame(&frame, &dissector, &mut Pseudonyms::default(), 1_000_000).is_err(),
+            "incomplete Ethernet header was published: {:02x?}",
+            frame.bytes()
+        );
+    }
+}
+
+#[test]
 fn scrub_drops_all_interface_option_metadata() {
     let options = [0_u16, 1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 15, 65_000]
         .into_iter()

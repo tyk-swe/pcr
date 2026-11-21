@@ -2967,6 +2967,27 @@ fn report_counts_repeated_inputs_once_at_the_findings_limit() {
 }
 
 #[test]
+fn findings_diff_accepts_assessment_reports() {
+    let report = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/documents/output-report-success.json");
+    let report_arg = report.to_string_lossy().into_owned();
+    let args = [
+        "analyze",
+        "findings-diff",
+        report_arg.as_str(),
+        report_arg.as_str(),
+    ];
+    let text = assert_success(&run(&args), &args);
+    assert!(
+        text.contains("before_kind=report after_kind=report"),
+        "{text}"
+    );
+    assert!(text.contains("new=0"), "{text}");
+    assert!(text.contains("fixed=0"), "{text}");
+    assert!(text.contains("severity_changed=0"), "{text}");
+}
+
+#[test]
 fn report_caps_the_emitted_json_result_before_writing_html() {
     let directory = tempfile::tempdir().expect("tempdir");
     let input = PathBuf::from(env!("CARGO_MANIFEST_DIR"))

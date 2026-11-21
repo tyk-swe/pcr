@@ -18,7 +18,7 @@
 //! | 3. Captures and filters | `capture_file`, `filter` |
 //! | 4. Offline analysis | `analysis`, `security`, `fuzz` |
 //!
-//! The kernel's data model is deliberately one unit: layers, codecs, fields,
+//! The kernel's data model is deliberately one unit because layers, codecs, fields,
 //! packets, and the registry refer to one another, so they are not ordered
 //! among themselves.
 //!

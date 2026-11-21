@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! The PacketcraftR command-line application: argument parsing, provider
+//! The PacketcraftR command-line application, covering argument parsing, provider
 //! composition, workflow dispatch, and rendering through the versioned
 //! [`output`] contract.
 //!

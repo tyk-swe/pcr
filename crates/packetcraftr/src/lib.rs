@@ -19,7 +19,7 @@
 //! `client` owns target admission and route planning. `engine` retains private
 //! operation state, packet preparation, and execution plumbing. Workflow
 //! evidence and identity types live with their workflows, including
-//! `exchange::Response` and the DNS identity functions; the value types the
+//! `exchange::Response` and the DNS identity functions. The value types that the
 //! engine and error layers consume directly (`probe::model`,
 //! `evidence::error`, `send::options`) sit below their consumers and are
 //! re-exported at the public workflow paths. Hand-offs from scan results to
@@ -28,7 +28,7 @@
 //!
 //! `policy` owns target resolution and authorization, returning a
 //! `policy::ResolutionError` that keeps target and policy failures distinct.
-//! `target` owns target parsing and resolution errors and no longer carries
+//! `target` owns target parsing and resolution errors and does not carry
 //! policy failures.
 //!
 //! Each `impl Client` block lives with the module that owns its operation.

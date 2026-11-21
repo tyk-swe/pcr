@@ -19,6 +19,7 @@ Examples:
   packetcraftr reference topics expressions
   packetcraftr reference topics filters
   packetcraftr reference topics formats
+  packetcraftr reference topics scope
   packetcraftr reference topics exit-codes";
 
 #[derive(Debug, clap::Args)]
@@ -53,7 +54,7 @@ const TOPICS: &[Topic] = &[
     },
     Topic {
         name: "scope",
-        summary: "Engagement scope documents and how they narrow live policy.",
+        summary: "Engagement Scope documents and how they narrow live policy.",
         body: || String::from(text::SCOPE),
     },
     Topic {
@@ -139,7 +140,10 @@ fn formats() -> String {
          files read: JSON requires at least one --field. NDJSON streams frame records\n\
          without --field and field rows with --field.\n\
          packet dissect: NDJSON requires at least one --field. JSON returns a full\n\
-         dissection without --field and a field projection with --field.\n\n\
+         dissection without --field and a field projection with --field.\n\
+         packet build: JSON and raw require a single packet.\n\
+         network capture: JSON requires --write, and --dissect or --field requires text\n\
+         or ndjson.\n\n\
          Formats by command:\n",
     );
     for command in commands {
@@ -163,7 +167,7 @@ fn formats() -> String {
 fn exit_codes() -> String {
     format!(
         "Exit codes\n\n{}\nFor codes 2 through 70, the word after the code is the `error.kind` of the same \
-         failure in JSON and NDJSON output; a cancellation reports kind `io`.\n",
+         failure in JSON and NDJSON output, and a cancellation reports kind `io`.\n",
         crate::app::cli::exit_codes_help()
     )
 }

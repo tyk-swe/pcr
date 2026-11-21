@@ -15,7 +15,7 @@ One distinct wire encoding of an Intent.
 _Avoid_: Mutation, encoding trick
 
 **Verdict**:
-The proven outcome for one Variant, such as accepted by the target, dropped in transit, rewritten by a middlebox, or unobserved.
+The proven outcome for one Variant, classified as accepted, unanswered, flaky, rewritten, or not run.
 _Avoid_: Result, status
 
 **Baseline**:
@@ -23,7 +23,7 @@ The plain reference encoding of an Intent that is expected to be accepted on a h
 _Avoid_: Control, default variant
 
 **Campaign**:
-One bounded run that sends every Variant of an Intent and collects a Verdict for each.
+One bounded differential run that exercises an Intent across its Variants and collects a Verdict for each.
 _Avoid_: Scan, test run
 
 **Responder**:
@@ -31,13 +31,13 @@ The cooperating target-side counterpart that records which Variants arrived and 
 _Avoid_: Server, listener, agent
 
 **Canary**:
-The unique marker carried in one attempt payload that ties a sent Variant to a Responder reception record or reply.
+The unique marker carried in one attempt payload that ties a sent Variant attempt to a Responder reception record or reply.
 _Avoid_: Token, cookie, probe ID
 
 ### Authorized testing
 
 **Scope**:
-The operator declared boundary of one engagement, naming the destinations, exclusions, policy opt-ins, and budgets a live workflow may use. A Scope only narrows what command flags allow.
+The operator-declared boundary of one engagement, naming the destinations, exclusions, policy opt-ins, and budgets a live workflow may use. A Scope only narrows what command flags allow.
 _Avoid_: Allowlist, profile, config
 
 **Evidence bundle**:

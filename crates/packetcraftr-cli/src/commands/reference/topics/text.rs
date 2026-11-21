@@ -42,8 +42,9 @@ Selectors (`--set`, `--axis`, `--payload-file`, and `packet fuzz --field`):
 Overrides and axes:
   `--set SELECTOR=VALUE` applies up to 64 field overrides in order before expansion.
   `--axis SELECTOR=[V1,V2,...]` or `SELECTOR=START..END[:STEP]` expands a Cartesian
-  product over inclusive unsigned integer ranges (`STEP` defaults to 1, last axis
-  varies fastest, bounded by `--max-template-packets`, default 10000).
+  product over expression value lists or inclusive unsigned integer ranges (`STEP`
+  defaults to 1, last axis varies fastest, bounded by `--max-template-packets`,
+  default 10000).
 
 See also `packetcraftr reference topics filters`.
 "#;
@@ -121,8 +122,8 @@ document (a regular file, at most 1 MiB). One Scope can be reused across
 `network capture` (budgets only), `network replay`, `network scan`,
 `network identify`, `network identify-os`, `network traceroute`, `network dns`,
 `network audit-tls`, `network audit-http`, `network differential`,
-`packet fuzz` (with `--live`), and `analyze report` (records the Scope label
-and digest in the report and Evidence bundle).
+`packet fuzz` (with `--live`), and `analyze report` (records the Scope digest
+in the report and both label and digest in the Evidence bundle).
 
 A Scope only narrows. Its `allow_*` booleans are ceilings, so a Scope can take
 away a policy opt-in the flags gave and can never grant one they did not.

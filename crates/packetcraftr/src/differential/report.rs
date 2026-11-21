@@ -338,15 +338,34 @@ pub struct NatMapping {
     pub behavior: NatBehavior,
 }
 
-/// Classify source-tuple stability from Responder reception records. This
+/// Classify source-tuple stability from Responder reception records that
+/// match a planned attempt Variant, sequence, and payload digest. This
 /// observes one destination only: stable here does not prove endpoint
 /// independent mapping to other destinations.
 #[must_use]
 pub fn nat_mapping(
     records: &[ReceptionRecord],
+    attempts: &[AttemptEvidence],
     expected_source: Option<std::net::SocketAddr>,
 ) -> NatMapping {
-    let sources: Vec<std::net::SocketAddr> = records
+    let planned: std::collections::BTreeMap<(usize, u32), [u8; 32]> = attempts
+        .iter()
+        .map(|attempt| {
+            (
+                (attempt.variant_index, attempt.attempt_seq),
+                attempt.payload_sha256,
+            )
+        })
+        .collect();
+    let authenticated: Vec<&ReceptionRecord> = records
+        .iter()
+        .filter(|record| {
+            planned
+                .get(&(usize::from(record.variant_index), record.attempt_seq))
+                .is_some_and(|digest| record.payload_sha256 == hex(digest))
+        })
+        .collect();
+    let sources: Vec<std::net::SocketAddr> = authenticated
         .iter()
         .map(|record| record.source)
         .collect::<std::collections::BTreeSet<_>>()
@@ -364,7 +383,7 @@ pub fn nat_mapping(
         NatBehavior::VaryingAddress
     };
     NatMapping {
-        records: records.len(),
+        records: authenticated.len(),
         sources,
         behavior,
     }
@@ -552,6 +571,15 @@ mod tests {
 
     #[test]
     fn nat_mapping_classifies_tuple_stability() {
+        let planned = [AttemptEvidence {
+            variant_index: 0,
+            attempt_seq: 0,
+            answered: false,
+            rewritten: false,
+            packets_sent: 1,
+            payload_sha256: [0; 32],
+            reply: None,
+        }];
         let record = |source: &str| ReceptionRecord {
             variant_index: 0,
             attempt_seq: 0,
@@ -560,14 +588,49 @@ mod tests {
         };
         let preserved = nat_mapping(
             &[record("192.0.2.1:53210")],
+            &planned,
             Some("192.0.2.1:53210".parse().unwrap()),
         );
         assert_eq!(preserved.behavior, NatBehavior::Preserved);
-        let varying_port = nat_mapping(&[record("192.0.2.1:1000"), record("192.0.2.1:1001")], None);
+        let varying_port = nat_mapping(
+            &[record("192.0.2.1:1000"), record("192.0.2.1:1001")],
+            &planned,
+            None,
+        );
         assert_eq!(varying_port.behavior, NatBehavior::StableAddressVaryingPort);
-        let varying_ip = nat_mapping(&[record("192.0.2.1:1000"), record("192.0.2.2:1000")], None);
+        let varying_ip = nat_mapping(
+            &[record("192.0.2.1:1000"), record("192.0.2.2:1000")],
+            &planned,
+            None,
+        );
         assert_eq!(varying_ip.behavior, NatBehavior::VaryingAddress);
-        assert_eq!(nat_mapping(&[], None).behavior, NatBehavior::NoReceptions);
+        assert_eq!(
+            nat_mapping(&[], &planned, None).behavior,
+            NatBehavior::NoReceptions
+        );
+    }
+
+    #[test]
+    fn nat_mapping_ignores_unplanned_reception_identities() {
+        let planned = [attempt(0, 7, false)];
+        let record = |attempt_seq: u32, source: &str, digest: u8| ReceptionRecord {
+            variant_index: 0,
+            attempt_seq,
+            source: source.parse().unwrap(),
+            payload_sha256: hex(&[digest; 32]),
+        };
+        let mapping = nat_mapping(
+            &[
+                record(7, "192.0.2.1:40000", 0x11),
+                record(999, "198.51.100.9:40000", 0x11),
+                record(7, "203.0.113.9:40000", 0x22),
+            ],
+            &planned,
+            Some("192.0.2.1:40000".parse().unwrap()),
+        );
+        assert_eq!(mapping.records, 1);
+        assert_eq!(mapping.sources, ["192.0.2.1:40000".parse().unwrap()]);
+        assert_eq!(mapping.behavior, NatBehavior::Preserved);
     }
 
     #[test]

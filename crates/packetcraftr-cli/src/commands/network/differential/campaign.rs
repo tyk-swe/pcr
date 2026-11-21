@@ -80,11 +80,10 @@ fn parse_hash(value: &str) -> Result<[u8; 32], CliError> {
     Ok(hash)
 }
 
-pub(crate) fn load(
+pub(crate) fn load_campaign(
     invocation: &Invocation,
     campaign_path: &Path,
-    log_path: &Path,
-) -> Result<JoinInputs, CliError> {
+) -> Result<lib::Aggregate, CliError> {
     let bytes = crate::input::read_bounded_json_document(
         &invocation.control,
         campaign_path,
@@ -105,7 +104,7 @@ pub(crate) fn load(
         .into_iter()
         .map(lib::AttemptEvidence::try_from)
         .collect::<Result<Vec<_>, _>>()?;
-    let campaign = lib::Aggregate {
+    Ok(lib::Aggregate {
         valid: false,
         provisional: campaign.provisional,
         plan_digest: campaign.plan_digest,
@@ -115,7 +114,15 @@ pub(crate) fn load(
         attempts,
         diagnostics: Vec::new(),
         stats: Default::default(),
-    };
+    })
+}
+
+pub(crate) fn load(
+    invocation: &Invocation,
+    campaign_path: &Path,
+    log_path: &Path,
+) -> Result<JoinInputs, CliError> {
+    let campaign = load_campaign(invocation, campaign_path)?;
     let bytes =
         crate::input::read_bounded_json_document(&invocation.control, log_path, MAX_INPUT_BYTES)?;
     invocation.check()?;

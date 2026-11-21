@@ -56,6 +56,43 @@ pub(super) fn render_report_text(
     Ok(())
 }
 
+pub(super) fn render_vantage_text(
+    invocation: &crate::invocation::Invocation,
+    frames: u64,
+    probes_seen: usize,
+    rows: &[lib::VantageRow],
+) -> Result<(), CliError> {
+    let attempts_seen: usize = rows
+        .iter()
+        .map(|row| row.delivered_and_seen + row.seen_not_delivered + row.rewritten_and_seen)
+        .sum();
+    write_stdout_line(
+        invocation,
+        format_args!(
+            "sensor frames={frames} probes_seen={probes_seen} attempts_seen={attempts_seen}"
+        ),
+    )?;
+    for row in rows.iter().filter(|row| row.attempts > 0) {
+        let variant = lib::catalog::catalog()
+            .get(row.variant_index)
+            .map_or("unknown", |variant| variant.id);
+        write_stdout_line(
+            invocation,
+            format_args!(
+                "vantage variant={variant} attempts={} delivered_and_seen={} delivered_not_seen={} seen_not_delivered={} neither={} rewritten_and_seen={} rewritten_not_seen={}",
+                row.attempts,
+                row.delivered_and_seen,
+                row.delivered_not_seen,
+                row.seen_not_delivered,
+                row.neither,
+                row.rewritten_and_seen,
+                row.rewritten_not_seen,
+            ),
+        )?;
+    }
+    Ok(())
+}
+
 pub(super) fn emit_event(event: lib::Event, stream: &StreamEncoder) -> Result<(), CliError> {
     let published = output::envelope::Published::<super::output::Event>::try_from(event)
         .map_err(CliError::classified)?;

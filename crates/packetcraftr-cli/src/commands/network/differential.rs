@@ -7,6 +7,7 @@ pub(in crate::commands) mod join;
 pub(in crate::commands) mod output;
 mod rendering;
 pub(in crate::commands) mod responder;
+mod sensor;
 
 use packetcraftr::differential as lib;
 use packetcraftr_core::error::Kind;

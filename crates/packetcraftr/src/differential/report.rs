@@ -309,6 +309,76 @@ pub fn hex(bytes: &[u8]) -> String {
     packetcraftr_core::field::hex::compact_hex(bytes)
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SensorObservation {
+    pub variant_index: u16,
+    pub attempt_seq: u32,
+    pub payload_sha256: String,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct VantageRow {
+    pub variant_index: usize,
+    pub attempts: usize,
+    pub delivered_and_seen: usize,
+    pub delivered_not_seen: usize,
+    pub seen_not_delivered: usize,
+    pub neither: usize,
+    pub rewritten_and_seen: usize,
+    pub rewritten_not_seen: usize,
+}
+
+/// Classifies joined attempts by both Responder delivery and sensor-probe
+/// observation. A sensor observation only counts when its Variant, attempt
+/// sequence and exact payload digest match the attempt. `Delivered` means
+/// the Responder answered; rewritten attempts are kept separate because the
+/// exact payload arrived under a different source tuple.
+#[must_use]
+pub fn three_vantage(aggregate: &Aggregate, sensor: &[SensorObservation]) -> Vec<VantageRow> {
+    let seen: std::collections::HashSet<(u16, u32, &str)> = sensor
+        .iter()
+        .map(|observation| {
+            (
+                observation.variant_index,
+                observation.attempt_seq,
+                observation.payload_sha256.as_str(),
+            )
+        })
+        .collect();
+    catalog()
+        .iter()
+        .enumerate()
+        .map(|(variant_index, _)| {
+            let mut row = VantageRow {
+                variant_index,
+                ..VantageRow::default()
+            };
+            for attempt in aggregate
+                .attempts
+                .iter()
+                .filter(|attempt| attempt.variant_index == variant_index)
+            {
+                row.attempts += 1;
+                let Ok(index) = u16::try_from(attempt.variant_index) else {
+                    row.neither += 1;
+                    continue;
+                };
+                let digest = hex(&attempt.payload_sha256);
+                let seen = seen.contains(&(index, attempt.attempt_seq, digest.as_str()));
+                match (attempt.answered, attempt.rewritten, seen) {
+                    (true, _, true) => row.delivered_and_seen += 1,
+                    (true, _, false) => row.delivered_not_seen += 1,
+                    (false, true, true) => row.rewritten_and_seen += 1,
+                    (false, true, false) => row.rewritten_not_seen += 1,
+                    (false, false, true) => row.seen_not_delivered += 1,
+                    (false, false, false) => row.neither += 1,
+                }
+            }
+            row
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -402,6 +472,55 @@ mod tests {
         let joined = join_receptions(aggregate, &records);
         assert!(joined.attempts[0].answered);
         assert!(!joined.attempts[1].answered);
+    }
+
+    #[test]
+    fn three_vantage_separates_delivery_rewrite_and_sensor_visibility() {
+        let mut rewritten = attempt(1, 4, false);
+        rewritten.rewritten = true;
+        let mut rewritten_seen = attempt(1, 5, false);
+        rewritten_seen.rewritten = true;
+        let aggregate = Aggregate {
+            valid: true,
+            provisional: false,
+            plan_digest: "digest".to_owned(),
+            source_port: 53210,
+            spoof_source: None,
+            attempts: vec![
+                attempt(0, 0, true),
+                attempt(0, 1, true),
+                attempt(0, 2, false),
+                attempt(0, 3, false),
+                rewritten,
+                rewritten_seen,
+            ],
+            diagnostics: Vec::new(),
+            rows: Vec::new(),
+            stats: Stats::default(),
+        };
+        let digest = hex(&[0x11; 32]);
+        let sensor =
+            |variant_index: u16, attempt_seq: u32, payload_sha256: String| SensorObservation {
+                variant_index,
+                attempt_seq,
+                payload_sha256,
+            };
+        let rows = three_vantage(
+            &aggregate,
+            &[
+                sensor(0, 0, digest.clone()),
+                sensor(0, 2, digest.clone()),
+                sensor(1, 5, digest.clone()),
+                sensor(0, 3, hex(&[0x22; 32])),
+            ],
+        );
+        assert_eq!(rows[0].delivered_and_seen, 1);
+        assert_eq!(rows[0].delivered_not_seen, 1);
+        assert_eq!(rows[0].seen_not_delivered, 1);
+        assert_eq!(rows[0].neither, 1);
+        assert_eq!(rows[1].rewritten_not_seen, 1);
+        assert_eq!(rows[1].rewritten_and_seen, 1);
+        assert_eq!(rows[0].attempts + rows[1].attempts, 6);
     }
 
     #[test]

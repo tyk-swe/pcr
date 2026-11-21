@@ -324,6 +324,21 @@ commands! {
     /// Verify an engagement journal chain and supplied result files against it.
     #[command(after_long_help = analyze::journal::VERIFY_AFTER_LONG_HELP)]
     JournalVerify(analyze::journal::Verify) => ("analyze", "journal-verify", 47),
+    /// Measure how much of an operator capture a sensor capture can see.
+    #[command(after_long_help = analyze::capture_fidelity::AFTER_LONG_HELP)]
+    CaptureFidelity(analyze::capture_fidelity::CaptureFidelity) => ("analyze", "capture-fidelity", 48),
+    /// Compare findings between two aggregate JSON results for retest.
+    #[command(after_long_help = analyze::retest::FINDINGS_AFTER_LONG_HELP)]
+    FindingsDiff(analyze::retest::FindingsDiff) => ("analyze", "findings-diff", 49),
+    /// Validate an Evidence bundle and any supplied source files.
+    #[command(after_long_help = analyze::retest::BUNDLE_AFTER_LONG_HELP)]
+    BundleVerify(analyze::retest::BundleVerify) => ("analyze", "bundle-verify", 50),
+    /// Compare passive inventories from baseline and later captures.
+    #[command(after_long_help = analyze::capture_diff::AFTER_LONG_HELP)]
+    CaptureDiff(analyze::capture_diff::CaptureDiff) => ("analyze", "capture-diff", 51),
+    /// Report ARP, DHCP and router-advertisement identity conflicts.
+    #[command(after_long_help = analyze::first_hop::AFTER_LONG_HELP)]
+    FirstHop(analyze::first_hop::FirstHop) => ("analyze", "first-hop", 52),
 }
 
 /// Workflow placement and compact identifiers used in machine output.

@@ -5,6 +5,7 @@
 
 pub mod bundle;
 pub mod capture;
+pub mod diff;
 pub mod http;
 pub mod indicators;
 pub mod input;

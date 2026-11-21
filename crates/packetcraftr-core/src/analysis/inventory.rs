@@ -42,6 +42,116 @@ pub struct Report {
     pub protocols: Vec<ProtocolCount>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HostPort {
+    pub address: IpAddr,
+    pub observed_port: ObservedPort,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MacChange {
+    pub address: IpAddr,
+    pub before: Vec<MacAddress>,
+    pub after: Vec<MacAddress>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Diff {
+    pub new_hosts: Vec<IpAddr>,
+    pub gone_hosts: Vec<IpAddr>,
+    pub new_ports: Vec<HostPort>,
+    pub gone_ports: Vec<HostPort>,
+    pub new_protocols: Vec<String>,
+    pub gone_protocols: Vec<String>,
+    pub mac_changes: Vec<MacChange>,
+}
+
+/// Compare passive inventories by observed identity only. A port is new
+/// when the host/transport/port tuple was absent from the baseline, even
+/// when its host already existed. This never claims a new host appeared at
+/// the after time; it says only that the baseline capture did not show it.
+#[must_use]
+pub fn diff(before: &Report, after: &Report) -> Diff {
+    let before_hosts: BTreeMap<IpAddr, &Host> = before
+        .hosts
+        .iter()
+        .map(|host| (host.address, host))
+        .collect();
+    let after_hosts: BTreeMap<IpAddr, &Host> = after
+        .hosts
+        .iter()
+        .map(|host| (host.address, host))
+        .collect();
+    let ports = |report: &Report| -> BTreeSet<(IpAddr, StreamTransport, u16)> {
+        report
+            .hosts
+            .iter()
+            .flat_map(|host| {
+                host.observed_ports
+                    .iter()
+                    .map(move |port| (host.address, port.transport, port.port))
+            })
+            .collect()
+    };
+    let before_ports = ports(before);
+    let after_ports = ports(after);
+    let before_protocols: BTreeSet<&str> = before
+        .protocols
+        .iter()
+        .map(|protocol| protocol.protocol.as_str())
+        .collect();
+    let after_protocols: BTreeSet<&str> = after
+        .protocols
+        .iter()
+        .map(|protocol| protocol.protocol.as_str())
+        .collect();
+    let to_host_port = |(address, transport, port): (IpAddr, StreamTransport, u16)| HostPort {
+        address,
+        observed_port: ObservedPort { transport, port },
+    };
+    Diff {
+        new_hosts: after_hosts
+            .keys()
+            .filter(|address| !before_hosts.contains_key(address))
+            .copied()
+            .collect(),
+        gone_hosts: before_hosts
+            .keys()
+            .filter(|address| !after_hosts.contains_key(address))
+            .copied()
+            .collect(),
+        new_ports: after_ports
+            .difference(&before_ports)
+            .copied()
+            .map(to_host_port)
+            .collect(),
+        gone_ports: before_ports
+            .difference(&after_ports)
+            .copied()
+            .map(to_host_port)
+            .collect(),
+        new_protocols: after_protocols
+            .difference(&before_protocols)
+            .map(|protocol| (*protocol).to_owned())
+            .collect(),
+        gone_protocols: before_protocols
+            .difference(&after_protocols)
+            .map(|protocol| (*protocol).to_owned())
+            .collect(),
+        mac_changes: before_hosts
+            .iter()
+            .filter_map(|(address, before_host)| {
+                let after_host = after_hosts.get(address)?;
+                (before_host.mac_addresses != after_host.mac_addresses).then(|| MacChange {
+                    address: *address,
+                    before: before_host.mac_addresses.clone(),
+                    after: after_host.mac_addresses.clone(),
+                })
+            })
+            .collect(),
+    }
+}
+
 /// Inventories untimed frames without using them for time-based reassembly.
 /// When time bounds are set, untimed frames only count toward input totals.
 pub fn run<R: Read>(
@@ -208,4 +318,65 @@ fn usable_host(address: IpAddr) -> bool {
         return false;
     }
     !matches!(address, IpAddr::V4(v4) if v4.is_broadcast())
+}
+
+#[cfg(test)]
+mod diff_tests {
+    use super::*;
+
+    fn host(address: &str, macs: Vec<MacAddress>, ports: Vec<(StreamTransport, u16)>) -> Host {
+        Host {
+            address: address.parse().unwrap(),
+            mac_addresses: macs,
+            protocols: Vec::new(),
+            observed_ports: ports
+                .into_iter()
+                .map(|(transport, port)| ObservedPort { transport, port })
+                .collect(),
+            frames_sent: 0,
+            frames_received: 0,
+        }
+    }
+
+    #[test]
+    fn diff_reports_new_gone_and_changed_identities() {
+        let before = Report {
+            frames_read: 3,
+            hosts: vec![
+                host(
+                    "10.0.0.1",
+                    vec![MacAddress([1, 2, 3, 4, 5, 6])],
+                    vec![(StreamTransport::Tcp, 80)],
+                ),
+                host("10.0.0.2", Vec::new(), Vec::new()),
+            ],
+            protocols: vec![ProtocolCount {
+                protocol: "dns".to_owned(),
+                frames: 1,
+            }],
+        };
+        let after = Report {
+            frames_read: 4,
+            hosts: vec![
+                host(
+                    "10.0.0.1",
+                    vec![MacAddress([6, 5, 4, 3, 2, 1])],
+                    vec![(StreamTransport::Tcp, 443)],
+                ),
+                host("10.0.0.3", Vec::new(), Vec::new()),
+            ],
+            protocols: vec![ProtocolCount {
+                protocol: "tls".to_owned(),
+                frames: 1,
+            }],
+        };
+        let diff = diff(&before, &after);
+        assert_eq!(diff.new_hosts, vec!["10.0.0.3".parse::<IpAddr>().unwrap()]);
+        assert_eq!(diff.gone_hosts, vec!["10.0.0.2".parse::<IpAddr>().unwrap()]);
+        assert_eq!(diff.new_ports[0].observed_port.port, 443);
+        assert_eq!(diff.gone_ports[0].observed_port.port, 80);
+        assert_eq!(diff.new_protocols, vec!["tls"]);
+        assert_eq!(diff.gone_protocols, vec!["dns"]);
+        assert_eq!(diff.mac_changes.len(), 1);
+    }
 }

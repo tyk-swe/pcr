@@ -4,7 +4,6 @@
 //! Operation declarations and the policy/resolver boundary used by live workflows.
 
 use std::net::IpAddr;
-use std::time::SystemTime;
 
 use packetcraftr_core::error::BoundaryError;
 use packetcraftr_core::packet::Packet;
@@ -274,15 +273,12 @@ impl Authorizer for &Policy {
 
 impl Policy {
     /// Exact materialized bytes are checked separately after route discovery.
+    /// This check is deliberately time-free so reauthorizing one message of
+    /// an already admitted operation cannot fail it for crossing the Window
+    /// end. Admission entry points call
+    /// [`authorize_window_at`](Self::authorize_window_at) first.
     pub fn authorize(&self, request: Operation<'_>) -> Result<(), Error> {
-        use packetcraftr_core::clock::{Clock, SystemClock};
-
-        self.authorize_at(request, SystemClock.wall_now())
-    }
-
-    pub fn authorize_at(&self, request: Operation<'_>, now: SystemTime) -> Result<(), Error> {
         self.validate()?;
-        self.authorize_window_at(now)?;
         let limits = request.limits();
         if matches!(request, Operation::Dns(_) | Operation::Socket(_)) {
             self.authorize_traffic_limits(limits.packets(), limits.wire_bytes())?;
@@ -478,8 +474,49 @@ mod tests {
     }
 
     #[test]
+    fn policy_digest_binds_every_admission_field_and_ignores_constraint_order() {
+        let first = Policy {
+            allowed_destinations: vec![
+                "192.0.2.0/24".parse().unwrap(),
+                "10.0.0.1".parse().unwrap(),
+            ],
+            ..ceilings(10, 100)
+        };
+        let reordered = Policy {
+            allowed_destinations: vec![
+                "10.0.0.1".parse().unwrap(),
+                "192.0.2.0/24".parse().unwrap(),
+            ],
+            ..ceilings(10, 100)
+        };
+        assert_eq!(first.digest(), reordered.digest());
+        assert_eq!(first.digest().len(), 64);
+
+        let changed_budget = Policy {
+            allowed_destinations: first.allowed_destinations.clone(),
+            ..ceilings(11, 100)
+        };
+        assert_ne!(first.digest(), changed_budget.digest());
+        let changed_optin = Policy {
+            allow_public_destinations: true,
+            allowed_destinations: first.allowed_destinations.clone(),
+            ..ceilings(10, 100)
+        };
+        assert_ne!(first.digest(), changed_optin.digest());
+        let windowed = Policy {
+            window: Some(crate::policy::Window {
+                not_before_unix_seconds: Some(100),
+                not_after_unix_seconds: None,
+            }),
+            allowed_destinations: first.allowed_destinations.clone(),
+            ..ceilings(10, 100)
+        };
+        assert_ne!(first.digest(), windowed.digest());
+    }
+
+    #[test]
     fn scope_window_admits_at_its_start_and_denies_at_its_end() {
-        use std::time::Duration;
+        use std::time::{Duration, SystemTime};
 
         let policy = Policy {
             window: Some(crate::policy::Window {
@@ -489,22 +526,21 @@ mod tests {
             ..ceilings(10, 100)
         };
         let at = |seconds: u64| SystemTime::UNIX_EPOCH + Duration::from_secs(seconds);
-        let wire = Operation::Wire(WireLimits::new(1, 1));
         assert!(matches!(
-            policy.authorize_at(wire, at(99)),
+            policy.authorize_window_at(at(99)),
             Err(Error::OutsideScopeWindow {
                 now_unix_seconds: 99
             })
         ));
-        assert!(policy.authorize_at(wire, at(100)).is_ok());
-        assert!(policy.authorize_at(wire, at(199)).is_ok());
+        assert!(policy.authorize_window_at(at(100)).is_ok());
+        assert!(policy.authorize_window_at(at(199)).is_ok());
         assert!(matches!(
-            policy.authorize_at(wire, at(200)),
+            policy.authorize_window_at(at(200)),
             Err(Error::OutsideScopeWindow {
                 now_unix_seconds: 200
             })
         ));
-        let error = policy.authorize_at(wire, at(99)).unwrap_err();
+        let error = policy.authorize_window_at(at(99)).unwrap_err();
         assert_eq!(error.classification().code.as_str(), "policy.scope_window");
         assert_eq!(error.classification().kind, Kind::Policy);
 
@@ -514,6 +550,22 @@ mod tests {
             Err(Error::OutsideScopeWindow { .. })
         ));
         assert!(ceilings(10, 100).authorize_window_at(before_epoch).is_ok());
+    }
+
+    #[test]
+    fn operation_authorization_stays_time_free_for_admitted_operations() {
+        let policy = Policy {
+            window: Some(crate::policy::Window {
+                not_before_unix_seconds: Some(100),
+                not_after_unix_seconds: Some(200),
+            }),
+            ..ceilings(10, 100)
+        };
+        assert!(
+            policy
+                .authorize(Operation::Wire(WireLimits::new(1, 1)))
+                .is_ok()
+        );
     }
 
     #[test]

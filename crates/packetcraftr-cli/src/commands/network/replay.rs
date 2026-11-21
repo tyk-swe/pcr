@@ -41,6 +41,7 @@ struct ReplayRun {
     client: crate::system::Client,
     request: Request<io::BufReader<std::fs::File>>,
     filtered: bool,
+    plan: Option<crate::system::PlanSummary>,
 }
 
 use crate::output::contract::PublishedType;
@@ -103,7 +104,13 @@ pub(super) fn run(
         client,
         request,
         filtered,
+        plan,
     } = prepare(invocation, &arguments)?;
+    if let Some(plan) = &plan
+        && crate::system::enforce_plan_gate(invocation, &arguments.gate, "replay", plan)?
+    {
+        return Ok(());
+    }
     match format {
         Format::Text => replay_text(
             invocation,
@@ -175,7 +182,7 @@ fn prepare(
             interface,
         )?);
     }
-    let routing = Routing::new(rules, fallback)?;
+    let routing = Routing::new(rules, fallback.clone())?;
     policy.validate().map_err(CliError::classified)?;
     let limits = packetcraftr::replay::Limits::from_policy(
         &policy,
@@ -204,12 +211,112 @@ fn prepare(
         },
     )?;
     let filtered = filter.is_some();
+    let mut reader = reader;
+    let plan = if arguments.gate.plan_only || arguments.gate.plan_digest.is_some() {
+        Some(replay_plan_summary(
+            arguments,
+            &policy,
+            &timing,
+            &fallback,
+            &mut reader,
+        )?)
+    } else {
+        None
+    };
     let mut request = Request::new(Source::seekable(reader), routing, options);
     request.filter = filter;
     Ok(ReplayRun {
         client: crate::system::client(invocation, registry, policy, crate::system::Runtime::Client),
         request,
         filtered,
+        plan,
+    })
+}
+
+fn replay_plan_summary(
+    arguments: &Args,
+    policy: &packetcraftr::policy::Policy,
+    timing: &packetcraftr::replay::Timing,
+    fallback: &Option<route::Interface>,
+    reader: &mut capture::Reader<io::BufReader<std::fs::File>>,
+) -> Result<crate::system::PlanSummary, CliError> {
+    use sha2::{Digest, Sha256};
+
+    let policy_digest = policy.digest();
+    let timing_line = match timing {
+        packetcraftr::replay::Timing::Original => "original".to_owned(),
+        packetcraftr::replay::Timing::Scaled(value) => format!("scaled:{}", value.to_bits()),
+        packetcraftr::replay::Timing::FixedRate(value) => {
+            format!("fixed_rate:{}", value.to_bits())
+        }
+        packetcraftr::replay::Timing::BitRate(value) => format!("bit_rate:{value}"),
+        packetcraftr::replay::Timing::Immediate => "immediate".to_owned(),
+        other => format!("{other:?}"),
+    };
+    let fallback_line = match fallback {
+        None => "-".to_owned(),
+        Some(route::Interface::Name(name)) => format!("name:{name}"),
+        Some(route::Interface::Index(index)) => format!("index:{index}"),
+        Some(route::Interface::Id(id)) => format!("id:{}#{}", id.name, id.index),
+    };
+    let mut hasher = Sha256::new();
+    hasher.update(
+        format!(
+            "packetcraftr.replay-plan/v1\npolicy={policy_digest}\nrepeat={}\ninter_pass_delay_ms={}\nlink_mode={:?}\ntiming={timing_line}\nmax_gap_ms={}\nallow_permissive_live={}\nfilter={}\nfallback={fallback_line}\ninterface_maps={}\nfilter_maps={}\n",
+            arguments.repeat,
+            arguments.inter_pass_delay_ms,
+            arguments.link_mode,
+            arguments
+                .max_gap_ms
+                .map_or_else(|| "-".to_owned(), |value| value.to_string()),
+            arguments.allow_permissive_live,
+            arguments.filter.as_deref().unwrap_or("-"),
+            arguments.interface_maps.join(","),
+            arguments.filter_maps.join(","),
+        )
+        .as_bytes(),
+    );
+    let mut frames: u64 = 0;
+    let mut wire_bytes: u64 = 0;
+    while let Some(frame) = reader.next_exact_frame().map_err(CliError::classified)? {
+        let timestamp = match frame.timestamp {
+            None => "-".to_owned(),
+            Some(value) => match value.duration_since(std::time::SystemTime::UNIX_EPOCH) {
+                Ok(elapsed) => format!("+{}.{:09}", elapsed.as_secs(), elapsed.subsec_nanos()),
+                Err(error) => {
+                    let elapsed = error.duration();
+                    format!("-{}.{:09}", elapsed.as_secs(), elapsed.subsec_nanos())
+                }
+            },
+        };
+        hasher.update(
+            format!(
+                "frame ts={timestamp} link={} interface={} captured={} original={}\n",
+                frame.link_type,
+                frame
+                    .interface
+                    .map_or_else(|| "-".to_owned(), |value| value.to_string()),
+                frame.captured_length(),
+                frame.original_length(),
+            )
+            .as_bytes(),
+        );
+        let length = u64::try_from(frame.bytes().len()).unwrap_or(u64::MAX);
+        hasher.update(length.to_be_bytes());
+        hasher.update(frame.bytes());
+        frames += 1;
+        wire_bytes = wire_bytes
+            .checked_add(length)
+            .ok_or_else(|| CliError::new(Kind::Internal, "plan wire bytes overflowed"))?;
+    }
+    reader.rewind().map_err(CliError::classified)?;
+    let repeat = u64::from(arguments.repeat);
+    Ok(crate::system::PlanSummary {
+        digest: packetcraftr_core::field::hex::compact_hex(&hasher.finalize()),
+        packets: frames.saturating_mul(repeat),
+        wire_bytes: wire_bytes.saturating_mul(repeat),
+        destination: None,
+        policy_digest,
     })
 }
 

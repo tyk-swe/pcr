@@ -90,6 +90,19 @@ fn load_scope(path: &str) -> Result<packetcraftr::policy::Scope, String> {
 }
 
 #[derive(Clone, Debug, Args)]
+pub(crate) struct PlanGateArgs {
+    /// Print the prepared live plan and its digest without sending. Text
+    /// output only; hostname resolution for an explicit destination may
+    /// still run during preparation.
+    #[arg(long, conflicts_with = "plan_digest")]
+    pub(crate) plan_only: bool,
+    /// Digest printed by a --plan-only run of the same command. The live
+    /// run refuses to send unless its prepared plan reproduces this digest.
+    #[arg(long, value_name = "HEX")]
+    pub(crate) plan_digest: Option<String>,
+}
+
+#[derive(Clone, Debug, Args)]
 pub(crate) struct TrafficBudgetArgs {
     /// Maximum packets authorized for one operation.
     #[arg(

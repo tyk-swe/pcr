@@ -5,6 +5,7 @@ use std::fmt;
 use std::net::IpAddr;
 use std::str::FromStr;
 
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
@@ -166,6 +167,54 @@ impl FromStr for DestinationConstraint {
                 Ok(Self::Network(network))
             }
         }
+    }
+}
+
+impl Policy {
+    /// A canonical digest of every admission-relevant field, stable across
+    /// destination-constraint order. Plans and engagement records bind this
+    /// digest so the exact Policy an operation ran under can be named later
+    /// without re-serializing CLI flags.
+    #[must_use]
+    pub fn digest(&self) -> String {
+        fn sorted(constraints: &[DestinationConstraint]) -> String {
+            let mut values: Vec<String> = constraints.iter().map(ToString::to_string).collect();
+            values.sort();
+            values.join(",")
+        }
+        let groups = self
+            .required_destination_groups
+            .iter()
+            .map(|group| sorted(group))
+            .collect::<Vec<_>>()
+            .join(";");
+        let window = match self.window {
+            None => "-".to_owned(),
+            Some(window) => format!(
+                "{}..{}",
+                window
+                    .not_before_unix_seconds
+                    .map_or_else(|| "-".to_owned(), |value| value.to_string()),
+                window
+                    .not_after_unix_seconds
+                    .map_or_else(|| "-".to_owned(), |value| value.to_string()),
+            ),
+        };
+        let canonical = format!(
+            "packetcraftr.policy/v1\npublic={}\nhostname={}\npermissive={}\nspoofing={}\nallowed={}\ndenied={}\ngroups={}\nmax_packets={}\nmax_bytes={}\nmax_resolved={}\nwindow={}\n",
+            self.allow_public_destinations,
+            self.allow_hostname_resolution,
+            self.allow_permissive_packets,
+            self.allow_source_spoofing,
+            sorted(&self.allowed_destinations),
+            sorted(&self.denied_destinations),
+            groups,
+            self.max_packets_per_operation,
+            self.max_bytes_per_operation,
+            self.max_resolved_addresses,
+            window,
+        );
+        packetcraftr_core::field::hex::compact_hex(&Sha256::digest(canonical.as_bytes()))
     }
 }
 

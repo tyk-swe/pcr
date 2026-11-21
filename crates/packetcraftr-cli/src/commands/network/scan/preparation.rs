@@ -90,6 +90,8 @@ pub(super) fn prepare(
         route,
         limits,
         policy,
+        gate,
+        preview,
     } = arguments;
 
     if let Some(preset) = timing {
@@ -128,8 +130,59 @@ pub(super) fn prepare(
     let targets = ingested.targets;
     let origins = ingested.origins;
 
-    if list {
-        validate_list_options(list, discovery, &reverse_dns, traceroute)?;
+    if preview && !list && !gate.plan_only {
+        return Err(CliError::new(
+            Kind::Usage,
+            "--preview sends no probe; combine it with --list or --plan-only",
+        ));
+    }
+    let gate_active = list || gate.plan_only || gate.plan_digest.is_some() || preview;
+    let plan = if gate_active {
+        let summary = scan_plan_summary(
+            invocation,
+            ScanPlanInputs {
+                policy: &policy,
+                targets: &targets,
+                transports: &transports,
+                ports: &ports,
+                exclude_ports: &exclude_ports,
+                ip_protocols: &ip_protocols,
+                exclude_ip_protocols: &exclude_ip_protocols,
+                max_ports,
+                connect,
+                method,
+                tcp_scan: &tcp_scan,
+                sctp_scan,
+                family,
+                attempts,
+                rate,
+                timeout: &timeout,
+                max_in_flight,
+                shuffle_seed,
+                discovery,
+                reverse_dns: &reverse_dns,
+                reverse_dns_port,
+                traceroute,
+                udp_payload_hex: &udp_payload_hex,
+                udp_payload_file: &udp_payload_file,
+                udp_profiles: &udp_profiles,
+                curated_udp_payloads,
+            },
+        )?;
+        if gate.plan_digest.is_some() {
+            let check = crate::command_options::PlanGateArgs {
+                plan_only: false,
+                plan_digest: gate.plan_digest.clone(),
+            };
+            crate::system::enforce_plan_gate(invocation, &check, "scan", &summary)?;
+        }
+        Some(summary)
+    } else {
+        None
+    };
+
+    if list || gate.plan_only {
+        validate_list_options(true, discovery, &reverse_dns, traceroute)?;
 
         let diagnostic = !tcp_scan.is_syn();
         if diagnostic && requested == method::Requested::Connect {
@@ -204,6 +257,12 @@ pub(super) fn prepare(
             max_duration: duration.max_duration(),
             shuffle_seed,
             policy,
+            plan,
+            preview: preview.then_some(list::PreviewInputs {
+                attempts,
+                rate,
+                timeout: timeout.timeout(),
+            }),
         }));
     }
 
@@ -422,6 +481,137 @@ fn publication_plan(
                 }),
         ),
     }
+}
+
+struct ScanPlanInputs<'a> {
+    policy: &'a crate::command_options::HostnamePolicyArgs,
+    targets: &'a packetcraftr::target::Selection,
+    transports: &'a [Transport],
+    ports: &'a [arguments::PortTerm],
+    exclude_ports: &'a [arguments::PortTerm],
+    ip_protocols: &'a [arguments::IpProtocolTerm],
+    exclude_ip_protocols: &'a [arguments::IpProtocolTerm],
+    max_ports: usize,
+    connect: bool,
+    method: arguments::Method,
+    tcp_scan: &'a packetcraftr::scan::TcpScan,
+    sctp_scan: packetcraftr::scan::SctpScan,
+    family: crate::command_options::AddressFamily,
+    attempts: u32,
+    rate: Option<u32>,
+    timeout: &'a crate::command_options::TimeoutArgs,
+    max_in_flight: usize,
+    shuffle_seed: Option<u64>,
+    discovery: Option<arguments::Discovery>,
+    reverse_dns: &'a Option<String>,
+    reverse_dns_port: u16,
+    traceroute: bool,
+    udp_payload_hex: &'a Option<String>,
+    udp_payload_file: &'a Option<std::path::PathBuf>,
+    udp_profiles: &'a Option<std::path::PathBuf>,
+    curated_udp_payloads: bool,
+}
+
+fn scan_plan_summary(
+    invocation: &crate::invocation::Invocation,
+    inputs: ScanPlanInputs<'_>,
+) -> Result<crate::system::PlanSummary, CliError> {
+    use sha2::{Digest, Sha256};
+
+    if inputs
+        .udp_payload_file
+        .as_deref()
+        .is_some_and(|path| path == Path::new("-"))
+        || inputs
+            .udp_profiles
+            .as_deref()
+            .is_some_and(|path| path == Path::new("-"))
+    {
+        return Err(CliError::new(
+            Kind::Usage,
+            "the scan plan gate cannot bind stdin payload inputs; use files for --udp-payload-file and --udp-profiles",
+        ));
+    }
+    let policy = inputs.policy.clone().into_policy();
+    let policy_digest = policy.digest();
+    let selected = EndpointRequest {
+        transports: inputs.transports.to_vec(),
+        ports: inputs.ports.to_vec(),
+        exclude_ports: inputs.exclude_ports.to_vec(),
+        ip_protocols: inputs.ip_protocols.to_vec(),
+        exclude_ip_protocols: inputs.exclude_ip_protocols.to_vec(),
+        max_ports: inputs.max_ports,
+    }
+    .select_if_requested()?;
+    let endpoints: Vec<String> = selected
+        .as_ref()
+        .map(|selected| selected.endpoints.iter().map(ToString::to_string).collect())
+        .unwrap_or_default();
+    let mut hasher = Sha256::new();
+    hasher.update(
+        format!(
+            "packetcraftr.scan-plan/v1\npolicy={policy_digest}\nconnect={}\nmethod={:?}\ntcp_scan={:?}\nsctp_scan={:?}\nfamily={:?}\nattempts={}\nrate={}\ntimeout_ms={}\nmax_in_flight={}\nshuffle_seed={}\ndiscovery={:?}\nreverse_dns={}\nreverse_dns_port={}\ntraceroute={}\ncurated_udp_payloads={}\n",
+            inputs.connect,
+            inputs.method,
+            inputs.tcp_scan,
+            inputs.sctp_scan,
+            inputs.family,
+            inputs.attempts,
+            inputs
+                .rate
+                .map_or_else(|| "-".to_owned(), |value| value.to_string()),
+            inputs.timeout.timeout().as_millis(),
+            inputs.max_in_flight,
+            inputs
+                .shuffle_seed
+                .map_or_else(|| "-".to_owned(), |value| value.to_string()),
+            inputs.discovery,
+            inputs.reverse_dns.as_deref().unwrap_or("-"),
+            inputs.reverse_dns_port,
+            inputs.traceroute,
+            inputs.curated_udp_payloads,
+        )
+        .as_bytes(),
+    );
+    for spec in &inputs.targets.include {
+        hasher.update(format!("include={spec}\n").as_bytes());
+    }
+    for network in &inputs.targets.exclude {
+        hasher.update(format!("exclude={network}\n").as_bytes());
+    }
+    for endpoint in &endpoints {
+        hasher.update(format!("endpoint={endpoint}\n").as_bytes());
+    }
+    if inputs.udp_payload_hex.is_some() || inputs.udp_payload_file.is_some() {
+        let payload = super::inputs::read_udp_payload(
+            invocation,
+            true,
+            inputs.udp_payload_hex.as_deref(),
+            inputs.udp_payload_file.as_deref(),
+        )?;
+        hasher.update((payload.len() as u64).to_be_bytes());
+        hasher.update(&payload);
+    }
+    if let Some(profiles) = inputs.udp_profiles {
+        let bytes = crate::input::read_document(
+            &invocation.control,
+            profiles,
+            1024 * 1024,
+            crate::input::InputKind::UdpProfiles,
+        )?;
+        hasher.update((bytes.len() as u64).to_be_bytes());
+        hasher.update(&bytes);
+    }
+    let packets = (inputs.targets.include.len() as u64)
+        .saturating_mul(endpoints.len() as u64)
+        .saturating_mul(u64::from(inputs.attempts));
+    Ok(crate::system::PlanSummary {
+        digest: packetcraftr_core::field::hex::compact_hex(&hasher.finalize()),
+        packets,
+        wire_bytes: 0,
+        destination: None,
+        policy_digest,
+    })
 }
 
 /// Raw scans need packet capture and transmission in the requested link mode.

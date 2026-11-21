@@ -81,6 +81,7 @@ fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<()
         max_responses,
         max_unmatched_frames,
         limits,
+        gate,
     } = arguments;
     let limits = limits.into_limits();
     let draft = Draft {
@@ -98,7 +99,14 @@ fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<()
             },
         },
     };
-    let Prepared { request, client } = prepare_live(invocation, send, template, draft)?;
+    let Prepared {
+        request,
+        client,
+        plan,
+    } = prepare_live(invocation, send, template, draft)?;
+    if crate::system::enforce_plan_gate(invocation, &gate, "exchange", &plan)? {
+        return Ok(());
+    }
     match format {
         Format::Ndjson => {
             let emit = crate::commands::execution::emitter(invocation, rendering::emit_event);
@@ -153,6 +161,17 @@ struct Draft {
 }
 impl LiveDraft for Draft {
     type Parameters = packetcraftr::exchange::Parameters;
+    const COMMAND: &'static str = "exchange";
+    fn plan_lines(&self, max_template_packets: usize) -> String {
+        let stop = match self.stop {
+            packetcraftr::exchange::StopCondition::Window => "window",
+            packetcraftr::exchange::StopCondition::AllAnswered => "all_answered",
+        };
+        format!(
+            "timeout_ms={}\nstop={stop}\nmax_template_packets={max_template_packets}\n",
+            self.timeout.as_millis(),
+        )
+    }
     fn validate(self, max_template_packets: usize) -> Result<Self::Parameters, CliError> {
         Self::Parameters::new(
             self.timeout,

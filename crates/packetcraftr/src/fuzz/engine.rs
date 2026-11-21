@@ -30,6 +30,11 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
     where
         S: Sink<Event, Ack = ()>,
     {
+        self.policy
+            .authorize_window_at(self.wall_now())
+            .map_err(|source| {
+                Error::Authorization(packetcraftr_core::error::BoundaryError::from_error(source))
+            })?;
         let operation =
             crate::engine::operation::Operation::new(self, request.campaign.limits.max_duration);
         let setup = WorkflowSetup::with_authorizer(self, &operation, self.policy.as_ref());

@@ -15,7 +15,144 @@ use crate::input::read_recipe;
 
 pub(crate) trait LiveDraft {
     type Parameters: LiveParameters;
+    const COMMAND: &'static str;
+    fn plan_lines(&self, max_template_packets: usize) -> String;
     fn validate(self, max_template_packets: usize) -> Result<Self::Parameters, CliError>;
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct PlanSummary {
+    pub(crate) digest: String,
+    pub(crate) packets: u64,
+    pub(crate) wire_bytes: u64,
+    pub(crate) destination: Option<IpAddr>,
+    pub(crate) policy_digest: String,
+}
+
+struct PlanInputs<'a> {
+    command: &'a str,
+    template: &'a core::template::Template,
+    registry: &'a Arc<core::registry::Registry>,
+    build: &'a core::build::Options,
+    policy: &'a packetcraftr::policy::Policy,
+    destination: Option<IpAddr>,
+    allow_permissive_live: bool,
+    plan_lines: &'a str,
+    total_packets: u64,
+    max_template_packets: usize,
+}
+
+fn plan_summary(inputs: PlanInputs<'_>) -> Result<PlanSummary, CliError> {
+    use sha2::{Digest, Sha256};
+
+    let PlanInputs {
+        command,
+        template,
+        registry,
+        build,
+        policy,
+        destination,
+        allow_permissive_live,
+        plan_lines,
+        total_packets,
+        max_template_packets,
+    } = inputs;
+    let policy_digest = policy.digest();
+    let mut hasher = Sha256::new();
+    hasher.update(
+        format!(
+            "packetcraftr.live-plan/v1\ncommand={command}\npolicy={policy_digest}\ndestination={}\nallow_permissive_live={allow_permissive_live}\nbuild_mode={:?}\n{plan_lines}packets={total_packets}\n",
+            destination.map_or_else(|| "-".to_owned(), |value| value.to_string()),
+            build.mode,
+        )
+        .as_bytes(),
+    );
+    let builder = core::build::Builder::new(Arc::clone(registry));
+    let mut pass_packets: u64 = 0;
+    let mut pass_bytes: u64 = 0;
+    for packet in template
+        .expand(max_template_packets)
+        .map_err(CliError::classified)?
+    {
+        let packet = packet.map_err(CliError::classified)?;
+        let built = builder
+            .build(packet, core::codec::Addresses::default(), build.clone())
+            .map_err(CliError::classified)?;
+        let length = u64::try_from(built.bytes.len()).unwrap_or(u64::MAX);
+        hasher.update(length.to_be_bytes());
+        hasher.update(&built.bytes);
+        pass_packets += 1;
+        pass_bytes = pass_bytes.checked_add(length).ok_or_else(|| {
+            CliError::new(core::error::Kind::Internal, "plan wire bytes overflowed")
+        })?;
+    }
+    let passes = total_packets.checked_div(pass_packets).unwrap_or(0);
+    let wire_bytes = pass_bytes
+        .checked_mul(passes)
+        .ok_or_else(|| CliError::new(core::error::Kind::Internal, "plan wire bytes overflowed"))?;
+    Ok(PlanSummary {
+        digest: core::field::hex::compact_hex(&hasher.finalize()),
+        packets: total_packets,
+        wire_bytes,
+        destination,
+        policy_digest,
+    })
+}
+
+/// Prints the plan for `--plan-only` (returning `true`) or refuses a live
+/// run whose prepared plan does not reproduce `--plan-digest`.
+pub(crate) fn enforce_plan_gate(
+    invocation: &crate::invocation::Invocation,
+    gate: &crate::command_options::PlanGateArgs,
+    command: &str,
+    plan: &PlanSummary,
+) -> Result<bool, CliError> {
+    if gate.plan_only {
+        if invocation.format != crate::output::contract::Format::Text {
+            return Err(CliError::new(
+                core::error::Kind::Usage,
+                format!(
+                    "--plan-only prints text only, not --output {}",
+                    invocation.format
+                ),
+            ));
+        }
+        crate::terminal::emit_stdout_document(
+            invocation,
+            &format!(
+                "command={command} plan_digest={} packets={} wire_bytes={} destination={} policy_digest={}\n",
+                plan.digest,
+                plan.packets,
+                plan.wire_bytes,
+                plan.destination
+                    .map_or_else(|| "-".to_owned(), |value| value.to_string()),
+                plan.policy_digest,
+            ),
+        )?;
+        return Ok(true);
+    }
+    if let Some(presented) = &gate.plan_digest {
+        let presented = presented.trim();
+        let well_formed = presented.len() == 64
+            && presented
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte));
+        if !well_formed || presented != plan.digest {
+            return Err(CliError::from_classification(
+                packetcraftr_core::error::Classification::new(
+                    core::error::Code::PolicyPlanDigest,
+                    core::error::Kind::Policy,
+                    Some("rerun with --plan-only and present the digest it prints"),
+                ),
+                format!(
+                    "plan digest mismatch: prepared plan is {}, presented {presented}",
+                    plan.digest
+                ),
+                Vec::new(),
+            ));
+        }
+    }
+    Ok(false)
 }
 
 pub(crate) trait LiveParameters {
@@ -64,6 +201,7 @@ impl LiveParameters for packetcraftr::exchange::Parameters {
 pub(crate) struct Prepared<R> {
     pub(crate) request: R,
     pub(crate) client: Client,
+    pub(crate) plan: PlanSummary,
 }
 
 pub(crate) fn prepare_live<D: LiveDraft>(
@@ -74,6 +212,7 @@ pub(crate) fn prepare_live<D: LiveDraft>(
 ) -> Result<Prepared<<D::Parameters as LiveParameters>::Request>, CliError> {
     let max_template_packets = template.max_template_packets;
     let axes = template.parse()?;
+    let draft_lines = draft.plan_lines(max_template_packets);
     // Options fail before recipe parsing can trigger hostname work.
     let parameters = draft.validate(max_template_packets)?;
     let registry = core::protocol::builtin::registry();
@@ -98,23 +237,37 @@ pub(crate) fn prepare_live<D: LiveDraft>(
         max_template_packets,
         &policy,
     )?;
-    let plan = route::options(&send.route.route)?;
+    let route_plan = route::options(&send.route.route)?;
     let destination = route::destination(invocation, send.route.destination, &first, &policy)?;
+    let build = core::build::Options {
+        mode: send.mode.into(),
+        ..core::build::Options::default()
+    };
+    let plan = plan_summary(PlanInputs {
+        command: D::COMMAND,
+        template: &template,
+        registry: &registry,
+        build: &build,
+        policy: &policy,
+        destination,
+        allow_permissive_live: send.allow_permissive_live,
+        plan_lines: &draft_lines,
+        total_packets: count,
+        max_template_packets,
+    })?;
     let request = parameters.into_request(
         template,
         packetcraftr::send::Options {
             destination,
-            plan,
-            build: core::build::Options {
-                mode: send.mode.into(),
-                ..core::build::Options::default()
-            },
+            plan: route_plan,
+            build,
             allow_permissive_live: send.allow_permissive_live,
         },
     );
     Ok(Prepared {
         request,
         client: client(invocation, registry, policy, Runtime::Client),
+        plan,
     })
 }
 

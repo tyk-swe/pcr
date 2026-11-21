@@ -275,6 +275,9 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
                 presented,
             });
         }
+        self.policy
+            .authorize_window_at(self.wall_now())
+            .map_err(|source| Error::Authorization(BoundaryError::from_error(source)))?;
         plan::authorize(&self.policy, &request, &prepared)?;
 
         let operation = Operation::new(self, request.max_duration);

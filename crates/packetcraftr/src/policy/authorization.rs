@@ -222,12 +222,24 @@ impl Policy {
         resolver: &R,
         deadline: &packetcraftr_core::budget::Deadline,
     ) -> Result<Authorized, ResolutionError> {
+        use packetcraftr_core::clock::{Clock, SystemClock};
+
+        self.resolve_target_at(target, resolver, deadline, SystemClock.wall_now())
+    }
+
+    pub fn resolve_target_at<R: Resolver + ?Sized>(
+        &self,
+        target: &Target,
+        resolver: &R,
+        deadline: &packetcraftr_core::budget::Deadline,
+        now: SystemTime,
+    ) -> Result<Authorized, ResolutionError> {
         deadline
             .live_remaining()
             .map_err(packetcraftr_core::error::BoundaryError::from_error)
             .map_err(crate::target::Error::from)?;
         self.validate()?;
-        self.authorize_window()?;
+        self.authorize_window_at(now)?;
         let result = (|| {
             let selected = match target {
                 Target::Address(address) => vec![crate::target::SelectedAddress::new(*address)],

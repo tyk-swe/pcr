@@ -10,6 +10,7 @@ pub(in crate::commands) mod http;
 pub(in crate::commands) mod http2;
 pub(in crate::commands) mod http3;
 pub(in crate::commands) mod inventory;
+pub(in crate::commands) mod journal;
 pub(in crate::commands) mod quic;
 pub(in crate::commands) mod report;
 pub(in crate::commands) mod scan_diff;

@@ -173,7 +173,8 @@ fn admit(
     let endpoints = [endpoint];
     let operation =
         SocketOperation::new(&endpoints, limits).map_err(|e| Error::Invalid(e.to_string()))?;
-    policy.authorize_at(Operation::Socket(operation), now)?;
+    policy.authorize_window_at(now)?;
+    policy.authorize(Operation::Socket(operation))?;
     Ok(())
 }
 /// A saturated count fails policy ceilings closed.

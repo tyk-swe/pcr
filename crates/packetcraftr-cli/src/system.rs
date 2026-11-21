@@ -9,5 +9,6 @@ mod route;
 pub(crate) use client::{Client, Runtime, client, runtime};
 pub(crate) use interface::{interface_routes, interfaces, resolve, timestamp_types};
 pub(crate) use preparation::{
-    LiveDraft, Prepared, Workflow, collection, prepare_live, prepare_plan, prepare_workflow,
+    LiveDraft, PlanSummary, Prepared, Workflow, collection, enforce_plan_gate, prepare_live,
+    prepare_plan, prepare_workflow,
 };

@@ -306,6 +306,12 @@ commands! {
     /// Finalize a provisional Campaign from a Responder reception log.
     #[command(after_long_help = network::differential::join::AFTER_LONG_HELP)]
     DifferentialJoin(network::differential::join::Args) = "differential-join" => ("network", "differential-join", 41),
+    /// Run a DNS differential Campaign against a cooperating DNS Responder.
+    #[command(after_long_help = network::differential::dns_campaign::AFTER_LONG_HELP)]
+    DnsDifferential(network::differential::dns_campaign::DnsDifferential) => ("network", "dns-differential", 56),
+    /// Run the cooperating DNS Responder for a DNS differential Campaign.
+    #[command(after_long_help = network::differential::dns_responder::AFTER_LONG_HELP)]
+    DnsDifferentialResponder(network::differential::dns_responder::DnsResponder) => ("network", "dns-differential-responder", 57),
     /// Generate shell completions and man pages under a directory.
     #[command(after_long_help = "Writes completions for Bash, Elvish, Fish, PowerShell, and Zsh, and man pages for all grouped paths. Requires a writable directory.\n\nExample:\n  packetcraftr reference documentation --directory ./cli-docs")]
     Documentation(reference::documentation::Args) => ("reference", "documentation", 30),

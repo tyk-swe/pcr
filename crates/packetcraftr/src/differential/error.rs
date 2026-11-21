@@ -50,6 +50,8 @@ pub enum Error {
         #[source]
         source: packetcraftr_core::error::BoundaryError,
     },
+    #[error(transparent)]
+    Dns(#[from] crate::dns::Error),
 }
 
 packetcraftr_core::deadline_error_conversions!(Error);
@@ -74,6 +76,7 @@ impl Classified for Error {
                 Some("run the plan-only command first and present its digest to the live run"),
             ),
             Self::Authorization(error) | Self::Build(error) => error.classification(),
+            Self::Dns(error) => error.classification(),
             Self::Execution { source, .. } | Self::Output { source } => source.classification(),
             Self::IncompleteEvidence { .. } => Classification::new(
                 packetcraftr_core::error::Code::CaptureDifferentialIncomplete,

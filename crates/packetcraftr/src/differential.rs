@@ -6,6 +6,7 @@
 
 pub mod canary;
 pub mod catalog;
+pub mod dns;
 
 mod engine;
 mod error;

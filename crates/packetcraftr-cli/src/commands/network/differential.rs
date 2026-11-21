@@ -3,6 +3,8 @@
 
 pub(in crate::commands) mod arguments;
 mod campaign;
+pub(in crate::commands) mod dns_campaign;
+pub(in crate::commands) mod dns_responder;
 pub(in crate::commands) mod join;
 pub(in crate::commands) mod output;
 mod rendering;

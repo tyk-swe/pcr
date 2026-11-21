@@ -8,6 +8,8 @@ use std::time::SystemTime;
 
 use crate::frame::Frame;
 
+const MIN_TRUNCATED_PREFIX_BYTES: usize = 20;
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Report {
     pub operator_frames: u64,
@@ -72,7 +74,7 @@ fn prefix_pairs(
 ) -> Vec<(usize, usize)> {
     let mut distinct: BTreeMap<&[u8], DistinctFrames> = BTreeMap::new();
     for (index, frame) in operator.iter().enumerate() {
-        if !operator_matched[index] && !frame.bytes().is_empty() {
+        if !operator_matched[index] && frame.bytes().len() >= MIN_TRUNCATED_PREFIX_BYTES {
             distinct
                 .entry(frame.bytes())
                 .or_default()
@@ -81,7 +83,7 @@ fn prefix_pairs(
         }
     }
     for (index, frame) in sensor.iter().enumerate() {
-        if !sensor_matched[index] && !frame.bytes().is_empty() {
+        if !sensor_matched[index] && frame.bytes().len() >= MIN_TRUNCATED_PREFIX_BYTES {
             distinct
                 .entry(frame.bytes())
                 .or_default()
@@ -225,14 +227,14 @@ mod tests {
     #[test]
     fn exact_truncated_and_unmatched_frames_are_separate() {
         let operator = vec![
-            frame(b"abcdef", 1_000, LinkType::ETHERNET),
-            frame(b"ghijkl", 2_000, LinkType::ETHERNET),
-            frame(b"mnopqr", 3_000, LinkType::ETHERNET),
+            frame(b"abcdefghijklmnopqrstuvwx", 1_000, LinkType::ETHERNET),
+            frame(b"ghijklmnopqrstuvwxyzabcd", 2_000, LinkType::ETHERNET),
+            frame(b"mnopqrstuvwxyzabcdefghij", 3_000, LinkType::ETHERNET),
         ];
         let sensor = vec![
-            frame(b"abcdef", 1_010, LinkType::RAW),
-            frame(b"ghij", 2_020, LinkType::ETHERNET),
-            frame(b"stuvwx", 9_000, LinkType::ETHERNET),
+            frame(b"abcdefghijklmnopqrstuvwx", 1_010, LinkType::RAW),
+            frame(b"ghijklmnopqrstuvwxyz", 2_020, LinkType::ETHERNET),
+            frame(b"stuvwxyzabcdefghijklmnop", 9_000, LinkType::ETHERNET),
         ];
         let report = compare(&operator, &sensor);
         assert_eq!(report.exact_matches, 1);
@@ -261,14 +263,14 @@ mod tests {
     #[test]
     fn prefix_matching_is_symmetric_and_maximum() {
         let operator = vec![
-            frame(b"abcdef", 100, LinkType::ETHERNET),
-            frame(b"abcxyz", 200, LinkType::ETHERNET),
-            frame(b"short", 300, LinkType::ETHERNET),
+            frame(b"abcdefghijklmnopqrstuvwx", 100, LinkType::ETHERNET),
+            frame(b"abcdefghijklmnopqrstwxyz", 200, LinkType::ETHERNET),
+            frame(b"shortshortshortshort", 300, LinkType::ETHERNET),
         ];
         let sensor = vec![
-            frame(b"abc", 110, LinkType::ETHERNET),
-            frame(b"abcd", 210, LinkType::ETHERNET),
-            frame(b"shorter", 310, LinkType::ETHERNET),
+            frame(b"abcdefghijklmnopqrst", 110, LinkType::ETHERNET),
+            frame(b"abcdefghijklmnopqrstu", 210, LinkType::ETHERNET),
+            frame(b"shortshortshortshorter", 310, LinkType::ETHERNET),
         ];
         let report = compare(&operator, &sensor);
         assert_eq!(report.truncated_matches, 3);
@@ -279,8 +281,8 @@ mod tests {
     #[test]
     fn empty_frames_are_not_truncated_prefix_matches() {
         let operator = vec![
-            frame(b"abcdef", 100, LinkType::ETHERNET),
-            frame(b"ghijkl", 200, LinkType::ETHERNET),
+            frame(b"abcdefghijklmnopqrstuvwx", 100, LinkType::ETHERNET),
+            frame(b"ghijklmnopqrstuvwxyzabcd", 200, LinkType::ETHERNET),
         ];
         let sensor = vec![
             frame(b"", 110, LinkType::ETHERNET),
@@ -295,6 +297,31 @@ mod tests {
         let report = compare(&sensor, &operator);
         assert_eq!(report.truncated_matches, 0);
         assert_eq!(report.operator_only, 2);
+        assert_eq!(report.sensor_only, 2);
+        assert_eq!(report.visibility_percent(), Some(0.0));
+    }
+
+    #[test]
+    fn short_prefixes_are_not_truncated_matches() {
+        let operator = vec![
+            frame(&[b'a'; 24], 100, LinkType::ETHERNET),
+            frame(&[b'b'; 24], 200, LinkType::ETHERNET),
+        ];
+        let sensor = vec![
+            frame(b"a", 110, LinkType::ETHERNET),
+            frame(b"b", 210, LinkType::ETHERNET),
+            frame(&[b'a'; 19], 120, LinkType::ETHERNET),
+            frame(&[b'b'; 19], 220, LinkType::ETHERNET),
+        ];
+        let report = compare(&operator, &sensor);
+        assert_eq!(report.truncated_matches, 0);
+        assert_eq!(report.operator_only, 2);
+        assert_eq!(report.sensor_only, 4);
+        assert_eq!(report.visibility_percent(), Some(0.0));
+
+        let report = compare(&sensor, &operator);
+        assert_eq!(report.truncated_matches, 0);
+        assert_eq!(report.operator_only, 4);
         assert_eq!(report.sensor_only, 2);
         assert_eq!(report.visibility_percent(), Some(0.0));
     }

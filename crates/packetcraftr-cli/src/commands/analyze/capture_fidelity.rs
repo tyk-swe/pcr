@@ -13,7 +13,7 @@ use crate::errors::CliError;
 use crate::output::contract::Format;
 use crate::terminal::emit_stdout_document;
 
-pub(crate) const AFTER_LONG_HELP: &str = r"Measures how much of the operator capture a sensor capture can see. Frames pair first by exact bytes, then by strict prefix so snap-length truncation is counted separately from loss. Timestamp skew is reported only for paired frames and assumes the two capture clocks are comparable. This measures capture visibility, not forwarding or detection.
+pub(crate) const AFTER_LONG_HELP: &str = r"Measures how much of the operator capture a sensor capture can see. Frames pair first by exact bytes, then by strict prefix of at least 20 captured bytes so snap-length truncation is counted separately from loss without treating degenerate prefixes as visibility. Timestamp skew is reported only for paired frames and assumes the two capture clocks are comparable. This measures capture visibility, not forwarding or detection.
 
 Example:
   packetcraftr analyze capture-fidelity operator.pcapng sensor.pcapng";

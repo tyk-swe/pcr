@@ -339,6 +339,12 @@ commands! {
     /// Report ARP, DHCP and router-advertisement identity conflicts.
     #[command(after_long_help = analyze::first_hop::AFTER_LONG_HELP)]
     FirstHop(analyze::first_hop::FirstHop) => ("analyze", "first-hop", 52),
+    /// Show TLS metadata available to a defender without key logs.
+    #[command(after_long_help = analyze::defender_view::AFTER_LONG_HELP)]
+    DefenderView(analyze::defender_view::DefenderView) => ("analyze", "defender-view", 53),
+    /// Write a pseudonymized PCAPNG copy of a capture for sharing.
+    #[command(after_long_help = analyze::scrub::AFTER_LONG_HELP)]
+    Scrub(analyze::scrub::Scrub) => ("analyze", "scrub", 54),
 }
 
 /// Workflow placement and compact identifiers used in machine output.

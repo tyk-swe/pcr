@@ -5,6 +5,7 @@
 
 pub(in crate::commands) mod capture_diff;
 pub(in crate::commands) mod capture_fidelity;
+pub(in crate::commands) mod defender_view;
 pub(in crate::commands) mod dns;
 pub(in crate::commands) mod expert;
 pub(in crate::commands) mod first_hop;
@@ -19,6 +20,7 @@ pub(in crate::commands) mod quic;
 pub(in crate::commands) mod report;
 pub(in crate::commands) mod retest;
 pub(in crate::commands) mod scan_diff;
+pub(in crate::commands) mod scrub;
 pub(in crate::commands) mod security;
 pub(in crate::commands) mod stats;
 pub(in crate::commands) mod tls;

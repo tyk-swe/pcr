@@ -393,16 +393,22 @@ pub struct VantageRow {
 
 /// Classifies joined attempts by both Responder delivery and sensor-probe
 /// observation. A sensor observation only counts when its Variant, attempt
-/// sequence and exact payload digest match the attempt and its source tuple
-/// matches the Campaign source port and spoofed source when one was planned.
+/// sequence and exact payload digest match the attempt, its source tuple
+/// matches the Campaign source port and spoofed source when one was planned,
+/// and its destination matches the planned destination at the sensor.
 /// `Delivered` means the Responder answered; rewritten attempts are kept
 /// separate because the exact payload arrived under a different source tuple.
 #[must_use]
-pub fn three_vantage(aggregate: &Aggregate, sensor: &[SensorObservation]) -> Vec<VantageRow> {
+pub fn three_vantage(
+    aggregate: &Aggregate,
+    sensor: &[SensorObservation],
+    destination: SocketAddr,
+) -> Vec<VantageRow> {
     let seen: std::collections::HashSet<(u16, u32, &str)> = sensor
         .iter()
         .filter(|observation| {
-            observation.source.port() == aggregate.source_port
+            observation.destination == destination
+                && observation.source.port() == aggregate.source_port
                 && aggregate
                     .spoof_source
                     .is_none_or(|source| observation.source.ip() == std::net::IpAddr::V4(source))
@@ -599,15 +605,19 @@ mod tests {
             };
         let mut wrong_source_port = sensor(0, 1, digest.clone());
         wrong_source_port.source.set_port(40000);
+        let mut wrong_destination = sensor(0, 1, digest.clone());
+        wrong_destination.destination.set_port(40102);
         let rows = three_vantage(
             &aggregate,
             &[
                 sensor(0, 0, digest.clone()),
                 wrong_source_port,
+                wrong_destination,
                 sensor(0, 2, digest.clone()),
                 sensor(1, 5, digest.clone()),
                 sensor(0, 3, hex(&[0x22; 32])),
             ],
+            "198.51.100.20:40101".parse().unwrap(),
         );
         assert_eq!(rows[0].delivered_and_seen, 1);
         assert_eq!(rows[0].delivered_not_seen, 1);

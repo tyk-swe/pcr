@@ -3881,7 +3881,7 @@ fn tcp_vantage_counts_only_planned_tuples_and_attempts() {
         "--base-sequence".into(),
         "1000".into(),
         "--source".into(),
-        "192.0.2.10".into(),
+        "192.0.2.10:40000".into(),
         "--endpoint".into(),
         "198.51.100.20:443".into(),
         "--variants".into(),
@@ -3904,6 +3904,19 @@ fn tcp_vantage_counts_only_planned_tuples_and_attempts() {
         })
         .collect();
     let text = assert_success(&run(&unplanned), &unplanned);
+    assert!(text.contains("syn_observations=0"), "{text}");
+
+    let wrong_source_port: Vec<std::ffi::OsString> = planned
+        .iter()
+        .map(|arg| {
+            if arg == "192.0.2.10:40000" {
+                "192.0.2.10:40001".into()
+            } else {
+                arg.clone()
+            }
+        })
+        .collect();
+    let text = assert_success(&run(&wrong_source_port), &wrong_source_port);
     assert!(text.contains("syn_observations=0"), "{text}");
 }
 

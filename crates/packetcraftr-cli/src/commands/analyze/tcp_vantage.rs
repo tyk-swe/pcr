@@ -1,7 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::net::IpAddr;
 use std::path::PathBuf;
 
 use clap::Args;
@@ -21,7 +20,7 @@ use crate::terminal::emit_stdout_document;
 pub(crate) const AFTER_LONG_HELP: &str = r"Classify TCP SYN segments in a responder-side capture by the differential sequence Canary. Only SYNs matching the planned source, destination, variant range, and attempt range are counted. This is the capture-side spike harness from ADR 0011: it reports which planned attempts were seen on that wire and whether their TCP options changed, and it sends nothing. A sequence number is a correlation marker, not authentication. Attempt sequences use base + variant * 4096 + attempt.
 
 Example:
-  packetcraftr analyze tcp-vantage responder.pcapng --base-sequence 100000 --source 192.0.2.10 --endpoint 198.51.100.20:443 --variants 4 --repeats 3";
+  packetcraftr analyze tcp-vantage responder.pcapng --base-sequence 100000 --source 192.0.2.10:40000 --endpoint 198.51.100.20:443 --variants 4 --repeats 3";
 
 #[derive(Debug, Args)]
 pub(crate) struct TcpVantage {
@@ -30,9 +29,9 @@ pub(crate) struct TcpVantage {
     /// Sequence number of variant 0 attempt 0.
     #[arg(long)]
     base_sequence: u32,
-    /// Planned source IP for every counted SYN.
+    /// Planned source IP:PORT for every counted SYN.
     #[arg(long)]
-    source: IpAddr,
+    source: std::net::SocketAddr,
     /// Planned destination IP:PORT for every counted SYN.
     #[arg(long)]
     endpoint: std::net::SocketAddr,
@@ -83,7 +82,8 @@ impl Generate for TcpVantage {
                 .iter()
                 .rev()
                 .find_map(identity::network_endpoints);
-            if endpoints != Some((self.source, self.endpoint.ip()))
+            if endpoints != Some((self.source.ip(), self.endpoint.ip()))
+                || tcp.source_port != self.source.port()
                 || tcp.destination_port != self.endpoint.port()
             {
                 continue;

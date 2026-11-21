@@ -167,6 +167,23 @@ pub(super) fn prepare(
         );
         let udp_required = transports.contains(&Transport::Udp)
             || discovery_probes.contains(&arguments::DiscoveryProbe::Udp);
+        let prepared_discovery = if !list || plan_only_needs_build {
+            Some(
+                super::selection::DiscoveryRequest {
+                    mode: discovery,
+                    probes: discovery_probes.clone(),
+                    ports: discovery_ports.clone(),
+                    exclude_ports: exclude_ports.clone(),
+                    ip_protocols: discovery_ip_protocols.clone(),
+                    exclude_ip_protocols: exclude_ip_protocols.clone(),
+                    unresponsive: unresponsive_hosts,
+                    max_ports,
+                }
+                .prepare()?,
+            )
+        } else {
+            None
+        };
         let summary = scan_plan_summary(
             invocation,
             ScanPlanInputs {
@@ -198,6 +215,7 @@ pub(super) fn prepare(
                 curated_udp_payloads,
                 schedule_lines: &schedule_lines,
                 udp_required,
+                prepared_discovery: prepared_discovery.as_ref(),
                 max_targets,
             },
         )?;
@@ -206,7 +224,7 @@ pub(super) fn prepare(
                 plan_only: false,
                 plan_digest: gate.plan_digest.clone(),
             };
-            crate::system::enforce_plan_gate(invocation, &check, "scan", &summary)?;
+            crate::system::enforce_plan_gate(invocation, &check, "scan", Some(&summary))?;
         }
         Some(summary)
     } else {
@@ -280,6 +298,13 @@ pub(super) fn prepare(
                 "--sctp-scan other than init requires at least one SCTP port endpoint",
             ));
         }
+        let beacon_eligible = tcp_scan.flags() & 0x012 == 0x002
+            && selected.as_ref().is_some_and(|selected| {
+                selected
+                    .endpoints
+                    .iter()
+                    .any(|endpoint| matches!(endpoint, packetcraftr::probe::Endpoint::Tcp { .. }))
+            });
         return Ok(Planned::List(list::Request {
             selection: targets,
             origins,
@@ -296,6 +321,7 @@ pub(super) fn prepare(
                 rate,
                 timeout: timeout.timeout(),
                 portless_endpoints,
+                beacon_eligible,
             }),
         }));
     }
@@ -430,6 +456,10 @@ pub(super) fn prepare(
                     rate: built.request.probes_per_second,
                     timeout: built.request.timeout,
                     portless_endpoints: 0,
+                    beacon_eligible: built.request.tcp_scan.flags() & 0x012 == 0x002
+                        && built.request.endpoints.iter().any(|endpoint| {
+                            matches!(endpoint, packetcraftr::probe::Endpoint::Tcp { .. })
+                        }),
                 },
             )
         } else {
@@ -589,6 +619,7 @@ struct ScanPlanInputs<'a> {
     curated_udp_payloads: bool,
     schedule_lines: &'a str,
     udp_required: bool,
+    prepared_discovery: Option<&'a super::selection::PreparedDiscovery>,
     max_targets: usize,
 }
 
@@ -644,15 +675,49 @@ fn scan_plan_summary(
     }
     let policy = inputs.policy.clone().into_policy();
     let policy_digest = policy.digest();
-    let selected = EndpointRequest {
+    let mut endpoint_request = EndpointRequest {
         transports: inputs.transports.to_vec(),
         ports: inputs.ports.to_vec(),
         exclude_ports: inputs.exclude_ports.to_vec(),
         ip_protocols: inputs.ip_protocols.to_vec(),
         exclude_ip_protocols: inputs.exclude_ip_protocols.to_vec(),
         max_ports: inputs.max_ports,
-    }
-    .select_if_requested()?;
+    };
+    let scanning = match inputs.prepared_discovery {
+        Some(prepared) => {
+            if prepared.options.runs() {
+                endpoint_request.retain_scan_exclusions(&prepared.port_transports);
+            }
+            if inputs.transports != [Transport::Ip]
+                && prepared.options.runs()
+                && prepared
+                    .options
+                    .probes
+                    .iter()
+                    .any(|probe| matches!(probe, packetcraftr::probe::Endpoint::Ip { .. }))
+            {
+                endpoint_request.clear_ip_exclusions();
+            }
+            prepared.options.mode != packetcraftr::scan::discovery::Mode::Only
+        }
+        None => true,
+    };
+    let selected = if scanning {
+        endpoint_request.select_if_requested()?
+    } else {
+        None
+    };
+    let udp_required = match inputs.prepared_discovery {
+        Some(prepared) => {
+            (scanning && inputs.transports.contains(&Transport::Udp))
+                || prepared
+                    .options
+                    .probes
+                    .iter()
+                    .any(|probe| probe.transport() == Transport::Udp)
+        }
+        None => inputs.udp_required,
+    };
     let endpoints: Vec<String> = match &selected {
         Some(selected) => selected.endpoints.iter().map(ToString::to_string).collect(),
         None if inputs.transports == [Transport::Icmp] => {
@@ -696,7 +761,7 @@ fn scan_plan_summary(
     for endpoint in &endpoints {
         hasher.update(format!("endpoint={endpoint}\n").as_bytes());
     }
-    if inputs.curated_udp_payloads && !inputs.udp_required {
+    if inputs.curated_udp_payloads && !udp_required {
         return Err(CliError::new(
             Kind::Usage,
             "--curated-udp-payloads requires UDP scan or discovery probes",
@@ -706,7 +771,7 @@ fn scan_plan_summary(
     if inputs.udp_payload_hex.is_some() || inputs.udp_payload_file.is_some() {
         let payload = super::inputs::read_udp_payload(
             invocation,
-            inputs.udp_required,
+            udp_required,
             inputs.udp_payload_hex.as_deref(),
             inputs.udp_payload_file.as_deref(),
         )?;
@@ -717,7 +782,7 @@ fn scan_plan_summary(
     }
     hasher.update(b"udp_profiles=");
     if let Some(profiles) = inputs.udp_profiles {
-        if !inputs.udp_required {
+        if !udp_required {
             return Err(CliError::new(
                 Kind::Usage,
                 "--udp-profiles requires --transport udp",

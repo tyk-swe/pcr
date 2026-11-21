@@ -163,7 +163,7 @@ pub(super) fn run(
                 plan_only: true,
                 plan_digest: None,
             };
-            crate::system::enforce_plan_gate(invocation, &gate, "scan", &plan)?;
+            crate::system::enforce_plan_gate(invocation, &gate, "scan", Some(&plan))?;
             for line in preview_lines {
                 crate::terminal::write_stdout_line(invocation, format_args!("{line}"))?;
             }

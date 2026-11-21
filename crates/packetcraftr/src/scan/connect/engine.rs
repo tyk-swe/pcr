@@ -49,7 +49,7 @@ impl<P: TargetProviders + TcpProviders, K: Clock> Client<P, K> {
         let mut admission = crate::client::admission::Admission::new(
             std::borrow::Cow::Owned(policy),
             self.providers.resolver(),
-            self.wall_now(),
+            operation.admitted_at,
         );
         let started = self.now();
         let mut deadline = operation.deadline(self, request.limits.max_duration);

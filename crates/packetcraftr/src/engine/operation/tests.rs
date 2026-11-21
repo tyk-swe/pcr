@@ -56,6 +56,45 @@ fn isolated_cache_retains_parent_worker_charges() {
     assert_eq!(runtime.snapshot().timed_out_retaining_capacity, 0);
 }
 
+#[derive(Clone)]
+struct FixedClock {
+    wall: std::time::SystemTime,
+}
+
+impl crate::clock::Clock for FixedClock {
+    type Error = std::convert::Infallible;
+
+    fn now(&self) -> Instant {
+        Instant::now()
+    }
+
+    fn wall_now(&self) -> std::time::SystemTime {
+        self.wall
+    }
+
+    fn sleep(
+        &self,
+        _delay: Duration,
+        _deadline: &packetcraftr_core::budget::Deadline,
+    ) -> Result<(), Self::Error> {
+        Ok(())
+    }
+}
+
+#[test]
+fn isolated_children_retain_the_admission_instant() {
+    let wall = std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(123);
+    let client = Client::new(Arc::new(Registry::default()), Policy::default(), ())
+        .with_clock(FixedClock { wall });
+    let operation = Operation::new(&client, Duration::from_secs(5));
+    assert_eq!(operation.admitted_at, wall);
+    assert_eq!(operation.isolated().admitted_at, wall);
+    assert_eq!(
+        operation.clone().with_spent(Stats::default()).admitted_at,
+        wall
+    );
+}
+
 #[test]
 fn explicit_independent_root_remains_independent() {
     let parent = Runtime::new(0).unwrap();

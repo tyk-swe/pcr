@@ -102,6 +102,12 @@ pub(crate) struct PlanGateArgs {
     pub(crate) plan_digest: Option<String>,
 }
 
+impl PlanGateArgs {
+    pub(crate) fn active(&self) -> bool {
+        self.plan_only || self.plan_digest.is_some()
+    }
+}
+
 #[derive(Clone, Debug, Args)]
 pub(crate) struct TrafficBudgetArgs {
     /// Maximum packets authorized for one operation.

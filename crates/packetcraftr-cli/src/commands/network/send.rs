@@ -25,10 +25,10 @@ fn prepare(
         template,
         repeat,
         rate,
-        gate: _,
+        gate,
     } = arguments;
     let draft = Draft { repeat, rate };
-    prepare_live(invocation, send, template, draft)
+    prepare_live(invocation, send, template, draft, gate.active())
 }
 
 fn writing(
@@ -88,7 +88,7 @@ fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<()
     let compression = arguments.send.compression.for_output(format)?;
     let gate = arguments.gate.clone();
     let prepared = prepare(invocation, arguments)?;
-    if crate::system::enforce_plan_gate(invocation, &gate, "send", &prepared.plan)? {
+    if crate::system::enforce_plan_gate(invocation, &gate, "send", prepared.plan.as_ref())? {
         return Ok(());
     }
     match format {

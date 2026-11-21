@@ -37,9 +37,23 @@ struct PlanInputs<'a> {
     policy: &'a packetcraftr::policy::Policy,
     destination: Option<IpAddr>,
     allow_permissive_live: bool,
+    link_mode: net::link::Mode,
     plan_lines: &'a str,
     total_packets: u64,
     max_template_packets: usize,
+}
+
+fn needs_link_envelope(packet: &core::packet::Packet, registry: &core::registry::Registry) -> bool {
+    packet.iter().enumerate().any(|(index, layer)| {
+        let Some(padding) = core::layer::Padding::from_layer(layer) else {
+            return false;
+        };
+        padding.outside_layer.is_none()
+            && !packet
+                .iter()
+                .take(index)
+                .any(|prior| registry.allows_trailing_padding(prior.protocol_id().as_str()))
+    })
 }
 
 fn plan_summary(inputs: PlanInputs<'_>) -> Result<PlanSummary, CliError> {
@@ -53,6 +67,7 @@ fn plan_summary(inputs: PlanInputs<'_>) -> Result<PlanSummary, CliError> {
         policy,
         destination,
         allow_permissive_live,
+        link_mode,
         plan_lines,
         total_packets,
         max_template_packets,
@@ -61,7 +76,7 @@ fn plan_summary(inputs: PlanInputs<'_>) -> Result<PlanSummary, CliError> {
     let mut hasher = Sha256::new();
     hasher.update(
         format!(
-            "packetcraftr.live-plan/v1\ncommand={command}\npolicy={policy_digest}\ndestination={}\nallow_permissive_live={allow_permissive_live}\nbuild_mode={:?}\n{plan_lines}packets={total_packets}\n",
+            "packetcraftr.live-plan/v1\ncommand={command}\npolicy={policy_digest}\ndestination={}\nallow_permissive_live={allow_permissive_live}\nlink_mode={link_mode}\nbuild_mode={:?}\n{plan_lines}packets={total_packets}\n",
             destination.map_or_else(|| "-".to_owned(), |value| value.to_string()),
             build.mode,
         )
@@ -74,7 +89,15 @@ fn plan_summary(inputs: PlanInputs<'_>) -> Result<PlanSummary, CliError> {
         .expand(max_template_packets)
         .map_err(CliError::classified)?
     {
-        let packet = packet.map_err(CliError::classified)?;
+        let mut packet = packet.map_err(CliError::classified)?;
+        // Route materialization inserts the link envelope before its first
+        // build. Mirror that only where a link-padding layer needs it, so
+        // planning never rejects a recipe the live path would materialize.
+        if link_mode != net::link::Mode::Layer3 && needs_link_envelope(&packet, registry) {
+            packet
+                .insert(0, core::protocol::link::Ethernet::default())
+                .map_err(CliError::classified)?;
+        }
         let built = builder
             .build(packet, core::codec::Addresses::default(), build.clone())
             .map_err(CliError::classified)?;
@@ -105,8 +128,17 @@ pub(crate) fn enforce_plan_gate(
     invocation: &crate::invocation::Invocation,
     gate: &crate::command_options::PlanGateArgs,
     command: &str,
-    plan: &PlanSummary,
+    plan: Option<&PlanSummary>,
 ) -> Result<bool, CliError> {
+    if !gate.active() {
+        return Ok(false);
+    }
+    let Some(plan) = plan else {
+        return Err(CliError::new(
+            core::error::Kind::Internal,
+            "plan gate preparation lost its plan",
+        ));
+    };
     if gate.plan_only {
         if invocation.format != crate::output::contract::Format::Text {
             return Err(CliError::new(
@@ -201,7 +233,7 @@ impl LiveParameters for packetcraftr::exchange::Parameters {
 pub(crate) struct Prepared<R> {
     pub(crate) request: R,
     pub(crate) client: Client,
-    pub(crate) plan: PlanSummary,
+    pub(crate) plan: Option<PlanSummary>,
 }
 
 pub(crate) fn prepare_live<D: LiveDraft>(
@@ -209,6 +241,7 @@ pub(crate) fn prepare_live<D: LiveDraft>(
     send: SendArgs,
     template: TemplateArgs,
     draft: D,
+    plan_gate_active: bool,
 ) -> Result<Prepared<<D::Parameters as LiveParameters>::Request>, CliError> {
     let max_template_packets = template.max_template_packets;
     let axes = template.parse()?;
@@ -243,18 +276,23 @@ pub(crate) fn prepare_live<D: LiveDraft>(
         mode: send.mode.into(),
         ..core::build::Options::default()
     };
-    let plan = plan_summary(PlanInputs {
-        command: D::COMMAND,
-        template: &template,
-        registry: &registry,
-        build: &build,
-        policy: &policy,
-        destination,
-        allow_permissive_live: send.allow_permissive_live,
-        plan_lines: &draft_lines,
-        total_packets: count,
-        max_template_packets,
-    })?;
+    let plan = plan_gate_active
+        .then(|| {
+            plan_summary(PlanInputs {
+                command: D::COMMAND,
+                template: &template,
+                registry: &registry,
+                build: &build,
+                policy: &policy,
+                destination,
+                allow_permissive_live: send.allow_permissive_live,
+                link_mode: route_plan.link_mode,
+                plan_lines: &draft_lines,
+                total_packets: count,
+                max_template_packets,
+            })
+        })
+        .transpose()?;
     let request = parameters.into_request(
         template,
         packetcraftr::send::Options {
@@ -376,4 +414,56 @@ pub(crate) fn prepare_workflow(
         route,
         collection: collection(timeout, queue_limits)?,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use packetcraftr_core::{
+        layer::Padding,
+        packet::Packet,
+        protocol::{builtin, network::Ipv4, transport::Udp},
+        template::Template,
+    };
+
+    fn padding_summary(link_mode: net::link::Mode) -> Result<PlanSummary, CliError> {
+        let mut packet = Packet::default();
+        packet.push(Ipv4 {
+            destination: "192.0.2.9".parse().unwrap(),
+            ..Ipv4::default()
+        });
+        packet.push(Udp {
+            source_port: 12345,
+            destination_port: 9,
+            ..Udp::default()
+        });
+        packet.push(Padding::new(vec![0_u8; 4]));
+        let template = Template::new(packet);
+        let registry = builtin::registry();
+        let build = core::build::Options::default();
+        let policy = packetcraftr::policy::Policy::default();
+        plan_summary(PlanInputs {
+            command: "send",
+            template: &template,
+            registry: &registry,
+            build: &build,
+            policy: &policy,
+            destination: None,
+            allow_permissive_live: false,
+            link_mode,
+            plan_lines: "",
+            total_packets: 1,
+            max_template_packets: 10,
+        })
+    }
+
+    #[test]
+    fn plan_build_materializes_link_envelope_before_strict_validation() {
+        let layer2 = padding_summary(net::link::Mode::Layer2).unwrap();
+        assert_eq!(layer2.wire_bytes, 14 + 20 + 8 + 4);
+        let auto = padding_summary(net::link::Mode::Auto).unwrap();
+        assert_eq!(auto.wire_bytes, layer2.wire_bytes);
+        assert_ne!(auto.digest, layer2.digest);
+        assert!(padding_summary(net::link::Mode::Layer3).is_err());
+    }
 }

@@ -35,6 +35,7 @@ pub(super) struct PreviewInputs {
     pub(super) rate: Option<u32>,
     pub(super) timeout: Duration,
     pub(super) portless_endpoints: usize,
+    pub(super) beacon_eligible: bool,
 }
 
 pub(super) fn preview_lines(
@@ -46,7 +47,9 @@ pub(super) fn preview_lines(
     let probes = (targets as u64)
         .saturating_mul(endpoints_per_target as u64)
         .saturating_mul(u64::from(inputs.attempts));
-    let beacons = if (inputs.attempts as usize) < thresholds.min_attempts {
+    let beacons = if !inputs.beacon_eligible {
+        "not_applicable_non_tcp"
+    } else if (inputs.attempts as usize) < thresholds.min_attempts {
         "below_attempt_threshold"
     } else if inputs.timeout.as_secs_f64() < thresholds.min_interval_seconds {
         "below_interval_threshold"
@@ -352,6 +355,7 @@ mod tests {
             rate: Some(100),
             timeout: Duration::from_millis(timeout_ms),
             portless_endpoints: 0,
+            beacon_eligible: true,
         }
     }
 
@@ -382,6 +386,14 @@ mod tests {
         assert!(
             possible[2].contains("distinct_destination_endpoints_max=6"),
             "{possible:?}"
+        );
+
+        let mut non_tcp = inputs(thresholds.min_attempts as u32, 1_000);
+        non_tcp.beacon_eligible = false;
+        let non_tcp = preview_lines(2, 3, non_tcp);
+        assert!(
+            non_tcp[1].contains("beacons=not_applicable_non_tcp"),
+            "{non_tcp:?}"
         );
     }
 }

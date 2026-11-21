@@ -103,8 +103,8 @@ fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<()
         request,
         client,
         plan,
-    } = prepare_live(invocation, send, template, draft)?;
-    if crate::system::enforce_plan_gate(invocation, &gate, "exchange", &plan)? {
+    } = prepare_live(invocation, send, template, draft, gate.active())?;
+    if crate::system::enforce_plan_gate(invocation, &gate, "exchange", plan.as_ref())? {
         return Ok(());
     }
     match format {

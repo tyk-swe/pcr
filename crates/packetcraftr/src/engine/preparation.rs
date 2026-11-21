@@ -185,6 +185,7 @@ impl<P: TransmitProviders, K: Clock> Client<P, K> {
     ) -> Result<(Stages<'c, P, K>, Budget), Error> {
         let stages = Stages::new(self, options, deadline, operation);
         stages.check()?;
+        stages.policy.authorize_window_at(operation.admitted_at)?;
         let budget = Budget::open(&stages.policy, packets)?;
         Ok((stages, budget))
     }

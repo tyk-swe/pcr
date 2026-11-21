@@ -107,7 +107,7 @@ pub(super) fn run(
         plan,
     } = prepare(invocation, &arguments)?;
     if let Some(plan) = &plan
-        && crate::system::enforce_plan_gate(invocation, &arguments.gate, "replay", plan)?
+        && crate::system::enforce_plan_gate(invocation, &arguments.gate, "replay", Some(plan))?
     {
         return Ok(());
     }
@@ -262,9 +262,10 @@ fn replay_plan_summary(
     let mut hasher = Sha256::new();
     hasher.update(
         format!(
-            "packetcraftr.replay-plan/v1\npolicy={policy_digest}\nrepeat={}\ninter_pass_delay_ms={}\nlink_mode={:?}\ntiming={timing_line}\nmax_gap_ms={}\nallow_permissive_live={}\nfilter={}\nfallback={fallback_line}\ninterface_maps={}\nfilter_maps={}\n",
+            "packetcraftr.replay-plan/v1\npolicy={policy_digest}\nrepeat={}\ninter_pass_delay_ms={}\nmax_duration_ms={}\nlink_mode={:?}\ntiming={timing_line}\nmax_gap_ms={}\nallow_permissive_live={}\nfilter={}\nfallback={fallback_line}\ninterface_maps={}\nfilter_maps={}\n",
             arguments.repeat,
             arguments.inter_pass_delay_ms,
+            arguments.duration.max_duration().as_millis(),
             arguments.link_mode,
             arguments
                 .max_gap_ms

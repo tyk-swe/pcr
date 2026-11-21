@@ -275,12 +275,11 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
                 presented,
             });
         }
+        let operation = Operation::new(self, request.max_duration);
         self.policy
-            .authorize_window_at(self.wall_now())
+            .authorize_window_at(operation.admitted_at)
             .map_err(|source| Error::Authorization(BoundaryError::from_error(source)))?;
         plan::authorize(&self.policy, &request, &prepared)?;
-
-        let operation = Operation::new(self, request.max_duration);
         let deadline = operation.deadline(self, request.max_duration);
         let publish = publisher(&self.runtime, sink, duration_limit, |source| {
             Error::Output { source }

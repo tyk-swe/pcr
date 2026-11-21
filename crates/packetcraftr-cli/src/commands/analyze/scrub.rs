@@ -875,6 +875,43 @@ mod tests {
     }
 
     #[test]
+    fn scrub_refuses_embedded_addresses_on_cooked_links() {
+        let segment = udp_segment(
+            IpAddr::from(V4_SOURCE),
+            IpAddr::from(V4_DESTINATION),
+            b"cooked",
+        );
+        let raw = ipv4_option_frame(7, &segment);
+        let dissector = Dissector::new(packetcraftr_core::protocol::builtin::registry());
+
+        let mut sll = vec![0_u8; 16];
+        sll[4..6].copy_from_slice(&6_u16.to_be_bytes());
+        sll[14..16].copy_from_slice(&0x0800_u16.to_be_bytes());
+        sll.extend_from_slice(raw.bytes());
+        let frame = Frame::new(None, LinkType::LINUX_SLL, sll).unwrap();
+        assert!(fallback_patch(&frame, &mut Pseudonyms::default()).is_none());
+        assert_eq!(
+            scrub_frame(&frame, &dissector, &mut Pseudonyms::default(), 1_000_000)
+                .unwrap_err()
+                .message,
+            "scrub cannot pseudonymize IP addresses on this link type"
+        );
+
+        let mut sll2 = vec![0_u8; 20];
+        sll2[0..2].copy_from_slice(&0x0800_u16.to_be_bytes());
+        sll2[11] = 6;
+        sll2.extend_from_slice(raw.bytes());
+        let frame = Frame::new(None, LinkType::LINUX_SLL2, sll2).unwrap();
+        assert!(fallback_patch(&frame, &mut Pseudonyms::default()).is_none());
+        assert_eq!(
+            scrub_frame(&frame, &dissector, &mut Pseudonyms::default(), 1_000_000)
+                .unwrap_err()
+                .message,
+            "scrub cannot pseudonymize IP addresses on this link type"
+        );
+    }
+
+    #[test]
     fn scrub_refuses_ip_on_unsupported_link_types() {
         let segment = udp_segment(
             IpAddr::from(V4_SOURCE),

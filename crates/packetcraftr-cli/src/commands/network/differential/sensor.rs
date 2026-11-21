@@ -141,17 +141,35 @@ impl FragmentAssembler {
         let tick = self.tick;
         let assembly = self.assemblies.entry(piece.key).or_default();
         assembly.last_seen = tick;
-        if assembly.chunks.contains_key(&piece.offset) {
+        let piece_end = piece.offset.saturating_add(piece.payload.len());
+        if assembly
+            .chunks
+            .iter()
+            .any(|(offset, chunk)| piece.offset < offset + chunk.len() && *offset < piece_end)
+        {
             return None;
         }
-        if piece.offset.saturating_add(piece.payload.len()) > MAX_DATAGRAM_BYTES
+        if assembly
+            .total
+            .is_some_and(|total| piece_end > total || (piece.more && piece_end == total))
+        {
+            return None;
+        }
+        if piece_end > MAX_DATAGRAM_BYTES
             || assembly.stored.saturating_add(piece.payload.len()) > MAX_DATAGRAM_BYTES
         {
             self.assemblies.remove(&piece.key);
             return None;
         }
         if !piece.more {
-            assembly.total = Some(piece.offset + piece.payload.len());
+            if assembly
+                .chunks
+                .iter()
+                .any(|(offset, chunk)| offset + chunk.len() > piece_end)
+            {
+                return None;
+            }
+            assembly.total = Some(piece_end);
         }
         assembly.stored += piece.payload.len();
         assembly.chunks.insert(piece.offset, piece.payload);
@@ -308,6 +326,22 @@ mod tests {
         assert_eq!(observations.len(), 1);
         assert_eq!(observations[0].variant_index, 4);
         assert_eq!(observations[0].attempt_seq, 11);
+    }
+
+    #[test]
+    fn overlapping_fragments_do_not_corrupt_valid_assembly() {
+        let probe = lib::canary::build_probe(&[7_u8; lib::canary::TOKEN_LEN], 3, 9, 96);
+        let datagram = udp_datagram(&probe);
+        let mut assembler = FragmentAssembler::default();
+        let first = ip_frame(0, true, &datagram[..24]);
+        let overlap = ip_frame(16, true, &[0_u8; 16]);
+        let second = ip_frame(24, false, &datagram[24..]);
+        assert!(observations_from_frame(&first, &mut assembler).is_empty());
+        assert!(observations_from_frame(&overlap, &mut assembler).is_empty());
+        let observations = observations_from_frame(&second, &mut assembler);
+        assert_eq!(observations.len(), 1);
+        assert_eq!(observations[0].variant_index, 3);
+        assert_eq!(observations[0].attempt_seq, 9);
     }
 
     #[test]

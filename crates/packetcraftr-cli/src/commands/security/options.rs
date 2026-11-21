@@ -46,12 +46,22 @@ pub(in crate::commands) struct Bounds {
     #[arg(long)]
     pub(super) fail_incomplete: bool,
 }
+fn incomplete(report: &security::Report) -> bool {
+    !report.completeness.complete || report.findings.iter().any(|finding| !finding.complete)
+}
+
 impl Bounds {
     pub(in crate::commands) fn fails(&self, report: &security::Report) -> bool {
-        report.meets(self.fail_on.map(Into::into))
-            || (self.fail_incomplete
-                && (!report.completeness.complete
-                    || report.findings.iter().any(|finding| !finding.complete)))
+        report.meets(self.fail_on.map(Into::into)) || (self.fail_incomplete && incomplete(report))
+    }
+
+    pub(in crate::commands) fn fails_diff(
+        &self,
+        before: &security::Report,
+        after: &security::Report,
+    ) -> bool {
+        after.meets(self.fail_on.map(Into::into))
+            || (self.fail_incomplete && (incomplete(before) || incomplete(after)))
     }
 
     pub(in crate::commands) fn core(self) -> Result<security::Limits, CliError> {
@@ -157,5 +167,36 @@ mod tests {
         report.findings[0].complete = false;
         assert!(gate.fails(&report));
         assert!(both.fails(&report));
+    }
+
+    #[test]
+    fn diff_gate_uses_after_severity_and_either_completeness() {
+        let defaults = TestArgs::parse_from(["security"]).bounds;
+        let both =
+            TestArgs::parse_from(["security", "--fail-incomplete", "--fail-on", "high"]).bounds;
+        let finding = |severity| {
+            security::Finding::new(
+                "test",
+                severity,
+                "host",
+                "summary",
+                serde_json::Value::Null,
+                "review",
+            )
+        };
+        let mut before = security::Report::new("hunt");
+        before.findings.push(finding(Severity::High));
+        let mut after = security::Report::new("hunt");
+        after.findings.push(finding(Severity::Low));
+        assert!(!both.fails_diff(&before, &after));
+        after.findings[0].severity = Severity::High;
+        assert!(both.fails_diff(&before, &after));
+        after.findings[0].severity = Severity::Low;
+        before.completeness.note("partial capture");
+        assert!(!defaults.fails_diff(&before, &after));
+        assert!(both.fails_diff(&before, &after));
+        before.completeness = security::Completeness::observed();
+        after.findings[0].complete = false;
+        assert!(both.fails_diff(&before, &after));
     }
 }

@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use packetcraftr_core::error::Kind;
 
-use super::{validate_list_options, validate_stdin_consumers};
+use super::{effective_method, validate_list_options, validate_stdin_consumers};
 use crate::commands::network::scan::arguments::Discovery;
 
 fn assert_usage_error(error: crate::errors::CliError) {
@@ -19,6 +19,70 @@ fn rejects_multiple_stdin_consumers() {
     let error = validate_stdin_consumers(&[PathBuf::from("-")], &[PathBuf::from("-")], None, None)
         .unwrap_err();
     assert_usage_error(error);
+}
+
+#[test]
+fn automatic_effective_method_tracks_raw_capability() {
+    use packetcraftr::scan::method::{Method, Requested};
+
+    let tcp_endpoints = [packetcraftr::probe::Endpoint::Tcp { port: 443 }];
+    let udp_endpoints = [packetcraftr::probe::Endpoint::Udp { port: 53 }];
+    let tcp_scan = packetcraftr::scan::TcpScan::Syn;
+    let sctp_scan = packetcraftr::scan::SctpScan::default();
+    let unavailable = || {
+        Err(packetcraftr_netio::Unsupported::new(
+            packetcraftr_netio::NativeCapability::Capture,
+            "test build has no raw packet I/O",
+        ))
+    };
+    assert_eq!(
+        effective_method(
+            Requested::Automatic,
+            Ok(()),
+            false,
+            &tcp_endpoints,
+            &tcp_scan,
+            sctp_scan,
+            None,
+        ),
+        Method::Raw
+    );
+    assert_eq!(
+        effective_method(
+            Requested::Automatic,
+            unavailable(),
+            false,
+            &tcp_endpoints,
+            &tcp_scan,
+            sctp_scan,
+            None,
+        ),
+        Method::Connect
+    );
+    assert_eq!(
+        effective_method(
+            Requested::Automatic,
+            unavailable(),
+            true,
+            &tcp_endpoints,
+            &tcp_scan,
+            sctp_scan,
+            None,
+        ),
+        Method::Raw
+    );
+    assert_eq!(
+        effective_method(
+            Requested::Automatic,
+            unavailable(),
+            false,
+            &udp_endpoints,
+            &tcp_scan,
+            sctp_scan,
+            None,
+        ),
+        Method::Raw
+    );
 }
 
 #[test]

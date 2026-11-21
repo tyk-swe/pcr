@@ -8,16 +8,17 @@ use clap::Args;
 use packetcraftr::differential as lib;
 use packetcraftr_core::error::Kind;
 
+use super::differential::campaign;
 use crate::commands::security::read;
 use crate::commands::{CommandExit, Generate};
 use crate::errors::CliError;
 use crate::output::contract::Format;
 use crate::terminal::emit_stdout_document;
 
-pub(crate) const AFTER_LONG_HELP: &str = r"Classify NAT source-tuple stability from a differential Responder reception log. With --expected-source, a single matching tuple is reported as preserved; otherwise stable, port-varying, and address-varying mappings are distinguished. This observes one responder destination only, so stability here does not prove endpoint-independent mapping to other destinations.
+pub(crate) const AFTER_LONG_HELP: &str = r"Classify NAT source-tuple stability from a differential Responder reception log. Only records matching a planned campaign attempt Variant, sequence, and payload digest are classified. With --expected-source, a single matching tuple is reported as preserved; otherwise stable, port-varying, and address-varying mappings are distinguished. This observes one responder destination only, so stability here does not prove endpoint-independent mapping to other destinations.
 
 Example:
-  packetcraftr network nat-mapping responder-log.jsonl --expected-source 192.0.2.10:53210";
+  packetcraftr network nat-mapping responder-log.jsonl --campaign campaign.json --expected-source 192.0.2.10:53210";
 
 const MAX_LOG_BYTES: usize = 16 * 1024 * 1024;
 const MAX_RECORDS: usize = 10_000;
@@ -26,6 +27,9 @@ const MAX_RECORDS: usize = 10_000;
 pub(crate) struct NatMapping {
     /// Differential Responder reception log in JSON lines.
     log: PathBuf,
+    /// Differential campaign aggregate that planned the probes in the log.
+    #[arg(long)]
+    campaign: PathBuf,
     /// Intended source IP:PORT before any NAT rewrite.
     #[arg(long)]
     expected_source: Option<SocketAddr>,
@@ -43,6 +47,7 @@ impl Generate for NatMapping {
                 format!("nat-mapping prints text only, not --output {format}"),
             ));
         }
+        let campaign = campaign::load_campaign(invocation, &self.campaign)?;
         let bytes = read(invocation, &self.log, MAX_LOG_BYTES)?;
         let text = String::from_utf8(bytes)
             .map_err(|_| CliError::new(Kind::Usage, "responder log is not valid UTF-8"))?;
@@ -66,7 +71,7 @@ impl Generate for NatMapping {
                 })?,
             );
         }
-        let mapping = lib::nat_mapping(&records, self.expected_source);
+        let mapping = lib::nat_mapping(&records, &campaign.attempts, self.expected_source);
         let mut text = format!(
             "records={} sources={} behavior={}\n",
             mapping.records,

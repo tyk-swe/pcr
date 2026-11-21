@@ -1965,6 +1965,48 @@ mod differential {
     }
 
     #[test]
+    fn nat_mapping_ignores_unplanned_reception_records() {
+        let dir = tempfile::tempdir().unwrap();
+        let campaign_path = dir.path().join("campaign.json");
+        let log_path = dir.path().join("receptions.jsonl");
+        std::fs::write(&campaign_path, campaign()).unwrap();
+        let poison = |attempt_seq: u32, source: &str, digest: u8| {
+            serde_json::to_vec(&lib::ReceptionRecord {
+                variant_index: 0,
+                attempt_seq,
+                source: source.parse().unwrap(),
+                payload_sha256: lib::hex(&[digest; 32]),
+            })
+            .unwrap()
+        };
+        let mut log = reception(u32::MAX);
+        log.push(b'\n');
+        log.extend(poison(999, "198.51.100.9:40000", 0x11));
+        log.push(b'\n');
+        log.extend(poison(7, "203.0.113.9:40000", 0x22));
+        log.push(b'\n');
+        log.extend(reception(7));
+        log.push(b'\n');
+        std::fs::write(&log_path, log).unwrap();
+        let args = [
+            "network",
+            "nat-mapping",
+            log_path.to_str().unwrap(),
+            "--campaign",
+            campaign_path.to_str().unwrap(),
+            "--expected-source",
+            "192.0.2.1:40000",
+        ];
+        let text = super::assert_success(&super::run(&args), &args);
+        assert!(
+            text.contains("records=2 sources=1 behavior=preserved"),
+            "{text}"
+        );
+        assert!(!text.contains("198.51.100.9"), "{text}");
+        assert!(!text.contains("203.0.113.9"), "{text}");
+    }
+
+    #[test]
     fn differential_join_rejects_reception_aliasing() {
         let mut value: Value = serde_json::from_slice(&campaign()).unwrap();
         value["result"]["attempts"][0]["attempt_seq"] = json!(u64::from(u32::MAX) + 1);

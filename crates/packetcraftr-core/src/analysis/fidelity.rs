@@ -72,7 +72,7 @@ fn prefix_pairs(
 ) -> Vec<(usize, usize)> {
     let mut distinct: BTreeMap<&[u8], DistinctFrames> = BTreeMap::new();
     for (index, frame) in operator.iter().enumerate() {
-        if !operator_matched[index] {
+        if !operator_matched[index] && !frame.bytes().is_empty() {
             distinct
                 .entry(frame.bytes())
                 .or_default()
@@ -81,7 +81,7 @@ fn prefix_pairs(
         }
     }
     for (index, frame) in sensor.iter().enumerate() {
-        if !sensor_matched[index] {
+        if !sensor_matched[index] && !frame.bytes().is_empty() {
             distinct
                 .entry(frame.bytes())
                 .or_default()
@@ -274,6 +274,29 @@ mod tests {
         assert_eq!(report.truncated_matches, 3);
         assert_eq!(report.operator_only, 0);
         assert_eq!(report.sensor_only, 0);
+    }
+
+    #[test]
+    fn empty_frames_are_not_truncated_prefix_matches() {
+        let operator = vec![
+            frame(b"abcdef", 100, LinkType::ETHERNET),
+            frame(b"ghijkl", 200, LinkType::ETHERNET),
+        ];
+        let sensor = vec![
+            frame(b"", 110, LinkType::ETHERNET),
+            frame(b"", 210, LinkType::ETHERNET),
+        ];
+        let report = compare(&operator, &sensor);
+        assert_eq!(report.truncated_matches, 0);
+        assert_eq!(report.operator_only, 2);
+        assert_eq!(report.sensor_only, 2);
+        assert_eq!(report.visibility_percent(), Some(0.0));
+
+        let report = compare(&sensor, &operator);
+        assert_eq!(report.truncated_matches, 0);
+        assert_eq!(report.operator_only, 2);
+        assert_eq!(report.sensor_only, 2);
+        assert_eq!(report.visibility_percent(), Some(0.0));
     }
 
     #[test]

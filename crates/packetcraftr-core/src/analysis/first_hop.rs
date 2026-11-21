@@ -88,11 +88,20 @@ impl Collector {
         {
             self.dhcp_servers.insert(dhcp_server_identity(packet, dhcp));
         }
-        if let Some(dhcp) = packet.get::<Dhcpv6>()
-            && matches!(dhcp.message_type, 2 | 7)
-        {
+        if let Some(dhcp) = packet.get::<Dhcpv6>() {
+            self.observe_dhcpv6(packet, dhcp);
+        }
+    }
+
+    fn observe_dhcpv6(&mut self, packet: &Packet, dhcp: &Dhcpv6) {
+        if matches!(dhcp.message_type, 2 | 7) {
             self.dhcpv6_servers
                 .insert(dhcpv6_server_identity(packet, dhcp));
+        }
+        for option in &dhcp.options {
+            if let Value6::Relay(inner) = &option.value {
+                self.observe_dhcpv6(packet, inner);
+            }
         }
     }
 
@@ -204,7 +213,7 @@ fn dhcpv6_server_identity(packet: &Packet, dhcp: &Dhcpv6) -> String {
 mod tests {
     use super::*;
     use crate::packet::Packet;
-    use crate::protocol::application::dhcp::Option4;
+    use crate::protocol::application::dhcp::{Dhcpv6, Duid, Option4, Option6};
     use crate::protocol::link::Arp;
     use crate::protocol::network::{Icmpv6, Ipv6};
 
@@ -255,6 +264,33 @@ mod tests {
         assert_eq!(report.arp_conflicts[0].mac_addresses.len(), 2);
         assert!(report.has_multiple_dhcp_servers());
         assert!(report.has_multiple_router_advertisers());
+    }
+
+    #[test]
+    fn nested_dhcpv6_relay_messages_reveal_the_inner_server() {
+        let mut collector = Collector::new();
+        let mut inner = Dhcpv6::default();
+        inner.edit(|inner| {
+            inner.message_type = 7;
+            inner.options = vec![Option6::server_identifier(
+                Duid::enterprise(7, [1, 2, 3]).unwrap(),
+            )];
+        });
+        let relay = Dhcpv6::relay_forward(
+            1,
+            "2001:db8::1".parse().unwrap(),
+            "fe80::1".parse().unwrap(),
+            inner,
+        );
+        let mut packet = Packet::default();
+        packet.push(relay);
+        collect(packet, &mut collector);
+        let report = collector.finish(&RunSummary::default());
+        assert_eq!(report.dhcpv6_servers.len(), 1);
+        assert!(
+            report.dhcpv6_servers[0].starts_with("duid:2:"),
+            "{report:?}"
+        );
     }
 
     #[test]

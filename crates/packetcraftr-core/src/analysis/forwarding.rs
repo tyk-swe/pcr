@@ -17,7 +17,7 @@ pub use observation::{Collector, ExpectationOutcome, Incomplete, Observation, Va
 pub use report::{
     ASSUMPTIONS, AmbiguousGroup, Check, CheckEvaluation, CheckKind, ComparisonKind, Evidence,
     ExpectationRule, Match, Omissions, Outcome, Report, RequestedRules, RuleWarning, SideSummary,
-    Sided, Summary, UnkeyedObservation, Verdict, Violation,
+    Sided, Summary, UnkeyedObservation, Verdict, ViolatedCheck, Violation,
 };
 pub use rules::{Declarations, Expectation, Rules};
 

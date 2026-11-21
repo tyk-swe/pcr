@@ -27,10 +27,27 @@ pub fn map_frames<R: Read, W: Write, F>(
     output: &mut Writer<W>,
     limits: Limits,
     maximum_growth: usize,
-    mut map: F,
+    map: F,
 ) -> Result<MapReport, Error>
 where
     F: FnMut(u64, &Frame) -> Result<Frame, BoundaryError>,
+{
+    map_frames_with_interface_options(reader, output, limits, maximum_growth, map, |_, options| {
+        options
+    })
+}
+
+pub fn map_frames_with_interface_options<R: Read, W: Write, F, G>(
+    reader: &mut Reader<R>,
+    output: &mut Writer<W>,
+    limits: Limits,
+    maximum_growth: usize,
+    mut map: F,
+    mut transform_options: G,
+) -> Result<MapReport, Error>
+where
+    F: FnMut(u64, &Frame) -> Result<Frame, BoundaryError>,
+    G: FnMut(&Interface, Vec<PcapNgOption>) -> Vec<PcapNgOption>,
 {
     let mut budget = Budget::new(limits)?;
     if output.format() != Format::PcapNg {
@@ -49,7 +66,14 @@ where
     reader.refuse_declared_fcs()?;
     if matches!(reader.header(), CaptureHeader::Pcap(_)) {
         for interface in reader.interfaces() {
-            let id = add_interface(output, interface.clone(), &[], maximum_growth, endianness)?;
+            let id = add_interface(
+                output,
+                interface.clone(),
+                &[],
+                maximum_growth,
+                endianness,
+                &mut transform_options,
+            )?;
             if id as usize != report.interfaces {
                 return Err(Error::TransformMetadata("nonempty output interface table"));
             }
@@ -69,8 +93,14 @@ where
                         ..
                     } => {
                         reader.refuse_declared_fcs()?;
-                        let id =
-                            add_interface(output, interface, &options, maximum_growth, endianness)?;
+                        let id = add_interface(
+                            output,
+                            interface,
+                            &options,
+                            maximum_growth,
+                            endianness,
+                            &mut transform_options,
+                        )?;
                         if id != global_id {
                             return Err(Error::TransformMetadata(
                                 "nonempty output interface table",
@@ -134,6 +164,7 @@ fn add_interface<W: Write>(
     options: &[PcapNgOption],
     growth: usize,
     source_endianness: Endianness,
+    transform_options: &mut dyn FnMut(&Interface, Vec<PcapNgOption>) -> Vec<PcapNgOption>,
 ) -> Result<u32, Error> {
     if interface.snap_len != 0 {
         interface.snap_len =
@@ -155,6 +186,7 @@ fn add_interface<W: Write>(
         })
         .map(|option| rewrite_interface_option(option, source_endianness, output.endianness()))
         .collect::<Result<Vec<_>, _>>()?;
+    let retained = transform_options(&interface, retained);
     output.add_interface_description_with_options(interface, &retained)
 }
 

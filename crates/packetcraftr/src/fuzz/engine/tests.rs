@@ -56,7 +56,7 @@ fn liveness_timeout_stops_mutations_before_they_are_sent() {
     let (client, sends) = testing::client(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)));
     let mut request = request(Ipv4Addr::new(10, 0, 0, 1));
     request.liveness = true;
-    request.timeout = Duration::from_millis(10);
+    request.timeout = Duration::from_millis(250);
     let collector = Collector::default();
     let report = client.fuzz(request, collector.clone()).unwrap();
     assert_eq!(sends.load(Ordering::Relaxed), 1);

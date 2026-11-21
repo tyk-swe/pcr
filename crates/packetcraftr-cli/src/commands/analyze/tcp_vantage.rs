@@ -18,10 +18,10 @@ use crate::errors::CliError;
 use crate::output::contract::Format;
 use crate::terminal::emit_stdout_document;
 
-pub(crate) const AFTER_LONG_HELP: &str = r"Classify TCP SYN segments in a responder-side capture by the differential sequence Canary. This is the capture-side spike harness from ADR 0011: it proves which crafted attempts were seen on that wire and whether their TCP options changed, and it sends nothing. Attempt sequences use base + variant * 4096 + attempt.
+pub(crate) const AFTER_LONG_HELP: &str = r"Classify TCP SYN segments in a responder-side capture by the differential sequence Canary. Only SYNs matching the planned source, destination, variant range, and attempt range are counted. This is the capture-side spike harness from ADR 0011: it reports which planned attempts were seen on that wire and whether their TCP options changed, and it sends nothing. A sequence number is a correlation marker, not authentication. Attempt sequences use base + variant * 4096 + attempt.
 
 Example:
-  packetcraftr analyze tcp-vantage responder.pcapng --base-sequence 100000";
+  packetcraftr analyze tcp-vantage responder.pcapng --base-sequence 100000 --source 192.0.2.10 --endpoint 198.51.100.20:443 --variants 4 --repeats 3";
 
 #[derive(Debug, Args)]
 pub(crate) struct TcpVantage {
@@ -30,12 +30,18 @@ pub(crate) struct TcpVantage {
     /// Sequence number of variant 0 attempt 0.
     #[arg(long)]
     base_sequence: u32,
-    /// Only count SYNs from this source IP.
+    /// Planned source IP for every counted SYN.
     #[arg(long)]
-    source: Option<IpAddr>,
-    /// Only count SYNs to this destination IP.
+    source: IpAddr,
+    /// Planned destination IP:PORT for every counted SYN.
     #[arg(long)]
-    destination: Option<IpAddr>,
+    endpoint: std::net::SocketAddr,
+    /// Number of variants in the plan.
+    #[arg(long)]
+    variants: usize,
+    /// Attempts per variant in the plan (1..=4096).
+    #[arg(long)]
+    repeats: u32,
     #[command(flatten)]
     limits: OfflineCaptureLimitsArgs,
 }
@@ -50,6 +56,12 @@ impl Generate for TcpVantage {
             return Err(CliError::new(
                 Kind::Usage,
                 format!("tcp-vantage prints text only, not --output {format}"),
+            ));
+        }
+        if self.variants == 0 || !(1..=tcp_vantage::ATTEMPTS_PER_VARIANT).contains(&self.repeats) {
+            return Err(CliError::new(
+                Kind::Usage,
+                "--variants must be non-zero and --repeats must be within 1..=4096",
             ));
         }
         let frames = super::frames::read_frames(invocation, &self.path, self.limits)?;
@@ -71,18 +83,16 @@ impl Generate for TcpVantage {
                 .iter()
                 .rev()
                 .find_map(identity::network_endpoints);
-            if let Some(source) = self.source
-                && endpoints.is_none_or(|(actual, _)| actual != source)
-            {
-                continue;
-            }
-            if let Some(destination) = self.destination
-                && endpoints.is_none_or(|(_, actual)| actual != destination)
+            if endpoints != Some((self.source, self.endpoint.ip()))
+                || tcp.destination_port != self.endpoint.port()
             {
                 continue;
             }
             let (variant_index, attempt_seq) =
                 tcp_vantage::decode_sequence(self.base_sequence, tcp.sequence);
+            if variant_index >= self.variants || attempt_seq >= self.repeats {
+                continue;
+            }
             observations.push(tcp_vantage::Observation {
                 variant_index,
                 attempt_seq,

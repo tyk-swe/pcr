@@ -426,6 +426,14 @@ impl<P: UdpProviders + TcpProviders, K: Clock> Client<P, K> {
                                 rows[variant_index].timeouts += 1;
                                 continue;
                             }
+                            Err(error)
+                                if error.category() == crate::dns::tcp::Category::Cancelled =>
+                            {
+                                return Err(Error::Execution {
+                                    attempt: u64::from(seq),
+                                    source: BoundaryError::from_error(error),
+                                });
+                            }
                             Err(error) => {
                                 diagnostics.push(packetcraftr_core::diagnostic::Diagnostic::new(
                                     packetcraftr_core::diagnostic::Severity::Warning,

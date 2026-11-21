@@ -76,6 +76,42 @@ fn liveness_timeout_stops_mutations_before_they_are_sent() {
 }
 
 #[test]
+fn liveness_loss_after_successful_baseline_stops_later_mutations() {
+    let (client, sends) = testing::client_with_reply_script(
+        IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
+        &[true, true, false],
+    );
+    let mut request = request(Ipv4Addr::new(10, 0, 0, 1));
+    request.liveness = true;
+    request.campaign.cases = 2;
+    let collector = Collector::default();
+    let report = client.fuzz(request, collector.clone()).unwrap();
+    assert_eq!(sends.load(Ordering::Relaxed), 3);
+    let aggregate = collector.finish(report);
+    assert_eq!(aggregate.trials.len(), 2);
+    assert!(aggregate.trials[0].evidence.is_some());
+    assert!(
+        aggregate.trials[0]
+            .case
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "fuzz.liveness_timeout"),
+        "{:?}",
+        aggregate.trials[0].case.diagnostics
+    );
+    assert!(aggregate.trials[1].evidence.is_none());
+    assert!(
+        aggregate.trials[1]
+            .case
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "fuzz.liveness_timeout"),
+        "{:?}",
+        aggregate.trials[1].case.diagnostics
+    );
+}
+
+#[test]
 fn liveness_budget_uses_actual_baseline_bytes() {
     let mut request = request(Ipv4Addr::new(10, 0, 0, 1));
     request.liveness = true;

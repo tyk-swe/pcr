@@ -824,6 +824,11 @@ where
             &deadline,
         )
         .map_err(|source| Error::Output { source })?;
+        deadline.check_cancelled().map_err(Error::from)?;
+        if deadline.check().is_err() {
+            flush_tcp_connections(&mut tcp_connections);
+            return Ok(report);
+        }
         socket
             .send_to(&response, source)
             .map_err(|source| Error::ResponderIo {

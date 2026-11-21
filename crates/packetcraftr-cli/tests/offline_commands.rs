@@ -2966,6 +2966,43 @@ fn security_analysis_reports_capture_paths_with_invalid_utf8() {
 }
 
 #[test]
+fn audit_dns_enforces_max_result_bytes_before_printing() {
+    let server = std::net::UdpSocket::bind(("127.0.0.1", 0)).unwrap();
+    let endpoint = server.local_addr().unwrap().to_string();
+    let responder = std::thread::spawn(move || {
+        let mut query = [0_u8; 2048];
+        let (len, source) = server.recv_from(&mut query).unwrap();
+        let mut response = query[..len].to_vec();
+        response[2] = 0x81;
+        response[3] = 0x80;
+        response[6..8].copy_from_slice(&1_u16.to_be_bytes());
+        response.extend_from_slice(&[
+            0xc0, 0x0c, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x3c, 0x00, 0x04, 93, 184, 216,
+            34,
+        ]);
+        server.send_to(&response, source).unwrap();
+    });
+    let args = [
+        "network",
+        "audit-dns",
+        endpoint.as_str(),
+        "example.test",
+        "--timeout-ms",
+        "1000",
+        "--max-result-bytes",
+        "1",
+    ];
+    let output = run(&args);
+    responder.join().unwrap();
+    assert!(
+        !output.status.success(),
+        "expected result-size failure, got success:\n{}",
+        stdout(&output)
+    );
+    assert!(!stdout(&output).contains("audit-dns endpoint="));
+}
+
+#[test]
 fn report_counts_repeated_inputs_once_at_the_findings_limit() {
     let directory = tempfile::tempdir().expect("tempdir");
     let input = PathBuf::from(env!("CARGO_MANIFEST_DIR"))

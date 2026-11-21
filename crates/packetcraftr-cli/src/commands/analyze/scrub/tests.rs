@@ -353,6 +353,30 @@ fn scrub_refuses_embedded_addresses_on_cooked_links() {
 }
 
 #[test]
+fn scrub_pseudonymizes_cooked_addresses_on_non_ip_frames() {
+    let sender_mac = [2, 0, 0, 0, 0, 8];
+    let dissector = Dissector::new(packetcraftr_core::protocol::builtin::registry());
+
+    let mut sll = vec![0_u8; 16];
+    sll[4..6].copy_from_slice(&6_u16.to_be_bytes());
+    sll[6..12].copy_from_slice(&sender_mac);
+    sll[14..16].copy_from_slice(&0x88cc_u16.to_be_bytes());
+    sll.extend_from_slice(b"lldp-payload");
+    let frame = Frame::new(None, LinkType::LINUX_SLL, sll).unwrap();
+    let scrubbed = scrub_frame(&frame, &dissector, &mut Pseudonyms::default(), 1_000_000).unwrap();
+    assert_eq!(&scrubbed.bytes()[6..12], &[2, 0, 0, 0, 0, 1]);
+
+    let mut sll2 = vec![0_u8; 20];
+    sll2[0..2].copy_from_slice(&0x88cc_u16.to_be_bytes());
+    sll2[11] = 6;
+    sll2[12..18].copy_from_slice(&sender_mac);
+    sll2.extend_from_slice(b"lldp-payload");
+    let frame = Frame::new(None, LinkType::LINUX_SLL2, sll2).unwrap();
+    let scrubbed = scrub_frame(&frame, &dissector, &mut Pseudonyms::default(), 1_000_000).unwrap();
+    assert_eq!(&scrubbed.bytes()[12..18], &[2, 0, 0, 0, 0, 1]);
+}
+
+#[test]
 fn scrub_refuses_ip_on_unsupported_link_types() {
     let segment = udp_segment(
         IpAddr::from(V4_SOURCE),

@@ -193,7 +193,7 @@ fn replayed_dns_identities_do_not_consume_budget_or_poison_records() {
     let handle = std::thread::spawn(move || {
         let mut request = ResponderRequest::new(Ipv4Addr::LOCALHOST, port, token);
         request.max_duration = Duration::from_secs(3);
-        request.idle_after_first = Some(Duration::from_millis(200));
+        request.idle_after_first = Some(Duration::from_millis(500));
         request.max_datagrams = 2;
         respond(request, thread_collector)
     });
@@ -213,6 +213,11 @@ fn replayed_dns_identities_do_not_consume_budget_or_poison_records() {
     udp.send_to(&first, (Ipv4Addr::LOCALHOST, port)).unwrap();
     udp.recv(&mut response).unwrap();
     udp.send_to(&first, (Ipv4Addr::LOCALHOST, port)).unwrap();
+    assert!(udp.recv(&mut response).is_err());
+    let mut replay_with_new_transaction = first.to_vec();
+    replay_with_new_transaction[0..2].copy_from_slice(&0xbeef_u16.to_be_bytes());
+    udp.send_to(&replay_with_new_transaction, (Ipv4Addr::LOCALHOST, port))
+        .unwrap();
     assert!(udp.recv(&mut response).is_err());
     udp.send_to(&second, (Ipv4Addr::LOCALHOST, port)).unwrap();
     udp.recv(&mut response).unwrap();

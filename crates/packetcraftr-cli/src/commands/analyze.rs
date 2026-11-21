@@ -23,6 +23,7 @@ pub(in crate::commands) mod scan_diff;
 pub(in crate::commands) mod scrub;
 pub(in crate::commands) mod security;
 pub(in crate::commands) mod stats;
+pub(in crate::commands) mod tcp_vantage;
 pub(in crate::commands) mod tls;
 pub(in crate::commands) mod verify_forwarding;
 

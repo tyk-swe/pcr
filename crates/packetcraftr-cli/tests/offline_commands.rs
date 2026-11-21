@@ -3953,3 +3953,150 @@ fn dns_transactions_follow_first_captured_bytes_not_completion_order() {
         }
     }
 }
+
+#[test]
+fn tcp_vantage_counts_only_planned_tuples_and_attempts() {
+    let dir = tempfile::tempdir().unwrap();
+    let capture = dir.path().join("scenario.pcapng");
+    let labels = dir.path().join("labels.json");
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let scenario = root.join("examples/documents/scenario.json");
+    let build_args: Vec<std::ffi::OsString> = vec![
+        "packet".into(),
+        "scenario-build".into(),
+        scenario.into_os_string(),
+        "--write".into(),
+        capture.clone().into_os_string(),
+        "--labels".into(),
+        labels.into_os_string(),
+        "--link-type".into(),
+        "ethernet".into(),
+    ];
+    assert_success(&run(&build_args), &build_args);
+
+    let planned: Vec<std::ffi::OsString> = vec![
+        "analyze".into(),
+        "tcp-vantage".into(),
+        capture.clone().into_os_string(),
+        "--base-sequence".into(),
+        "1000".into(),
+        "--source".into(),
+        "192.0.2.10:40000".into(),
+        "--endpoint".into(),
+        "198.51.100.20:443".into(),
+        "--variants".into(),
+        "1".into(),
+        "--repeats".into(),
+        "3".into(),
+    ];
+    let text = assert_success(&run(&planned), &planned);
+    assert!(text.contains("syn_observations=3"), "{text}");
+    assert!(text.contains("distinct_attempts=1"), "{text}");
+
+    let unplanned: Vec<std::ffi::OsString> = planned
+        .iter()
+        .map(|arg| {
+            if arg == "198.51.100.20:443" {
+                "198.51.100.20:444".into()
+            } else {
+                arg.clone()
+            }
+        })
+        .collect();
+    let text = assert_success(&run(&unplanned), &unplanned);
+    assert!(text.contains("syn_observations=0"), "{text}");
+
+    let wrong_source_port: Vec<std::ffi::OsString> = planned
+        .iter()
+        .map(|arg| {
+            if arg == "192.0.2.10:40000" {
+                "192.0.2.10:40001".into()
+            } else {
+                arg.clone()
+            }
+        })
+        .collect();
+    let text = assert_success(&run(&wrong_source_port), &wrong_source_port);
+    assert!(text.contains("syn_observations=0"), "{text}");
+}
+
+#[test]
+fn retest_plan_verifies_an_anchored_bundle_and_orders_steps() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let journal = root.join("examples/documents/journal.json");
+    let scan = root.join("examples/documents/output-scan-success.json");
+    let hunt = root.join("examples/documents/output-hunt-success.json");
+    let scope = root.join("examples/documents/scope-v2.json");
+    let dir = tempfile::tempdir().unwrap();
+    let html = dir.path().join("report.html");
+    let bundle = dir.path().join("bundle.json");
+    let report_args: Vec<std::ffi::OsString> = vec![
+        "analyze".into(),
+        "report".into(),
+        scan.clone().into_os_string(),
+        hunt.clone().into_os_string(),
+        "--html".into(),
+        html.into_os_string(),
+        "--bundle".into(),
+        bundle.clone().into_os_string(),
+        "--journal".into(),
+        journal.clone().into_os_string(),
+        "--scope-file".into(),
+        scope.into_os_string(),
+    ];
+    assert_success(&run(&report_args), &report_args);
+
+    let args: Vec<std::ffi::OsString> = vec![
+        "analyze".into(),
+        "retest-plan".into(),
+        "--journal".into(),
+        journal.clone().into_os_string(),
+        "--bundle".into(),
+        bundle.clone().into_os_string(),
+    ];
+    let text = assert_success(&run(&args), &args);
+    assert!(text.contains("bundle_anchored=true"), "{text}");
+    assert!(text.contains("step=1 rerun_command=scan"), "{text}");
+    assert!(text.contains("step=2 rerun_command=hunt"), "{text}");
+
+    let mut gated = args.clone();
+    gated.push("--fail-on".into());
+    gated.push("high".into());
+    let output = run(&gated);
+    assert_eq!(output.status.code(), Some(1), "{}", stdout(&output));
+    assert!(stdout(&output).contains("bundle_anchored=true"));
+
+    let mut tampered: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&bundle).unwrap()).unwrap();
+    tampered["report"]["findings"] = serde_json::json!([]);
+    let tampered_bundle = dir.path().join("tampered-bundle.json");
+    std::fs::write(
+        &tampered_bundle,
+        serde_json::to_vec_pretty(&tampered).unwrap(),
+    )
+    .unwrap();
+    let tampered_args: Vec<std::ffi::OsString> = vec![
+        "analyze".into(),
+        "retest-plan".into(),
+        "--journal".into(),
+        journal.clone().into_os_string(),
+        "--bundle".into(),
+        tampered_bundle.into_os_string(),
+        "--fail-on".into(),
+        "high".into(),
+    ];
+    let output = run(&tampered_args);
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "tampered bundle should not pass the gate:\n{}",
+        stdout(&output)
+    );
+
+    let mut limited = args;
+    limited.push("--max-result-bytes".into());
+    limited.push("1".into());
+    let output = run(&limited);
+    assert!(!output.status.success(), "{}", stdout(&output));
+    assert!(!stdout(&output).contains("retest_plan"));
+}

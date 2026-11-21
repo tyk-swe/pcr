@@ -51,6 +51,10 @@ fn incomplete(report: &security::Report) -> bool {
 }
 
 impl Bounds {
+    pub(in crate::commands) fn has_failure_gates(&self) -> bool {
+        self.fail_on.is_some() || self.fail_incomplete
+    }
+
     pub(in crate::commands) fn fails(&self, report: &security::Report) -> bool {
         report.meets(self.fail_on.map(Into::into)) || (self.fail_incomplete && incomplete(report))
     }

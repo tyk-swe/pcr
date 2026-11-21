@@ -124,6 +124,12 @@ impl Generate for Build {
         let mut bytes = serde_json::to_vec_pretty(&journal)
             .map_err(|error| CliError::caused(Kind::Io, &error))?;
         bytes.push(b'\n');
+        if bytes.len() > self.bounds.max_result_bytes {
+            return Err(CliError::classified(security::Error::Limit {
+                field: "max_result_bytes",
+                limit: self.bounds.max_result_bytes,
+            }));
+        }
         if bytes.len() > security::journal::MAX_JOURNAL_DOCUMENT_BYTES {
             return Err(invalid("journal exceeds its document byte limit"));
         }

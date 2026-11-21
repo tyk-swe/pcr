@@ -11,7 +11,12 @@ pub const MAX_JOURNAL_DOCUMENT_BYTES: usize = 1024 * 1024;
 pub const MAX_JOURNAL_RECORDS: usize = 1024;
 const MAX_JOURNAL_LABEL_CHARS: usize = 128;
 const MAX_COMMAND_CHARS: usize = 64;
-const GENESIS: &str = "0000000000000000000000000000000000000000000000000000000000000000";
+
+fn genesis(label: &str) -> String {
+    crate::field::hex::compact_hex(&Sha256::digest(
+        format!("packetcraftr.journal.genesis/v1\nlabel={label}\n").as_bytes(),
+    ))
+}
 
 fn invalid(reason: String) -> Error {
     Error::Invalid(reason)
@@ -66,10 +71,10 @@ pub struct RecordInput {
 }
 
 impl Record {
-    fn canonical(&self) -> String {
+    fn canonical(&self, journal_label: &str) -> String {
         let absent = |value: &Option<String>| value.as_deref().unwrap_or("-").to_owned();
         format!(
-            "packetcraftr.journal.record/v1\nsequence={}\ncommand={}\nresult={}\nscope={}\nplan={}\nprevious={}\n",
+            "packetcraftr.journal.record/v1\njournal_label={journal_label}\nsequence={}\ncommand={}\nresult={}\nscope={}\nplan={}\nprevious={}\n",
             self.sequence,
             self.command,
             self.result_sha256,
@@ -79,8 +84,8 @@ impl Record {
         )
     }
 
-    fn compute_digest(&self) -> String {
-        crate::field::hex::compact_hex(&Sha256::digest(self.canonical().as_bytes()))
+    fn compute_digest(&self, journal_label: &str) -> String {
+        crate::field::hex::compact_hex(&Sha256::digest(self.canonical(journal_label).as_bytes()))
     }
 
     fn validate_fields(&self) -> Result<(), Error> {
@@ -122,10 +127,10 @@ impl Journal {
     }
 
     #[must_use]
-    pub fn head(&self) -> &str {
+    pub fn head(&self) -> String {
         self.records
             .last()
-            .map_or(GENESIS, |record| record.digest.as_str())
+            .map_or_else(|| genesis(&self.label), |record| record.digest.clone())
     }
 
     pub fn append(&mut self, input: RecordInput) -> Result<&Record, Error> {
@@ -135,17 +140,18 @@ impl Journal {
                 limit: MAX_JOURNAL_RECORDS,
             });
         }
+        let previous = self.head();
         let mut record = Record {
             sequence: self.records.len() as u64 + 1,
             command: input.command,
             result_sha256: input.result_sha256,
             scope_digest: input.scope_digest,
             plan_digest: input.plan_digest,
-            previous: self.head().to_owned(),
-            digest: GENESIS.to_owned(),
+            digest: previous.clone(),
+            previous,
         };
         record.validate_fields()?;
-        record.digest = record.compute_digest();
+        record.digest = record.compute_digest(&self.label);
         self.records.push(record);
         Ok(self.records.last().expect("just appended"))
     }
@@ -177,7 +183,8 @@ impl Journal {
                 limit: MAX_JOURNAL_RECORDS,
             });
         }
-        let mut previous = GENESIS;
+        let genesis = genesis(&self.label);
+        let mut previous = genesis.as_str();
         for (index, record) in self.records.iter().enumerate() {
             record.validate_fields()?;
             if record.sequence != index as u64 + 1 {
@@ -193,7 +200,7 @@ impl Journal {
                     record.sequence
                 )));
             }
-            if record.digest != record.compute_digest() {
+            if record.digest != record.compute_digest(&self.label) {
                 return Err(invalid(format!(
                     "journal record {} digest does not match its contents",
                     record.sequence
@@ -235,7 +242,7 @@ mod tests {
     #[test]
     fn chain_links_each_record_to_the_previous_digest() {
         let journal = journal();
-        assert_eq!(journal.records[0].previous, GENESIS);
+        assert_eq!(journal.records[0].previous, genesis("lab"));
         assert_eq!(journal.records[1].previous, journal.records[0].digest);
         assert_eq!(journal.head(), journal.records[1].digest);
         assert_eq!(journal.find("hunt", &"c".repeat(64)).unwrap().sequence, 2);
@@ -243,6 +250,17 @@ mod tests {
 
         let bytes = serde_json::to_vec(&journal).unwrap();
         assert_eq!(Journal::parse(&bytes).unwrap(), journal);
+    }
+
+    #[test]
+    fn relabeling_breaks_the_chain_and_changes_the_empty_head() {
+        let mut relabeled = journal();
+        relabeled.label = "other-engagement".to_owned();
+        assert!(relabeled.validate().is_err());
+        assert_ne!(
+            Journal::new("one").unwrap().head(),
+            Journal::new("two").unwrap().head()
+        );
     }
 
     #[test]
@@ -256,7 +274,7 @@ mod tests {
         assert!(reordered.validate().is_err());
 
         let mut relinked = journal();
-        relinked.records[1].previous = GENESIS.to_owned();
+        relinked.records[1].previous = genesis("lab");
         assert!(relinked.validate().is_err());
 
         let mut resequenced = journal();
@@ -291,7 +309,7 @@ mod tests {
                 result_sha256: "b".repeat(64),
                 scope_digest: None,
                 plan_digest: None,
-                previous: GENESIS.to_owned(),
+                previous: genesis("lab"),
                 digest: "c".repeat(64),
             })
             .collect();

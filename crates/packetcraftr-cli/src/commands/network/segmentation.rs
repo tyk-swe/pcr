@@ -12,7 +12,7 @@ use packetcraftr_core::error::Kind;
 use crate::command_options::{
     Bounded as _, CaptureLimitsArgs, IdentificationPolicyArgs, MaxDurationArgs,
 };
-use crate::commands::Generate;
+use crate::commands::{CommandExit, Generate};
 use crate::errors::CliError;
 use crate::output::contract::Format;
 use crate::terminal::emit_stdout_document;
@@ -45,7 +45,7 @@ impl Generate for Segmentation {
         self,
         invocation: &crate::invocation::Invocation,
         format: Format,
-    ) -> Result<(), CliError> {
+    ) -> Result<CommandExit, CliError> {
         if format != Format::Text {
             return Err(CliError::new(
                 Kind::Usage,
@@ -163,6 +163,6 @@ impl Generate for Segmentation {
                 "segmentation matrix has mismatched cells",
             ));
         }
-        Ok(())
+        Ok(CommandExit::SUCCESS)
     }
 }

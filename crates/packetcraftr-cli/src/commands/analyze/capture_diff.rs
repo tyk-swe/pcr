@@ -8,8 +8,8 @@ use packetcraftr_core::analysis;
 use packetcraftr_core::error::Kind;
 
 use crate::command_options::{DecodeArgs, OfflineLimitsArgs};
-use crate::commands::Generate;
 use crate::commands::offline_analysis::prepare;
+use crate::commands::{CommandExit, Generate};
 use crate::errors::CliError;
 use crate::output::contract::Format;
 use crate::terminal::emit_stdout_document;
@@ -36,7 +36,7 @@ impl Generate for CaptureDiff {
         self,
         invocation: &crate::invocation::Invocation,
         format: Format,
-    ) -> Result<(), CliError> {
+    ) -> Result<CommandExit, CliError> {
         if format != Format::Text {
             return Err(CliError::new(
                 Kind::Usage,
@@ -113,6 +113,7 @@ impl Generate for CaptureDiff {
                 render(&change.after),
             ));
         }
-        emit_stdout_document(invocation, &text)
+        emit_stdout_document(invocation, &text)?;
+        Ok(CommandExit::SUCCESS)
     }
 }

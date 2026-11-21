@@ -295,7 +295,7 @@ impl<P: UdpProviders + TcpProviders, K: Clock> Client<P, K> {
         for (variant_index, variant) in catalog().iter().enumerate() {
             for seq in 0..request.repeats {
                 let (query, name, id) = build_query(&request.token, variant_index, variant, seq)?;
-                let deadline = self.deadline(request.timeout);
+                let deadline = operation.deadline(self, request.timeout);
                 rows[variant_index].attempts += 1;
                 let validated = match variant.transport {
                     Transport::Udp => {
@@ -382,6 +382,12 @@ impl<P: UdpProviders + TcpProviders, K: Clock> Client<P, K> {
                             )
                             .map(|decoded| (response.frame.len().saturating_sub(2), decoded))
                             .map_err(crate::dns::Error::Query),
+                            Err(error)
+                                if error.category() == crate::dns::tcp::Category::Timeout =>
+                            {
+                                rows[variant_index].timeouts += 1;
+                                continue;
+                            }
                             Err(error) => {
                                 diagnostics.push(packetcraftr_core::diagnostic::Diagnostic::new(
                                     packetcraftr_core::diagnostic::Severity::Warning,
@@ -530,6 +536,67 @@ fn read_tcp_frame(stream: &mut TcpStream, deadline: &Deadline) -> Result<Option<
     }
 }
 
+const TCP_CONNECTION_TIMEOUT: Duration = Duration::from_secs(5);
+
+fn handle_tcp_connection<S>(
+    mut stream: TcpStream,
+    source: SocketAddr,
+    request: &ResponderRequest,
+    sink: &mut S,
+    deadline: &Arc<Deadline>,
+    report: &mut ResponderReport,
+    last_received: &mut Option<Instant>,
+) -> Result<(), Error>
+where
+    S: Sink<ResponderEvent, Ack = ()>,
+{
+    stream
+        .set_read_timeout(Some(Duration::from_millis(50)))
+        .map_err(|source| Error::ResponderIo {
+            message: source.to_string(),
+        })?;
+    stream
+        .set_write_timeout(Some(Duration::from_millis(50)))
+        .map_err(|source| Error::ResponderIo {
+            message: source.to_string(),
+        })?;
+    let connection_deadline =
+        Deadline::new(TCP_CONNECTION_TIMEOUT).with_parent(Some(Arc::clone(deadline)));
+    let Some(frame) = read_tcp_frame(&mut stream, &connection_deadline)? else {
+        return Ok(());
+    };
+    let message = Bytes::copy_from_slice(frame.get(2..).unwrap_or_default());
+    let Some((variant_index, attempt_seq, response)) = answer_message(&message, &request.token)?
+    else {
+        report.ignored += 1;
+        return Ok(());
+    };
+    *last_received = Some(SystemClock.now());
+    report.received += 1;
+    sink.publish_controlled(
+        ResponderEvent::Received(ReceptionRecord {
+            variant_index,
+            attempt_seq,
+            source,
+            payload_sha256: hex(&Sha256::digest(&message)),
+        }),
+        &connection_deadline,
+    )
+    .map_err(|source| Error::Output { source })?;
+    let mut framed = Vec::with_capacity(response.len() + 2);
+    framed.extend_from_slice(
+        &u16::try_from(response.len())
+            .unwrap_or(u16::MAX)
+            .to_be_bytes(),
+    );
+    framed.extend_from_slice(&response);
+    // A reset after the reception was recorded must not abort the responder.
+    if stream.write_all(&framed).is_ok() {
+        report.replies_sent += 1;
+    }
+    Ok(())
+}
+
 pub fn respond<S>(request: ResponderRequest, mut sink: S) -> Result<ResponderReport, Error>
 where
     S: Sink<ResponderEvent, Ack = ()>,
@@ -557,8 +624,9 @@ where
         .map_err(|source| Error::ResponderIo {
             message: source.to_string(),
         })?;
-    let deadline =
-        Deadline::new(request.max_duration).with_cancellation(request.cancellation.clone());
+    let deadline = Arc::new(
+        Deadline::new(request.max_duration).with_cancellation(request.cancellation.clone()),
+    );
     let mut last_received: Option<Instant> = None;
     let mut report = ResponderReport::default();
     let mut buffer = vec![0_u8; 65_535];
@@ -576,49 +644,18 @@ where
             return Ok(report);
         }
         match listener.accept() {
-            Ok((mut stream, source)) => {
-                stream
-                    .set_read_timeout(Some(Duration::from_millis(50)))
-                    .map_err(|source| Error::ResponderIo {
-                        message: source.to_string(),
-                    })?;
-                stream
-                    .set_write_timeout(Some(Duration::from_millis(50)))
-                    .map_err(|source| Error::ResponderIo {
-                        message: source.to_string(),
-                    })?;
-                if let Some(frame) = read_tcp_frame(&mut stream, &deadline)? {
-                    let message = Bytes::copy_from_slice(frame.get(2..).unwrap_or_default());
-                    match answer_message(&message, &request.token)? {
-                        Some((variant_index, attempt_seq, response)) => {
-                            last_received = Some(SystemClock.now());
-                            report.received += 1;
-                            sink.publish_controlled(
-                                ResponderEvent::Received(ReceptionRecord {
-                                    variant_index,
-                                    attempt_seq,
-                                    source,
-                                    payload_sha256: hex(&Sha256::digest(&message)),
-                                }),
-                                &deadline,
-                            )
-                            .map_err(|source| Error::Output { source })?;
-                            let mut framed = Vec::with_capacity(response.len() + 2);
-                            framed.extend_from_slice(
-                                &u16::try_from(response.len())
-                                    .unwrap_or(u16::MAX)
-                                    .to_be_bytes(),
-                            );
-                            framed.extend_from_slice(&response);
-                            stream
-                                .write_all(&framed)
-                                .map_err(|source| Error::ResponderIo {
-                                    message: source.to_string(),
-                                })?;
-                            report.replies_sent += 1;
-                        }
-                        None => report.ignored += 1,
-                    }
+            Ok((stream, source)) => {
+                match handle_tcp_connection(
+                    stream,
+                    source,
+                    &request,
+                    &mut sink,
+                    &deadline,
+                    &mut report,
+                    &mut last_received,
+                ) {
+                    Ok(()) | Err(Error::ResponderIo { .. }) => {}
+                    Err(error) => return Err(error),
                 }
                 continue;
             }

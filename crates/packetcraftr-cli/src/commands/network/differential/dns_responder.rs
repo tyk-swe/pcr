@@ -11,7 +11,7 @@ use packetcraftr::differential as lib;
 use packetcraftr_core::error::Kind;
 
 use crate::command_options::{Bounded as _, MaxDurationArgs};
-use crate::commands::Generate;
+use crate::commands::{CommandExit, Generate};
 use crate::errors::CliError;
 use crate::output::contract::Format;
 use crate::staged_output::StagedFile;
@@ -53,7 +53,7 @@ impl Generate for DnsResponder {
         self,
         invocation: &crate::invocation::Invocation,
         format: Format,
-    ) -> Result<(), CliError> {
+    ) -> Result<CommandExit, CliError> {
         if format != Format::Text {
             return Err(CliError::new(
                 Kind::Usage,
@@ -94,11 +94,11 @@ impl Generate for DnsResponder {
                     })?;
             }
         }
-        let report = outcome.map_err(CliError::classified)?;
         if let Some(staged_file) = staged {
             staged_file.sync()?;
             staged_file.persist()?;
         }
+        let report = outcome.map_err(CliError::classified)?;
         emit_stdout_document(
             invocation,
             &format!(
@@ -108,6 +108,7 @@ impl Generate for DnsResponder {
                 report.replies_sent,
                 records.len(),
             ),
-        )
+        )?;
+        Ok(CommandExit::SUCCESS)
     }
 }

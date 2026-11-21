@@ -49,11 +49,12 @@ impl Launch<'_> {
         }
         .and_then(|()| crate::cancellation::install())
         .and_then(|()| arguments.generate(&invocation, self.format))
-        .and_then(|()| {
+        .and_then(|exit| {
             invocation
                 .control
                 .cancellation
                 .check()
+                .map(|()| exit)
                 .map_err(CliError::classified)
         });
         generation_exit(&invocation, result, emit_stderr_error)
@@ -263,11 +264,11 @@ fn command_failure_with(
 
 fn generation_exit(
     invocation: &Invocation,
-    result: Result<(), CliError>,
+    result: Result<CommandExit, CliError>,
     stderr: impl Fn(&CliError) -> Result<(), CliError>,
 ) -> ExitCode {
     match result {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(exit) => ExitCode::from(exit.get()),
         Err(error) => {
             let exit_code = failure_exit(invocation, &error);
             match stderr(&error) {

@@ -34,7 +34,7 @@ pub const MAX_STEPS: usize = 128;
 pub const MAX_REPEAT: u32 = 1_000;
 pub const MAX_FRAMES: usize = 10_000;
 pub const MAX_DELAY_MS: u64 = 3_600_000;
-const MAX_LABEL_CHARS: usize = 128;
+const MAX_SCENARIO_LABEL_CHARS: usize = 128;
 const MAX_TAGS: usize = 16;
 
 fn invalid(message: impl Into<String>) -> Error {
@@ -53,11 +53,11 @@ fn limited(message: impl Into<String>) -> Error {
 
 fn check_label(field: &str, value: &str) -> Result<(), Error> {
     if value.trim().is_empty()
-        || value.chars().count() > MAX_LABEL_CHARS
+        || value.chars().count() > MAX_SCENARIO_LABEL_CHARS
         || value.chars().any(char::is_control)
     {
         return Err(invalid(format!(
-            "scenario {field} must be printable and 1..={MAX_LABEL_CHARS} characters"
+            "scenario {field} must be printable and 1..={MAX_SCENARIO_LABEL_CHARS} characters"
         )));
     }
     Ok(())

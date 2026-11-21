@@ -7,7 +7,7 @@ use std::fmt::Write as _;
 
 use packetcraftr_core::error::{Classification, Kind};
 
-use crate::commands::{Command, Generate};
+use crate::commands::{Command, CommandExit, Generate};
 use crate::errors::CliError;
 use crate::output::contract::Format;
 use crate::terminal::emit_stdout_document;
@@ -69,14 +69,15 @@ impl Generate for Args {
         self,
         invocation: &crate::invocation::Invocation,
         format: Format,
-    ) -> Result<(), CliError> {
+    ) -> Result<CommandExit, CliError> {
         if format != Format::Text {
             return Err(CliError::new(
                 Kind::Usage,
                 format!("topics prints text only, not --output {format}"),
             ));
         }
-        emit_stdout_document(invocation, &render(self.name.as_deref())?)
+        emit_stdout_document(invocation, &render(self.name.as_deref())?)?;
+        Ok(CommandExit::SUCCESS)
     }
 }
 

@@ -8,8 +8,8 @@ use packetcraftr_core::analysis;
 use packetcraftr_core::error::Kind;
 
 use crate::command_options::{DecodeArgs, OfflineLimitsArgs};
-use crate::commands::Generate;
 use crate::commands::offline_analysis::prepare;
+use crate::commands::{CommandExit, Generate};
 use crate::errors::CliError;
 use crate::output::contract::Format;
 use crate::terminal::emit_stdout_document;
@@ -34,7 +34,7 @@ impl Generate for FirstHop {
         self,
         invocation: &crate::invocation::Invocation,
         format: Format,
-    ) -> Result<(), CliError> {
+    ) -> Result<CommandExit, CliError> {
         if format != Format::Text {
             return Err(CliError::new(
                 Kind::Usage,
@@ -78,6 +78,7 @@ impl Generate for FirstHop {
         for router in &report.router_advertisers {
             text.push_str(&format!("router_advertiser {router}\n"));
         }
-        emit_stdout_document(invocation, &text)
+        emit_stdout_document(invocation, &text)?;
+        Ok(CommandExit::SUCCESS)
     }
 }

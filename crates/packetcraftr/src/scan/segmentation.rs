@@ -12,7 +12,7 @@ use super::connect::{Endpoint, Outcome};
 pub const MATRIX_SCHEMA_V1: &str = "packetcraftr.segmentation/v1";
 pub const MAX_MATRIX_DOCUMENT_BYTES: usize = 1024 * 1024;
 pub const MAX_CELLS: usize = 4096;
-const MAX_LABEL_CHARS: usize = 128;
+const MAX_SEGMENTATION_LABEL_CHARS: usize = 128;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -75,11 +75,11 @@ fn invalid(message: impl Into<String>) -> InvalidMatrix {
 
 fn check_label(field: &str, value: &str) -> Result<(), InvalidMatrix> {
     if value.trim().is_empty()
-        || value.chars().count() > MAX_LABEL_CHARS
+        || value.chars().count() > MAX_SEGMENTATION_LABEL_CHARS
         || value.chars().any(char::is_control)
     {
         return Err(invalid(format!(
-            "segmentation {field} must be printable and 1..={MAX_LABEL_CHARS} characters"
+            "segmentation {field} must be printable and 1..={MAX_SEGMENTATION_LABEL_CHARS} characters"
         )));
     }
     Ok(())

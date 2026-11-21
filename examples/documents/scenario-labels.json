@@ -1,0 +1,45 @@
+{
+  "schema": "packetcraftr.scenario-labels/v1",
+  "scenario_label": "periodic-beacon",
+  "frames": [
+    {
+      "frame": 1,
+      "timestamp_offset_ms": 0,
+      "step": 0,
+      "label": "beacon-syn",
+      "tags": [
+        "beacon",
+        "tcp"
+      ],
+      "repeat_index": 0,
+      "sha256": "977a7ed3208905b6ffb115f92bdf6007f7323b818f110c02ce89579375f4a02a",
+      "captured_bytes": 54
+    },
+    {
+      "frame": 2,
+      "timestamp_offset_ms": 1000,
+      "step": 0,
+      "label": "beacon-syn",
+      "tags": [
+        "beacon",
+        "tcp"
+      ],
+      "repeat_index": 1,
+      "sha256": "977a7ed3208905b6ffb115f92bdf6007f7323b818f110c02ce89579375f4a02a",
+      "captured_bytes": 54
+    },
+    {
+      "frame": 3,
+      "timestamp_offset_ms": 2000,
+      "step": 0,
+      "label": "beacon-syn",
+      "tags": [
+        "beacon",
+        "tcp"
+      ],
+      "repeat_index": 2,
+      "sha256": "977a7ed3208905b6ffb115f92bdf6007f7323b818f110c02ce89579375f4a02a",
+      "captured_bytes": 54
+    }
+  ]
+}

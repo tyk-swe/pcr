@@ -312,6 +312,9 @@ commands! {
     /// Run the cooperating DNS Responder for a DNS differential Campaign.
     #[command(after_long_help = network::differential::dns_responder::AFTER_LONG_HELP)]
     DnsDifferentialResponder(network::differential::dns_responder::DnsResponder) => ("network", "dns-differential-responder", 57),
+    /// Generate a deterministic labelled synthetic capture from a scenario.
+    #[command(after_long_help = packet::scenario::AFTER_LONG_HELP)]
+    ScenarioBuild(packet::scenario::ScenarioBuild) => ("packet", "scenario-build", 58),
     /// Generate shell completions and man pages under a directory.
     #[command(after_long_help = "Writes completions for Bash, Elvish, Fish, PowerShell, and Zsh, and man pages for all grouped paths. Requires a writable directory.\n\nExample:\n  packetcraftr reference documentation --directory ./cli-docs")]
     Documentation(reference::documentation::Args) => ("reference", "documentation", 30),

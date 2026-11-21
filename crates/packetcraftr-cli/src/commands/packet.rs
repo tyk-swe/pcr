@@ -7,3 +7,4 @@ pub(in crate::commands) mod build;
 pub(in crate::commands) mod dissect;
 pub(in crate::commands) mod fragment;
 pub(in crate::commands) mod fuzz;
+pub(in crate::commands) mod scenario;

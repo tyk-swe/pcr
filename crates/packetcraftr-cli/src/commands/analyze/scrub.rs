@@ -244,6 +244,8 @@ fn embedded_outer_addresses(ip: &[u8]) -> bool {
                         ip[6],
                         ip_protocol::HOP_BY_HOP
                             | ip_protocol::ROUTING
+                            | ip_protocol::FRAGMENT
+                            | ip_protocol::AH
                             | ip_protocol::DESTINATION_OPTIONS
                     )
             }
@@ -280,6 +282,11 @@ fn scrub_frame(
             )
         });
     }
+    let outer_addresses = outer_ip_addresses(frame);
+    if outer_ip(frame).is_some() && outer_addresses.is_none() {
+        return fallback_patch(frame, pseudonyms)
+            .ok_or_else(|| CliError::new(Kind::Policy, "scrub cannot walk the outer IP header"));
+    }
     let mut patch = HeaderRewrite::default();
     if frame.link_type == LinkType::ETHERNET
         && let Some((source, destination)) =
@@ -288,7 +295,7 @@ fn scrub_frame(
         patch.source_mac = Some(pseudonyms.mac(source));
         patch.destination_mac = Some(pseudonyms.mac(destination));
     }
-    if let Some((source, destination)) = outer_ip_addresses(frame) {
+    if let Some((source, destination)) = outer_addresses {
         patch.source_ip = Some(pseudonyms.ip(source));
         patch.destination_ip = Some(pseudonyms.ip(destination));
     }

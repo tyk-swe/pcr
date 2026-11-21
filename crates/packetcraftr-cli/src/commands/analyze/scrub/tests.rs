@@ -408,6 +408,32 @@ fn scrub_pseudonymizes_arp_sender_and_target_addresses() {
 }
 
 #[test]
+fn scrub_refuses_malformed_fragment_to_routing_chain() {
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(&[2, 0, 0, 0, 0, 2]);
+    bytes.extend_from_slice(&[2, 0, 0, 0, 0, 1]);
+    bytes.extend_from_slice(&0x86dd_u16.to_be_bytes());
+    let mut ip = vec![0_u8; 64];
+    ip[0] = 0x60;
+    ip[4..6].copy_from_slice(&40_u16.to_be_bytes());
+    ip[6] = 44;
+    ip[7] = 64;
+    ip[8..24].copy_from_slice(&V6_SOURCE);
+    ip[24..40].copy_from_slice(&V6_DESTINATION);
+    ip[40] = 43;
+    ip[43] = 1;
+    ip[44..48].copy_from_slice(&7_u32.to_be_bytes());
+    ip[48] = 17;
+    ip[49] = 2;
+    ip[51] = 1;
+    ip[56..64].copy_from_slice(&V6_SOURCE[..8]);
+    bytes.extend_from_slice(&ip);
+    let frame = Frame::new(None, LinkType::ETHERNET, bytes).unwrap();
+    let dissector = Dissector::new(packetcraftr_core::protocol::builtin::registry());
+    assert!(scrub_frame(&frame, &dissector, &mut Pseudonyms::default(), 1_000_000).is_err());
+}
+
+#[test]
 fn scrub_drops_all_interface_option_metadata() {
     let options = [0_u16, 1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 15, 65_000]
         .into_iter()

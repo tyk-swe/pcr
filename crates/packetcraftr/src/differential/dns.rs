@@ -757,8 +757,13 @@ mod tests {
         let udp = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
         udp.set_read_timeout(Some(Duration::from_millis(100)))
             .unwrap();
-        // The responder binds inside its thread; the valid-probe retry loop
-        // below tolerates that startup race.
+        let _ready = (0..100)
+            .find_map(|_| {
+                std::net::TcpStream::connect((Ipv4Addr::LOCALHOST, port))
+                    .inspect_err(|_| std::thread::sleep(Duration::from_millis(10)))
+                    .ok()
+            })
+            .expect("responder TCP listener should become ready");
         udp.send_to(b"junk", (Ipv4Addr::LOCALHOST, port)).unwrap();
         let (query, _, _) = build_query(&token, 0, &CATALOG[0], 0).unwrap();
         let mut received = false;

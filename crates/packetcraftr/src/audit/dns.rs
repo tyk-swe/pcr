@@ -165,10 +165,11 @@ impl<P: UdpProviders + TcpProviders, K: Clock> Client<P, K> {
             Outcome::TimedOut => ("timeout".to_owned(), None),
             Outcome::Failed(source) => (format!("failed:{source}"), None),
             Outcome::Cancelled => {
-                return Err(Error::Io(std::io::Error::new(
-                    std::io::ErrorKind::TimedOut,
-                    "DNS audit deadline exceeded",
-                )));
+                return Err(Error::Interrupted(
+                    packetcraftr_core::budget::Interrupted::Cancelled(
+                        packetcraftr_core::budget::Cancelled,
+                    ),
+                ));
             }
         };
         Ok(ExchangeResult {

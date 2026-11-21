@@ -356,6 +356,29 @@ impl packetcraftr_netio::udp::Provider for FakeDnsUdp {
     }
 }
 
+#[derive(Clone, Default)]
+struct CancelledDnsUdp;
+
+impl packetcraftr_netio::udp::Provider for CancelledDnsUdp {
+    fn exchange(
+        &self,
+        endpoint: SocketAddr,
+        request: &[u8],
+        _max_response: usize,
+        _deadline: &packetcraftr_core::budget::Deadline,
+    ) -> Result<packetcraftr_netio::udp::Reply, packetcraftr_netio::udp::Error> {
+        Ok(packetcraftr_netio::udp::Reply {
+            peer: endpoint,
+            local: "127.0.0.1:40000".parse().unwrap(),
+            exchange: packetcraftr_netio::bounded::Exchange {
+                response: bytes::Bytes::new(),
+                bytes_sent: request.len(),
+                outcome: packetcraftr_netio::bounded::Outcome::Cancelled,
+            },
+        })
+    }
+}
+
 struct DnsTcpStream {
     peer: SocketAddr,
     inbound: Vec<u8>,
@@ -621,6 +644,25 @@ fn dns_audit_propagates_cancellation_from_tcp_fallback() {
             &result,
             Err(Error::DnsTcp(error))
                 if error.category() == crate::dns::tcp::Category::Cancelled
+        ),
+        "{result:?}"
+    );
+}
+
+#[test]
+fn dns_audit_propagates_cancellation_from_udp_reception() {
+    let client = Client::new(
+        Arc::new(Registry::default()),
+        budget(16, 200_000),
+        ProviderSet::tcp(FakeDnsTcp, ()).with_udp(CancelledDnsUdp),
+    );
+    let result = client.audit_dns(&DnsRequest::new(ENDPOINT, "example.test"));
+    assert!(
+        matches!(
+            &result,
+            Err(Error::Interrupted(
+                packetcraftr_core::budget::Interrupted::Cancelled(_)
+            ))
         ),
         "{result:?}"
     );

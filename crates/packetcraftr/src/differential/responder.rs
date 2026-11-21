@@ -49,7 +49,7 @@ where
         {
             return Ok(report);
         }
-        if report.received + report.ignored >= request.max_datagrams {
+        if report.received >= request.max_datagrams {
             return Ok(report);
         }
         let (len, source) = match socket.recv_from(&mut buffer) {

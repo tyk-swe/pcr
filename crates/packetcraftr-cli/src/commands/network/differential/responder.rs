@@ -39,7 +39,7 @@ pub(crate) struct Args {
     /// Stop this many milliseconds after the first received Canary; 0 runs until the duration bound.
     #[arg(long, default_value_t = 30_000)]
     pub(crate) idle_ms: u64,
-    /// Maximum datagrams processed before stopping.
+    /// Maximum matching datagrams received before stopping.
     #[arg(long, default_value_t = 4096, value_parser = clap::value_parser!(u64).range(1..))]
     pub(crate) max_datagrams: u64,
     /// Write the reception log as JSON lines to this new file.

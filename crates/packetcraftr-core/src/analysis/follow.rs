@@ -85,6 +85,7 @@ impl Collector {
                 if let TcpEvent::Evicted {
                     flow,
                     pending_bytes,
+                    ..
                 } = event
                     && direction_of(flow, &client).is_some()
                 {
@@ -105,6 +106,7 @@ impl Collector {
                     TcpEvent::Evicted {
                         flow,
                         pending_bytes,
+                        ..
                     } if direction_of(flow, &client).is_some() => {
                         self.add_undelivered(*pending_bytes);
                         self.dedup.mark_evicted(flow, &client);
@@ -139,6 +141,7 @@ impl Collector {
                 flow: sender,
                 sequence,
                 bytes,
+                ..
             } = event
             {
                 let Some(direction) = direction_of(sender, &client) else {

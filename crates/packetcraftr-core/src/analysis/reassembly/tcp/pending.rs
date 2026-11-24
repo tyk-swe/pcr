@@ -286,6 +286,9 @@ fn plan_merge_and_accounting(
         storage_bytes,
         emitted_segment_bytes: merge.emitted_segment_bytes,
         segment_count: merge.segment_count,
+        source_span_count: state.pending_sources.len().saturating_add(usize::from(
+            segment.sources.is_some() && !merge.direct_output,
+        )),
         aggregate_base_bytes,
         aggregate_base_memory_charge,
         retains_flow_state: !closed,

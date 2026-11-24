@@ -8,7 +8,10 @@ use super::history::History;
 use super::pages::{PAGE_CHARGE, Page};
 
 use super::Error;
-use super::{PENDING_SEGMENT_METADATA_CHARGE, TCP_FLOW_STATE_METADATA_CHARGE};
+use super::{
+    PENDING_SEGMENT_METADATA_CHARGE, PENDING_SOURCE_SPAN_CHARGE, TCP_FLOW_STATE_METADATA_CHARGE,
+};
+use crate::analysis::provenance::SourceSet;
 
 #[derive(Debug)]
 pub(super) struct TcpFlowState {
@@ -18,6 +21,7 @@ pub(super) struct TcpFlowState {
     pub(super) history_start_offset: u64,
     pub(super) emitted_history: History,
     pub(super) pending: BTreeMap<u64, u64>,
+    pub(super) pending_sources: BTreeMap<u64, (u64, SourceSet)>,
     pub(super) pages: BTreeMap<u64, Page>,
     pub(super) pending_bytes: usize,
     pub(super) fin_offset: Option<u64>,
@@ -33,6 +37,7 @@ impl TcpFlowState {
             history_start_offset: 0,
             emitted_history: History::default(),
             pending: BTreeMap::new(),
+            pending_sources: BTreeMap::new(),
             pages: BTreeMap::new(),
             pending_bytes: 0,
             fin_offset: None,
@@ -42,6 +47,100 @@ impl TcpFlowState {
     }
 }
 
+fn overlapping_sources(
+    sources: &BTreeMap<u64, (u64, SourceSet)>,
+    start: u64,
+    end: u64,
+) -> Vec<(u64, u64)> {
+    let prior = sources
+        .range(..=start)
+        .next_back()
+        .filter(|(_, (source_end, _))| *source_end > start)
+        .map(|(&source_start, &(source_end, _))| (source_start, source_end));
+    prior
+        .into_iter()
+        .chain(
+            sources
+                .range(start..end)
+                .map(|(&source_start, &(source_end, _))| (source_start, source_end)),
+        )
+        .collect()
+}
+
+/// Insert the not-yet-seen portions of a wire span. Existing spans win, so a
+/// retransmission never replaces the provenance of the first observation.
+pub(super) fn insert_pending_source(
+    state: &mut TcpFlowState,
+    start: u64,
+    end: u64,
+    set: SourceSet,
+) {
+    if start >= end {
+        return;
+    }
+    let mut pieces = vec![(start, end)];
+    for (existing_start, existing_end) in overlapping_sources(&state.pending_sources, start, end) {
+        let mut next = Vec::with_capacity(pieces.len());
+        for (piece_start, piece_end) in pieces {
+            if existing_end <= piece_start || existing_start >= piece_end {
+                next.push((piece_start, piece_end));
+                continue;
+            }
+            if piece_start < existing_start {
+                next.push((piece_start, existing_start));
+            }
+            if existing_end < piece_end {
+                next.push((existing_end, piece_end));
+            }
+        }
+        pieces = next;
+    }
+    for (piece_start, piece_end) in pieces {
+        state
+            .pending_sources
+            .insert(piece_start, (piece_end, set.clone()));
+    }
+}
+
+/// Remove `[start, end)` and return contiguous byte-length/source-set spans.
+/// Missing provenance is represented by a zero-length gap that callers merge
+/// into an unprovenanced tail; reassembly invariants should prevent it.
+pub(super) fn take_pending_sources(
+    state: &mut TcpFlowState,
+    start: u64,
+    end: u64,
+) -> Vec<(usize, SourceSet)> {
+    let mut output = Vec::new();
+    let mut cursor = start;
+    while cursor < end {
+        let containing = state
+            .pending_sources
+            .range(..=cursor)
+            .next_back()
+            .filter(|&(_, &(source_end, _))| source_end > cursor)
+            .map(|(&source_start, _)| source_start);
+        let Some(source_start) = containing else {
+            break;
+        };
+        let Some((source_end, set)) = state.pending_sources.remove(&source_start) else {
+            break;
+        };
+        if source_start < cursor {
+            state
+                .pending_sources
+                .insert(source_start, (cursor, set.clone()));
+        }
+        let take_end = source_end.min(end);
+        let length = usize::try_from(take_end.saturating_sub(cursor)).unwrap_or(usize::MAX);
+        output.push((length, set.clone()));
+        if source_end > end {
+            state.pending_sources.insert(end, (source_end, set));
+        }
+        cursor = take_end;
+    }
+    output
+}
+
 pub(super) fn retained_bytes(state: &TcpFlowState) -> Option<usize> {
     state.pending_bytes.checked_add(state.emitted_history.len())
 }
@@ -49,11 +148,17 @@ pub(super) fn retained_bytes(state: &TcpFlowState) -> Option<usize> {
 pub(super) fn memory_charge_parts(
     pending_storage_charge: usize,
     segment_count: usize,
+    source_span_count: usize,
     history_capacity: usize,
     flow_state: bool,
 ) -> Option<usize> {
     let buffers = segment_count
         .checked_mul(PENDING_SEGMENT_METADATA_CHARGE)
+        .and_then(|metadata| {
+            source_span_count
+                .checked_mul(PENDING_SOURCE_SPAN_CHARGE)
+                .and_then(|sources| metadata.checked_add(sources))
+        })
         .and_then(|metadata| pending_storage_charge.checked_add(metadata))
         .and_then(|charge| charge.checked_add(history_capacity))?;
     if flow_state {
@@ -67,6 +172,7 @@ pub(super) fn flow_memory_charge(state: &TcpFlowState) -> Option<usize> {
     memory_charge_parts(
         state.pages.len().checked_mul(PAGE_CHARGE)?,
         state.pending.len(),
+        state.pending_sources.len(),
         state.emitted_history.capacity(),
         true,
     )

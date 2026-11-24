@@ -7,7 +7,6 @@
 use std::time::{Duration, SystemTime};
 
 use crate::analysis::ScopedFlowKey;
-use crate::analysis::reassembly::tcp::Event as TcpEvent;
 use crate::analysis::scope::{Interner, ScopeId};
 use crate::decode::DecodedPacket;
 use crate::protocol::identity::TcpHeader;
@@ -31,6 +30,15 @@ impl DerivedDatagram {
     }
 }
 
+/// A reassembly event stamped with its capture-global conversation and generation.
+#[derive(Clone, Debug)]
+pub struct TcpEventRecord {
+    pub stream: u64,
+    pub generation: u64,
+    pub direction_generation: u64,
+    pub event: crate::analysis::reassembly::tcp::Event,
+}
+
 /// One matched frame, dispatched in capture order.
 #[derive(Debug)]
 pub struct FrameRecord<'a, Timestamp = SystemTime> {
@@ -48,7 +56,7 @@ pub struct FrameRecord<'a, Timestamp = SystemTime> {
     pub tcp: Option<TcpView<'a>>,
     pub udp: Option<UdpView<'a>>,
     /// Reassembly events in delivery order, including expiry of other flows.
-    pub tcp_events: &'a [TcpEvent],
+    pub tcp_events: &'a [TcpEventRecord],
     /// The rollback this frame's timestamp showed against the capture's
     /// high-water mark, when it regressed. The shared capture clock detects
     /// the regression for every physical frame; matched frames carry it so
@@ -71,6 +79,7 @@ pub struct TcpView<'a> {
     pub layer: usize,
     pub header: TcpHeader<'a>,
     pub conversation: Option<Conversation<'a>>,
+    pub generation: Option<u64>,
     /// Indexed segment bytes; control segments and unindexed carriers are empty.
     pub payload: &'a [u8],
 }

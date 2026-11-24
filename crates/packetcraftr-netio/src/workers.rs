@@ -26,11 +26,10 @@ use packetcraftr_core::budget::Deadline;
 
 use crate::resources::ExecutorThreadSnapshot;
 
-use admission::Counters;
 #[cfg(native_route)]
 pub(crate) use admission::Exhausted;
 pub(crate) use admission::{
-    ConnectPermit, Permit, RetentionMarker, RootLease, SocketPermit, SocketReservation,
+    Admission, ConnectPermit, Permit, RetentionMarker, RootLease, SocketPermit, SocketReservation,
 };
 #[cfg(all(native_route, target_os = "linux"))]
 pub(crate) use context::NAMESPACE_PATH;
@@ -40,36 +39,39 @@ pub(crate) use task::Waited;
 pub(crate) use task::{Blocked, Task, discard_panic_payload, unwind_after_cleanup};
 
 pub(crate) const CAPACITY: usize = crate::resources::WORKER_CAPACITY;
+const CONTROL_CAPACITY: usize = 4;
 
 static SHARED: LazyLock<Arc<Pool>> = LazyLock::new(|| Arc::new(Pool::new(CAPACITY)));
+static CONTROL: LazyLock<Arc<Pool>> = LazyLock::new(|| Arc::new(Pool::new(CONTROL_CAPACITY)));
 
 pub(crate) fn shared() -> &'static Arc<Pool> {
     &SHARED
 }
 
+pub(crate) fn control() -> &'static Arc<Pool> {
+    &CONTROL
+}
+
 pub(crate) struct Pool {
     capacity: usize,
-    data_capacity: usize,
+    admission: Arc<Admission>,
     state: Mutex<State>,
-    changed: Condvar,
+    changed: Arc<Condvar>,
     retirement_service: Mutex<Option<reaper::ReaperService>>,
 }
 
 #[derive(Default)]
 struct State {
-    all: Counters,
-    tcp: Counters,
-    execution: Counters,
-    sockets: Counters,
     idle: Vec<Worker>,
     busy: BTreeMap<u64, Worker>,
     retiring: Vec<Retiring>,
+    starting: usize,
     next_worker: u64,
 }
 
 impl State {
     fn thread_count(&self) -> usize {
-        self.idle.len() + self.busy.len() + self.retiring.len()
+        self.idle.len() + self.busy.len() + self.retiring.len() + self.starting
     }
 
     fn prune_retired(&mut self) {
@@ -80,15 +82,17 @@ impl State {
 
 struct Retiring {
     complete: Arc<AtomicBool>,
+    thread: Option<JoinHandle<()>>,
     // A failed queue transfer keeps the join task and its handle owned here.
     pending: Option<reaper::ReapTask>,
 }
 
-struct RetirementComplete(Arc<AtomicBool>);
+struct RetirementComplete(Arc<AtomicBool>, Arc<Condvar>);
 
 impl Drop for RetirementComplete {
     fn drop(&mut self) {
         self.0.store(true, Ordering::Release);
+        self.1.notify_all();
     }
 }
 
@@ -115,9 +119,12 @@ impl Pool {
     pub(crate) fn new(capacity: usize) -> Self {
         Self {
             capacity,
-            data_capacity: crate::resources::data_capacity(capacity),
+            admission: Arc::new(Admission::new(
+                capacity,
+                crate::resources::data_capacity(capacity),
+            )),
             state: Mutex::new(State::default()),
-            changed: Condvar::new(),
+            changed: Arc::new(Condvar::new()),
             retirement_service: Mutex::new(None),
         }
     }
@@ -133,7 +140,7 @@ impl Pool {
             capacity: self.capacity,
             busy: state.busy.len(),
             idle: state.idle.len(),
-            retiring: state.retiring.len(),
+            retiring: state.retiring.len() + state.starting,
         }
     }
 
@@ -150,48 +157,63 @@ impl Pool {
         Ok(client)
     }
 
-    fn retire(state: &mut State, worker: Worker, reaper: &reaper::ReaperClient) {
+    fn retire(state: &mut State, worker: Worker) {
         let Worker { jobs, thread, .. } = worker;
         drop(jobs);
-        let complete = Arc::new(AtomicBool::new(false));
-        let finish = Arc::clone(&complete);
-        let task: reaper::ReapTask = Box::new(move || {
-            // is_finished only covers the main function; TLS can still block.
-            // Only actual join completion permits this thread slot to return.
-            let joined = thread.join();
-            let _complete = RetirementComplete(finish);
-            drop(joined);
-        });
         state.retiring.push(Retiring {
-            complete,
-            pending: reaper.try_transfer(task).err(),
+            complete: Arc::new(AtomicBool::new(false)),
+            thread: Some(thread),
+            pending: None,
         });
     }
 
-    fn maintain_workers(&self, state: &mut State) -> Result<(), reaper::ReaperStartError> {
+    fn submit_retiring(&self, state: &mut State, reaper: &reaper::ReaperClient) {
+        for retiring in &mut state.retiring {
+            if let Some(thread) = retiring.thread.take() {
+                let finish = Arc::clone(&retiring.complete);
+                let changed = Arc::clone(&self.changed);
+                let task: reaper::ReapTask = Box::new(move || {
+                    // is_finished only covers the main function; TLS can still block.
+                    // Only actual join completion permits this thread slot to return.
+                    let joined = thread.join();
+                    let _complete = RetirementComplete(finish, changed);
+                    drop(joined);
+                });
+                retiring.pending = reaper.try_transfer(task).err();
+            }
+            if let Some(task) = retiring.pending.take() {
+                retiring.pending = reaper.try_transfer(task).err();
+            }
+        }
+    }
+
+    fn maintenance_needed(state: &mut State) -> bool {
         state.prune_retired();
-        // Main-function completion is only a hint that a handle needs
-        // reaping. It never authorizes dropping or freeing its thread slot.
+        state
+            .busy
+            .values()
+            .any(|worker| worker.thread.is_finished())
+            || state.idle.iter().any(|worker| worker.thread.is_finished())
+            || state
+                .retiring
+                .iter()
+                .any(|retiring| retiring.thread.is_some() || retiring.pending.is_some())
+    }
+
+    /// Main-function completion is only a hint that a handle needs reaping.
+    /// It never authorizes dropping or freeing its thread slot.
+    fn maintain_workers(&self, state: &mut State, reaper: &reaper::ReaperClient) {
+        state.prune_retired();
         let finished_busy: Vec<_> = state
             .busy
             .iter()
             .filter_map(|(id, worker)| worker.thread.is_finished().then_some(*id))
             .collect();
-        let has_finished_idle = state.idle.iter().any(|worker| worker.thread.is_finished());
-        let has_pending = state
-            .retiring
-            .iter()
-            .any(|retiring| retiring.pending.is_some());
-        if finished_busy.is_empty() && !has_finished_idle && !has_pending {
-            return Ok(());
-        }
-
-        let reaper = self.retirement_reaper()?;
         for id in finished_busy {
             let removed = state.busy.remove(&id);
             debug_assert!(removed.is_some(), "finished worker vanished under lock");
             if let Some(worker) = removed {
-                Self::retire(state, worker, &reaper);
+                Self::retire(state, worker);
             }
         }
         let finished_idle: Vec<_> = state
@@ -199,14 +221,64 @@ impl Pool {
             .extract_if(.., |worker| worker.thread.is_finished())
             .collect();
         for worker in finished_idle {
-            Self::retire(state, worker, &reaper);
+            Self::retire(state, worker);
         }
-        for retiring in &mut state.retiring {
-            if let Some(task) = retiring.pending.take() {
-                retiring.pending = reaper.try_transfer(task).err();
+        self.submit_retiring(state, reaper);
+    }
+
+    fn spawn_worker(
+        self: &Arc<Self>,
+        id: u64,
+        context: Option<ExecutionContext>,
+        job: Job,
+    ) -> Result<(), (Job, std::io::Error)> {
+        let (jobs, inbox) = mpsc::channel();
+        let pool = Arc::downgrade(self);
+        let thread = match thread::Builder::new()
+            .name("packetcraftr-worker".to_owned())
+            .spawn(move || serve(&pool, id, &inbox))
+        {
+            Ok(thread) => thread,
+            Err(error) => {
+                let mut state = lock(&self.state);
+                state.starting -= 1;
+                drop(state);
+                self.changed.notify_all();
+                return Err((job, error));
+            }
+        };
+        let worker = Worker {
+            id,
+            context,
+            jobs,
+            thread,
+        };
+        let mut state = lock(&self.state);
+        state.starting -= 1;
+        let jobs = worker.jobs.clone();
+        state.busy.insert(id, worker);
+        match jobs.send(job) {
+            Ok(()) => {
+                drop(state);
+                self.changed.notify_all();
+                Ok(())
+            }
+            Err(mpsc::SendError(job)) => {
+                let removed = state.busy.remove(&id);
+                debug_assert!(removed.is_some(), "new worker vanished under lock");
+                if let Some(worker) = removed {
+                    Self::retire(&mut state, worker);
+                }
+                drop(state);
+                self.changed.notify_all();
+                Err((
+                    job,
+                    std::io::Error::other(
+                        "new pooled thread exited before accepting its first job",
+                    ),
+                ))
             }
         }
-        Ok(())
     }
 
     /// A failed spawn returns the job so its permit and captured values drop
@@ -228,8 +300,15 @@ impl Pool {
                     ),
                 ));
             }
-            if let Err(error) = self.maintain_workers(&mut state) {
-                return Err((job, std::io::Error::other(error)));
+            if Self::maintenance_needed(&mut state) {
+                drop(state);
+                let reaper = match self.retirement_reaper() {
+                    Ok(reaper) => reaper,
+                    Err(error) => return Err((job, std::io::Error::other(error))),
+                };
+                state = lock(&self.state);
+                self.maintain_workers(&mut state, &reaper);
+                continue;
             }
             if let Some(context) = context
                 && let Some(position) = state
@@ -243,37 +322,34 @@ impl Pool {
                         state.busy.insert(worker.id, worker);
                         return Ok(());
                     }
-                    Err(mpsc::SendError(returned)) => job = returned,
-                }
-                let reaper = match self.retirement_reaper() {
-                    Ok(reaper) => reaper,
-                    Err(error) => {
-                        state.idle.push(worker);
-                        return Err((job, std::io::Error::other(error)));
+                    Err(mpsc::SendError(returned)) => {
+                        job = returned;
+                        Self::retire(&mut state, worker);
+                        continue;
                     }
-                };
-                Self::retire(&mut state, worker, &reaper);
+                }
             }
             if state.thread_count() < self.capacity {
-                break;
+                let id = state.next_worker;
+                state.next_worker += 1;
+                state.starting += 1;
+                drop(state);
+                return self.spawn_worker(id, context, job);
             }
             // Retire one stale idle thread first. If its exit remains blocked,
             // later passes can retire another under this same caller ceiling.
             // Healthy replacement preserves the other cached contexts.
             if !state.idle.is_empty() {
-                let reaper = match self.retirement_reaper() {
-                    Ok(reaper) => reaper,
-                    Err(error) => return Err((job, std::io::Error::other(error))),
-                };
                 let popped = state.idle.pop();
                 debug_assert!(popped.is_some(), "idle worker vanished under lock");
                 if let Some(worker) = popped {
-                    Self::retire(&mut state, worker, &reaper);
+                    Self::retire(&mut state, worker);
                 }
+                continue;
             }
             state.prune_retired();
             if state.thread_count() < self.capacity {
-                break;
+                continue;
             }
             let remaining = match control.live_remaining() {
                 Ok(remaining) => remaining,
@@ -285,29 +361,6 @@ impl Pool {
                 .unwrap_or_else(PoisonError::into_inner)
                 .0;
         }
-        let id = state.next_worker;
-        state.next_worker += 1;
-        let (jobs, inbox) = mpsc::channel();
-        let pool = Arc::downgrade(self);
-        let thread = match thread::Builder::new()
-            .name("packetcraftr-worker".to_owned())
-            .spawn(move || serve(&pool, id, &inbox))
-        {
-            Ok(thread) => thread,
-            Err(error) => return Err((job, error)),
-        };
-        let started = jobs.send(job);
-        state.busy.insert(
-            id,
-            Worker {
-                id,
-                context,
-                jobs,
-                thread,
-            },
-        );
-        debug_assert!(started.is_ok(), "a new pooled thread accepts its first job");
-        Ok(())
     }
 
     /// Publication can destroy an abandoned custom stream. A worker becomes
@@ -320,16 +373,18 @@ impl Pool {
         let keep = worker.context.is_some();
         if keep {
             state.idle.push(worker);
-        } else {
-            match self.retirement_reaper() {
-                Ok(reaper) => Self::retire(&mut state, worker, &reaper),
-                Err(_) => {
-                    state.busy.insert(worker.id, worker);
-                }
-            }
+            drop(state);
+            self.changed.notify_all();
+            return true;
+        }
+        Self::retire(&mut state, worker);
+        drop(state);
+        if let Ok(reaper) = self.retirement_reaper() {
+            let mut state = lock(&self.state);
+            self.submit_retiring(&mut state, &reaper);
         }
         self.changed.notify_all();
-        keep
+        false
     }
 }
 

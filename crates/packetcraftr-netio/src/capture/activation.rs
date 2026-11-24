@@ -20,7 +20,7 @@ use crate::{
     deadline::POLL_INTERVAL,
     workers::{
         Pool,
-        reaper::{ReaperClient, ReaperStartError, shared_reaper, wait_until_finished},
+        reaper::{ReaperClient, ReaperStartError, shared_reaper},
     },
 };
 
@@ -98,10 +98,7 @@ fn open_with(
         Err(interrupted) => {
             drop(claim);
             lease.retention_marker().mark_retained();
-            reaper.transfer(Box::new(move || {
-                let _lease = lease;
-                wait_until_finished(task, POLL_INTERVAL, || {});
-            }));
+            drop(task);
             Err(Error::interrupted(interrupted, ARMING))
         }
         Ok(Ok(started)) => {

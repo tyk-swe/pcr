@@ -247,6 +247,7 @@ pub(super) fn finish(
         if let TcpEvent::Evicted {
             flow,
             pending_bytes,
+            ..
         } = event
             && *pending_bytes > 0
         {

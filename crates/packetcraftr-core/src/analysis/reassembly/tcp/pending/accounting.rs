@@ -21,6 +21,7 @@ pub(super) struct PushAccountingInput<'a> {
     pub(super) storage_bytes: usize,
     pub(super) emitted_segment_bytes: usize,
     pub(super) segment_count: usize,
+    pub(super) source_span_count: usize,
     pub(super) aggregate_base_bytes: usize,
     pub(super) aggregate_base_memory_charge: usize,
     pub(super) retains_flow_state: bool,
@@ -36,6 +37,7 @@ pub(super) fn plan_push_accounting(
         storage_bytes,
         emitted_segment_bytes,
         segment_count,
+        source_span_count,
         aggregate_base_bytes,
         aggregate_base_memory_charge,
         retains_flow_state,
@@ -71,6 +73,7 @@ pub(super) fn plan_push_accounting(
     let prospective_memory = memory_charge_parts(
         storage_bytes,
         final_pending_segments,
+        source_span_count,
         history_allocation,
         retains_flow_state,
     )

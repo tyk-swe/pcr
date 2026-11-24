@@ -6,7 +6,7 @@
 
 use crate::{
     resources::NativeSnapshot,
-    workers::{self, Blocked, Pool},
+    workers::{self, Admission, Blocked, Pool},
 };
 use packetcraftr_core::{
     budget::Deadline,
@@ -19,8 +19,9 @@ use std::{
 
 /// Nested lookup allocation; the process-wide native root must also admit work.
 pub const MAX_PENDING_LOOKUPS: usize = 4;
-static LOOKUPS: LazyLock<Arc<Pool>> = LazyLock::new(|| Arc::new(Pool::new(MAX_PENDING_LOOKUPS)));
-fn lookups() -> &'static Arc<Pool> {
+static LOOKUPS: LazyLock<Arc<Admission>> =
+    LazyLock::new(|| Arc::new(Admission::new(MAX_PENDING_LOOKUPS, MAX_PENDING_LOOKUPS)));
+fn lookups() -> &'static Arc<Admission> {
     &LOOKUPS
 }
 
@@ -68,20 +69,20 @@ pub fn blocking_lookup(
     deadline: &Deadline,
     lookup: impl FnOnce() -> Result<Vec<IpAddr>, BoundaryError> + Send + 'static,
 ) -> Result<Vec<IpAddr>, BoundaryError> {
-    blocking_lookup_on(deadline, lookup, lookups(), workers::shared())
+    blocking_lookup_on(deadline, lookup, lookups(), workers::control())
 }
 
 pub(crate) fn blocking_lookup_on(
     deadline: &Deadline,
     lookup: impl FnOnce() -> Result<Vec<IpAddr>, BoundaryError> + Send + 'static,
-    lookup_pool: &Arc<Pool>,
+    lookup_pool: &Arc<Admission>,
     root: &Arc<Pool>,
 ) -> Result<Vec<IpAddr>, BoundaryError> {
     let wait = deadline.detach().map_err(BoundaryError::from_error)?;
-    let lookup_permit = lookup_pool
+    let lookup_lease = lookup_pool
         .admit()
         .map_err(|error| failure_with_source("hostname lookup admission refused", error))?;
-    let retained_lookup = lookup_permit.retention_marker();
+    let retained_lookup = lookup_lease.retention_marker();
     let permit = root
         .admit()
         .map_err(|error| failure_with_source("native hostname lookup admission refused", error))?;
@@ -92,7 +93,7 @@ pub(crate) fn blocking_lookup_on(
                 execution.enforce().map_err(BoundaryError::from_error)?;
                 lookup()
             });
-            drop(lookup_permit);
+            drop(lookup_lease);
             result
         })
         .map_err(|error| match wait.enforce() {

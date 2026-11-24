@@ -20,7 +20,6 @@ use crate::analysis::adapter::{
 };
 use crate::analysis::conversation_index::StreamIndex;
 use crate::analysis::reassembly::ip::{CompletedDatagram, DatagramKey};
-use crate::analysis::reassembly::tcp::Event as TcpEvent;
 use crate::analysis::scope::{Interner, Limits as ScopeLimits, MAX_SCOPES};
 use crate::analysis::{Error, StreamTransport};
 use crate::frame::{Frame, LinkType};
@@ -38,7 +37,7 @@ pub use ip::{
 };
 pub use limits::Limits;
 pub use options::{Options, Plan};
-pub use record::{Conversation, DerivedDatagram, FrameRecord, TcpView, UdpView};
+pub use record::{Conversation, DerivedDatagram, FrameRecord, TcpEventRecord, TcpView, UdpView};
 
 use clock::CaptureClock;
 use dispatch::ReassemblyDispatch;
@@ -53,7 +52,7 @@ pub struct Summary {
     pub bytes_read: u64,
     pub frames_matched: u64,
     pub truncated_frames: u64,
-    pub trailing_tcp_events: Vec<TcpEvent>,
+    pub trailing_tcp_events: Vec<TcpEventRecord>,
     pub ip_reassembly: IpReassemblyReport,
     pub interfaces: Vec<crate::capture_file::Interface>,
     pub scopes: Vec<crate::analysis::scope::Definition>,
@@ -412,6 +411,7 @@ impl FramePipeline {
             layer: elected.transport.index,
             header: elected.transport.header,
             conversation: None,
+            generation: None,
             payload: &[],
         });
         let mut udp_view = udp.as_ref().map(|elected| UdpView {
@@ -421,21 +421,42 @@ impl FramePipeline {
         });
 
         // Assign stream IDs before filtering to keep them stable across runs.
-        let segment = match tcp.filter(|_| stages.tcp_index) {
-            Some(elected) => tcp_segment(elected.decoded, elected.transport, elected.base, scopes)
-                .map_err(|source| Error::Scope { number, source })?,
+        let mut segment = match tcp.as_ref().filter(|_| stages.tcp_index) {
+            Some(elected) => tcp_segment(
+                elected.decoded,
+                elected.transport.clone(),
+                elected.base,
+                scopes,
+            )
+            .map_err(|source| Error::Scope { number, source })?,
             None => None,
         };
+        if let (Some(elected), Some(segment)) = (tcp.as_ref(), segment.as_mut()) {
+            segment.sources = if std::ptr::eq(elected.decoded, &decoded) {
+                physical_sources.clone()
+            } else {
+                derived
+                    .iter()
+                    .find(|datagram| std::ptr::eq(&datagram.decoded, elected.decoded))
+                    .and_then(|datagram| datagram.sources.clone())
+            };
+        }
         if let (Some(view), Some(segment)) = (&mut tcp_view, &segment) {
+            let index = tcp_streams.assign(&segment.flow, number, limits.max_flows)?;
             view.conversation = Some(Conversation {
-                index: tcp_streams.assign(&segment.flow, number, limits.max_flows)?,
+                index,
                 flow: &segment.flow,
             });
             view.payload = &segment.payload;
         }
         let udp_flow = match udp.filter(|_| stages.udp_index) {
-            Some(elected) => udp_flow(elected.decoded, elected.transport, elected.base, scopes)
-                .map_err(|source| Error::Scope { number, source })?,
+            Some(elected) => udp_flow(
+                elected.decoded,
+                elected.transport.clone(),
+                elected.base,
+                scopes,
+            )
+            .map_err(|source| Error::Scope { number, source })?,
             None => None,
         };
         if let (Some(view), Some(flow)) = (&mut udp_view, &udp_flow) {
@@ -483,6 +504,9 @@ impl FramePipeline {
             reassembly_dispatch.dispatch(
                 record.tcp.map(|view| view.header),
                 segment.as_ref(),
+                record
+                    .tcp
+                    .and_then(|view| view.conversation.map(|conversation| conversation.index)),
                 timestamp,
                 number,
             )?

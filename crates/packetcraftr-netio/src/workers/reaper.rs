@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::{
+    collections::VecDeque,
     panic::{AssertUnwindSafe, catch_unwind},
     sync::{
         Arc, Mutex,
@@ -20,19 +21,29 @@ use std::{sync::LazyLock, time::Duration};
 use super::{Task, Waited, shared};
 
 #[cfg(native_layer2)]
-static SHARED_REAPER: LazyLock<Result<ReaperService, ReaperStartError>> =
-    LazyLock::new(|| start_reaper(shared().capacity(), spawn_reaper_thread));
+static SHARED_REAPER: LazyLock<Mutex<Option<ReaperService>>> = LazyLock::new(|| Mutex::new(None));
 
 type SharedReceiver = Arc<Mutex<mpsc::Receiver<ReapTask>>>;
+type SharedSender = Arc<Mutex<Option<SyncSender<ReapTask>>>>;
+type Pending = Arc<Mutex<VecDeque<ReapTask>>>;
 
 #[derive(Clone)]
 pub(crate) struct ReaperClient {
-    tasks: SyncSender<ReapTask>,
+    tasks: SharedSender,
+    pending: Pending,
+    capacity: usize,
 }
 
 pub(crate) struct ReaperService {
     client: ReaperClient,
+    tasks: SharedSender,
     _workers: Vec<JoinHandle<()>>,
+}
+
+impl Drop for ReaperService {
+    fn drop(&mut self) {
+        close_sender(&self.tasks);
+    }
 }
 
 #[derive(Clone, Debug, thiserror::Error)]
@@ -82,14 +93,25 @@ pub(crate) fn wait_until_finished(
 impl ReaperClient {
     /// The caller retains ownership on every refusal.
     pub(crate) fn try_transfer(&self, task: ReapTask) -> Result<(), ReapTask> {
-        self.tasks.try_send(task).map_err(|error| match error {
+        let sender = self
+            .tasks
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        let Some(sender) = sender else {
+            return Err(task);
+        };
+        sender.try_send(task).map_err(|error| match error {
             TrySendError::Full(task) | TrySendError::Disconnected(task) => task,
         })
     }
 
-    /// If admission fails, leaks the task so native state outlives workers that may still use it.
+    /// Retain an ownership bundle in the bounded service allocation until a
+    /// reaper slot frees. Every retained bundle is backed by a corresponding
+    /// native admission slot, so this cannot grow past `capacity` in practice.
     #[cfg(native_layer2)]
     pub(crate) fn transfer(&self, task: ReapTask) {
+        self.retry_pending();
         if let Err(task) = self.try_transfer(task) {
             self.retain(task);
         }
@@ -97,31 +119,67 @@ impl ReaperClient {
 
     #[cfg(native_layer2)]
     fn retain(&self, task: ReapTask) {
-        std::mem::forget(task);
+        let mut pending = self
+            .pending
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        debug_assert!(pending.len() < self.capacity);
+        pending.push_back(task);
+    }
+
+    fn retry_pending(&self) {
+        for _ in 0..self.capacity {
+            let mut pending = self
+                .pending
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let Some(task) = pending.pop_front() else {
+                return;
+            };
+            match self.try_transfer(task) {
+                Ok(()) => drop(pending),
+                Err(task) => {
+                    pending.push_front(task);
+                    return;
+                }
+            }
+        }
     }
 }
 
 #[cfg(native_layer2)]
 pub(crate) fn shared_reaper() -> Result<ReaperClient, ReaperStartError> {
-    SHARED_REAPER
-        .as_ref()
-        .map(|service| service.client.clone())
-        .map_err(Clone::clone)
+    let mut service = SHARED_REAPER
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(service) = &*service {
+        return Ok(service.client());
+    }
+    let initialized = start_reaper(shared().capacity(), spawn_reaper_thread)?;
+    let client = initialized.client();
+    *service = Some(initialized);
+    Ok(client)
 }
 
 fn start_reaper(
     capacity: usize,
-    mut spawn: impl FnMut(SharedReceiver) -> std::io::Result<JoinHandle<()>>,
+    mut spawn: impl FnMut(SharedReceiver, ReaperClient) -> std::io::Result<JoinHandle<()>>,
 ) -> Result<ReaperService, ReaperStartError> {
     // The channel and threads match pool capacity, so every admitted worker can be reaped.
     let (tasks, receiver) = mpsc::sync_channel(capacity);
     let receiver = Arc::new(Mutex::new(receiver));
+    let tasks = Arc::new(Mutex::new(Some(tasks)));
+    let client = ReaperClient {
+        tasks: Arc::clone(&tasks),
+        pending: Arc::new(Mutex::new(VecDeque::with_capacity(capacity))),
+        capacity,
+    };
     let mut workers = Vec::with_capacity(capacity);
     for _ in 0..capacity {
-        match spawn(Arc::clone(&receiver)) {
+        match spawn(Arc::clone(&receiver), client.clone()) {
             Ok(worker) => workers.push(worker),
             Err(error) => {
-                drop(tasks);
+                close_sender(&tasks);
                 for worker in workers {
                     let _ = worker.join();
                 }
@@ -132,19 +190,24 @@ fn start_reaper(
         }
     }
     Ok(ReaperService {
-        client: ReaperClient { tasks },
+        client,
+        tasks,
         _workers: workers,
     })
 }
 
-fn spawn_reaper_thread(receiver: SharedReceiver) -> std::io::Result<JoinHandle<()>> {
+fn spawn_reaper_thread(
+    receiver: SharedReceiver,
+    client: ReaperClient,
+) -> std::io::Result<JoinHandle<()>> {
     thread::Builder::new()
         .name("packetcraftr-native-reaper".to_owned())
-        .spawn(move || run_reaper(receiver))
+        .spawn(move || run_reaper(receiver, client))
 }
 
-fn run_reaper(receiver: SharedReceiver) {
+fn run_reaper(receiver: SharedReceiver, client: ReaperClient) {
     loop {
+        client.retry_pending();
         let task = receiver
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -154,5 +217,13 @@ fn run_reaper(receiver: SharedReceiver) {
         };
         // A defective cleanup task must not kill the shared receiver.
         let _ = catch_unwind(AssertUnwindSafe(task));
+        client.retry_pending();
     }
+}
+
+fn close_sender(tasks: &SharedSender) {
+    tasks
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .take();
 }

@@ -60,7 +60,7 @@ pub(in crate::platform) fn on_worker<T: Send + 'static>(
     let wait = detached
         .detach()
         .map_err(|interrupted| native::Error::interrupted(interrupted, operation))?;
-    let permit = crate::workers::shared().admit().map_err(refused)?;
+    let permit = crate::workers::control().admit().map_err(refused)?;
     let blocked = permit
         .call(&wait, move || query(&detached))
         .map_err(|error| match wait.enforce() {

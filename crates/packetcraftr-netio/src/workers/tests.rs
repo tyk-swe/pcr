@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::{Blocked, Pool, SocketPermit, Waited};
+use super::{Blocked, Pool, SocketPermit, Waited, admission::Admission};
 use packetcraftr_core::budget::Deadline;
 use std::{
     sync::{Arc, mpsc},
@@ -348,7 +348,7 @@ fn tcp_panic_cleanup_retains_operation_budget() {
 #[test]
 fn cancelled_lookup_panic_cleanup_retains_allocation() {
     let root = Arc::new(Pool::new(2));
-    let allocation = Arc::new(Pool::new(1));
+    let allocation = Arc::new(Admission::new(1, 1));
     let (entered, dropping) = mpsc::channel();
     let gate = Arc::new(PanicPayloadGate {
         entered,

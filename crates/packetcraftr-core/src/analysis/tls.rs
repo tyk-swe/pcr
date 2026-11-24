@@ -344,6 +344,7 @@ impl Collector {
                 flow: sender,
                 sequence,
                 bytes,
+                ..
             } = event
             else {
                 continue;

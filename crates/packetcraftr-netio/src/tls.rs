@@ -32,10 +32,10 @@ pub struct Limits {
     /// Cumulative ciphertext written, including application data.
     pub max_wire_bytes_sent: usize,
     pub max_wire_bytes_read: usize,
-    /// Each native read, write, or flush attempt consumes one step before it
-    /// reaches the wrapped stream, including retries and attempts that fail.
-    /// Once all steps are used, further attempts fail without native I/O, so
-    /// a connection performs at most `max_steps` native writes.
+    /// Native writes and productive or quickly failing reads consume steps.
+    /// Idle poll slices are governed by the deadline instead. Once all steps
+    /// are used, further attempts fail without native I/O, so a connection
+    /// performs at most `max_steps` native writes.
     pub max_steps: usize,
     pub max_certificates: usize,
     pub max_certificate_bytes: usize,

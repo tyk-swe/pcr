@@ -6,7 +6,7 @@ use std::time::Instant;
 
 use super::pending::{commit::commit_push, plan_push};
 use super::state::{TcpFlowState, flow_memory_charge, retained_bytes};
-use super::{Error, Event, Limits, Reassembler, Resource, ScopedFlowKey, Segment};
+use super::{Error, Event, EvictionReason, Limits, Reassembler, Resource, ScopedFlowKey, Segment};
 
 impl Reassembler {
     pub fn new(limits: Limits) -> Result<Self, crate::analysis::Error> {
@@ -74,16 +74,16 @@ impl Reassembler {
 
     pub fn expire(&mut self, now: Instant) -> Vec<Event> {
         let keys = self.expiry.take_expired(now);
-        self.remove_flows(keys)
+        self.remove_flows(keys, EvictionReason::Idle)
     }
 
     pub fn flush(&mut self) -> Vec<Event> {
         let keys = self.flows.keys().cloned().collect::<Vec<_>>();
-        self.remove_flows(keys)
+        self.remove_flows(keys, EvictionReason::Flush)
     }
 
-    pub fn evict_flow(&mut self, flow: &ScopedFlowKey) -> Vec<Event> {
-        self.remove_flows(vec![flow.clone()])
+    pub fn evict_flow(&mut self, flow: &ScopedFlowKey, reason: EvictionReason) -> Vec<Event> {
+        self.remove_flows(vec![flow.clone()], reason)
     }
 
     pub fn flow_count(&self) -> usize {
@@ -133,7 +133,7 @@ impl Reassembler {
     }
 
     // Offsets are cumulative; the `as u32` casts deliberately wrap them modulo 2^32.
-    fn remove_flows(&mut self, mut keys: Vec<ScopedFlowKey>) -> Vec<Event> {
+    fn remove_flows(&mut self, mut keys: Vec<ScopedFlowKey>, reason: EvictionReason) -> Vec<Event> {
         keys.sort();
         let mut events = Vec::new();
         for key in keys {
@@ -158,6 +158,7 @@ impl Reassembler {
             events.push(Event::Evicted {
                 flow: key,
                 pending_bytes: state.pending_bytes,
+                reason,
             });
         }
         events

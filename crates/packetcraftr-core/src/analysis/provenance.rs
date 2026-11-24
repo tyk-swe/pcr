@@ -82,6 +82,15 @@ struct Data {
 /// Immutable source frames in physical capture order; clones share the memory charge.
 #[derive(Clone)]
 pub struct SourceSet(Arc<Data>);
+
+impl PartialEq for SourceSet {
+    fn eq(&self, other: &Self) -> bool {
+        self.frames() == other.frames()
+    }
+}
+
+impl Eq for SourceSet {}
+
 impl fmt::Debug for SourceSet {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("SourceSet").field(&self.0.frames).finish()
@@ -97,6 +106,10 @@ impl std::ops::Deref for SourceSet {
 impl SourceSet {
     pub fn frames(&self) -> &[SourceFrame] {
         &self.0.frames
+    }
+
+    pub(crate) fn ptr_eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
     }
     pub fn union(&self, other: &Self) -> Result<Self, Error> {
         if !Arc::ptr_eq(&self.0.lease.budget, &other.0.lease.budget) {

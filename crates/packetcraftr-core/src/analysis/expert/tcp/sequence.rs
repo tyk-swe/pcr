@@ -444,6 +444,7 @@ pub(in crate::analysis::expert) fn finish(
         let TcpEvent::Evicted {
             flow,
             pending_bytes,
+            ..
         } = event
         else {
             continue;

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::{
-    tcp::{ConnectOutcome, Connection, Error, MAX_PENDING_CONNECTIONS, Provider},
+    tcp::{ConnectOutcome, Connection, Error, Provider},
     workers::{self, Task},
 };
 use packetcraftr_core::budget::{Cancelled, Deadline};
@@ -198,8 +198,8 @@ where
     }
     let started = SystemClock.now();
     let started_at = SystemClock.wall_now();
-    let permit = pool.admit_connect().map_err(|_| Error::Capacity {
-        limit: MAX_PENDING_CONNECTIONS,
+    let permit = pool.admit_connect().map_err(|exhausted| Error::Capacity {
+        limit: exhausted.capacity,
     })?;
     let cancel = Arc::new(Mutex::new(CancelState::default()));
     let cancelled = Arc::clone(&cancel);

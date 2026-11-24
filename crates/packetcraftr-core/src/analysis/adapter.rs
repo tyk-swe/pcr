@@ -38,6 +38,7 @@ pub(crate) struct Transports<'a> {
     pub(crate) outermost: Option<usize>,
 }
 
+#[derive(Clone)]
 pub(crate) struct TcpTransport<'a> {
     pub(crate) index: usize,
     pub(crate) flow: FlowKey,
@@ -45,6 +46,7 @@ pub(crate) struct TcpTransport<'a> {
     pub(crate) encapsulation: Vec<EncapsulationIdentifier>,
 }
 
+#[derive(Clone)]
 pub(crate) struct UdpTransport {
     pub(crate) index: usize,
     pub(crate) flow: FlowKey,
@@ -396,6 +398,7 @@ pub(crate) fn tcp_segment(
         },
         sequence: transport.header.sequence,
         payload: transport_payload(decoded, transport.index),
+        sources: None,
         syn: transport.header.flags & Tcp::SYN != 0,
         fin: transport.header.flags & Tcp::FIN != 0,
         rst: transport.header.flags & Tcp::RST != 0,

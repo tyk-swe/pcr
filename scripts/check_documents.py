@@ -39,8 +39,6 @@ HISTORICAL = (
     "2d1cc3bb26444a3a4c5dd40c818940369a53b1c6eda2eab1e618f438852581d4",
 )
 
-HISTORICAL_ADR = "docs/adr/0003-never-reuse-output-contract-identifiers.md"
-
 
 def schema_path(root: Path, identity: str) -> Path | None:
     match = IDENTITY.match(identity)
@@ -139,9 +137,6 @@ def check_documents(root: Path = ROOT) -> list[str]:
     actual = hashlib.sha256((root / historical).read_bytes()).hexdigest()
     if actual != digest:
         problems.append(f"{historical}: frozen schema changed (sha256 {actual})")
-    adr = (root / HISTORICAL_ADR).read_text()
-    if not any(historical in line and digest in line for line in adr.splitlines()):
-        problems.append(f"{HISTORICAL_ADR}: no row ties {historical} to sha256 {digest}")
     return problems
 
 

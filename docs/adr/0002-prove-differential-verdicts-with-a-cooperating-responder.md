@@ -1,5 +1,0 @@
-# Prove differential Verdicts with a cooperating Responder
-
-Differential testing sends one Intent under several Variants and reports a Verdict for each, and silence from an arbitrary target cannot distinguish a middlebox drop from ordinary loss, filtering, or a slow stack. We therefore prove Verdicts with a cooperating Responder run target-side that records each Canary it receives and replies deterministically, accepting the operational cost of a target-side component in exchange for Verdicts an operator can defend in an engagement report. Inference from resets, ICMP errors, or timeouts against arbitrary targets was rejected for v1 because it would label guesses as findings, and the honest Verdict vocabulary stays Accepted, Unanswered, and Flaky until a capture vantage can prove rewrites.
-
-[ADR 0006](0006-prove-rewritten-verdicts-from-the-responder-source.md) later extended this set with the `rewritten` Verdict for spoofed Campaigns where Responder reception records prove an attempt arrived under a different source tuple than the one sent.

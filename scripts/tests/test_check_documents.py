@@ -31,8 +31,6 @@ def workspace(files: dict[str, str]):
         for relative in pair
     }
     base = {
-        documents.HISTORICAL_ADR:
-            f"| {documents.HISTORICAL[0]} | {documents.HISTORICAL[1]} |\n",
         "examples/consumers/forwarding.py": 'SCHEMA = "packetcraftr.output/v19"\n',
         "crates/packetcraftr-core/src/security.rs":
             'pub const OUTPUT_SCHEMA: &str = "packetcraftr.output/v19";\n',
@@ -172,12 +170,12 @@ class CheckDocumentsTests(unittest.TestCase):
         self.assertTrue(stderr.getvalue().startswith("error:"))
         self.assertNotIn("Traceback", stderr.getvalue())
 
-    def test_adr_hash_drift_fails(self):
+    def test_frozen_historical_schema_drift_fails(self):
         problems = self.check({
             "examples/documents/indicators.json": '{"schema": "packetcraftr.indicators/v1"}',
-            documents.HISTORICAL_ADR: "no provenance row here\n",
+            documents.HISTORICAL[0]: "modified\n",
         })
-        self.assertTrue(any("no row ties" in problem for problem in problems))
+        self.assertTrue(any("frozen schema changed" in problem for problem in problems))
 
 
 if __name__ == "__main__":

@@ -115,28 +115,6 @@ Before requesting maintainer review, verify the current PR tip passes required C
 
 Before adding complexity for a speculative or vanishingly unlikely race or security edge case, explain the concrete failure mode, likelihood, and complexity cost to the user and get their buy-in. Do not silently expand scope for theoretical robustness.
 
-## Agent skills
-
-### Issue tracker
-
-Issues and specs live in GitHub Issues for this repo, managed with the `gh` CLI. See `docs/agents/issue-tracker.md`.
-
-### Triage labels
-
-The five canonical triage labels are used as-is (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
-
-### Domain docs
-
-Single-context, with one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
-
-### Updating skills
-
-Skills live in `.agents/skills/` as the canonical copy, with `.claude/skills/` and `.devin/skills/` symlinking to it, and Codex, OpenCode and Muse Code reading `.agents/skills/` directly. Update with `npx skills@latest update`, and re-run `npx skills@latest add mattpocock/skills` to pick up new skills. sol-loop is a local fork of t3dotgg/tstack with a Codex app-server route and no lockfile entry, so refresh it by hand from upstream and keep the fork changes. Do not also install the Claude Code or Codex plugin for these skills, or every skill will appear twice in that harness.
-
-After adding or removing skills, update the tracked discovery links with `python3 scripts/agent_skills.py --write-links` and verify them with `python3 scripts/agent_skills.py --check`. The generator refuses unexpected entries in either discovery directory, so remove obsolete entries intentionally first.
-
-When the checkout cannot create symlinks, run `python3 scripts/agent_skills.py --write-copies` to replace materialized link files with local copies. Rerun it after editing canonical skills. It replaces copies under `.claude/skills/` and `.devin/skills/`, so edit `.agents/skills/` only. These local copies are not tracked replacements for the links and should not be committed.
-
 ## Pull requests
 
 1. **Branch from latest default.** Pull the latest default branch (`git pull --ff-only`) and switch to a new feature branch before editing files. Open a **draft PR** as soon as the branch is up (`gh pr create --draft`).

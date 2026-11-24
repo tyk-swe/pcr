@@ -16,7 +16,6 @@
     "crates/packetcraftr/data/service-probes.training.v1.json",
     "crates/packetcraftr/data/udp-payloads.json",
     "crates/packetcraftr/data/udp-payloads.provenance.yaml",
-    "docs/adr/0003-never-reuse-output-contract-identifiers.md",
     "docs/http3-analysis.md",
     "docs/quic-analysis.md",
     "examples/captures/beacon-periodic.pcap",

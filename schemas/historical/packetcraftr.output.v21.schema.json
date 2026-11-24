@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:packetcraftr:output:v21",
-  "$comment": "Packet documents remain independently versioned at packetcraftr.packet/v1. Output identifiers are immutable and never reused; docs/adr/0003-never-reuse-output-contract-identifiers.md maps every historical identifier to its schema. Resolve this schema from the release archive; never fetch a moving branch to validate archived evidence.",
+  "$comment": "Packet documents remain independently versioned at packetcraftr.packet/v1. Output identifiers are immutable and never reused. Resolve this schema from the release archive; never fetch a moving branch to validate archived evidence.",
   "title": "PacketcraftR command output v21",
   "description": "Aggregate JSON and sequenced NDJSON. Every stream record declares event in its envelope; complete and error are terminal.",
   "oneOf": [

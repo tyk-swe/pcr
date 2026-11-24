@@ -87,7 +87,6 @@ FIXED_ASSETS = (
     'LICENSE',
     'README.md',
     'THIRD_PARTY_NOTICES.md',
-    'docs/adr/0003-never-reuse-output-contract-identifiers.md',
     'docs/http3-analysis.md',
     'docs/quic-analysis.md',
     'scripts/release-assets.json',

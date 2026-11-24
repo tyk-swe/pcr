@@ -330,7 +330,7 @@ def main(argv: list[str] | None = None) -> int:
         "--report-tests",
         action="store_true",
         help="report upward dependencies from test code without failing; "
-        "test code stays exempt from the check itself (ADR 0001)",
+        "test code stays exempt from the check itself",
     )
     args = parser.parse_args(argv)
     if args.report_tests:

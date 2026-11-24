@@ -6,7 +6,6 @@
 mod adapter;
 pub mod application;
 mod conversation_index;
-pub(crate) mod dedup;
 pub mod dns;
 mod error;
 pub mod expert;

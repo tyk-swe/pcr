@@ -107,6 +107,17 @@ impl Reassembler {
         })
     }
 
+    pub(crate) fn flow_final_next_sequence(&self, flow: &ScopedFlowKey) -> Option<u32> {
+        self.flows.get(flow).and_then(|state| {
+            state.fin_offset.map(|offset| {
+                state
+                    .base_sequence
+                    .wrapping_add(offset as u32)
+                    .wrapping_add(1)
+            })
+        })
+    }
+
     pub fn aggregate_bytes(&self) -> usize {
         self.aggregate_bytes
     }

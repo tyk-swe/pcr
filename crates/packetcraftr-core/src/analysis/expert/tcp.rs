@@ -8,7 +8,7 @@ use crate::diagnostic::Severity;
 use super::finding::new as new_finding;
 use super::generation;
 use super::observation::TcpObservation;
-use super::{Collector, Finding, FrameRecord, ScopedFlowKey, TcpEvent};
+use super::{Collector, Finding, FrameRecord, ScopedFlowKey, TcpEventRecord};
 
 mod acknowledgment;
 mod handshake;
@@ -23,7 +23,7 @@ pub(super) use window::scale as window_scale;
 pub(super) fn finish(
     flows: &HashMap<ScopedFlowKey, DirectionState>,
     streams: &HashMap<ScopedFlowKey, u64>,
-    events: &[TcpEvent],
+    events: &[TcpEventRecord],
     end_number: u64,
     check: &mut dyn FnMut() -> Result<(), crate::error::BoundaryError>,
     emit: &mut dyn FnMut(Finding) -> Result<(), crate::error::BoundaryError>,
@@ -64,9 +64,9 @@ impl DirectionState {
 }
 
 impl Collector {
-    pub(super) fn reconcile_tcp_evictions(&mut self, events: &[TcpEvent]) {
-        for event in events {
-            if let TcpEvent::Evicted { flow, .. } = event
+    pub(super) fn reconcile_tcp_evictions(&mut self, events: &[TcpEventRecord]) {
+        for record in events {
+            if let crate::analysis::reassembly::tcp::Event::Evicted { flow, .. } = &record.event
                 && let Some(state) = self.flows.get_mut(flow)
             {
                 state.reassembly_base = None;

@@ -8,7 +8,7 @@ use crate::diagnostic::Severity;
 use super::DirectionState;
 use crate::analysis::expert::finding::new as new_finding;
 use crate::analysis::expert::observation::TcpObservation;
-use crate::analysis::expert::{Finding, ScopedFlowKey, TcpEvent, tcp_stream_ref};
+use crate::analysis::expert::{Finding, ScopedFlowKey, tcp_stream_ref};
 use crate::analysis::serial::{serial_ge, serial_offset, serial_range_contains};
 
 /// Handshake progress one direction contributes within the current generation.
@@ -224,7 +224,7 @@ pub(super) fn record(
 pub(super) fn finish(
     flows: &HashMap<ScopedFlowKey, DirectionState>,
     streams: &HashMap<ScopedFlowKey, u64>,
-    events: &[TcpEvent],
+    events: &[crate::analysis::pipeline::TcpEventRecord],
     end_number: u64,
     check: &mut dyn FnMut() -> Result<(), crate::error::BoundaryError>,
     emit: &mut dyn FnMut(Finding) -> Result<(), crate::error::BoundaryError>,
@@ -242,13 +242,13 @@ pub(super) fn finish(
 
     // Looked up once per established flow, so the scan does not grow with the opener count.
     let mut unfinished = HashSet::new();
-    for event in events {
+    for record in events {
         check()?;
-        if let TcpEvent::Evicted {
+        if let crate::analysis::reassembly::tcp::Event::Evicted {
             flow,
             pending_bytes,
             ..
-        } = event
+        } = &record.event
             && *pending_bytes > 0
         {
             unfinished.insert(flow);

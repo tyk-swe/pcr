@@ -3,7 +3,7 @@
 
 //! Indicator matching across packet, DNS, HTTP, and TLS observations.
 
-use super::{Finding, Output, Severity, sample};
+use super::{Finding, Output, Severity};
 use crate::protocol::{application::dns::RecordValue, identity};
 use crate::security::indicators::{Kind, Matcher};
 use crate::{
@@ -13,7 +13,7 @@ use crate::{
     registry::Registry,
 };
 use serde_json::json;
-use std::{collections::BTreeMap, net::IpAddr, sync::Arc};
+use std::{net::IpAddr, sync::Arc};
 
 const HTTP_PORTS: [u16; 3] = [80, 8080, 8000];
 
@@ -26,7 +26,6 @@ pub(super) struct Hunt {
 
 pub(super) struct Matches {
     indicators: Matcher,
-    stream_sources: BTreeMap<u64, Vec<u64>>,
 }
 
 impl Hunt {
@@ -44,10 +43,7 @@ impl Hunt {
                 max_buffered_bytes: app.max_buffer_bytes,
             })
             .map_err(BoundaryError::from_error)?,
-            matches: Matches {
-                indicators,
-                stream_sources: BTreeMap::new(),
-            },
+            matches: Matches { indicators },
         })
     }
 
@@ -255,14 +251,7 @@ impl Matches {
                 output.report.completeness.note("incomplete TLS sessions");
             }
             if let Some(c) = s.client {
-                let mut frames: Vec<_> = self
-                    .stream_sources
-                    .get(&s.tcp_stream)
-                    .into_iter()
-                    .flatten()
-                    .copied()
-                    .filter(|number| *number >= s.first_frame && *number <= s.last_frame)
-                    .collect();
+                let mut frames = s.source_frames.clone();
                 if frames.is_empty() {
                     frames.push(s.first_frame);
                 }
@@ -292,15 +281,6 @@ impl Matches {
         Ok(())
     }
     fn frame(&mut self, r: &FrameRecord<'_>, output: &mut Output) -> Result<(), BoundaryError> {
-        if let Some(tcp) = r.tcp
-            && let Some(c) = tcp.conversation
-        {
-            let sampled = output.group(&mut self.stream_sources, c.index, Vec::new)?;
-            let sources = r
-                .tcp_sources()
-                .map_or_else(|| vec![r.number], |s| s.iter().map(|f| f.number).collect());
-            sample(sampled, &sources);
-        }
         for (packet, sources) in std::iter::once((&r.decoded.packet, r.physical_sources())).chain(
             r.derived_datagrams()
                 .iter()

@@ -9,7 +9,6 @@
 use bytes::Bytes;
 
 use crate::analysis::adapter::transport_payload;
-use crate::analysis::dedup::Deduplicator;
 use crate::analysis::pipeline::{FrameRecord, Summary as RunSummary};
 use crate::analysis::reassembly::tcp::Event as TcpEvent;
 use crate::analysis::session::{self, CollectorNeeds};
@@ -17,7 +16,14 @@ use crate::analysis::{FlowKey, ScopedFlowKey};
 use crate::analysis::{StreamRef, StreamTransport};
 use crate::error::BoundaryError;
 
-pub use crate::analysis::dedup::PeerDirection;
+/// Sender relative to the first captured frame, whose sender is the client.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+pub enum PeerDirection {
+    #[serde(rename = "client")]
+    ClientToServer,
+    #[serde(rename = "server")]
+    ServerToClient,
+}
 
 /// One run of conversation payload, in delivery order.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -47,7 +53,6 @@ pub struct Collector {
     selector: StreamRef,
     summary: Summary,
     client_flow: Option<ScopedFlowKey>,
-    dedup: Deduplicator,
 }
 
 impl Collector {
@@ -56,7 +61,6 @@ impl Collector {
             selector,
             summary: Summary::default(),
             client_flow: None,
-            dedup: Deduplicator::default(),
         }
     }
 
@@ -86,7 +90,7 @@ impl Collector {
                     flow,
                     pending_bytes,
                     ..
-                } = event
+                } = &event.event
                     && direction_of(flow, &client).is_some()
                 {
                     self.add_undelivered(*pending_bytes);
@@ -102,21 +106,14 @@ impl Collector {
         // by another flow.
         if let Some(client) = self.client_flow.clone() {
             for event in record.tcp_events {
-                match event {
-                    TcpEvent::Evicted {
-                        flow,
-                        pending_bytes,
-                        ..
-                    } if direction_of(flow, &client).is_some() => {
-                        self.add_undelivered(*pending_bytes);
-                        self.dedup.mark_evicted(flow, &client);
-                    }
-                    TcpEvent::Closed { flow, reset: false }
-                        if direction_of(flow, &client).is_some() =>
-                    {
-                        self.dedup.mark_closed(flow, &client);
-                    }
-                    _ => {}
+                if let TcpEvent::Evicted {
+                    flow,
+                    pending_bytes,
+                    ..
+                } = &event.event
+                    && direction_of(flow, &client).is_some()
+                {
+                    self.add_undelivered(*pending_bytes);
                 }
             }
         }
@@ -129,20 +126,16 @@ impl Collector {
         else {
             return Vec::new();
         };
-        let tcp = view.header;
         let flow = conversation.flow;
         let client = self.claim_client(record, flow);
-
-        self.dedup.observe_syn(flow, &client, tcp);
         self.summary.frames = self.summary.frames.saturating_add(1);
         let mut chunks = Vec::new();
         for event in record.tcp_events {
             if let TcpEvent::Data {
                 flow: sender,
-                sequence,
                 bytes,
                 ..
-            } = event
+            } = &event.event
             {
                 let Some(direction) = direction_of(sender, &client) else {
                     continue;
@@ -150,15 +143,12 @@ impl Collector {
                 if bytes.is_empty() {
                     continue;
                 }
-                let Some(bytes) = self.dedup.deduplicate(direction, *sequence, bytes) else {
-                    continue;
-                };
                 self.tally(direction, bytes.len());
                 chunks.push(Chunk {
                     direction,
-                    direction_generation: self.dedup.generation(direction),
+                    direction_generation: event.direction_generation,
                     number: record.number,
-                    bytes,
+                    bytes: bytes.clone(),
                 });
             }
         }

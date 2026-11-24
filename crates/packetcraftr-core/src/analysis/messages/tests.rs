@@ -1366,7 +1366,9 @@ fn directions_share_reclaimed_capacity() {
 #[test]
 fn fragmented_tcp_resolves_event_filter_and_stream_dependencies() {
     use crate::analysis::reassembly::tcp::Event as TcpEvent;
-    use crate::analysis::{CollectorNeeds, FrameRecord, Options, Plan, Session, SessionOptions};
+    use crate::analysis::{
+        CollectorNeeds, FrameRecord, Options, Plan, Session, SessionOptions, TcpEventRecord,
+    };
     use crate::budget::Deadline;
     use crate::error::BoundaryError;
     use crate::frame::{Frame, LinkType};
@@ -1377,7 +1379,7 @@ fn fragmented_tcp_resolves_event_filter_and_stream_dependencies() {
     struct EventsOnly;
 
     impl crate::analysis::Collector for EventsOnly {
-        type Event = TcpEvent;
+        type Event = TcpEventRecord;
         type Summary = ();
 
         fn needs(&self) -> CollectorNeeds {
@@ -1391,7 +1393,7 @@ fn fragmented_tcp_resolves_event_filter_and_stream_dependencies() {
             &mut self,
             record: &FrameRecord<'_>,
             _deadline: &crate::budget::Deadline,
-        ) -> Result<Vec<TcpEvent>, BoundaryError> {
+        ) -> Result<Vec<TcpEventRecord>, BoundaryError> {
             Ok(record.tcp_events.to_vec())
         }
 
@@ -1399,7 +1401,7 @@ fn fragmented_tcp_resolves_event_filter_and_stream_dependencies() {
             self,
             run: &crate::analysis::Summary,
             deadline: &Deadline,
-            sink: &mut dyn FnMut(TcpEvent) -> Result<(), BoundaryError>,
+            sink: &mut dyn FnMut(TcpEventRecord) -> Result<(), BoundaryError>,
         ) -> Result<(), BoundaryError> {
             crate::analysis::session::deliver(deadline, run.trailing_tcp_events.clone(), sink)
         }
@@ -1453,7 +1455,7 @@ fn fragmented_tcp_resolves_event_filter_and_stream_dependencies() {
             &mut reader,
             |_| Ok(()),
             |event| {
-                if let TcpEvent::Data { bytes, .. } = event {
+                if let TcpEvent::Data { bytes, .. } = &event.event {
                     delivered.extend_from_slice(&bytes);
                 }
                 Ok(())

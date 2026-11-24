@@ -10,21 +10,18 @@ use crate::protocol::identity::TcpHeader;
 use crate::protocol::transport::Tcp;
 
 use crate::analysis::conversation_index::CanonicalFlow;
-use crate::analysis::pipeline::Limits;
-use crate::analysis::pipeline::TcpEventRecord;
 use crate::analysis::pipeline::clock::CaptureClock;
-use crate::analysis::pipeline::limits::DIRECTIONS_PER_CONVERSATION;
+use crate::analysis::pipeline::{Limits, TcpEventRecord};
 use crate::analysis::reassembly::tcp::{
     Error as ReassemblyTcpError, Event as TcpEvent, EvictionReason, Reassembler as TcpReassembler,
     Resource as TcpResource, Segment,
 };
-use crate::analysis::serial::serial_range_contains;
+use crate::analysis::serial::{serial_gt, serial_range_contains};
 use crate::analysis::{Error, ScopedFlowKey};
 
 pub(super) struct ReassemblyDispatch {
     tcp_reassembler: Option<TcpReassembler>,
     conversations: HashMap<CanonicalFlow, ConversationMeta>,
-    max_half_open_pure_syns: usize,
     clock: CaptureClock,
 }
 
@@ -45,6 +42,42 @@ struct DirectionMeta {
     closed_next_sequence: Option<u32>,
 }
 
+impl DirectionMeta {
+    fn end(&mut self) {
+        if self.active
+            || self.half_open_pure_syn
+            || self.last_syn_base.is_some()
+            || self.saw_prior_traffic
+            || self.closed
+        {
+            self.generation = self.generation.saturating_add(1);
+        }
+        self.active = false;
+        self.half_open_pure_syn = false;
+        self.saw_prior_traffic = false;
+        self.closed = false;
+        self.closed_next_sequence = None;
+    }
+
+    fn start_syn(&mut self, base: u32) -> bool {
+        let retransmitted = self.last_syn_base == Some(base) && (self.active || self.closed);
+        let prior_connection = self.active
+            || self.half_open_pure_syn
+            || self.last_syn_base.is_some()
+            || self.saw_prior_traffic
+            || self.closed;
+        let new_connection = prior_connection && !retransmitted;
+        if new_connection {
+            self.generation = self.generation.saturating_add(1);
+        }
+        self.last_syn_base = Some(base);
+        self.saw_prior_traffic = false;
+        self.closed = false;
+        self.closed_next_sequence = None;
+        new_connection
+    }
+}
+
 impl ConversationMeta {
     fn new(stream: Option<u64>) -> Self {
         Self {
@@ -57,18 +90,6 @@ impl ConversationMeta {
     fn direction(&mut self, flow: &ScopedFlowKey) -> &mut DirectionMeta {
         self.directions.entry(flow.clone()).or_default()
     }
-
-    fn bump_generation(&mut self) {
-        self.generation = self.generation.saturating_add(1);
-        for direction in self.directions.values_mut() {
-            direction.generation = direction.generation.saturating_add(1);
-            direction.active = false;
-            direction.half_open_pure_syn = false;
-            direction.saw_prior_traffic = false;
-            direction.closed = false;
-            direction.closed_next_sequence = None;
-        }
-    }
 }
 
 impl ReassemblyDispatch {
@@ -79,9 +100,14 @@ impl ReassemblyDispatch {
         Ok(Self {
             tcp_reassembler,
             conversations: HashMap::new(),
-            max_half_open_pure_syns: limits.max_flows.saturating_mul(DIRECTIONS_PER_CONVERSATION),
             clock: CaptureClock::new(),
         })
+    }
+
+    pub(super) fn generation(&self, flow: &ScopedFlowKey) -> Option<u64> {
+        self.conversations
+            .get(&CanonicalFlow::from_flow(flow))
+            .map(|meta| meta.generation)
     }
 
     fn meta(&mut self, flow: &ScopedFlowKey, stream: Option<u64>) -> &mut ConversationMeta {
@@ -95,15 +121,48 @@ impl ReassemblyDispatch {
         meta
     }
 
-    fn stamp(&self, event: TcpEvent) -> TcpEventRecord {
-        let flow = event_flow(&event);
+    fn stamp(&self, event: &TcpEvent) -> TcpEventRecord {
+        let flow = event_flow(event);
         let meta = self.conversations.get(&CanonicalFlow::from_flow(flow));
         let direction = meta.and_then(|meta| meta.directions.get(flow));
         TcpEventRecord {
             stream: meta.and_then(|meta| meta.stream).unwrap_or(0),
             generation: meta.map_or(0, |meta| meta.generation),
             direction_generation: direction.map_or(0, |direction| direction.generation),
-            event,
+            event: event.clone(),
+        }
+    }
+
+    fn emit(
+        &mut self,
+        event: TcpEvent,
+        closed_next_sequence: Option<u32>,
+        output: &mut Vec<TcpEventRecord>,
+    ) {
+        output.push(self.stamp(&event));
+        self.observe_event(&event, closed_next_sequence);
+    }
+
+    fn observe_event(&mut self, event: &TcpEvent, closed_next_sequence: Option<u32>) {
+        let flow = event_flow(event).clone();
+        let meta = self.meta(&flow, None);
+        match event {
+            TcpEvent::Data { .. } => {
+                let direction = meta.direction(&flow);
+                direction.active = true;
+                direction.saw_prior_traffic = true;
+            }
+            TcpEvent::Evicted { .. } => {
+                meta.direction(&flow).end();
+            }
+            TcpEvent::Closed { reset, .. } => {
+                let direction = meta.direction(&flow);
+                direction.active = false;
+                direction.half_open_pure_syn = false;
+                direction.closed = true;
+                direction.closed_next_sequence = if *reset { None } else { closed_next_sequence };
+            }
+            TcpEvent::Retransmission { .. } | TcpEvent::Gap { .. } => {}
         }
     }
 
@@ -120,7 +179,6 @@ impl ReassemblyDispatch {
             return Ok(output);
         }
 
-        // Only matched frames advance TCP expiry.
         let now = self.clock.at(timestamp, number)?;
         let sweep_due = self.clock.should_sweep(now);
         let pushable = segment.as_ref().is_some_and(|segment| {
@@ -133,10 +191,9 @@ impl ReassemblyDispatch {
                 .as_mut()
                 .expect("reassembler checked")
                 .expire(now);
-            for flow in expired.iter().map(event_flow).cloned().collect::<Vec<_>>() {
-                self.meta(&flow, stream).direction(&flow).active = false;
+            for event in expired {
+                self.emit(event, None, &mut output);
             }
-            output.extend(expired.into_iter().map(|event| self.stamp(event)));
         }
 
         if pushable && let Some(segment) = segment {
@@ -162,29 +219,28 @@ impl ReassemblyDispatch {
         now: std::time::Instant,
         number: u64,
     ) -> Result<Vec<TcpEventRecord>, Error> {
-        let flow = segment.flow.clone();
-        let pure_syn = segment.syn && acknowledgment.is_none() && segment.payload.is_empty();
         let mut output = Vec::new();
         let reused = self.evict_reused_generation(segment, acknowledgment, &mut output);
-        if reused {
-            self.meta(&flow, None).bump_generation();
+        let mut new_connection = reused;
+        if segment.syn {
+            let base = segment.sequence.wrapping_add(1);
+            let meta = self.meta(&segment.flow, None);
+            new_connection |= meta.direction(&segment.flow).start_syn(base);
+            if new_connection {
+                meta.generation = meta.generation.saturating_add(1);
+            }
         }
 
         let mut input = if segment.rst {
-            for event in [
-                self.tcp_reassembler
+            for flow in [segment.flow.reverse(), segment.flow.clone()] {
+                let events = self
+                    .tcp_reassembler
                     .as_mut()
                     .expect("reassembler exists")
-                    .evict_flow(&segment.flow.reverse(), EvictionReason::Reset),
-                self.tcp_reassembler
-                    .as_mut()
-                    .expect("reassembler exists")
-                    .evict_flow(&segment.flow, EvictionReason::Reset),
-            ]
-            .into_iter()
-            .flatten()
-            {
-                output.push(self.stamp(event));
+                    .evict_flow(&flow, EvictionReason::Reset);
+                for event in events {
+                    self.emit(event, None, &mut output);
+                }
             }
             Segment {
                 payload: Bytes::new(),
@@ -194,13 +250,33 @@ impl ReassemblyDispatch {
             segment.clone()
         };
 
-        self.filter_post_fin_retransmission(&mut input);
-        if input.payload.is_empty() && !input.syn && !input.fin && !input.rst {
+        let keep = input.syn || self.trim_post_fin_retransmission(&mut input);
+        if !keep {
             return Ok(output);
         }
         let produced = self.push_with_retry(input.clone(), now, number, &mut output)?;
-        self.observe_segment(&input, &produced, pure_syn);
+        self.observe_segment(
+            &input,
+            &produced,
+            acknowledgment.is_none() && segment.payload.is_empty(),
+        );
         Ok(output)
+    }
+
+    fn final_next_sequence(&self, segment: &Segment) -> Option<u32> {
+        if segment.fin {
+            Some(
+                segment
+                    .sequence
+                    .wrapping_add(u32::from(segment.syn))
+                    .wrapping_add(segment.payload.len() as u32)
+                    .wrapping_add(1),
+            )
+        } else {
+            self.tcp_reassembler
+                .as_ref()
+                .and_then(|reassembler| reassembler.flow_final_next_sequence(&segment.flow))
+        }
     }
 
     fn push_with_retry(
@@ -210,10 +286,16 @@ impl ReassemblyDispatch {
         number: u64,
         output: &mut Vec<TcpEventRecord>,
     ) -> Result<Vec<TcpEvent>, Error> {
-        let reassembler = self.tcp_reassembler.as_mut().expect("reassembler exists");
-        match reassembler.push(segment.clone(), now) {
+        let final_next_sequence = self.final_next_sequence(&segment);
+        let first = {
+            let reassembler = self.tcp_reassembler.as_mut().expect("reassembler exists");
+            reassembler.push(segment.clone(), now)
+        };
+        match first {
             Ok(produced) => {
-                output.extend(produced.clone().into_iter().map(|event| self.stamp(event)));
+                for event in produced.clone() {
+                    self.emit(event, final_next_sequence, output);
+                }
                 Ok(produced)
             }
             Err(ReassemblyTcpError::Resource(
@@ -221,13 +303,21 @@ impl ReassemblyDispatch {
                 | TcpResource::SegmentLimit { .. }
                 | TcpResource::AggregateByteLimit { .. },
             )) => {
-                for event in reassembler.evict_flow(&segment.flow, EvictionReason::Budget) {
-                    output.push(self.stamp(event));
+                let evicted = {
+                    let reassembler = self.tcp_reassembler.as_mut().expect("reassembler exists");
+                    reassembler.evict_flow(&segment.flow, EvictionReason::Budget)
+                };
+                for event in evicted {
+                    self.emit(event, None, output);
                 }
-                let produced = reassembler
-                    .push(segment, now)
-                    .map_err(|source| Error::Reassembly { number, source })?;
-                output.extend(produced.clone().into_iter().map(|event| self.stamp(event)));
+                let produced = {
+                    let reassembler = self.tcp_reassembler.as_mut().expect("reassembler exists");
+                    reassembler.push(segment, now)
+                }
+                .map_err(|source| Error::Reassembly { number, source })?;
+                for event in produced.clone() {
+                    self.emit(event, final_next_sequence, output);
+                }
                 Ok(produced)
             }
             Err(source) => Err(Error::Reassembly { number, source }),
@@ -245,6 +335,11 @@ impl ReassemblyDispatch {
         }
         let first = segment.sequence.wrapping_add(1);
         let reverse = segment.flow.reverse();
+        let reverse_half_open = self
+            .conversations
+            .get(&CanonicalFlow::from_flow(&segment.flow))
+            .and_then(|meta| meta.directions.get(&reverse))
+            .is_some_and(|direction| direction.half_open_pure_syn);
         let reassembler = self.tcp_reassembler.as_mut().expect("reassembler exists");
         let reverse_verdict = acknowledgment.and_then(|acknowledgment| {
             serial_range_contains(
@@ -255,11 +350,6 @@ impl ReassemblyDispatch {
         });
         let acknowledgment_disagrees = reverse_verdict == Some(false);
         let own_base = reassembler.flow_base_sequence(&segment.flow);
-        let reverse_half_open = self
-            .conversations
-            .get(&CanonicalFlow::from_flow(&segment.flow))
-            .and_then(|meta| meta.directions.get(&reverse))
-            .is_some_and(|direction| direction.half_open_pure_syn);
         let reuse = match own_base {
             Some(base) => {
                 base != first
@@ -269,101 +359,99 @@ impl ReassemblyDispatch {
                         && reassembler.flow_observed_payload(&segment.flow))
             }
             None if acknowledgment.is_some() => acknowledgment_disagrees,
-            None => !reverse_half_open,
+            None => {
+                !reverse_half_open
+                    && self
+                        .conversations
+                        .get(&CanonicalFlow::from_flow(&segment.flow))
+                        .and_then(|meta| meta.directions.get(&segment.flow))
+                        .is_some_and(|direction| direction.last_syn_base.is_some())
+            }
         };
         if !reuse {
             return false;
         }
+        let mut evictions = Vec::new();
         if reverse_verdict != Some(true) {
-            for event in reassembler.evict_flow(&reverse, EvictionReason::Reuse) {
-                output.push(self.stamp(event));
-            }
+            evictions.extend(reassembler.evict_flow(&reverse, EvictionReason::Reuse));
         }
         if own_base.is_some() {
-            for event in reassembler.evict_flow(&segment.flow, EvictionReason::Reuse) {
-                output.push(self.stamp(event));
-            }
+            evictions.extend(reassembler.evict_flow(&segment.flow, EvictionReason::Reuse));
+        }
+        for event in evictions {
+            self.emit(event, None, output);
         }
         true
     }
 
-    fn filter_post_fin_retransmission(&mut self, segment: &mut Segment) {
-        if segment.syn {
-            return;
-        }
+    fn trim_post_fin_retransmission(&mut self, segment: &mut Segment) -> bool {
         let Some(direction) = self
             .conversations
             .get(&CanonicalFlow::from_flow(&segment.flow))
             .and_then(|meta| meta.directions.get(&segment.flow))
         else {
-            return;
+            return true;
         };
-        if !direction.closed {
-            return;
+        if !direction.closed || direction.active {
+            return true;
         }
         let Some(edge) = direction.closed_next_sequence else {
-            return;
+            return true;
         };
-        let sequence = segment.sequence;
-        let overlap = edge.wrapping_sub(sequence);
-        if overlap == 0 {
-            return;
+        let start = segment.sequence;
+        if !serial_gt(edge, start) {
+            return true;
         }
-        let payload_overlap = usize::try_from(overlap)
-            .unwrap_or(usize::MAX)
-            .min(segment.payload.len());
+        let overlap = usize::try_from(edge.wrapping_sub(start)).unwrap_or(usize::MAX);
+        let fin = usize::from(segment.fin);
+        let Some(span) = segment.payload.len().checked_add(fin) else {
+            return true;
+        };
+        if overlap >= span {
+            return false;
+        }
+        let payload_overlap = overlap.min(segment.payload.len());
         if payload_overlap != 0 {
             segment.sequence = segment.sequence.wrapping_add(payload_overlap as u32);
             segment.payload = segment.payload.slice(payload_overlap..);
         }
-        if segment.fin
-            && segment.payload.len() + usize::try_from(overlap).unwrap_or(usize::MAX) != 0
-            && segment.payload.is_empty()
-        {
+        if overlap > segment.payload.len() {
             segment.fin = false;
         }
+        !segment.payload.is_empty() || segment.fin || segment.rst
     }
 
     fn observe_segment(&mut self, segment: &Segment, produced: &[TcpEvent], pure_syn: bool) {
         let meta = self.meta(&segment.flow, None);
         let direction = meta.direction(&segment.flow);
-        direction.active = true;
-        direction.half_open_pure_syn = pure_syn;
-        if segment.syn {
-            direction.last_syn_base = Some(segment.sequence.wrapping_add(1));
+        if pure_syn {
+            direction.half_open_pure_syn = true;
+        } else {
+            direction.half_open_pure_syn = false;
         }
+        direction.active = true;
         direction.saw_prior_traffic |= !segment.payload.is_empty()
             || produced
                 .iter()
                 .any(|event| matches!(event, TcpEvent::Data { .. }));
         for event in produced {
-            if let TcpEvent::Closed { flow, reset } = event
-                && flow == &segment.flow
-            {
-                let direction = meta.direction(flow);
-                direction.closed = true;
+            if matches!(event, TcpEvent::Closed { flow, .. } if flow == &segment.flow) {
                 direction.active = false;
-                if !reset {
-                    direction.closed_next_sequence = Some(
-                        segment
-                            .sequence
-                            .wrapping_add(u32::from(segment.syn))
-                            .wrapping_add(segment.payload.len() as u32)
-                            .wrapping_add(1),
-                    );
-                }
             }
         }
     }
 
     pub(super) fn flush(&mut self) -> Vec<TcpEventRecord> {
-        self.tcp_reassembler
+        let events = self
+            .tcp_reassembler
             .as_mut()
             .map(TcpReassembler::flush)
-            .unwrap_or_default()
-            .into_iter()
-            .map(|event| self.stamp(event))
-            .collect()
+            .unwrap_or_default();
+        let mut output = Vec::new();
+        for event in events {
+            self.emit(event, None, &mut output);
+        }
+        output
     }
 }
 

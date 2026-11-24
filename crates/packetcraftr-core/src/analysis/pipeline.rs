@@ -516,6 +516,9 @@ impl FramePipeline {
 
         enforce_deadline(deadline)?;
         record.tcp_events = &tcp_events;
+        if let (Some(view), Some(segment)) = (&mut record.tcp, segment.as_ref()) {
+            view.generation = reassembly_dispatch.generation(&segment.flow);
+        }
         sink(record).map_err(|source| Error::Sink { number, source })?;
 
         Ok(())

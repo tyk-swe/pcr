@@ -9,7 +9,7 @@ use crate::protocol::identity::TcpHeader;
 use super::DirectionState;
 use crate::analysis::expert::finding::new as new_finding;
 use crate::analysis::expert::observation::TcpObservation;
-use crate::analysis::expert::{Finding, ScopedFlowKey, TcpEvent, tcp_stream_ref};
+use crate::analysis::expert::{Finding, ScopedFlowKey, TcpEventRecord, tcp_stream_ref};
 use crate::analysis::serial::{serial_ge, serial_gt};
 
 /// Duplicate acknowledgments after which a resend of the acknowledged edge is a fast retransmission.
@@ -84,13 +84,14 @@ impl Holes {
 pub(super) fn reconcile_events(
     flows: &mut HashMap<ScopedFlowKey, DirectionState>,
     observation: &TcpObservation<'_>,
-    events: &[TcpEvent],
+    events: &[TcpEventRecord],
     findings: &mut Vec<Finding>,
 ) -> (bool, bool) {
     let probe_shape = is_probe_shape(flows.get(observation.flow), observation);
     let mut reassembly_retransmission = false;
-    for event in events {
-        let TcpEvent::Retransmission {
+    for record in events {
+        let event = &record.event;
+        let crate::analysis::reassembly::tcp::Event::Retransmission {
             flow,
             sequence,
             bytes,
@@ -423,10 +424,12 @@ fn update_next_sequences(
 
 pub(super) fn record_clean_closures(
     flows: &mut HashMap<ScopedFlowKey, DirectionState>,
-    events: &[TcpEvent],
+    events: &[TcpEventRecord],
 ) {
-    for event in events {
-        if let TcpEvent::Closed { flow, reset: false } = event {
+    for record in events {
+        if let crate::analysis::reassembly::tcp::Event::Closed { flow, reset: false } =
+            &record.event
+        {
             flows.entry(flow.clone()).or_default().closed = true;
         }
     }
@@ -434,14 +437,15 @@ pub(super) fn record_clean_closures(
 
 pub(in crate::analysis::expert) fn finish(
     streams: &HashMap<ScopedFlowKey, u64>,
-    events: &[TcpEvent],
+    events: &[TcpEventRecord],
     end_number: u64,
     check: &mut dyn FnMut() -> Result<(), crate::error::BoundaryError>,
     emit: &mut dyn FnMut(Finding) -> Result<(), crate::error::BoundaryError>,
 ) -> Result<(), crate::error::BoundaryError> {
-    for event in events {
+    for record in events {
         check()?;
-        let TcpEvent::Evicted {
+        let event = &record.event;
+        let crate::analysis::reassembly::tcp::Event::Evicted {
             flow,
             pending_bytes,
             ..

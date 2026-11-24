@@ -5,7 +5,7 @@ mod transactions;
 
 use super::{
     FrameRecord, ScopedFlowKey, StreamTransport, Summary as RunSummary, adapter,
-    application::{self, Error, Limits, Retained, TcpSources},
+    application::{self, Error, Limits, Retained, TcpStreamFilter},
     provenance::{Accumulator, SourceSet},
     scope::Definition,
     session::{self, CollectorNeeds},
@@ -108,7 +108,7 @@ pub struct Collector {
     ports: Vec<u16>,
     registry: Arc<Registry>,
     seen_streams: BTreeSet<(StreamTransport, u64)>,
-    tcp: TcpSources,
+    tcp: TcpStreamFilter,
     directions: BTreeMap<ScopedFlowKey, Direction>,
     scopes: BTreeMap<u32, Definition>,
     buffered: usize,
@@ -128,7 +128,7 @@ impl Collector {
         let ports = application::normalize_ports(ports, "dns_ports")?;
         Ok(Self {
             limits,
-            tcp: TcpSources::new(ports.clone(), limits),
+            tcp: TcpStreamFilter::new(ports.clone(), limits),
             ports,
             registry,
             seen_streams: BTreeSet::new(),

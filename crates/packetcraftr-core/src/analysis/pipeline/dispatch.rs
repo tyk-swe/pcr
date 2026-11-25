@@ -223,9 +223,27 @@ impl ReassemblyDispatch {
         let reused = self.evict_reused_generation(segment, acknowledgment, &mut output);
         if segment.syn {
             let base = segment.sequence.wrapping_add(1);
+            let reverse = segment.flow.reverse();
+            let reverse_acknowledged = acknowledgment.is_some_and(|acknowledgment| {
+                let reassembler = self.tcp_reassembler.as_ref().expect("reassembler exists");
+                serial_range_contains(
+                    reassembler.flow_base_sequence(&reverse),
+                    reassembler.flow_next_sequence(&reverse),
+                    acknowledgment,
+                ) == Some(true)
+            });
             let meta = self.meta(&segment.flow, None);
-            meta.direction(&segment.flow).start_syn(base);
-            if reused {
+            let reverse_half_open = meta
+                .directions
+                .get(&reverse)
+                .is_some_and(|direction| direction.half_open_pure_syn);
+            let starts_direction = meta.direction(&segment.flow).start_syn(base);
+            let completes_reverse_syn = if acknowledgment.is_some() {
+                reverse_acknowledged
+            } else {
+                reverse_half_open
+            };
+            if reused || (starts_direction && !completes_reverse_syn) {
                 meta.generation = meta.generation.saturating_add(1);
             }
         }
@@ -257,7 +275,7 @@ impl ReassemblyDispatch {
         self.observe_segment(
             &input,
             &produced,
-            acknowledgment.is_none() && segment.payload.is_empty(),
+            input.syn && acknowledgment.is_none() && segment.payload.is_empty(),
         );
         Ok(output)
     }
@@ -548,5 +566,24 @@ mod tests {
 
         assert_eq!(client_generation, 1);
         assert_eq!(data_generation(&events), Some(client_generation));
+    }
+
+    #[test]
+    fn syn_after_midstream_close_starts_a_new_generation() {
+        let client = flow();
+        let now = Instant::now();
+        let mut dispatch = ReassemblyDispatch::new(true, &Limits::default()).unwrap();
+
+        dispatch
+            .dispatch_segment(None, &segment(&client, 100, b"x", false, false), now, 1)
+            .unwrap();
+        dispatch
+            .dispatch_segment(None, &segment(&client, 101, &[], false, true), now, 2)
+            .unwrap();
+        let events = dispatch
+            .dispatch_segment(None, &segment(&client, 500, b"y", true, false), now, 3)
+            .unwrap();
+
+        assert_eq!(data_generation(&events), Some(1));
     }
 }

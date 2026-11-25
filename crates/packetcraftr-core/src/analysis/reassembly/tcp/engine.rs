@@ -294,4 +294,103 @@ mod tests {
             ]
         );
     }
+
+    #[test]
+    fn conflicting_retransmission_preserves_first_seen_provenance() {
+        let tracker = Tracker::new(1 << 20, 32).unwrap();
+        let flow = flow();
+        let base = 1_000;
+        let mut reassembler = Reassembler::new(Limits::default()).unwrap();
+        let now = Instant::now();
+        let mut syn = segment(&flow, base - 1, &[], None);
+        syn.syn = true;
+        reassembler.push(syn, now).unwrap();
+        reassembler
+            .push(
+                segment(&flow, base + 5, b"fghij", Some(source(&tracker, 1))),
+                now,
+            )
+            .unwrap();
+        let retransmission = reassembler
+            .push(
+                segment(&flow, base + 5, b"xxxxx", Some(source(&tracker, 2))),
+                now,
+            )
+            .unwrap();
+        assert!(retransmission.iter().any(|event| matches!(
+            event,
+            Event::Retransmission {
+                conflicting: true,
+                ..
+            }
+        )));
+
+        let events = reassembler
+            .push(
+                segment(&flow, base, b"abcde", Some(source(&tracker, 3))),
+                now,
+            )
+            .unwrap();
+
+        let Some((bytes, sources)) = events.iter().find_map(|event| match event {
+            Event::Data { bytes, sources, .. } => Some((bytes, sources)),
+            _ => None,
+        }) else {
+            panic!("gap fill did not emit reassembled data: {events:?}");
+        };
+        assert_eq!(bytes.as_ref(), b"abcdefghij");
+        let DataSources::Spans(spans) = sources else {
+            panic!("merged data did not retain span provenance: {sources:?}");
+        };
+        let spans: Vec<(usize, Vec<u64>)> = spans
+            .iter()
+            .map(|(length, sources)| {
+                (
+                    *length,
+                    sources.iter().map(|frame| frame.number).collect::<Vec<_>>(),
+                )
+            })
+            .collect();
+        assert_eq!(spans, vec![(5, vec![3]), (5, vec![1])]);
+    }
+
+    #[test]
+    fn reassembly_and_provenance_survive_sequence_wraps() {
+        let tracker = Tracker::new(1 << 20, 32).unwrap();
+        let flow = flow();
+        let base = u32::MAX - 1;
+        let mut reassembler = Reassembler::new(Limits::default()).unwrap();
+        let now = Instant::now();
+        let mut syn = segment(&flow, base.wrapping_sub(1), &[], None);
+        syn.syn = true;
+        reassembler.push(syn, now).unwrap();
+        reassembler
+            .push(segment(&flow, 1, b"de", Some(source(&tracker, 2))), now)
+            .unwrap();
+
+        let events = reassembler
+            .push(segment(&flow, base, b"abc", Some(source(&tracker, 1))), now)
+            .unwrap();
+
+        let Some((bytes, sources)) = events.iter().find_map(|event| match event {
+            Event::Data { bytes, sources, .. } => Some((bytes, sources)),
+            _ => None,
+        }) else {
+            panic!("sequence wrap did not emit reassembled data: {events:?}");
+        };
+        assert_eq!(bytes.as_ref(), b"abcde");
+        let DataSources::Spans(spans) = sources else {
+            panic!("wrapped data did not retain span provenance: {sources:?}");
+        };
+        let spans: Vec<(usize, Vec<u64>)> = spans
+            .iter()
+            .map(|(length, sources)| {
+                (
+                    *length,
+                    sources.iter().map(|frame| frame.number).collect::<Vec<_>>(),
+                )
+            })
+            .collect();
+        assert_eq!(spans, vec![(3, vec![1]), (2, vec![2])]);
+    }
 }

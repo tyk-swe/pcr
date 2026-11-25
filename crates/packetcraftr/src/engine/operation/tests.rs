@@ -57,6 +57,30 @@ fn isolated_cache_retains_parent_worker_charges() {
 }
 
 #[test]
+fn isolated_operations_share_cumulative_traffic_and_neighbor_spending() {
+    let client = Client::new(Arc::new(Registry::default()), Policy::default(), ());
+    let operation = Operation::new(&client, Duration::from_secs(5));
+    let child = operation.isolated();
+    operation.spend.record_packet(40);
+    child.spend.record_neighbors(&Stats {
+        packets_attempted: 2,
+        packets_completed: 1,
+        bytes: 60,
+        ..Stats::default()
+    });
+
+    let policy = Policy {
+        max_packets_per_operation: 4,
+        max_bytes_per_operation: 120,
+        ..Policy::default()
+    };
+    let projected = child.policy(&policy);
+    assert_eq!(projected.max_packets_per_operation, 1);
+    assert_eq!(projected.max_bytes_per_operation, 20);
+    assert_eq!(operation.spend.neighbor_snapshot().packets_attempted, 2);
+}
+
+#[test]
 fn explicit_independent_root_remains_independent() {
     let parent = Runtime::new(0).unwrap();
     let independent = Runtime::new(1).unwrap();

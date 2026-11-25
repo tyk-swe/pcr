@@ -227,8 +227,9 @@ impl ReassemblyDispatch {
         number: u64,
     ) -> Result<Vec<TcpEventRecord>, Error> {
         let mut output = Vec::new();
-        let reused = self.evict_reused_generation(segment, acknowledgment, &mut output);
-        if segment.syn {
+        let reused =
+            !segment.rst && self.evict_reused_generation(segment, acknowledgment, &mut output);
+        if segment.syn && !segment.rst {
             let base = segment.sequence.wrapping_add(1);
             let reverse = segment.flow.reverse();
             let reverse_acknowledged = acknowledgment.is_some_and(|acknowledgment| {
@@ -592,5 +593,66 @@ mod tests {
             .unwrap();
 
         assert_eq!(data_generation(&events), Some(1));
+    }
+
+    #[test]
+    fn post_fin_retransmissions_do_not_duplicate_delivery() {
+        let client = flow();
+        let now = Instant::now();
+        let mut dispatch = ReassemblyDispatch::new(true, &Limits::default()).unwrap();
+
+        let events = dispatch
+            .dispatch_segment(None, &segment(&client, 100, b"abcd", false, false), now, 1)
+            .unwrap();
+        assert!(events.iter().any(|record| matches!(&record.event, TcpEvent::Data { bytes, .. } if bytes.as_ref() == b"abcd")));
+        dispatch
+            .dispatch_segment(None, &segment(&client, 104, &[], false, true), now, 2)
+            .unwrap();
+
+        for (sequence, payload, fin) in [(100, &b"abcd"[..], false), (104, &b""[..], true)] {
+            let events = dispatch
+                .dispatch_segment(
+                    None,
+                    &segment(&client, sequence, payload, false, fin),
+                    now,
+                    3,
+                )
+                .unwrap();
+            assert!(
+                events.is_empty(),
+                "post-FIN retransmission produced {events:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn rst_takes_precedence_over_syn_reuse() {
+        let client = flow();
+        let now = Instant::now();
+        let mut dispatch = ReassemblyDispatch::new(true, &Limits::default()).unwrap();
+        dispatch
+            .dispatch_segment(None, &segment(&client, 100, b"x", false, false), now, 1)
+            .unwrap();
+        let mut reset = segment(&client, 500, &[], true, false);
+        reset.rst = true;
+
+        let events = dispatch.dispatch_segment(None, &reset, now, 2).unwrap();
+
+        assert!(events.iter().any(|record| matches!(
+            &record.event,
+            TcpEvent::Evicted {
+                reason: EvictionReason::Reset,
+                ..
+            }
+        )));
+        assert!(!events.iter().any(|record| matches!(
+            &record.event,
+            TcpEvent::Evicted {
+                reason: EvictionReason::Reuse,
+                ..
+            }
+        )));
+        assert!(events.iter().any(|record| record.generation == 0
+            && matches!(&record.event, TcpEvent::Closed { reset: true, .. })));
     }
 }

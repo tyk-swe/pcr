@@ -24,21 +24,9 @@ pub(crate) const FLAG_ACK: u8 = 0x1;
 pub(crate) const FLAG_PADDED: u8 = 0x8;
 pub(crate) const FLAG_PRIORITY: u8 = 0x20;
 
-pub fn parse_frame(input: &Bytes, max_frame_bytes: usize) -> Result<Option<(Frame, usize)>, Error> {
-    parse_frame_inner(input, max_frame_bytes, false)
-}
-
 pub(crate) fn parse_frame_for_analysis(
     input: &Bytes,
     max_frame_bytes: usize,
-) -> Result<Option<(Frame, usize)>, Error> {
-    parse_frame_inner(input, max_frame_bytes, true)
-}
-
-fn parse_frame_inner(
-    input: &Bytes,
-    max_frame_bytes: usize,
-    allow_stream_errors: bool,
 ) -> Result<Option<(Frame, usize)>, Error> {
     if input.len() < HEADER_LEN {
         return Ok(None);
@@ -59,7 +47,7 @@ fn parse_frame_inner(
         return Ok(None);
     }
     let payload = input.slice(HEADER_LEN..total);
-    let payload = parse_payload(&header, &payload, allow_stream_errors)?;
+    let payload = parse_payload(&header, &payload)?;
     Ok(Some((
         Frame {
             header,
@@ -125,11 +113,7 @@ fn check_header(header: &FrameHeader) -> Result<(), Error> {
     Ok(())
 }
 
-fn parse_payload(
-    header: &FrameHeader,
-    payload: &Bytes,
-    allow_stream_errors: bool,
-) -> Result<Payload, Error> {
+fn parse_payload(header: &FrameHeader, payload: &Bytes) -> Result<Payload, Error> {
     match header.frame_type {
         TYPE_DATA => {
             let (data, padding) = split_padding(header, payload)?;
@@ -138,15 +122,11 @@ fn parse_payload(
                 padding: payload.slice_ref(padding),
             })
         }
-        _ => parse_control(header, payload, allow_stream_errors).map(Payload::Control),
+        _ => parse_control(header, payload).map(Payload::Control),
     }
 }
 
-fn parse_control(
-    header: &FrameHeader,
-    payload: &Bytes,
-    allow_stream_errors: bool,
-) -> Result<Control, Error> {
+fn parse_control(header: &FrameHeader, payload: &Bytes) -> Result<Control, Error> {
     match header.frame_type {
         TYPE_HEADERS => {
             let (rest, padding) = split_padding(header, payload)?;
@@ -154,10 +134,7 @@ fn parse_control(
                 let Some((fixed, rest)) = rest.split_at_checked(5) else {
                     return Err(Error::Invalid("HEADERS priority is truncated"));
                 };
-                (
-                    Some(priority(fixed, header.stream_id, allow_stream_errors)?),
-                    rest,
-                )
+                (Some(priority(fixed)), rest)
             } else {
                 (None, rest)
             };
@@ -167,11 +144,7 @@ fn parse_control(
                 padding: payload.slice_ref(padding),
             })
         }
-        TYPE_PRIORITY => Ok(Control::Priority(priority(
-            payload,
-            header.stream_id,
-            allow_stream_errors,
-        )?)),
+        TYPE_PRIORITY => Ok(Control::Priority(priority(payload))),
         TYPE_RESET => Ok(Control::Reset {
             error_code: be32(&payload[..4]),
         }),
@@ -213,13 +186,9 @@ fn parse_control(
             error_code: be32(&payload[4..8]),
             debug: payload.slice_ref(&payload[8..]),
         }),
-        TYPE_WINDOW_UPDATE => {
-            let increment = be32(&payload[..4]) & 0x7fff_ffff;
-            if increment == 0 && !allow_stream_errors {
-                return Err(Error::Invalid("WINDOW_UPDATE has a zero increment"));
-            }
-            Ok(Control::WindowUpdate { increment })
-        }
+        TYPE_WINDOW_UPDATE => Ok(Control::WindowUpdate {
+            increment: be32(&payload[..4]) & 0x7fff_ffff,
+        }),
         TYPE_CONTINUATION => Ok(Control::Continuation(payload.clone())),
         _ => Ok(Control::Unknown(payload.clone())),
     }
@@ -241,17 +210,13 @@ fn split_padding<'a>(
     Ok(rest.split_at(rest.len() - usize::from(pad_len)))
 }
 
-fn priority(bytes: &[u8], stream_id: u32, allow_stream_errors: bool) -> Result<Priority, Error> {
+fn priority(bytes: &[u8]) -> Priority {
     let raw = be32(&bytes[..4]);
-    let dependency = raw & 0x7fff_ffff;
-    if dependency == stream_id && !allow_stream_errors {
-        return Err(Error::Invalid("priority depends on its own stream"));
-    }
-    Ok(Priority {
+    Priority {
         exclusive: raw & 0x8000_0000 != 0,
-        dependency,
+        dependency: raw & 0x7fff_ffff,
         weight: u16::from(bytes[4]) + 1,
-    })
+    }
 }
 
 fn be32(bytes: &[u8]) -> u32 {

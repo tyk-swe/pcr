@@ -19,7 +19,7 @@ pub(crate) use fields::{
 };
 pub(crate) use payload::payload_without_padding;
 pub(crate) use validation::{
-    ensure_encode_budget, pad_options_to_four_bytes, strict_or_diagnostic,
+    ensure_encode_budget, pad_options_to_four_bytes, reject_uncarried, strict_or_diagnostic,
     strict_or_diagnostic_error, validate_auto_raw_discriminator, validate_ipv6_routing_child,
     validate_raw_child_discriminator, validate_typed_child_discriminator, zero_pad_to_four_bytes,
 };

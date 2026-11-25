@@ -5,17 +5,11 @@ use std::net::Ipv6Addr;
 
 use bytes::Bytes;
 
-use super::super::codec::{self as shared, Budget, Message, extend, take, u16_at, u32_at};
+use super::super::codec::{self as shared, Budget, extend, take, u16_at, u32_at};
 use super::super::{Error, Limit, Limits};
 use super::reflection::{layout, schema};
 use super::{Dhcpv6, Duid, Option6, Value6};
-use crate::{
-    codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
-    field,
-    layer::{Id, Layer, Raw, Schema},
-    layout::FieldLayout,
-    protocol::BuiltinProtocol,
-};
+use crate::protocol::BuiltinProtocol;
 
 const NAME: &str = BuiltinProtocol::Dhcpv6.as_str();
 
@@ -367,74 +361,4 @@ fn encode_value(option: &Option6, budget: &mut Budget, depth: usize) -> Result<V
     Ok(output)
 }
 
-impl Message for Dhcpv6 {
-    const NAME: &'static str = NAME;
-
-    fn decode_wire(wire: Bytes) -> Result<Self, Error> {
-        Self::try_from(wire)
-    }
-
-    fn encode_wire(&self, limits: Limits) -> Result<Bytes, Error> {
-        self.to_wire_with_limits(limits)
-    }
-
-    fn layout() -> Vec<FieldLayout> {
-        layout()
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct Dhcpv6Codec;
-
-impl Codec for Dhcpv6Codec {
-    fn protocol_id(&self) -> &'static Id {
-        &schema().protocol
-    }
-
-    fn schema(&self) -> Option<&'static Schema> {
-        Some(schema())
-    }
-
-    fn new_layer(&self) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        Ok(Box::new(Dhcpv6::default()))
-    }
-
-    fn seed_layer(
-        &self,
-        fields: &[(usize, &field::Value)],
-    ) -> Result<Option<crate::codec::SeededLayer>, crate::codec::Error> {
-        shared::seed_layer::<Dhcpv6>(fields)
-    }
-
-    fn finish_constructed(
-        &self,
-        layer: &mut dyn Layer,
-        fields: &[(usize, &field::Value)],
-    ) -> Result<(), crate::codec::Error> {
-        shared::finish_constructed::<Dhcpv6>(layer, fields)
-    }
-
-    fn accepts_decoded_protocol(&self, protocol: &Id) -> bool {
-        protocol == self.protocol_id() || protocol == &crate::layer::Raw::ID
-    }
-
-    fn encode(
-        &self,
-        layer: &dyn Layer,
-        payload: &[u8],
-        context: &EncodeContext<'_>,
-    ) -> Result<Encoded, crate::codec::Error> {
-        shared::encode::<Dhcpv6>(layer, payload, context)
-    }
-
-    fn decode(
-        &self,
-        input: Bytes,
-        _context: &DecodeContext<'_>,
-    ) -> Result<Decoded, crate::codec::Error> {
-        if input.len() < 4 {
-            return Ok(Raw::decoded(input));
-        }
-        shared::decode::<Dhcpv6>(input)
-    }
-}
+shared::dhcp_codec!(Dhcpv6Codec, Dhcpv6, NAME, |input| input.len() >= 4);

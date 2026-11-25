@@ -113,16 +113,12 @@ impl OpcuaTcp {
             ("secure_channel", !secure && self.secure_channel != 0),
             ("data", !secure && !self.data.is_empty()),
         ];
-        if let Some((field, _)) = fields.into_iter().find(|(_, uncarried)| *uncarried) {
-            return Err(invalid(
-                NAME,
-                format!(
-                    "{field} is not part of message type {}",
-                    String::from_utf8_lossy(message_type)
-                ),
-            ));
-        }
-        Ok(())
+        crate::protocol::common::reject_uncarried(NAME, &fields, |field| {
+            format!(
+                "{field} is not part of message type {}",
+                String::from_utf8_lossy(message_type)
+            )
+        })
     }
 
     fn encode_wire(&self, c: &EncodeContext<'_>) -> Result<Vec<u8>, Error> {

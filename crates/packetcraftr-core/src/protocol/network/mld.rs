@@ -49,7 +49,6 @@ pub use super::igmpv3::MAX_SOURCES;
 const ADDRESS_LENGTH: usize = 16;
 const MLDV1_LENGTH: usize = 20;
 const MLDV2_QUERY_LENGTH: usize = 24;
-const MLDV2_REPORT_LENGTH: usize = 4;
 const RECORD_LENGTH: usize = 20;
 /// Auxiliary data is sized in 32-bit words.
 
@@ -252,57 +251,16 @@ pub struct Mldv2Report {
 
 impl Mldv2Report {
     pub fn decode(body: &[u8]) -> Result<Self, Error> {
-        let Some((fixed, mut rest)) = body.split_first_chunk::<MLDV2_REPORT_LENGTH>() else {
-            return Err(truncated(MLDV2_REPORT_LENGTH, body.len()));
-        };
-        let count = usize::from(u16::from_be_bytes([fixed[2], fixed[3]]));
-        if count > MAX_RECORDS {
-            return Err(limit("record", count, MAX_RECORDS));
-        }
-        // each record needs at least its fixed header, so this bounds the
-        // allocation by the bytes actually present
-        let minimum = count.saturating_mul(RECORD_LENGTH);
-        if rest.len() < minimum {
-            return Err(truncated(
-                MLDV2_REPORT_LENGTH.saturating_add(minimum),
-                body.len(),
-            ));
-        }
-        let mut records = Vec::with_capacity(count);
-        for _ in 0..count {
-            let Some((header, after)) = rest.split_first_chunk::<RECORD_LENGTH>() else {
-                return Err(truncated(RECORD_LENGTH, rest.len()));
-            };
-            let aux_length = usize::from(header[1]) * AUX_UNIT;
-            let sources = usize::from(u16::from_be_bytes([header[2], header[3]]));
-            let (sources, after) = read_sources_prefix(after, sources)?;
-            let Some((aux_data, after)) = after.split_at_checked(aux_length) else {
-                return Err(truncated(aux_length, after.len()));
-            };
-            records.push(MulticastAddressRecord {
-                record_type: header[0],
-                group: address(&header[4..]),
-                sources,
-                aux_data: Bytes::copy_from_slice(aux_data),
-            });
-            rest = after;
-        }
+        let (reserved, records, rest) = decode_report_records(body)?;
         no_trailing(rest, 0)?;
-        Ok(Self {
-            reserved: u16::from_be_bytes([fixed[0], fixed[1]]),
-            records,
-        })
+        Ok(Self { reserved, records })
     }
 
     pub fn encode(&self) -> Result<Bytes, Error> {
-        let count = checked_count("record", self.records.len(), MAX_RECORDS)?;
-        let mut body = Vec::with_capacity(MLDV2_REPORT_LENGTH);
-        body.extend_from_slice(&self.reserved.to_be_bytes());
-        body.extend_from_slice(&count.to_be_bytes());
-        for record in &self.records {
-            push_record(&mut body, record)?;
-        }
-        Ok(Bytes::from(body))
+        Ok(Bytes::from(encode_report_records(
+            self.reserved,
+            &self.records,
+        )?))
     }
 
     pub fn to_icmpv6(&self) -> Result<Icmpv6, Error> {

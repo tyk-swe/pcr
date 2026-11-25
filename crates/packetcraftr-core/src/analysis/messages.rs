@@ -54,13 +54,7 @@ pub struct Message {
     pub error: Option<String>,
     pub sources: SourceSet,
 }
-#[derive(Clone, Debug, Serialize)]
-pub struct Issue {
-    pub number: u64,
-    pub flow: ScopedFlowKey,
-    pub stream: u64,
-    pub status: Status,
-}
+pub type Issue = application::StreamIssue<Status>;
 #[derive(Clone, Debug)]
 pub enum Event {
     Message(Box<Message>),
@@ -213,30 +207,30 @@ impl Collector {
         mut check: impl FnMut() -> Result<(), Error>,
         mut emit: impl FnMut(Vec<Event>) -> Result<(), Error>,
     ) -> Result<Summary, Error> {
-        for event in self
+        let trailing = self
             .tcp
-            .trailing(&run.trailing_tcp_events, run.frames_read)?
-        {
-            check()?;
-            let mut out = Vec::new();
+            .trailing(&run.trailing_tcp_events, run.frames_read)?;
+        application::drain_batches(trailing, &mut check, &mut emit, |event, out| {
             if let application::Event::Evicted {
                 flow,
                 stream,
                 generation,
             } = event
             {
-                self.stop(&flow, stream, generation, Status::Incomplete, &mut out)?;
+                self.stop(&flow, stream, generation, Status::Incomplete, out)
             } else {
-                self.event(event, run.frames_read, &mut out)?;
+                self.event(event, run.frames_read, out)
             }
-            emit(out)?;
-        }
-        for (flow, mut direction) in std::mem::take(&mut self.directions) {
-            check()?;
-            let mut out = Vec::new();
-            self.flush(&flow, &mut direction, Status::Incomplete, None, &mut out)?;
-            emit(out)?;
-        }
+        })?;
+        let directions = std::mem::take(&mut self.directions);
+        application::drain_batches(
+            directions,
+            &mut check,
+            &mut emit,
+            |(flow, mut direction), out| {
+                self.flush(&flow, &mut direction, Status::Incomplete, None, out)
+            },
+        )?;
         check()?;
         Ok(self.summary)
     }

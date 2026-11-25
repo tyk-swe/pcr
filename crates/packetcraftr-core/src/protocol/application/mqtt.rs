@@ -149,55 +149,56 @@ impl Mqtt {
         let fields = [
             (
                 "connect_flags",
-                connect,
-                *connect_flags == default.connect_flags,
+                !connect && *connect_flags != default.connect_flags,
             ),
-            ("keep_alive", connect, *keep_alive == default.keep_alive),
-            ("client_id", connect, *client_id == default.client_id),
-            ("will_topic", will, *will_topic == default.will_topic),
-            ("will_payload", will, *will_payload == default.will_payload),
-            ("user_name", user_name_flag, *user_name == default.user_name),
-            ("password", password_flag, *password == default.password),
-            ("topic", *packet_type == 3, *topic == default.topic),
-            ("packet_id", identified, *packet_id == default.packet_id),
+            ("keep_alive", !connect && *keep_alive != default.keep_alive),
+            ("client_id", !connect && *client_id != default.client_id),
+            ("will_topic", !will && *will_topic != default.will_topic),
+            (
+                "will_payload",
+                !will && *will_payload != default.will_payload,
+            ),
+            (
+                "user_name",
+                !user_name_flag && *user_name != default.user_name,
+            ),
+            ("password", !password_flag && *password != default.password),
+            ("topic", *packet_type != 3 && *topic != default.topic),
+            ("packet_id", !identified && *packet_id != default.packet_id),
             (
                 "session_present",
-                *packet_type == 2,
-                *session_present == default.session_present,
+                *packet_type != 2 && *session_present != default.session_present,
             ),
             (
                 "return_code",
-                *packet_type == 2,
-                *return_code == default.return_code,
+                *packet_type != 2 && *return_code != default.return_code,
             ),
             (
                 "payload",
-                matches!(packet_type, 3 | 9),
-                *payload == default.payload,
+                !matches!(packet_type, 3 | 9) && *payload != default.payload,
             ),
             (
                 "subscriptions",
-                matches!(packet_type, 8 | 10),
-                *subscriptions == default.subscriptions,
+                !matches!(packet_type, 8 | 10) && *subscriptions != default.subscriptions,
             ),
         ];
-        if let Some((field, ..)) = fields
-            .iter()
-            .find(|(_, carried, unchanged)| !carried && !unchanged)
-        {
-            return Err(self.uncarried(field));
-        }
+        crate::protocol::common::reject_uncarried(NAME, &fields, |field| {
+            self.uncarried_reason(field)
+        })?;
         for (index, subscription) in subscriptions.0.iter().enumerate() {
             if let Some(key) = subscription
                 .keys()
                 .find(|key| *key != "topic" && (*packet_type != 8 || *key != "qos"))
             {
-                return Err(self.uncarried(&format!("subscriptions[{index}].{key}")));
+                return Err(invalid(
+                    NAME,
+                    self.uncarried_reason(&format!("subscriptions[{index}].{key}")),
+                ));
             }
         }
         Ok(())
     }
-    fn uncarried(&self, field: &str) -> Error {
+    fn uncarried_reason(&self, field: &str) -> String {
         const NAMES: [&str; 14] = [
             "CONNECT",
             "CONNACK",
@@ -215,12 +216,9 @@ impl Mqtt {
             "DISCONNECT",
         ];
         let name = NAMES[usize::from(self.packet_type - 1)];
-        invalid(
-            NAME,
-            format!(
-                "{name} (packet type {}) does not carry field {field}",
-                self.packet_type
-            ),
+        format!(
+            "{name} (packet type {}) does not carry field {field}",
+            self.packet_type
         )
     }
     fn encode_wire(&self, c: &EncodeContext<'_>) -> Result<Vec<u8>, Error> {

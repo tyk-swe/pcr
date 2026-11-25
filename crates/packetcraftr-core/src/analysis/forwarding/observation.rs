@@ -91,16 +91,6 @@ impl Observation {
                 .all(|state| *state == ValueState::Observed)
             && self.key_cells.iter().all(Option::is_some)
     }
-
-    pub fn key_cells(&self) -> &[Option<field::Value>] {
-        &self.key_cells
-    }
-    pub fn preserved(&self) -> &[Option<field::Value>] {
-        &self.preserved
-    }
-    pub fn expectations(&self) -> &[ExpectationOutcome] {
-        &self.expectations
-    }
 }
 
 /// One egress-side expectation result retained on the observation.

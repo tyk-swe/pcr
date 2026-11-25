@@ -65,57 +65,46 @@ impl BacnetIp {
         let destination = npdu && self.control & 32 != 0;
         let source = npdu && self.control & 8 != 0;
         let network_message = npdu && self.control & 128 != 0;
-        for (field, carried, unchanged) in [
-            (
-                "forwarded_address",
-                self.bvlc_function == 4,
-                self.forwarded_address == default.forwarded_address,
-            ),
-            ("control", npdu, self.control == default.control),
-            (
-                "destination_network",
-                destination,
-                self.destination_network == default.destination_network,
-            ),
-            (
-                "destination_address",
-                destination,
-                self.destination_address == default.destination_address,
-            ),
-            (
-                "hop_count",
-                destination,
-                self.hop_count == default.hop_count,
-            ),
-            (
-                "source_network",
-                source,
-                self.source_network == default.source_network,
-            ),
-            (
-                "source_address",
-                source,
-                self.source_address == default.source_address,
-            ),
-            (
-                "network_message_type",
-                network_message,
-                self.network_message_type == default.network_message_type,
-            ),
-            (
-                "vendor_id",
-                network_message && self.network_message_type >= 128,
-                self.vendor_id == default.vendor_id,
-            ),
-        ] {
-            if !carried && !unchanged {
-                return Err(invalid(
-                    NAME,
-                    format!("{field} is not part of the selected BVLC and NPDU headers"),
-                ));
-            }
-        }
-        Ok(())
+        crate::protocol::common::reject_uncarried(
+            NAME,
+            &[
+                (
+                    "forwarded_address",
+                    self.bvlc_function != 4 && self.forwarded_address != default.forwarded_address,
+                ),
+                ("control", !npdu && self.control != default.control),
+                (
+                    "destination_network",
+                    !destination && self.destination_network != default.destination_network,
+                ),
+                (
+                    "destination_address",
+                    !destination && self.destination_address != default.destination_address,
+                ),
+                (
+                    "hop_count",
+                    !destination && self.hop_count != default.hop_count,
+                ),
+                (
+                    "source_network",
+                    !source && self.source_network != default.source_network,
+                ),
+                (
+                    "source_address",
+                    !source && self.source_address != default.source_address,
+                ),
+                (
+                    "network_message_type",
+                    !network_message && self.network_message_type != default.network_message_type,
+                ),
+                (
+                    "vendor_id",
+                    !(network_message && self.network_message_type >= 128)
+                        && self.vendor_id != default.vendor_id,
+                ),
+            ],
+            |field| format!("{field} is not part of the selected BVLC and NPDU headers"),
+        )
     }
 
     fn encode_wire(&self, c: &EncodeContext<'_>) -> Result<Vec<u8>, Error> {

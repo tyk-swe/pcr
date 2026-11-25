@@ -9,7 +9,7 @@ use super::{
 };
 use crate::error::{Classification, Classified, Kind};
 use bytes::Bytes;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 pub const MAX_BODY_BYTES: u64 = 256 * 1024 * 1024;
 
@@ -241,6 +241,8 @@ pub(crate) struct TcpStreamFilter {
     limits: Limits,
     streams: HashSet<u64>,
     scopes: BTreeMap<u32, Definition>,
+    span_counts: HashMap<ScopedFlowKey, usize>,
+    source_span_count: usize,
 }
 
 impl TcpStreamFilter {
@@ -250,6 +252,8 @@ impl TcpStreamFilter {
             limits,
             streams: HashSet::new(),
             scopes: BTreeMap::new(),
+            span_counts: HashMap::new(),
+            source_span_count: 0,
         }
     }
 
@@ -269,7 +273,14 @@ impl TcpStreamFilter {
                     .or_insert_with(|| scope.clone());
             }
         }
-        self.project_many(record.tcp_events, record.number)
+        let output = self.project_many(record.tcp_events, record.number)?;
+        if let Some(view) = record.tcp
+            && let Some(conversation) = view.conversation
+            && self.matches(conversation.flow)
+        {
+            self.track_source_spans(conversation.flow, view.pending_source_spans)?;
+        }
+        Ok(output)
     }
 
     pub(crate) fn trailing(
@@ -307,6 +318,12 @@ impl TcpStreamFilter {
         };
         if !self.matches(flow) {
             return Ok(());
+        }
+        if matches!(
+            record.event,
+            TcpEvent::Closed { .. } | TcpEvent::Evicted { .. }
+        ) {
+            self.forget_source_spans(flow);
         }
         self.track_stream(record.stream)?;
         match &record.event {
@@ -357,6 +374,22 @@ impl TcpStreamFilter {
     fn matches(&self, flow: &ScopedFlowKey) -> bool {
         self.ports.contains(&flow.flow.source_port)
             || self.ports.contains(&flow.flow.destination_port)
+    }
+
+    fn track_source_spans(&mut self, flow: &ScopedFlowKey, spans: usize) -> Result<(), Error> {
+        let previous = self.span_counts.remove(flow).unwrap_or(0);
+        self.source_span_count = self.source_span_count.saturating_sub(previous);
+        if spans != 0 {
+            self.span_counts.insert(flow.clone(), spans);
+            self.source_span_count = self.source_span_count.saturating_add(spans);
+        }
+        self.limits.check_source_spans(self.source_span_count)
+    }
+
+    fn forget_source_spans(&mut self, flow: &ScopedFlowKey) {
+        if let Some(spans) = self.span_counts.remove(flow) {
+            self.source_span_count = self.source_span_count.saturating_sub(spans);
+        }
     }
 
     fn track_stream(&mut self, stream: u64) -> Result<(), Error> {

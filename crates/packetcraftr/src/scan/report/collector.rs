@@ -187,6 +187,11 @@ impl Collector {
         }
         let endpoints = match inferred {
             Some(inferred) => {
+                for endpoint in &mut endpoints {
+                    endpoint.probes.sort_by_key(|probe| probe.sequence);
+                }
+                endpoints
+                    .sort_by_key(|endpoint| endpoint.probes.first().map(|probe| probe.sequence));
                 let coherent = endpoints.len() == inferred.len()
                     && endpoints
                         .iter()
@@ -265,14 +270,14 @@ mod tests {
     use crate::probe::{self, Reply, Status};
     use crate::{Sink, Stats};
 
-    fn evidence(response: Option<Frame>) -> ProbeEvidence {
+    fn evidence(response: Option<Frame>, sequence: u64, port: u16) -> ProbeEvidence {
         ProbeEvidence {
             measurement: scan::Measurement::Response(Reply::TcpSynAck),
-            sequence: 7,
+            sequence,
             stage: Stage::Scan,
             address: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
             scope: None,
-            endpoint: probe::Endpoint::Tcp { port: 80 },
+            endpoint: probe::Endpoint::Tcp { port },
             tcp_scan: Some(scan::TcpScan::Syn),
             sctp_scan: None,
             attempt: 1,
@@ -293,23 +298,34 @@ mod tests {
     #[test]
     fn inferences_reuse_collected_reply_frames() {
         let frame = Frame::new(None, LinkType(1), &b"reply"[..]).unwrap();
+        let later_frame = Frame::new(None, LinkType(1), &b"later"[..]).unwrap();
         let mut collector = Collector::default();
-        collector
-            .publish(Event::Probe {
-                target: "192.0.2.1".into(),
-                probe: evidence(Some(frame.clone())),
+        for (probe, target) in [
+            (evidence(Some(later_frame.clone()), 20, 81), "192.0.2.1"),
+            (evidence(Some(frame.clone()), 7, 80), "192.0.2.1"),
+        ] {
+            collector
+                .publish(Event::Probe {
+                    target: target.into(),
+                    probe,
+                })
+                .unwrap();
+        }
+        let inferred = [(7, 80), (20, 81)]
+            .into_iter()
+            .map(|(sequence, port)| {
+                let stripped = evidence(None, sequence, port);
+                Endpoint {
+                    address: stripped.address,
+                    scope: stripped.scope.clone(),
+                    endpoint: stripped.endpoint,
+                    classification: stripped.classification,
+                    port_hint: None,
+                    inference: None,
+                    probes: vec![stripped],
+                }
             })
-            .unwrap();
-        let stripped = evidence(None);
-        let inferred = vec![Endpoint {
-            address: stripped.address,
-            scope: stripped.scope.clone(),
-            endpoint: stripped.endpoint,
-            classification: stripped.classification,
-            port_hint: None,
-            inference: None,
-            probes: vec![stripped],
-        }];
+            .collect();
         let report = Report {
             planned_duration: Duration::ZERO,
             target: "192.0.2.1".to_owned(),
@@ -319,7 +335,7 @@ mod tests {
             retained_evidence_bytes: 0,
             stats: Stats::default(),
             rtt: crate::scan::Rtt {
-                sent: 1,
+                sent: 2,
                 ..Default::default()
             },
             scheduling: Default::default(),
@@ -330,6 +346,10 @@ mod tests {
         assert_eq!(
             aggregate.endpoints[0].probes[0].response.as_ref(),
             Some(&frame)
+        );
+        assert_eq!(
+            aggregate.endpoints[1].probes[0].response.as_ref(),
+            Some(&later_frame)
         );
     }
 }

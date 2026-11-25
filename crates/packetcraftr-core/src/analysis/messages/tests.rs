@@ -711,6 +711,87 @@ fn unsupported_amqp_stays_opaque() {
 }
 
 #[test]
+fn pending_tcp_source_spans_enforce_application_limit() {
+    use crate::error::Classified;
+    use crate::{
+        codec::Addresses,
+        frame::{Frame, LinkType},
+        layer::Raw,
+        packet::Packet,
+        protocol::{builtin, link::Ethernet, network::Ipv4, transport::Tcp},
+    };
+    use std::time::Duration;
+
+    let registry = builtin::registry();
+    let builder = crate::build::Builder::new(registry.clone());
+    let mut writer = crate::capture_file::Writer::pcap_with_options(
+        Vec::new(),
+        LinkType::ETHERNET,
+        Default::default(),
+    )
+    .unwrap();
+    for (seconds, sequence, flags, payload) in [
+        (0, 100, Tcp::SYN, &b""[..]),
+        (1, 103, Tcp::ACK, &b"a"[..]),
+        (2, 105, Tcp::ACK, &b"b"[..]),
+    ] {
+        let mut packet = Packet::default();
+        packet.push(Ethernet::default());
+        packet.push(Ipv4 {
+            source: "192.0.2.1".parse().unwrap(),
+            destination: "192.0.2.2".parse().unwrap(),
+            ..Default::default()
+        });
+        packet.push(Tcp {
+            source_port: 40000,
+            destination_port: 1883,
+            sequence,
+            flags,
+            ..Default::default()
+        });
+        if !payload.is_empty() {
+            packet.push(Raw::new(Bytes::copy_from_slice(payload)));
+        }
+        let built = builder
+            .build(packet, Addresses::default(), Default::default())
+            .unwrap();
+        let frame = Frame::new(
+            Some(UNIX_EPOCH + Duration::from_secs(seconds)),
+            LinkType::ETHERNET,
+            built.bytes,
+        )
+        .unwrap();
+        writer.write_frame(&frame).unwrap();
+    }
+    let capture = writer.into_inner();
+    let mut reader =
+        crate::capture_file::Reader::with_limits(&capture[..], Default::default()).unwrap();
+    let collector = Collector::new(
+        Limits {
+            max_source_spans: 1,
+            ..Limits::default()
+        },
+        registry.clone(),
+        [BuiltinProtocol::Mqtt],
+    )
+    .unwrap();
+
+    let Err(error) = crate::analysis::Session::new(registry, Default::default(), collector).run(
+        &mut reader,
+        |_| Ok(()),
+        |_| Ok(()),
+    ) else {
+        panic!("pending source spans exceeded the application limit without an error");
+    };
+
+    assert_eq!(
+        error.classification().code,
+        crate::error::Code::PolicyApplicationLimit,
+        "unexpected error: {error:?}"
+    );
+}
+
+#[test]
 fn capture_faults_disable_until_tuple_reuse() {
     use crate::{
         codec::Addresses,

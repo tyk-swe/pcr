@@ -101,6 +101,12 @@ impl Reassembler {
             .map(|state| state.base_sequence.wrapping_add(state.next_offset as u32))
     }
 
+    pub fn flow_pending_source_spans(&self, flow: &ScopedFlowKey) -> Option<usize> {
+        self.flows
+            .get(flow)
+            .map(|state| state.pending_sources.len())
+    }
+
     pub fn flow_observed_payload(&self, flow: &ScopedFlowKey) -> bool {
         self.flows.get(flow).is_some_and(|state| {
             state.next_offset > 0 || !state.pending.is_empty() || state.fin_offset.is_some()

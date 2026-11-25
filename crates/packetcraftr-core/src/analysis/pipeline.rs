@@ -412,6 +412,7 @@ impl FramePipeline {
             header: elected.transport.header,
             conversation: None,
             generation: None,
+            pending_source_spans: 0,
             payload: &[],
         });
         let mut udp_view = udp.as_ref().map(|elected| UdpView {
@@ -518,6 +519,7 @@ impl FramePipeline {
         record.tcp_events = &tcp_events;
         if let (Some(view), Some(segment)) = (&mut record.tcp, segment.as_ref()) {
             view.generation = reassembly_dispatch.generation(&segment.flow);
+            view.pending_source_spans = reassembly_dispatch.pending_source_spans(&segment.flow);
         }
         sink(record).map_err(|source| Error::Sink { number, source })?;
 

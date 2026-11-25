@@ -80,6 +80,8 @@ pub struct TcpView<'a> {
     pub header: TcpHeader<'a>,
     pub conversation: Option<Conversation<'a>>,
     pub generation: Option<u64>,
+    /// Provenance spans currently retained by reassembly for this direction.
+    pub pending_source_spans: usize,
     /// Indexed segment bytes; control segments and unindexed carriers are empty.
     pub payload: &'a [u8],
 }

@@ -104,6 +104,13 @@ impl ReassemblyDispatch {
         })
     }
 
+    pub(super) fn pending_source_spans(&self, flow: &ScopedFlowKey) -> usize {
+        self.tcp_reassembler
+            .as_ref()
+            .and_then(|reassembler| reassembler.flow_pending_source_spans(flow))
+            .unwrap_or(0)
+    }
+
     pub(super) fn generation(&self, flow: &ScopedFlowKey) -> Option<u64> {
         self.conversations
             .get(&CanonicalFlow::from_flow(flow))

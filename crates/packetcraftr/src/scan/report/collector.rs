@@ -149,6 +149,25 @@ impl Collected {
 
 impl Collector {
     pub fn finish(self, report: Report) -> Result<Aggregate, Error> {
+        self.finish_inner(report, None)
+    }
+
+    /// Finishes with endpoint ordering and inferences already computed from
+    /// the same event stream, after checking that they describe the collected
+    /// probes.
+    pub fn finish_with_inferences(
+        self,
+        report: Report,
+        inferred: Vec<Endpoint>,
+    ) -> Result<Aggregate, Error> {
+        self.finish_inner(report, Some(inferred))
+    }
+
+    fn finish_inner(
+        self,
+        report: Report,
+        inferred: Option<Vec<Endpoint>>,
+    ) -> Result<Aggregate, Error> {
         let Collected {
             mut discovery,
             mut endpoints,
@@ -166,20 +185,48 @@ impl Collector {
                 ),
             });
         }
-        for endpoint in &mut endpoints {
-            endpoint.probes.sort_by_key(|probe| probe.sequence);
-            endpoint.inference = inference::raw(
-                endpoint.endpoint.transport(),
-                endpoint.probes.iter().map(|probe| inference::Attempt {
-                    sequence: probe.sequence,
-                    measurement: probe.measurement,
-                    tcp_scan: probe.tcp_scan,
-                    sctp_scan: probe.sctp_scan,
-                    tcp_window: probe.tcp_window,
-                }),
-            );
-        }
-        endpoints.sort_by_key(|endpoint| endpoint.probes.first().map(|probe| probe.sequence));
+        let endpoints = match inferred {
+            Some(inferred) => {
+                let coherent = endpoints.len() == inferred.len()
+                    && endpoints
+                        .iter()
+                        .zip(&inferred)
+                        .all(|(collected, inferred)| {
+                            collected.address == inferred.address
+                                && collected.scope == inferred.scope
+                                && collected.endpoint == inferred.endpoint
+                                && collected.probes.len() == inferred.probes.len()
+                                && collected.probes.iter().zip(&inferred.probes).all(
+                                    |(collected, inferred)| collected.sequence == inferred.sequence,
+                                )
+                        });
+                if !coherent {
+                    return Err(Error::IncoherentEvents {
+                        message: "scan endpoint inferences do not match the collected events"
+                            .into(),
+                    });
+                }
+                inferred
+            }
+            None => {
+                for endpoint in &mut endpoints {
+                    endpoint.probes.sort_by_key(|probe| probe.sequence);
+                    endpoint.inference = inference::raw(
+                        endpoint.endpoint.transport(),
+                        endpoint.probes.iter().map(|probe| inference::Attempt {
+                            sequence: probe.sequence,
+                            measurement: probe.measurement,
+                            tcp_scan: probe.tcp_scan,
+                            sctp_scan: probe.sctp_scan,
+                            tcp_window: probe.tcp_window,
+                        }),
+                    );
+                }
+                endpoints
+                    .sort_by_key(|endpoint| endpoint.probes.first().map(|probe| probe.sequence));
+                endpoints
+            }
+        };
         discovery.sort_by_key(|probe| probe.sequence);
         scan::discovery::check_probes(&report.hosts, discovery.iter().map(|probe| probe.sequence))?;
         Ok(Aggregate {

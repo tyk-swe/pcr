@@ -31,13 +31,15 @@ fn prepare(
 }
 
 fn writing(
+    invocation: &crate::invocation::Invocation,
     write: impl Fn(&packetcraftr::send::SentFrame) -> Result<(), CliError> + Send + 'static,
-) -> impl packetcraftr::Sink<packetcraftr::send::Event, Ack = ()> {
-    packetcraftr::forwarding(
-        move |packetcraftr::send::Event::Sent(frame): packetcraftr::send::Event, _| {
-            write(&frame).map_err(CliError::into_boundary_error)
-        },
-    )
+) -> Result<packetcraftr::Isolated<packetcraftr::send::Event>, CliError> {
+    let runtime = invocation.output_writer_runtime();
+    packetcraftr::Isolated::new(&runtime, move |(event, _)| {
+        let packetcraftr::send::Event::Sent(frame) = event;
+        write(&frame).map_err(CliError::into_boundary_error)
+    })
+    .map_err(CliError::classified)
 }
 
 fn collect(
@@ -96,7 +98,7 @@ fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<()
                 .client
                 .send(
                     prepared.request,
-                    writing({
+                    writing(invocation, {
                         let invocation = invocation.clone();
                         move |frame| {
                             let invocation = &invocation;
@@ -137,7 +139,7 @@ fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<()
                             }
                             Ok(())
                         }
-                    }),
+                    })?,
                 )
                 .map_err(CliError::classified)?;
             if report.stats.packets_completed > 1 {
@@ -170,7 +172,9 @@ fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<()
             .client
             .send(
                 prepared.request,
-                writing(|frame| write_hex_line(frame.packet.wire_bytes())),
+                writing(invocation, |frame| {
+                    write_hex_line(frame.packet.wire_bytes())
+                })?,
             )
             .map_err(CliError::classified)
             .map(|_| ()),
@@ -178,7 +182,7 @@ fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<()
             .client
             .send(
                 prepared.request,
-                writing(|frame| write_raw(frame.packet.wire_bytes())),
+                writing(invocation, |frame| write_raw(frame.packet.wire_bytes()))?,
             )
             .map_err(CliError::classified)
             .map(|_| ()),

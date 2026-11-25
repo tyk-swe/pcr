@@ -46,10 +46,10 @@
 //!     expression::Limits::default(),
 //! )?;
 //! let client = Client::new(registry, Policy::default(), SystemProviders);
-//! let collector = send::Collector::default();
+//! let mut collector = send::Collector::default();
 //! let report = client.send(
 //!     send::Request::new(packetcraftr_core::template::Template::new(packet), send::Options::default()),
-//!     collector.clone(),
+//!     &mut collector,
 //! )?;
 //! let aggregate = collector.finish(report)?;
 //! println!("sent {} bytes", aggregate.stats.bytes);

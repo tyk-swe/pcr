@@ -338,7 +338,8 @@ fn drive<P: packetcraftr::CaptureProviders>(
     let sink = {
         let invocation = invocation.clone();
         let destinations = Arc::clone(&destinations);
-        packetcraftr::forwarding(move |event, _| {
+        let runtime = invocation.output_writer_runtime();
+        packetcraftr::Isolated::new(&runtime, move |(event, _)| {
             let mut destinations = lock(&destinations);
             match event {
                 Event::Started { sources } => {
@@ -358,6 +359,7 @@ fn drive<P: packetcraftr::CaptureProviders>(
                 ),
             }
         })
+        .map_err(CliError::classified)?
     };
     let result = client.capture(request, sink);
     let (report, error) = match result {

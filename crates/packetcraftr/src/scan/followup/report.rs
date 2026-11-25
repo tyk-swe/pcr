@@ -55,13 +55,13 @@ impl Collector {
     pub fn finish(self, report: Report) -> Result<Aggregate, Error> {
         let Report {
             scan,
+            endpoints,
             trace,
             reverse_dns,
             stats,
-            ..
         } = report;
         Ok(Aggregate {
-            scan: self.scan.finish(scan)?,
+            scan: self.scan.finish_with_inferences(scan, endpoints)?,
             trace: trace.map(|trace| self.trace.finish(trace)).transpose()?,
             reverse_dns,
             stats,

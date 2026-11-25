@@ -1,290 +1,251 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! Server HTTP/1.1 prelude responses, 101 Switching Protocols handoff, and EOF checks.
+
 use super::super::super::Error;
 use super::super::super::buffer::union_balanced;
-use super::super::super::model::{Certainty, IssueScope, MessageKind, Status};
+use super::super::super::model::{Certainty, MessageKind, Status};
 use super::super::super::upgrade;
-use super::super::{ConnectionState, Context, Fault, Phase};
-use super::{PreludeHead, UnexpectedHead, record_head};
+use super::super::{ActiveState, Context, Fault, Reporter, StepResult};
+use super::{PreludeHead, UnexpectedHead, UpgradeAcceptance, record_head};
 use crate::analysis::http2::IssueCode;
 use crate::analysis::http2::budget;
 use crate::analysis::http2::side::Side;
-use crate::protocol::application::http::{self, BodyDecoder, StartLine};
+use crate::analysis::provenance::SourceSet;
+use crate::protocol::application::http::{self, StartLine};
 use bytes::Bytes;
 
-impl ConnectionState {
+impl ActiveState {
     pub(in super::super) fn report_unmatched_response_at_eof(
         &mut self,
+        reporter: &mut Reporter,
         context: &mut Context<'_>,
     ) -> Result<(), Error> {
-        if !matches!(self.phase, Phase::Prelude)
-            || !self
-                .upgrade
-                .prelude
-                .as_ref()
-                .is_some_and(|p| p.requests.is_empty())
-        {
-            return Ok(());
-        }
-        let Some(dir) = self.directions.get(Side::Server) else {
+        let Some(prelude) = self.prelude.as_ref() else {
             return Ok(());
         };
-        let need = dir.buffer.len().min(http::MAX_HEADER_BYTES + 1);
+        if !prelude.requests.is_empty() {
+            return Ok(());
+        }
+        let Some(server) = self.directions.server.as_ref() else {
+            return Ok(());
+        };
+        let need = server.buffer.len().min(http::MAX_HEADER_BYTES + 1);
         if need == 0 {
             return Ok(());
         }
         let uncertain = !self.clean_start
-            || self.status != Status::Complete
-            || self
-                .directions
-                .get(Side::Client)
-                .is_some_and(|dir| !dir.buffer.is_empty())
-            || self
-                .upgrade
-                .prelude
-                .as_ref()
-                .is_some_and(|p| p.live_request.is_some());
+            || reporter.status != Status::Complete
+            || !self.directions.client.buffer.is_empty()
+            || prelude.sides[Side::Client].live_message.is_some();
         let scratch = need * 4 + budget::PRELUDE_HEADER_OVERHEAD;
-        context.reserve_scratch(scratch)?;
-        let result = (|| {
-            let dir = self
-                .directions
-                .get_mut(Side::Server)
-                .ok_or(Error::Invariant("server"))?;
-            let view = Bytes::copy_from_slice(&dir.buffer.bytes()[..need]);
+        context.with_scratch(scratch, |context| {
+            let Some(server) = self.directions.server.as_mut() else {
+                return Ok(());
+            };
+            let view = Bytes::copy_from_slice(&server.buffer.bytes()[..need]);
             let Ok(Some((head, consumed))) = http::parse_head(&view) else {
                 return Ok(());
             };
             if !matches!(head.start, StartLine::Response { .. }) {
                 return Ok(());
             }
-            let (wire, sets) = dir.buffer.take(consumed, context)?;
-            self.issue(
+            let flow = server.flow.clone();
+            let (wire, sets) = server.buffer.take(consumed, context)?;
+            let (status, certainty) = if !uncertain {
+                (Status::Malformed, Certainty::Confirmed)
+            } else {
+                (Status::Incomplete, Certainty::Indeterminate)
+            };
+            reporter.issue(
                 context,
-                Fault::new(
-                    self.dir_flow(Side::Server),
-                    IssueScope::Connection,
-                    if !uncertain {
-                        Status::Malformed
-                    } else {
-                        Status::Incomplete
-                    },
+                Fault::connection(
+                    flow,
+                    status,
                     IssueCode::PreludeUnsolicitedResponse,
                     "capture ended without a request matching this HTTP/1 response",
                 )
-                .certainty(if !uncertain {
-                    Certainty::Confirmed
-                } else {
-                    Certainty::Indeterminate
-                })
-                .evidence(wire, union_balanced(sets)?),
+                .with_certainty(certainty)
+                .with_evidence(wire, union_balanced(sets)?),
             )
-        })();
-        context.release_scratch(scratch)?;
-        result
+        })
     }
 
-    pub(super) fn server_prelude_step(&mut self, context: &mut Context<'_>) -> Result<bool, Error> {
+    pub(super) fn server_prelude_step(
+        &mut self,
+        reporter: &mut Reporter,
+        context: &mut Context<'_>,
+    ) -> StepResult<bool> {
         let unmatched = self
-            .upgrade
             .prelude
             .as_ref()
-            .is_some_and(|p| p.requests.is_empty());
-        let partial_request = self
-            .directions
-            .get(Side::Client)
-            .is_some_and(|dir| !dir.buffer.is_empty());
+            .is_some_and(|prelude| prelude.requests.is_empty());
+        let partial_request = !self.directions.client.buffer.is_empty();
         if unmatched && (!self.clean_start || partial_request) {
             // Capture order can expose a response before the request head is
             // complete. Keep its bytes and sources in the charged direction
             // buffer; the next client delivery pumps this direction again.
             return Ok(false);
         }
-        let (head, head_wire_bytes, sets) = match self.take_prelude_head(
+        let PreludeHead::Taken { head, wire, sets } = self.take_prelude_head(
             Side::Server,
             |start| matches!(start, StartLine::Response { .. }),
             UnexpectedHead::NOT_RESPONSE,
+            reporter,
             context,
-        )? {
-            PreludeHead::Incomplete => return Ok(false),
-            PreludeHead::Rejected => return Ok(true),
-            PreludeHead::Taken { head, wire, sets } => (head, wire, sets),
+        )?
+        else {
+            return Ok(false);
         };
-        let head_wire = head_wire_bytes.len();
         let status = head.status().ok_or(Error::Invariant("response"))?;
-        let front = self.upgrade.prelude.as_mut().and_then(|p| {
-            p.requests
-                .front()
-                .map(|p| (p.index, p.method.clone(), p.upgrade))
-        });
-        let matched = front.as_ref().is_some_and(|(index, _, upgrade)| {
-            *upgrade
-                && self
-                    .upgrade
-                    .prelude
-                    .as_ref()
-                    .is_some_and(|p| p.offers.contains_key(index))
-        });
         if status < 200
             && (head.values("content-length").next().is_some()
                 || head.values("transfer-encoding").next().is_some())
         {
-            self.reject(
+            return reporter.reject(
                 context,
-                Fault::new(
-                    self.dir_flow(Side::Server),
-                    IssueScope::Connection,
+                Fault::connection(
+                    self.directions.flow(Side::Server),
                     Status::Malformed,
                     IssueCode::PreludeFraming,
                     "informational responses cannot contain Content-Length or Transfer-Encoding",
                 )
-                .evidence(head_wire_bytes, union_balanced(sets)?),
-            )?;
-            return Ok(true);
+                .with_evidence(wire, union_balanced(sets)?),
+            );
         }
         if status == 101 {
-            if matched && upgrade::accepts_upgrade(&head) {
-                let (index, method, _) = front.clone().ok_or(Error::Invariant("front"))?;
-                let prelude = self
-                    .upgrade
-                    .prelude
-                    .as_mut()
-                    .ok_or(Error::Invariant("prelude"))?;
-                prelude.requests.pop_front();
-                context.release(&mut self.charge, budget::PENDING_OVERHEAD)?;
-                self.accept_upgrade(index, head, head_wire_bytes, sets, method, context)?;
-                return Ok(true);
-            }
-            self.reject(
-                context,
-                Fault::new(
-                    self.dir_flow(Side::Server),
-                    IssueScope::Connection,
-                    Status::Unsupported,
-                    IssueCode::Unexpected101,
-                    "a 101 response does not match a pending h2c offer",
-                )
-                .evidence(head_wire_bytes, union_balanced(sets)?),
-            )?;
-            return Ok(true);
+            return self.handle_101_response(head, wire, sets, reporter, context);
         }
-        if front.is_none() {
-            self.reject(
+        let Some(front_index) = self
+            .prelude
+            .as_ref()
+            .and_then(|prelude| prelude.requests.front().map(|pending| pending.index))
+        else {
+            return reporter.reject(
                 context,
-                Fault::new(
-                    self.dir_flow(Side::Server),
-                    IssueScope::Connection,
+                Fault::connection(
+                    self.directions.flow(Side::Server),
                     Status::Malformed,
                     IssueCode::PreludeUnsolicitedResponse,
                     "HTTP/1 response has no pending request",
                 )
-                .certainty(if self.clean_start {
+                .with_certainty(if self.clean_start {
                     Certainty::Confirmed
                 } else {
                     Certainty::Indeterminate
                 })
-                .evidence(head_wire_bytes, union_balanced(sets)?),
-            )?;
-            return Ok(true);
-        }
-        let mut msg = self.new_message(0, MessageKind::Response, context)?;
-        record_head(&mut msg, &head, head_wire, sets, context)?;
-        if let Some((index, ..)) = front {
-            msg.request = Some(index);
-        }
-        let informational = status < 200;
-        if informational {
-            self.drop_msg(msg, context)?;
-            return Ok(true);
-        }
-        let had_front = front.is_some();
-        let (front_index, method, was_upgrade) = front.unwrap_or((0, None, false));
-        if had_front {
-            let prelude = self
-                .upgrade
-                .prelude
-                .as_mut()
-                .ok_or(Error::Invariant("prelude"))?;
-            prelude.requests.pop_front();
-            context.release(&mut self.charge, budget::PENDING_OVERHEAD)?;
-        }
-        if was_upgrade {
-            if let Some(mut offer) = self
-                .upgrade
-                .prelude
-                .as_mut()
-                .and_then(|prelude| prelude.offers.remove(&front_index))
-            {
-                context.release(
-                    &mut self.charge,
-                    budget::offer_cost(offer.settings.capacity()),
-                )?;
-                if let Some(held) = offer.msg.take() {
-                    self.refused_upgrade(held, context)?;
-                }
-            }
-            let live = self.upgrade.prelude.as_mut().and_then(|prelude| {
-                if prelude
-                    .live_request
-                    .as_ref()
-                    .is_some_and(|msg| msg.index == front_index)
-                {
-                    prelude.live_request.take()
-                } else {
-                    None
-                }
-            });
-            if let Some(live) = live {
-                self.refused_upgrade(live, context)?;
-            }
-            self.upgrade.refused = true;
-        }
-        let framing = match head.body(method.as_deref()) {
-            Ok(framing) => framing,
-            Err(error) => {
-                let sources = union_balanced(std::mem::take(&mut msg.sets))?;
-                self.drop_msg(msg, context)?;
-                self.reject(
-                    context,
-                    Fault::new(
-                        self.dir_flow(Side::Server),
-                        IssueScope::Connection,
-                        Status::Malformed,
-                        IssueCode::PreludeFraming,
-                        error.to_string(),
-                    )
-                    .evidence(head.wire().clone(), sources),
-                )?;
-                return Ok(true);
-            }
+                .with_evidence(wire, union_balanced(sets)?),
+            );
         };
-        if matches!(framing, http::Body::Chunked) {
-            let prelude = self
-                .upgrade
-                .prelude
-                .as_mut()
-                .ok_or(Error::Invariant("prelude"))?;
-            if let Err(error) = context.charge(
-                &mut prelude.body_charge[Side::Server],
-                budget::PRELUDE_BODY_RESERVE,
-            ) {
-                self.drop_msg(msg, context)?;
-                return Err(error);
-            }
+        let head_wire = wire.len();
+        let mut msg = Self::new_message(0, MessageKind::Response, context)?;
+        record_head(&mut msg, &head, head_wire, sets, context)?;
+        msg.request = Some(front_index);
+        if status < 200 {
+            context.release_all(&mut msg.charge)?;
+            return Ok(true);
         }
-        let decoder = BodyDecoder::new(framing, context.limits.max_body_bytes);
-        if decoder.complete() {
-            self.drop_msg(msg, context)?;
-        } else {
-            let prelude = self
-                .upgrade
-                .prelude
-                .as_mut()
-                .ok_or(Error::Invariant("prelude"))?;
-            prelude.server_body = Some(decoder);
-            prelude.live_response = Some(msg);
+        let Some(pending) = self
+            .prelude
+            .as_mut()
+            .and_then(|prelude| prelude.pop_request(context).transpose())
+            .transpose()?
+        else {
+            context.release_all(&mut msg.charge)?;
+            return Ok(true);
+        };
+        if pending.upgrade {
+            self.decline_upgrade_offer(pending.index, reporter, context)?;
         }
+        self.attach_prelude_body(
+            Side::Server,
+            &head,
+            pending.method.as_deref(),
+            msg,
+            reporter,
+            context,
+        )
+    }
+
+    fn handle_101_response(
+        &mut self,
+        head: http::Head,
+        wire: Bytes,
+        sets: Vec<SourceSet>,
+        reporter: &mut Reporter,
+        context: &mut Context<'_>,
+    ) -> StepResult<bool> {
+        let matched = self.prelude.as_ref().is_some_and(|prelude| {
+            prelude.requests.front().is_some_and(|pending| {
+                pending.upgrade && prelude.offers.contains_key(&pending.index)
+            })
+        });
+        if !matched || !upgrade::accepts_upgrade(&head) {
+            return reporter.reject(
+                context,
+                Fault::connection(
+                    self.directions.flow(Side::Server),
+                    Status::Unsupported,
+                    IssueCode::Unexpected101,
+                    "a 101 response does not match a pending h2c offer",
+                )
+                .with_evidence(wire, union_balanced(sets)?),
+            );
+        }
+        let Some(pending) = self
+            .prelude
+            .as_mut()
+            .and_then(|prelude| prelude.pop_request(context).transpose())
+            .transpose()?
+        else {
+            return Ok(true);
+        };
+        self.accept_upgrade(
+            UpgradeAcceptance {
+                index: pending.index,
+                head,
+                head_wire: wire,
+                sets,
+                method: pending.method,
+            },
+            reporter,
+            context,
+        )?;
         Ok(true)
+    }
+
+    fn decline_upgrade_offer(
+        &mut self,
+        index: u64,
+        reporter: &mut Reporter,
+        context: &mut Context<'_>,
+    ) -> Result<(), Error> {
+        if let Some(mut offer) = self
+            .prelude
+            .as_mut()
+            .and_then(|prelude| prelude.remove_offer(index, context).transpose())
+            .transpose()?
+            && let Some(held) = offer.msg.take()
+        {
+            self.refused_upgrade(held, reporter, context)?;
+        }
+        let live = self.prelude.as_mut().and_then(|prelude| {
+            let slot = &mut prelude.sides[Side::Client];
+            if slot
+                .live_message
+                .as_ref()
+                .is_some_and(|msg| msg.index == index)
+            {
+                slot.live_message.take()
+            } else {
+                None
+            }
+        });
+        if let Some(live) = live {
+            self.refused_upgrade(live, reporter, context)?;
+        }
+        self.upgrade.refused = true;
+        Ok(())
     }
 }

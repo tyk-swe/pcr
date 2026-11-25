@@ -35,7 +35,7 @@ pub use model::{
 use crate::budget::Deadline;
 use crate::error::BoundaryError;
 use budget::{Budget, Context};
-use connection::{ConnectionState, Phase};
+use connection::ConnectionState;
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::{
@@ -47,7 +47,7 @@ use super::{
 
 type ConnectionKey = (u64, u64);
 
-struct Fault {
+struct TransportFault {
     status: Status,
     code: IssueCode,
     detail: &'static str,
@@ -81,13 +81,73 @@ impl Resources {
     }
 }
 
+#[derive(Default)]
+struct FlowRegistry {
+    flow_to_connection: BTreeMap<ScopedFlowKey, ConnectionKey>,
+    connection_to_flows: BTreeMap<ConnectionKey, BTreeSet<ScopedFlowKey>>,
+}
+
+impl FlowRegistry {
+    fn get(&self, flow: &ScopedFlowKey) -> Option<ConnectionKey> {
+        self.flow_to_connection.get(flow).copied()
+    }
+
+    fn get_either(&self, flow: &ScopedFlowKey) -> Option<ConnectionKey> {
+        self.get(flow).or_else(|| self.get(&flow.reverse()))
+    }
+
+    fn distinct_pair(&self, flow: &ScopedFlowKey) -> [Option<ConnectionKey>; 2] {
+        let mut keys = [flow, &flow.reverse()].map(|candidate| {
+            #[cfg(test)]
+            FAILURE_LOOKUPS.with(|count| count.set(count.get() + 1));
+            self.get(candidate)
+        });
+        keys.sort_unstable();
+        let [first, second] = keys;
+        [first, second.filter(|key| Some(*key) != first)]
+    }
+
+    fn associate(&mut self, flow: ScopedFlowKey, key: ConnectionKey) {
+        if let Some(old) = self.flow_to_connection.insert(flow.clone(), key)
+            && old != key
+            && let Some(flows) = self.connection_to_flows.get_mut(&old)
+        {
+            flows.remove(&flow);
+            if flows.is_empty() {
+                self.connection_to_flows.remove(&old);
+            }
+        }
+        self.connection_to_flows
+            .entry(key)
+            .or_default()
+            .insert(flow);
+    }
+
+    fn forget(&mut self, key: ConnectionKey) {
+        let Some(flows) = self.connection_to_flows.remove(&key) else {
+            return;
+        };
+        for flow in flows {
+            #[cfg(test)]
+            REPLACEMENT_FLOWS.with(|count| count.set(count.get() + 1));
+            if self.flow_to_connection.get(&flow) == Some(&key) {
+                self.flow_to_connection.remove(&flow);
+            }
+        }
+    }
+
+    fn clear(&mut self) {
+        self.flow_to_connection.clear();
+        self.connection_to_flows.clear();
+    }
+}
+
 pub struct Collector {
     resources: Resources,
     tcp: TcpStreamFilter,
     // Boxed to keep B-tree nodes small; connection state is large.
     connections: BTreeMap<ConnectionKey, Box<ConnectionState>>,
-    flow_index: BTreeMap<ScopedFlowKey, ConnectionKey>,
-    connection_flows: BTreeMap<ConnectionKey, BTreeSet<ScopedFlowKey>>,
+    flows: FlowRegistry,
     failed: bool,
 }
 
@@ -108,8 +168,7 @@ impl Collector {
             },
             tcp: TcpStreamFilter::new(ports, application),
             connections: BTreeMap::new(),
-            flow_index: BTreeMap::new(),
-            connection_flows: BTreeMap::new(),
+            flows: FlowRegistry::default(),
             failed: false,
         })
     }
@@ -130,8 +189,7 @@ impl Collector {
         if let Err(error) = self.observe_into(record, deadline, &mut out) {
             self.failed = true;
             self.connections.clear();
-            self.flow_index.clear();
-            self.connection_flows.clear();
+            self.flows.clear();
             return Err(error);
         }
         Ok(out)
@@ -160,13 +218,13 @@ impl Collector {
         match event {
             application::Event::Data(delivery) => {
                 let key = (delivery.stream, delivery.generation);
-                if let Some(&old) = self.flow_index.get(&delivery.flow)
+                if let Some(old) = self.flows.get(&delivery.flow)
                     && old != key
                     && let Some(mut conn) = self.connections.remove(&old)
                 {
-                    self.forget_connection_flows(old);
-                    conn.number = number;
-                    if !conn.done && !matches!(conn.phase, Phase::Dead) {
+                    self.flows.forget(old);
+                    conn.set_frame_number(number);
+                    if !conn.is_inactive() {
                         conn.terminate(
                             &delivery.flow,
                             Status::Evicted,
@@ -177,7 +235,7 @@ impl Collector {
                     }
                     conn.finish(&mut self.resources.context(deadline, out))?;
                 }
-                self.associate_flow(delivery.flow.clone(), key);
+                self.flows.associate(delivery.flow.clone(), key);
                 let conn = self.connections.entry(key).or_insert_with(|| {
                     Box::new(ConnectionState::new(
                         delivery.stream,
@@ -194,7 +252,7 @@ impl Collector {
             application::Event::Gap { flow, .. } => self.fail_flow(
                 &flow,
                 number,
-                Fault {
+                TransportFault {
                     status: Status::Gap,
                     code: IssueCode::TcpGap,
                     detail: "a TCP sequence gap invalidated the byte stream",
@@ -205,7 +263,7 @@ impl Collector {
             application::Event::Conflict { flow, .. } => self.fail_flow(
                 &flow,
                 number,
-                Fault {
+                TransportFault {
                     status: Status::Conflict,
                     code: IssueCode::TcpConflict,
                     detail: "conflicting TCP retransmissions invalidated the byte stream",
@@ -216,7 +274,7 @@ impl Collector {
             application::Event::Evicted { flow, .. } => self.fail_flow(
                 &flow,
                 number,
-                Fault {
+                TransportFault {
                     status: Status::Evicted,
                     code: IssueCode::TcpEvicted,
                     detail: "reassembly state was evicted before the stream completed",
@@ -226,20 +284,15 @@ impl Collector {
             ),
             application::Event::Closed { flow, reset, .. } => {
                 let Some(conn) = self
-                    .flow_index
-                    .get(&flow)
-                    .or_else(|| self.flow_index.get(&flow.reverse()))
-                    .and_then(|key| self.connections.get_mut(key))
+                    .flows
+                    .get_either(&flow)
+                    .and_then(|key| self.connections.get_mut(&key))
                     .filter(|conn| conn.has_flow(&flow) || conn.has_flow(&flow.reverse()))
                 else {
                     return Ok(());
                 };
-                conn.number = number;
-                conn.close(&flow, reset, &mut self.resources.context(deadline, out))?;
-                if matches!(conn.phase, Phase::Dead) {
-                    conn.drain(&mut self.resources.context(deadline, out))?;
-                }
-                Ok(())
+                conn.set_frame_number(number);
+                conn.close(&flow, reset, &mut self.resources.context(deadline, out))
             }
         }
     }
@@ -248,23 +301,13 @@ impl Collector {
         &mut self,
         flow: &ScopedFlowKey,
         number: u64,
-        fault: Fault,
+        fault: TransportFault,
         deadline: Option<&Deadline>,
         out: &mut Vec<Event>,
     ) -> Result<(), Error> {
-        let mut keys = [flow, &flow.reverse()].map(|flow| {
-            #[cfg(test)]
-            FAILURE_LOOKUPS.with(|count| count.set(count.get() + 1));
-            self.flow_index.get(flow).copied()
-        });
-        keys.sort_unstable();
-        let [first, second] = keys;
-        for key in [first, second.filter(|key| Some(*key) != first)]
-            .into_iter()
-            .flatten()
-        {
+        for key in self.flows.distinct_pair(flow).into_iter().flatten() {
             if let Some(conn) = self.connections.get_mut(&key) {
-                conn.number = number;
+                conn.set_frame_number(number);
                 conn.terminate(
                     flow,
                     fault.status,
@@ -277,29 +320,14 @@ impl Collector {
         Ok(())
     }
 
+    #[cfg(test)]
     fn associate_flow(&mut self, flow: ScopedFlowKey, key: ConnectionKey) {
-        if let Some(old) = self.flow_index.insert(flow.clone(), key)
-            && old != key
-            && let Some(flows) = self.connection_flows.get_mut(&old)
-        {
-            flows.remove(&flow);
-            if flows.is_empty() {
-                self.connection_flows.remove(&old);
-            }
-        }
-        self.connection_flows.entry(key).or_default().insert(flow);
+        self.flows.associate(flow, key);
     }
 
+    #[cfg(test)]
     fn forget_connection_flows(&mut self, key: ConnectionKey) {
-        if let Some(flows) = self.connection_flows.remove(&key) {
-            for flow in flows {
-                #[cfg(test)]
-                REPLACEMENT_FLOWS.with(|count| count.set(count.get() + 1));
-                if self.flow_index.get(&flow) == Some(&key) {
-                    self.flow_index.remove(&flow);
-                }
-            }
-        }
+        self.flows.forget(key);
     }
 
     pub fn finish(self, run: &RunSummary) -> Result<(Vec<Event>, Summary), Error> {
@@ -341,7 +369,7 @@ impl Collector {
                 deadline.enforce()?;
             }
             let mut out = Vec::new();
-            conn.number = run.frames_read;
+            conn.set_frame_number(run.frames_read);
             conn.finish(&mut self.resources.context(deadline, &mut out))?;
             emit(out)?;
         }

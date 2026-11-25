@@ -1,113 +1,202 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Connection control frames, with SETTINGS and flow control in child modules.
+//! Connection control state (SETTINGS, windows, GOAWAY, PING) and handlers.
 
 mod flow_control;
 mod settings;
 
 use super::super::Error;
-use super::super::model::{Certainty, IssueScope, Status};
-use super::{ConnectionState, Context, Evidence, Fault};
+use super::super::budget::{self, Charge};
+use super::super::model::{Certainty, Status};
+use super::super::settings::DirectionSettings;
+use super::{ActiveState, Context, Evidence, Fault, Reporter, StepResult};
 use crate::analysis::http2::IssueCode;
-use crate::analysis::http2::side::Side;
+use crate::analysis::http2::side::{PerSide, Side};
 use crate::protocol::application::http2 as wire;
+use std::collections::BTreeMap;
+use std::ops::Bound;
 
-impl ConnectionState {
+#[derive(Clone, Copy, Default)]
+pub(crate) struct PendingCounts {
+    pub settings: u64,
+    pub pings: u64,
+}
+
+pub(crate) struct ControlState {
+    pub settings: PerSide<DirectionSettings>,
+    pub send_window: PerSide<i64>,
+    pub goaway: PerSide<Option<u32>>,
+    pub pings: PerSide<BTreeMap<[u8; 8], u64>>,
+    pings_charge: Charge,
+}
+
+impl ControlState {
+    pub(crate) fn new() -> Self {
+        Self {
+            settings: PerSide::new(DirectionSettings::new(), DirectionSettings::new()),
+            send_window: PerSide::new(65_535, 65_535),
+            goaway: PerSide::new(None, None),
+            pings: PerSide::default(),
+            pings_charge: Charge::default(),
+        }
+    }
+
+    pub(crate) fn initial_windows(&self) -> PerSide<i64> {
+        PerSide::new(
+            i64::from(self.settings[Side::Server].acknowledged.initial_window_size),
+            i64::from(self.settings[Side::Client].acknowledged.initial_window_size),
+        )
+    }
+
+    pub(crate) fn pending_counts(&self) -> PendingCounts {
+        PendingCounts {
+            settings: self
+                .settings
+                .iter()
+                .map(|direction| direction.pending.len() as u64)
+                .sum(),
+            pings: self
+                .pings
+                .iter()
+                .map(|pings| pings.values().sum::<u64>())
+                .sum(),
+        }
+    }
+
+    pub(crate) fn release_all(
+        &mut self,
+        context: &mut Context<'_>,
+    ) -> Result<PendingCounts, Error> {
+        let counts = self.pending_counts();
+        for direction in self.settings.iter_mut() {
+            for mut pending in std::mem::take(&mut direction.pending) {
+                context.release_all(&mut pending.charge)?;
+            }
+        }
+        for pings in self.pings.iter_mut() {
+            pings.clear();
+        }
+        context.release_all(&mut self.pings_charge)?;
+        Ok(counts)
+    }
+}
+
+struct GoawayScan<'a> {
+    side: Side,
+    last_stream_id: u32,
+    capacity: usize,
+    closed_range: (Bound<u32>, Bound<u32>),
+    evidence: &'a Evidence,
+}
+
+impl ActiveState {
     pub(crate) fn goaway_frame(
         &mut self,
         side: Side,
         last_stream_id: u32,
         evidence: Evidence,
+        reporter: &mut Reporter,
         context: &mut Context<'_>,
-    ) -> Result<(), Error> {
+    ) -> StepResult {
         if let Some(previous) = self.control.goaway[side]
             && last_stream_id > previous
         {
-            self.reject(
+            return reporter.reject(
                 context,
-                Fault::new(
-                    self.dir_flow(side),
-                    IssueScope::Connection,
+                Fault::connection(
+                    self.directions.flow(side),
                     Status::Malformed,
                     IssueCode::GoawayLastStreamIncreased,
                     "GOAWAY last_stream_id must not increase",
                 )
-                .evidence(evidence.wire.clone(), evidence.sources.clone()),
-            )?;
-            return Ok(());
+                .with_evidence(evidence.wire, evidence.sources),
+            );
         }
         let previous_last = self.control.goaway[side];
-        let effective_last = previous_last.map_or(last_stream_id, |p| p.min(last_stream_id));
+        let effective_last = previous_last.map_or(last_stream_id, |prev| prev.min(last_stream_id));
         self.control.goaway[side] = Some(effective_last);
         let closed_range = (
-            std::ops::Bound::Excluded(effective_last),
-            previous_last.map_or(std::ops::Bound::Unbounded, std::ops::Bound::Included),
+            Bound::Excluded(effective_last),
+            previous_last.map_or(Bound::Unbounded, Bound::Included),
         );
         // Successive GOAWAY bounds only decrease: scan newly excluded closed
         // IDs, rather than revisiting every completed stream for every frame.
-        let mut capacity = self.streams.open.len();
-        for _ in self.streams.closed.range(closed_range) {
+        let mut capacity = self.streams.open_len();
+        for _ in self.streams.closed_range(closed_range) {
             context.check_deadline()?;
             capacity += 1;
         }
         let scratch = capacity * size_of::<u32>();
-        context.reserve_scratch(scratch)?;
-        let result = self.goaway_unprocessed(
+        let scan = GoawayScan {
             side,
             last_stream_id,
             capacity,
             closed_range,
-            &evidence,
-            context,
-        );
-        context.release_scratch(scratch)?;
-        result
+            evidence: &evidence,
+        };
+        context.with_scratch(scratch, |context| {
+            self.mark_goaway_unprocessed(scan, reporter, context)
+        })?;
+        Ok(())
     }
 
-    fn goaway_unprocessed(
+    fn mark_goaway_unprocessed(
         &mut self,
-        side: Side,
-        last_stream_id: u32,
-        capacity: usize,
-        closed_range: (std::ops::Bound<u32>, std::ops::Bound<u32>),
-        evidence: &Evidence,
+        scan: GoawayScan<'_>,
+        reporter: &mut Reporter,
         context: &mut Context<'_>,
     ) -> Result<(), Error> {
+        let GoawayScan {
+            side,
+            last_stream_id,
+            capacity,
+            closed_range,
+            evidence,
+        } = scan;
         let mut emitted = Vec::with_capacity(capacity);
-        for (id, stream) in &mut self.streams.open {
+        let peer = side.peer();
+        for (id, stream) in self.streams.open_iter_mut() {
             context.check_deadline()?;
-            let initiated_by_receiver = stream.initiator == side.peer();
-            if *id > last_stream_id && initiated_by_receiver {
-                if !stream.unprocessed && stream.ended[side.peer()] {
-                    emitted.push(*id);
+            if id > last_stream_id && stream.initiator == peer {
+                if !stream.unprocessed && stream.ended[peer] {
+                    emitted.push(id);
                 }
                 stream.unprocessed = true;
             }
         }
-        for (id, _) in self.streams.closed.range(closed_range) {
+        for id in self.streams.closed_range(closed_range) {
             context.check_deadline()?;
-            if Side::initiator_of(*id) == side.peer() {
-                emitted.push(*id);
+            if Side::initiator_of(id) == peer {
+                emitted.push(id);
             }
         }
+        let flow = self.directions.flow(side);
         for id in emitted {
-            self.issue(context, Fault::new(self.dir_flow(side), IssueScope::Stream, Status::Unprocessed, IssueCode::GoawayUnprocessed, "GOAWAY excludes this already-emitted request; the earlier event records byte completeness only").stream(Some(id)).evidence(evidence.wire.clone(), evidence.sources.clone()))?;
+            reporter.issue(
+                context,
+                Fault::stream(
+                    flow.clone(),
+                    id,
+                    Status::Unprocessed,
+                    IssueCode::GoawayUnprocessed,
+                    "GOAWAY excludes this already-emitted request; the earlier event records byte completeness only",
+                )
+                .with_evidence_ref(evidence),
+            )?;
         }
         Ok(())
     }
-}
 
-impl ConnectionState {
     pub(crate) fn ping_frame(
         &mut self,
         side: Side,
         flags: u8,
         opaque: [u8; 8],
         evidence: Evidence,
+        reporter: &mut Reporter,
         context: &mut Context<'_>,
     ) -> Result<(), Error> {
-        const PING_ENTRY: usize = 64;
         if flags & wire::FLAG_ACK != 0 {
             let pending = &mut self.control.pings[side.peer()];
             match pending.get_mut(&opaque) {
@@ -115,21 +204,21 @@ impl ConnectionState {
                     *count -= 1;
                     if *count == 0 {
                         pending.remove(&opaque);
-                        context.release(&mut self.charge, PING_ENTRY)?;
+                        context
+                            .release(&mut self.control.pings_charge, budget::PING_ENTRY_OVERHEAD)?;
                     }
                 }
                 None => {
-                    self.issue(
+                    reporter.issue(
                         context,
-                        Fault::new(
-                            self.dir_flow(side),
-                            IssueScope::Connection,
+                        Fault::connection(
+                            self.directions.flow(side),
                             Status::Incomplete,
                             IssueCode::UnmatchedPingAck,
                             "a PING acknowledgment carries an opaque value never observed",
                         )
-                        .certainty(Certainty::ObservedOrder)
-                        .evidence(evidence.wire, evidence.sources),
+                        .with_certainty(Certainty::ObservedOrder)
+                        .with_evidence(evidence.wire, evidence.sources),
                     )?;
                 }
             }
@@ -139,7 +228,7 @@ impl ConnectionState {
             *count += 1;
             return Ok(());
         }
-        context.charge(&mut self.charge, PING_ENTRY)?;
+        context.charge(&mut self.control.pings_charge, budget::PING_ENTRY_OVERHEAD)?;
         self.control.pings[side].insert(opaque, 1);
         Ok(())
     }

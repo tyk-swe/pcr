@@ -22,6 +22,7 @@ pub(crate) const ORIGIN_ENTRY_OVERHEAD: usize = 96;
 pub(crate) const PENDING_OVERHEAD: usize = 160;
 pub(crate) const OFFER_OVERHEAD: usize = 384;
 const OFFER_SETTING_OVERHEAD: usize = 24;
+pub(crate) const PING_ENTRY_OVERHEAD: usize = 64;
 // Two historical directional debts, stream key, and map-node overhead.
 pub(crate) const CLOSED_CREDIT_OVERHEAD: usize = 160;
 pub(crate) const PRELUDE_HEADER_OVERHEAD: usize =
@@ -102,14 +103,33 @@ impl Context<'_> {
         Ok(())
     }
 
-    pub(crate) fn reserve_scratch(&mut self, bytes: usize) -> Result<(), Error> {
+    pub(crate) fn with_scratch<T, E>(
+        &mut self,
+        bytes: usize,
+        f: impl FnOnce(&mut Self) -> Result<T, E>,
+    ) -> Result<T, E>
+    where
+        E: From<Error>,
+    {
+        self.reserve_scratch(bytes)?;
+        let result = f(self);
+        match self.release_scratch(bytes) {
+            Ok(()) => result,
+            Err(release_error) => match result {
+                Ok(_) => Err(release_error.into()),
+                Err(error) => Err(error),
+            },
+        }
+    }
+
+    fn reserve_scratch(&mut self, bytes: usize) -> Result<(), Error> {
         let next = self.budget.live.saturating_add(bytes);
         self.app.check_buffer(next)?;
         self.budget.live = next;
         Ok(())
     }
 
-    pub(crate) fn release_scratch(&mut self, bytes: usize) -> Result<(), Error> {
+    fn release_scratch(&mut self, bytes: usize) -> Result<(), Error> {
         self.budget.live = self
             .budget
             .live

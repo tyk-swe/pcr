@@ -1,6 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-use super::settings::{ENABLE_PUSH, INITIAL_WINDOW_SIZE, MAX_CONCURRENT_STREAMS, MAX_FRAME_SIZE};
+use super::settings::{
+    ENABLE_PUSH, HEADER_TABLE_SIZE, INITIAL_WINDOW_SIZE, MAX_CONCURRENT_STREAMS, MAX_FRAME_SIZE,
+    MAX_HEADER_LIST_SIZE, WINDOW_MAX,
+};
 use super::*;
 use crate::analysis::{
     FlowKey,
@@ -2236,14 +2239,20 @@ fn flow_cleanup_visits_owned_flows() {
         rig.send_stream(forward.clone(), 1, 1, CLIENT_PREFACE)
             .unwrap();
         assert_eq!(REPLACEMENT_FLOWS.with(std::cell::Cell::get), 2);
-        assert_eq!(rig.collector.flow_index.len(), population as usize + 1);
+        assert_eq!(
+            rig.collector.flows.flow_to_connection.len(),
+            population as usize + 1
+        );
         rig.event(application::Event::Gap {
             flow: forward,
             stream: 1,
             generation: 1,
         });
         assert_eq!(FAILURE_LOOKUPS.with(std::cell::Cell::get), 2);
-        assert_eq!(rig.collector.flow_index.len(), population as usize + 1);
+        assert_eq!(
+            rig.collector.flows.flow_to_connection.len(),
+            population as usize + 1
+        );
     }
 }
 
@@ -2254,9 +2263,9 @@ fn generation_removal_preserves_reassigned_flows() {
     rig.collector.associate_flow(key.clone(), (1, 0));
     rig.collector.associate_flow(key.clone(), (2, 1));
     rig.collector.forget_connection_flows((1, 0));
-    assert_eq!(rig.collector.flow_index.get(&key), Some(&(2, 1)));
+    assert_eq!(rig.collector.flows.get(&key), Some((2, 1)));
     rig.collector.forget_connection_flows((2, 1));
-    assert!(!rig.collector.flow_index.contains_key(&key));
+    assert_eq!(rig.collector.flows.get(&key), None);
 }
 
 #[test]
@@ -2357,4 +2366,295 @@ fn trailing_eviction_avoids_transport_fault() {
             .iter()
             .any(|event| matches!(event, Event::Connection(_)))
     );
+}
+
+fn hpack_table_update(size: u32) -> Vec<u8> {
+    if size < 31 {
+        return vec![0x20 | size as u8];
+    }
+    let mut out = vec![0x3f];
+    let mut rem = size - 31;
+    while rem >= 128 {
+        out.push((rem as u8 & 0x7f) | 0x80);
+        rem >>= 7;
+    }
+    out.push(rem as u8);
+    out
+}
+
+#[test]
+fn settings_deduplicate_invalid_codes_and_apply_window_deltas() {
+    let mut server_push = rig();
+    handshake(&mut server_push);
+    server_push.recv(&settings(&[(ENABLE_PUSH, 0), (ENABLE_PUSH, 1)]));
+    let (events, _) = server_push.finish();
+    let role_issues = events
+        .iter()
+        .filter(|event| matches!(event, Event::Issue(issue) if issue.code == IssueCode::SettingsEnablePushRole))
+        .count();
+    assert_eq!(role_issues, 1);
+    let conn = events
+        .iter()
+        .find_map(|event| match event {
+            Event::Connection(conn) => Some(conn),
+            _ => None,
+        })
+        .unwrap();
+    assert!(!conn.server_settings.enable_push);
+
+    let mut invalid_push = rig();
+    handshake(&mut invalid_push);
+    invalid_push.send(&settings(&[(ENABLE_PUSH, 2), (ENABLE_PUSH, 3)]));
+    let (events, _) = invalid_push.finish();
+    let value_issues = events
+        .iter()
+        .filter(|event| matches!(event, Event::Issue(issue) if issue.code == IssueCode::SettingsEnablePushValue))
+        .count();
+    assert_eq!(value_issues, 1);
+    let conn = events
+        .iter()
+        .find_map(|event| match event {
+            Event::Connection(conn) => Some(conn),
+            _ => None,
+        })
+        .unwrap();
+    assert!(conn.client_settings.enable_push);
+
+    let mut window = rig();
+    handshake(&mut window);
+    window.recv(&settings(&[
+        (INITIAL_WINDOW_SIZE, WINDOW_MAX as u32),
+        (INITIAL_WINDOW_SIZE, 100),
+    ]));
+    window.send(&settings_ack());
+    window.send(&frame(HEADERS, END_HEADERS, 1, &request_headers()));
+    window.recv(&settings(&[
+        (INITIAL_WINDOW_SIZE, 200),
+        (INITIAL_WINDOW_SIZE, 250),
+    ]));
+    window.send(&settings_ack());
+    window.send(&frame(DATA, 0, 1, &[0u8; 250]));
+    assert!(
+        !window
+            .events
+            .iter()
+            .any(|event| matches!(event, Event::Issue(issue) if issue.code == IssueCode::StreamWindowExceeded))
+    );
+    window.send(&frame(DATA, END_STREAM, 1, &[0u8; 1]));
+    assert!(
+        window
+            .events
+            .iter()
+            .any(|event| matches!(event, Event::Issue(issue) if issue.code == IssueCode::StreamWindowExceeded))
+    );
+}
+
+#[test]
+fn max_header_list_size_emits_advisory() {
+    let mut rig = rig();
+    handshake(&mut rig);
+    rig.recv(&settings(&[(MAX_HEADER_LIST_SIZE, 32)]));
+    rig.send(&settings_ack());
+    rig.send(&frame(
+        HEADERS,
+        END_HEADERS | END_STREAM,
+        1,
+        &request_headers(),
+    ));
+    let (events, _) = rig.finish();
+    assert!(events.iter().any(|event| matches!(
+        event,
+        Event::Issue(issue) if issue.code == IssueCode::HeaderListSizeAdvisory
+    )));
+}
+
+#[test]
+fn hpack_table_size_updates_enforce_causal_minimums_and_uncertainty() {
+    let mut missing_shrink = rig();
+    handshake(&mut missing_shrink);
+    missing_shrink.recv(&settings(&[
+        (HEADER_TABLE_SIZE, 128),
+        (HEADER_TABLE_SIZE, 512),
+    ]));
+    missing_shrink.recv(&settings(&[
+        (HEADER_TABLE_SIZE, 64),
+        (HEADER_TABLE_SIZE, 8192),
+    ]));
+    let mut block = hpack_table_update(8192);
+    block.extend_from_slice(&request_headers());
+    missing_shrink.send(&frame(HEADERS, END_HEADERS | END_STREAM, 1, &block));
+    let (events, _) = missing_shrink.finish();
+    assert!(events.iter().any(|event| matches!(
+        event,
+        Event::Issue(issue) if issue.code == IssueCode::HpackDecode
+    )));
+
+    let mut prefix_only = rig();
+    handshake(&mut prefix_only);
+    prefix_only.recv(&settings(&[(HEADER_TABLE_SIZE, 128)]));
+    prefix_only.recv(&settings(&[
+        (HEADER_TABLE_SIZE, 64),
+        (HEADER_TABLE_SIZE, 8192),
+    ]));
+    prefix_only.recv(&settings(&[(HEADER_TABLE_SIZE, 32)]));
+    let mut first = hpack_table_update(64);
+    first.extend_from_slice(&hpack_table_update(8192));
+    first.extend_from_slice(&request_headers());
+    prefix_only.send(&frame(HEADERS, END_HEADERS | END_STREAM, 1, &first));
+    assert!(
+        !prefix_only
+            .events
+            .iter()
+            .any(|event| matches!(event, Event::Issue(_)))
+    );
+    prefix_only.send(&settings_ack());
+    prefix_only.send(&settings_ack());
+    prefix_only.send(&settings_ack());
+    prefix_only.send(&frame(
+        HEADERS,
+        END_HEADERS | END_STREAM,
+        3,
+        &request_headers(),
+    ));
+    let (events, _) = prefix_only.finish();
+    assert!(events.iter().any(|event| matches!(
+        event,
+        Event::Issue(issue) if issue.code == IssueCode::HpackDecode
+    )));
+
+    let mut uncertain = rig();
+    handshake(&mut uncertain);
+    uncertain.recv(&settings(&[(HEADER_TABLE_SIZE, 128)]));
+    uncertain.recv(&settings(&[(HEADER_TABLE_SIZE, 8192)]));
+    let mut shrink = hpack_table_update(128);
+    shrink.extend_from_slice(&hpack_table_update(512));
+    shrink.extend_from_slice(&request_headers());
+    uncertain.send(&frame(HEADERS, END_HEADERS | END_STREAM, 1, &shrink));
+    let mut grow = hpack_table_update(8192);
+    grow.extend_from_slice(&request_headers());
+    uncertain.send(&frame(HEADERS, END_HEADERS | END_STREAM, 3, &grow));
+    let (events, _) = uncertain.finish();
+    assert!(events.iter().any(|event| matches!(
+        event,
+        Event::Issue(issue) if issue.code == IssueCode::HpackTableSizeOrdering
+    )));
+}
+
+#[test]
+fn retained_budget_enforces_frame_issue_and_connection_charges() {
+    let decoded_charge = |bytes: usize| bytes.saturating_mul(32).saturating_add(4096);
+    let settings_pairs: Vec<(u16, u32)> = (0..16).map(|index| (0xff00 + index, 1)).collect();
+    let settings_frame = settings(&settings_pairs);
+    let mut base = CLIENT_PREFACE.to_vec();
+    base.extend_from_slice(&settings_frame);
+    let exact_frame_cost = decoded_charge(
+        settings_frame.len()
+            + settings_pairs.len() * size_of::<crate::protocol::application::http2::Setting>()
+            + budget::EVENT_OVERHEAD
+            + budget::SET_OVERHEAD
+            + budget::SPAN_OVERHEAD,
+    );
+    let mut rig_under = rig_bounded(
+        application::Limits {
+            max_retained_bytes: exact_frame_cost - 1,
+            ..application::Limits::default()
+        },
+        Limits::default(),
+    );
+    assert!(matches!(
+        rig_under.send_on(flow(), &base, 0),
+        Err(Error::Application(application::Error::Limit {
+            field: "max_retained_bytes",
+            ..
+        }))
+    ));
+    let mut rig_exact = rig_bounded(
+        application::Limits {
+            max_retained_bytes: exact_frame_cost,
+            ..application::Limits::default()
+        },
+        Limits::default(),
+    );
+    assert!(rig_exact.send_on(flow(), &base, 0).is_ok());
+
+    let bad_preface = b"PRI * HTTP/2.0\r\n\r\nXX\r\n\r\n";
+    let issue_detail = "client connection preface does not match the HTTP/2 magic";
+    let exact_issue_cost = decoded_charge(
+        bad_preface.len() + issue_detail.len() + budget::ISSUE_OVERHEAD + budget::EVENT_OVERHEAD,
+    ) + decoded_charge(budget::SET_OVERHEAD + budget::SPAN_OVERHEAD);
+    let mut rig_issue_under = rig_bounded(
+        application::Limits {
+            max_retained_bytes: exact_issue_cost - 1,
+            ..application::Limits::default()
+        },
+        Limits::default(),
+    );
+    assert!(matches!(
+        rig_issue_under.send_on(flow(), bad_preface, 0),
+        Err(Error::Application(application::Error::Limit {
+            field: "max_retained_bytes",
+            ..
+        }))
+    ));
+    let mut rig_issue_exact = rig_bounded(
+        application::Limits {
+            max_retained_bytes: exact_issue_cost,
+            ..application::Limits::default()
+        },
+        Limits::default(),
+    );
+    assert!(rig_issue_exact.send_on(flow(), bad_preface, 0).is_ok());
+
+    let switching =
+        b"HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: h2c\r\n\r\n";
+    let mut preface = CLIENT_PREFACE.to_vec();
+    preface.extend_from_slice(&settings(&[]));
+    let run_h2c = |max_retained_bytes: usize, include_finish: bool| -> Result<(), Error> {
+        let mut r = rig_bounded(
+            application::Limits {
+                max_retained_bytes,
+                ..application::Limits::default()
+            },
+            Limits::default(),
+        );
+        r.send_on(flow(), upgrade_offer(), 0)?;
+        r.send_on(flow().reverse(), switching, 0)?;
+        r.send_on(flow(), &preface, 0)?;
+        r.send_on(flow().reverse(), &settings(&[]), 0)?;
+        r.send_on(flow().reverse(), &settings_ack(), 0)?;
+        r.send_on(flow(), &settings_ack(), 0)?;
+        r.send_on(
+            flow().reverse(),
+            &frame(HEADERS, END_HEADERS | END_STREAM, 1, &response_headers()),
+            0,
+        )?;
+        r.client_close(false).server_close(false);
+        if include_finish {
+            r.collector.finish(&RunSummary::default())?;
+        }
+        Ok(())
+    };
+    let min_budget = |include_finish: bool| {
+        let mut lo = 0usize;
+        let mut hi = 1 << 20;
+        while lo < hi {
+            let mid = lo + (hi - lo) / 2;
+            if run_h2c(mid, include_finish).is_ok() {
+                hi = mid;
+            } else {
+                lo = mid + 1;
+            }
+        }
+        lo
+    };
+    let before_finish = min_budget(false);
+    let with_finish = min_budget(true);
+    let connection_headroom = decoded_charge(
+        budget::EVENT_OVERHEAD
+            + budget::MESSAGE_OVERHEAD
+            + switching.len()
+            + budget::SET_OVERHEAD
+            + budget::SPAN_OVERHEAD,
+    );
+    assert_eq!(with_finish - before_finish, connection_headroom);
 }

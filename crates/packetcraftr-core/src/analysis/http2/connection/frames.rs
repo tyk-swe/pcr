@@ -1,125 +1,129 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! Frame boundary decoding, continuation/size/semantic checks, and dispatch.
+
 mod data;
 mod headers;
 
 use super::super::Error;
 use super::super::buffer::union_balanced;
-use super::super::model::{Certainty, FrameBody, IssueScope, Status};
-use super::{ChainHead, ConnectionState, Context, Evidence, Fault, Pos};
+use super::super::model::{Certainty, IssueScope, Status};
+use super::{
+    ActiveState, ChainHead, Context, Evidence, Fault, Pos, Reporter, StepAbort, StepResult,
+};
 use crate::analysis::http2::IssueCode;
 use crate::analysis::http2::budget;
+use crate::analysis::http2::side::Side;
+use crate::analysis::provenance::SourceSet;
 use crate::protocol::application::http2 as wire;
 use bytes::Bytes;
-
-use crate::analysis::http2::side::Side;
 use data::DataHead;
+use headers::{BlockContinue, BlockStart};
 
-impl ConnectionState {
+fn frame_scratch_bytes(length: usize, total: usize) -> Result<usize, Error> {
+    let setting_words = size_of::<wire::Setting>();
+    total
+        .checked_mul(2)
+        .and_then(|v| v.checked_add((length / 6).saturating_mul(setting_words.saturating_mul(2))))
+        .and_then(|v| {
+            v.checked_add(
+                budget::EVENT_OVERHEAD + 4 * size_of::<super::super::settings::SettingIssue>(),
+            )
+        })
+        .ok_or(Error::Application(
+            crate::analysis::application::Error::Limit {
+                field: "frame_scratch",
+                limit: total,
+            },
+        ))
+}
+
+impl ActiveState {
     pub(crate) fn frame_step(
         &mut self,
         side: Side,
+        reporter: &mut Reporter,
         context: &mut Context<'_>,
-    ) -> Result<bool, Error> {
+    ) -> StepResult<bool> {
         context.check_deadline()?;
         if self.waiting_settings_ack(side) {
             return Ok(false);
         }
-        {
-            let dir = self
-                .directions
-                .get_mut(side)
-                .ok_or(Error::Invariant("direction not found"))?;
-            if dir.buffer.len() < wire::HEADER_LEN {
-                return Ok(false);
-            }
-            let header = Bytes::copy_from_slice(&dir.buffer.bytes()[..wire::HEADER_LEN]);
-            if let Err(error) =
-                wire::parse_frame_for_analysis(&header, context.limits.max_frame_bytes)
-            {
-                return self.frame_fault(side, error, context);
-            }
-            let length = wire::declared_length(&header);
-            let receiver = &self.control.settings[side.peer()];
-            let effective_max = receiver.permitted_frame_size();
-            if length as u32 > effective_max {
-                let flow = dir.flow.clone();
-                let sets = dir.buffer.consume(wire::HEADER_LEN, context)?;
-                let sources = union_balanced(sets)?;
-                self.reject(
-                    context,
-                    Fault::new(
-                        flow,
-                        IssueScope::Connection,
-                        Status::Malformed,
-                        IssueCode::FrameOverMaxSize,
-                        format!("frame payload {length} exceeds the permitted maximum"),
-                    )
-                    .evidence(header, sources),
-                )?;
-                return Ok(true);
-            }
-            if dir.buffer.len() < wire::HEADER_LEN + length {
-                return Ok(false);
-            }
+        let Some(total) = self.peek_ready_frame(side, reporter, context)? else {
+            return Ok(false);
+        };
+        let length = total - wire::HEADER_LEN;
+        let scratch = frame_scratch_bytes(length, total)?;
+        context.with_scratch(scratch, |context| {
+            self.frame_step_parsed(side, total, reporter, context)
+        })
+    }
+
+    fn peek_ready_frame(
+        &mut self,
+        side: Side,
+        reporter: &mut Reporter,
+        context: &mut Context<'_>,
+    ) -> StepResult<Option<usize>> {
+        let effective_max = self.control.settings[side.peer()].permitted_frame_size();
+        let Some(dir) = self.directions.get_mut(side) else {
+            return Ok(None);
+        };
+        if dir.buffer.len() < wire::HEADER_LEN {
+            return Ok(None);
         }
-        let dir = self
-            .directions
-            .get_mut(side)
-            .ok_or(Error::Invariant("dir"))?;
-        let length = wire::declared_length(dir.buffer.bytes());
-        let total = wire::HEADER_LEN + length;
-        let setting_words = size_of::<wire::Setting>();
-        let scratch = total
-            .checked_mul(2)
-            .and_then(|v| {
-                v.checked_add((length / 6).saturating_mul(setting_words.saturating_mul(2)))
-            })
-            .and_then(|v| {
-                v.checked_add(
-                    budget::EVENT_OVERHEAD + 4 * size_of::<super::super::settings::SettingIssue>(),
+        let header = Bytes::copy_from_slice(&dir.buffer.bytes()[..wire::HEADER_LEN]);
+        if let Err(error) = wire::parse_frame_for_analysis(&header, context.limits.max_frame_bytes)
+        {
+            self.frame_fault(side, error, reporter, context)?;
+            return Ok(None);
+        }
+        let length = wire::declared_length(&header);
+        if length as u32 > effective_max {
+            let flow = dir.flow.clone();
+            let sets = dir.buffer.consume(wire::HEADER_LEN, context)?;
+            let sources = union_balanced(sets)?;
+            return reporter.reject(
+                context,
+                Fault::connection(
+                    flow,
+                    Status::Malformed,
+                    IssueCode::FrameOverMaxSize,
+                    format!("frame payload {length} exceeds the permitted maximum"),
                 )
-            })
-            .ok_or(Error::Application(
-                crate::analysis::application::Error::Limit {
-                    field: "frame_scratch",
-                    limit: total,
-                },
-            ))?;
-        context.reserve_scratch(scratch)?;
-        let result = self.frame_step_parsed(side, total, context);
-        context.release_scratch(scratch)?;
-        result
+                .with_evidence(header, sources),
+            );
+        }
+        let total = wire::HEADER_LEN + length;
+        if dir.buffer.len() < total {
+            return Ok(None);
+        }
+        Ok(Some(total))
     }
 
     fn frame_step_parsed(
         &mut self,
         side: Side,
         total: usize,
+        reporter: &mut Reporter,
         context: &mut Context<'_>,
-    ) -> Result<bool, Error> {
-        let dir = self
-            .directions
-            .get_mut(side)
-            .ok_or(Error::Invariant("dir"))?;
+    ) -> StepResult<bool> {
+        let Some(dir) = self.directions.get_mut(side) else {
+            return Ok(false);
+        };
         let wire_bytes = Bytes::copy_from_slice(&dir.buffer.bytes()[..total]);
-        let parsed = wire::parse_frame_for_analysis(&wire_bytes, context.limits.max_frame_bytes);
-        match parsed {
+        match wire::parse_frame_for_analysis(&wire_bytes, context.limits.max_frame_bytes) {
             Ok(Some((frame, _))) => {
                 context.check_frames()?;
-                let dir = self
-                    .directions
-                    .get_mut(side)
-                    .ok_or(Error::Invariant("dir"))?;
                 let sets = dir.buffer.consume(total, context)?;
                 let sources = union_balanced(sets)?;
-                self.frames += 1;
-                self.handle_frame(side, frame, wire_bytes, sources, context)?;
+                reporter.frames += 1;
+                self.handle_frame(side, frame, wire_bytes, sources, reporter, context)?;
                 Ok(true)
             }
             Ok(None) => Ok(false),
-            Err(error) => self.frame_fault(side, error, context),
+            Err(error) => self.frame_fault(side, error, reporter, context),
         }
     }
 
@@ -127,12 +131,12 @@ impl ConnectionState {
         &mut self,
         side: Side,
         error: wire::Error,
+        reporter: &mut Reporter,
         context: &mut Context<'_>,
-    ) -> Result<bool, Error> {
-        let dir = self
-            .directions
-            .get_mut(side)
-            .ok_or(Error::Invariant("dir"))?;
+    ) -> StepResult<bool> {
+        let Some(dir) = self.directions.get_mut(side) else {
+            return Ok(false);
+        };
         let bytes = dir.buffer.bytes();
         let priority_length_error = matches!(
             error,
@@ -145,21 +149,19 @@ impl ConnectionState {
             .then(|| u32::from_be_bytes([bytes[5] & 0x7f, bytes[6], bytes[7], bytes[8]]));
         let declared = (bytes.len() >= wire::HEADER_LEN)
             .then(|| wire::HEADER_LEN + wire::declared_length(bytes));
-        let take = if stream_error {
-            let total = declared.ok_or(Error::Invariant("header length checked"))?;
-            if bytes.len() < total {
-                return Ok(false);
+        let take = match (stream_error, declared) {
+            (true, Some(total)) => {
+                if bytes.len() < total {
+                    return Ok(false);
+                }
+                context.check_frames()?;
+                reporter.frames += 1;
+                total
             }
-            context.check_frames()?;
-            self.frames += 1;
-            total
-        } else {
             // Attribute only the malformed frame to the issue when its declared
             // length is buffered; coalesced later frames stay terminal evidence.
-            match declared {
-                Some(total) if total <= bytes.len() => total,
-                _ => dir.buffer.len(),
-            }
+            (_, Some(total)) if total <= bytes.len() => total,
+            _ => dir.buffer.len(),
         };
         let (wire, sets) = dir.buffer.take(take, context)?;
         let sources = union_balanced(sets)?;
@@ -182,26 +184,22 @@ impl ConnectionState {
                 (*reason).to_string(),
             ),
         };
-        self.issue(
+        let scope = if stream_error {
+            IssueScope::Stream
+        } else {
+            IssueScope::Connection
+        };
+        reporter.issue(
             context,
-            Fault::new(
-                flow,
-                if stream_error {
-                    IssueScope::Stream
-                } else {
-                    IssueScope::Connection
-                },
-                status,
-                code,
-                detail,
-            )
-            .stream(stream_id)
-            .evidence(wire, sources),
+            Fault::new(flow, scope, status, code, detail)
+                .with_stream(stream_id)
+                .with_evidence(wire, sources),
         )?;
         if !stream_error {
-            self.fail(context, status)?;
-        } else if let Some(id) = stream_id {
-            self.reject_priority_stream(side, id, context)?;
+            return Err(StepAbort::ConnectionFailed(status));
+        }
+        if let Some(id) = stream_id {
+            self.reject_priority_stream(side, id, reporter, context)?;
         }
         Ok(true)
     }
@@ -211,57 +209,84 @@ impl ConnectionState {
         side: Side,
         frame: wire::Frame,
         wire_bytes: Bytes,
-        sources: Option<crate::analysis::provenance::SourceSet>,
+        sources: Option<SourceSet>,
+        reporter: &mut Reporter,
         context: &mut Context<'_>,
-    ) -> Result<(), Error> {
-        let header = frame.header.clone();
-        let stream_id = header.stream_id;
+    ) -> StepResult {
+        let evidence = Evidence::new(wire_bytes, sources);
+        self.check_continuation(side, &frame.header, &evidence, reporter, context)?;
+        self.check_frame_size(side, &frame.header, &evidence, reporter, context)?;
+        if self.check_control_semantics(side, &frame, &evidence, reporter, context)? {
+            return Ok(());
+        }
+        reporter.emit_frame(
+            self.directions.flow(side),
+            &frame,
+            &evidence.wire,
+            evidence.sources.clone(),
+            context,
+        )?;
+        self.apply_frame(side, frame, evidence, reporter, context)
+    }
+
+    fn check_continuation(
+        &self,
+        side: Side,
+        header: &wire::FrameHeader,
+        evidence: &Evidence,
+        reporter: &mut Reporter,
+        context: &mut Context<'_>,
+    ) -> StepResult {
         let chained = self
             .directions
             .get(side)
             .and_then(|dir| dir.chain.as_ref().map(|chain| chain.stream_id));
         if let Some(chained) = chained {
-            if header.frame_type != wire::TYPE_CONTINUATION || stream_id != chained {
-                let flow = self.dir_flow(side);
-                self.reject(
+            if header.frame_type != wire::TYPE_CONTINUATION || header.stream_id != chained {
+                return reporter.reject(
                     context,
-                    Fault::new(
-                        flow,
-                        IssueScope::Connection,
+                    Fault::connection(
+                        self.directions.flow(side),
                         Status::Malformed,
                         IssueCode::BrokenHeaderBlock,
                         "a frame interrupts an unfinished header block",
                     )
-                    .stream(Some(stream_id))
-                    .evidence(wire_bytes.clone(), sources.clone()),
-                )?;
-                return Ok(());
+                    .with_stream(Some(header.stream_id))
+                    .with_evidence_ref(evidence),
+                );
             }
         } else if header.frame_type == wire::TYPE_CONTINUATION {
-            let flow = self.dir_flow(side);
-            self.reject(
+            return reporter.reject(
                 context,
-                Fault::new(
-                    flow,
-                    IssueScope::Connection,
+                Fault::connection(
+                    self.directions.flow(side),
                     Status::Malformed,
                     IssueCode::StrayContinuation,
                     "CONTINUATION does not follow a header block",
                 )
-                .stream(Some(stream_id))
-                .evidence(wire_bytes.clone(), sources.clone()),
-            )?;
-            return Ok(());
+                .with_stream(Some(header.stream_id))
+                .with_evidence_ref(evidence),
+            );
         }
+        Ok(())
+    }
+
+    fn check_frame_size(
+        &self,
+        side: Side,
+        header: &wire::FrameHeader,
+        evidence: &Evidence,
+        reporter: &mut Reporter,
+        context: &mut Context<'_>,
+    ) -> Result<(), Error> {
         let receiver = &self.control.settings[side.peer()];
-        let effective_max = receiver.permitted_frame_size();
-        if header.length > effective_max {
-            let flow = self.dir_flow(side);
-            self.issue(
+        let stream_opt = (header.stream_id != 0).then_some(header.stream_id);
+        let header_wire = evidence.wire.slice(..wire::HEADER_LEN);
+        if header.length > receiver.permitted_frame_size() {
+            reporter.issue(
                 context,
-                Fault::new(
-                    flow,
-                    IssueScope::Connection,
+                Fault::connection(
+                    self.directions.flow(side),
                     Status::Malformed,
                     IssueCode::FrameOverMaxSize,
                     format!(
@@ -269,8 +294,8 @@ impl ConnectionState {
                         header.length
                     ),
                 )
-                .stream((stream_id != 0).then_some(stream_id))
-                .evidence(wire_bytes.slice(..wire::HEADER_LEN), sources.clone()),
+                .with_stream(stream_opt)
+                .with_evidence(header_wire, evidence.sources.clone()),
             )?;
         } else if header.length
             > receiver
@@ -278,12 +303,10 @@ impl ConnectionState {
                 .max_frame_size
                 .min(receiver.acknowledged.max_frame_size)
         {
-            let flow = self.dir_flow(side);
-            self.issue(
+            reporter.issue(
                 context,
-                Fault::new(
-                    flow,
-                    IssueScope::Connection,
+                Fault::connection(
+                    self.directions.flow(side),
                     Status::Malformed,
                     IssueCode::FrameSizeOrdering,
                     format!(
@@ -291,126 +314,73 @@ impl ConnectionState {
                         header.length
                     ),
                 )
-                .stream((stream_id != 0).then_some(stream_id))
-                .certainty(Certainty::ObservedOrder)
-                .evidence(wire_bytes.slice(..wire::HEADER_LEN), sources.clone()),
+                .with_stream(stream_opt)
+                .with_certainty(Certainty::ObservedOrder)
+                .with_evidence(header_wire, evidence.sources.clone()),
             )?;
         }
-        let control = match &frame.payload {
-            wire::Payload::Control(control) => Some(control),
-            wire::Payload::Data { .. } => None,
-        };
-        let semantic_error = match control {
-            Some(
-                wire::Control::Priority(priority)
-                | wire::Control::Headers {
-                    priority: Some(priority),
-                    ..
-                },
-            ) if priority.dependency == stream_id => Some("priority depends on its own stream"),
-            Some(wire::Control::WindowUpdate { increment: 0 }) => {
-                Some("WINDOW_UPDATE has a zero increment")
-            }
-            _ => None,
-        };
-        if let Some(detail) = semantic_error {
-            self.issue(
-                context,
-                Fault::new(
-                    self.dir_flow(side),
-                    if stream_id == 0 {
-                        IssueScope::Connection
-                    } else {
-                        IssueScope::Stream
-                    },
-                    Status::Malformed,
-                    IssueCode::FrameInvalid,
-                    detail,
-                )
-                .stream((stream_id != 0).then_some(stream_id))
-                .evidence(wire_bytes.clone(), sources.clone()),
-            )?;
-            if stream_id == 0 {
-                self.fail(context, Status::Malformed)?;
-                return Ok(());
-            }
-        }
-        if semantic_error.is_some() && !matches!(control, Some(wire::Control::Headers { .. })) {
-            // Invalid control values remain in the issue's exact wire evidence,
-            // rather than being emitted as a valid typed control payload.
-            if self.streams.open.contains_key(&stream_id) {
-                self.close_stream(stream_id, Status::Malformed, None, context)?;
-            } else if matches!(control, Some(wire::Control::Priority(_))) {
-                self.reject_priority_stream(side, stream_id, context)?;
-            } else if matches!(control, Some(wire::Control::WindowUpdate { increment: 0 })) {
-                // Preserve the idle/closed/capture-delayed classification even
-                // when the control value itself is invalid.
-                self.window_update(
-                    side,
-                    stream_id,
-                    0,
-                    Evidence {
-                        wire: wire_bytes,
-                        sources,
-                    },
-                    context,
-                )?;
-            }
-            return Ok(());
-        }
-        self.emit_frame(side, &frame, &wire_bytes, sources.clone(), context)?;
-        self.apply_frame(
-            side,
-            frame,
-            Evidence {
-                wire: wire_bytes,
-                sources,
-            },
-            context,
-        )
+        Ok(())
     }
 
-    fn emit_frame(
+    /// Validates control frame invariants that depend on stream id or payload
+    /// values. Returns `Ok(true)` when the frame has been handled and should not
+    /// be emitted or dispatched further.
+    fn check_control_semantics(
         &mut self,
         side: Side,
         frame: &wire::Frame,
-        wire_bytes: &Bytes,
-        sources: Option<crate::analysis::provenance::SourceSet>,
+        evidence: &Evidence,
+        reporter: &mut Reporter,
         context: &mut Context<'_>,
-    ) -> Result<(), Error> {
-        let body = match &frame.payload {
-            wire::Payload::Data { data, padding } => FrameBody::Data {
-                data_bytes: data.len() as u64,
-                padding_bytes: padding.len(),
-            },
-            wire::Payload::Control(control) => FrameBody::Control {
-                control: control.clone(),
-                payload_wire: wire_bytes.slice(wire::HEADER_LEN..),
-            },
+    ) -> StepResult<bool> {
+        let stream_id = frame.header.stream_id;
+        let wire::Payload::Control(control) = &frame.payload else {
+            return Ok(false);
         };
-        let mut header_wire = [0u8; wire::HEADER_LEN];
-        header_wire.copy_from_slice(&wire_bytes[..wire::HEADER_LEN]);
-        let retained = match &body {
-            FrameBody::Data { .. } => wire::HEADER_LEN,
-            FrameBody::Control {
-                control: wire::Control::Settings(values),
+        let detail = match control {
+            wire::Control::Priority(priority)
+            | wire::Control::Headers {
+                priority: Some(priority),
                 ..
-            } => wire_bytes.len() + values.capacity() * size_of::<wire::Setting>(),
-            FrameBody::Control { .. } => wire_bytes.len(),
+            } if priority.dependency == stream_id => "priority depends on its own stream",
+            wire::Control::WindowUpdate { increment: 0 } => "WINDOW_UPDATE has a zero increment",
+            _ => return Ok(false),
         };
-        let sources = sources.ok_or(Error::Invariant("frame sources missing"))?;
-        context.charge_retained(retained + budget::EVENT_OVERHEAD + budget::set_cost(&sources))?;
-        context.frame(super::super::model::Frame {
-            index: self.frames,
-            stream: self.stream,
-            generation: self.generation,
-            flow: self.dir_flow(side),
-            header: frame.header.clone(),
-            header_wire,
-            body,
-            sources,
-        });
-        Ok(())
+        let scope = if stream_id == 0 {
+            IssueScope::Connection
+        } else {
+            IssueScope::Stream
+        };
+        reporter.issue(
+            context,
+            Fault::new(
+                self.directions.flow(side),
+                scope,
+                Status::Malformed,
+                IssueCode::FrameInvalid,
+                detail,
+            )
+            .with_stream((stream_id != 0).then_some(stream_id))
+            .with_evidence_ref(evidence),
+        )?;
+        if stream_id == 0 {
+            return Err(StepAbort::ConnectionFailed(Status::Malformed));
+        }
+        if matches!(control, wire::Control::Headers { .. }) {
+            return Ok(false);
+        }
+        // Invalid control values remain in the issue's exact wire evidence,
+        // rather than being emitted as a valid typed control payload.
+        if self.streams.is_open(stream_id) {
+            self.close_stream(stream_id, Status::Malformed, None, reporter, context)?;
+        } else if matches!(control, wire::Control::Priority(_)) {
+            self.reject_priority_stream(side, stream_id, reporter, context)?;
+        } else if matches!(control, wire::Control::WindowUpdate { increment: 0 }) {
+            // Preserve the idle/closed/capture-delayed classification even
+            // when the control value itself is invalid.
+            self.window_update(side, stream_id, 0, evidence.clone(), reporter, context)?;
+        }
+        Ok(true)
     }
 
     fn apply_frame(
@@ -418,18 +388,16 @@ impl ConnectionState {
         side: Side,
         frame: wire::Frame,
         evidence: Evidence,
+        reporter: &mut Reporter,
         context: &mut Context<'_>,
-    ) -> Result<(), Error> {
+    ) -> StepResult {
         let flags = frame.header.flags;
         let stream_id = frame.header.stream_id;
-        let first_frame = {
-            let Some(dir) = self.directions.get_mut(side) else {
-                return Ok(());
-            };
-            let first = !dir.saw_frame;
-            dir.saw_frame = true;
-            first
+        let Some(dir) = self.directions.get_mut(side) else {
+            return Ok(());
         };
+        let first_frame = !dir.saw_frame;
+        dir.saw_frame = true;
         if first_frame
             && !(frame.header.frame_type == wire::TYPE_SETTINGS && flags & wire::FLAG_ACK == 0)
         {
@@ -438,24 +406,22 @@ impl ConnectionState {
             } else {
                 Certainty::Indeterminate
             };
-            self.issue(
+            reporter.issue(
                 context,
-                Fault::new(
-                    self.dir_flow(side),
-                    IssueScope::Connection,
+                Fault::connection(
+                    self.directions.flow(side),
                     Status::Malformed,
                     IssueCode::MissingInitialSettings,
                     "the first frame on a direction was not a non-ACK SETTINGS",
                 )
-                .certainty(certainty)
-                .evidence(
+                .with_certainty(certainty)
+                .with_evidence(
                     evidence.wire.slice(..wire::HEADER_LEN),
                     evidence.sources.clone(),
                 ),
             )?;
             if certainty == Certainty::Confirmed {
-                self.fail(context, Status::Malformed)?;
-                return Ok(());
+                return Err(StepAbort::ConnectionFailed(Status::Malformed));
             }
         }
         let control = match frame.payload {
@@ -468,10 +434,11 @@ impl ConnectionState {
                         data_bytes: data.len() as u64,
                         end_stream: flags & wire::FLAG_END_STREAM != 0,
                     },
-                    Evidence {
-                        wire: Bytes::copy_from_slice(&evidence.wire[..wire::HEADER_LEN]),
-                        sources: evidence.sources,
-                    },
+                    Evidence::new(
+                        Bytes::copy_from_slice(&evidence.wire[..wire::HEADER_LEN]),
+                        evidence.sources,
+                    ),
+                    reporter,
                     context,
                 );
             }
@@ -481,45 +448,64 @@ impl ConnectionState {
             wire::Control::Headers {
                 fragment, priority, ..
             } => self.block_start(
-                Pos { side, stream_id },
-                ChainHead::Headers {
-                    end_stream: flags & wire::FLAG_END_STREAM != 0,
-                    malformed: priority.is_some_and(|priority| priority.dependency == stream_id),
+                BlockStart {
+                    at: Pos { side, stream_id },
+                    head: ChainHead::Headers {
+                        end_stream: flags & wire::FLAG_END_STREAM != 0,
+                        malformed: priority
+                            .is_some_and(|priority| priority.dependency == stream_id),
+                    },
+                    fragment,
+                    evidence,
+                    end_headers: flags & wire::FLAG_END_HEADERS != 0,
                 },
-                fragment,
-                evidence,
+                reporter,
                 context,
-                flags & wire::FLAG_END_HEADERS != 0,
             ),
-            wire::Control::Reset { .. } => self.reset_stream(side, stream_id, evidence, context),
+            wire::Control::Reset { .. } => {
+                self.reset_stream(side, stream_id, evidence, reporter, context)
+            }
             wire::Control::Settings(settings) => {
-                self.settings_frame(side, flags, settings, evidence, context)
+                self.settings_frame(side, flags, settings, evidence, reporter, context)
             }
             wire::Control::PushPromise {
                 promised_stream_id,
                 fragment,
                 ..
             } => self.block_start(
-                Pos { side, stream_id },
-                ChainHead::PushPromise {
-                    promised: promised_stream_id,
+                BlockStart {
+                    at: Pos { side, stream_id },
+                    head: ChainHead::PushPromise {
+                        promised: promised_stream_id,
+                    },
+                    fragment,
+                    evidence,
+                    end_headers: flags & wire::FLAG_END_HEADERS != 0,
                 },
-                fragment,
-                evidence,
+                reporter,
                 context,
-                flags & wire::FLAG_END_HEADERS != 0,
             ),
-            wire::Control::Ping(opaque) => self.ping_frame(side, flags, opaque, evidence, context),
+            wire::Control::Ping(opaque) => {
+                self.ping_frame(side, flags, opaque, evidence, reporter, context)?;
+                Ok(())
+            }
             wire::Control::Priority(_) | wire::Control::Unknown(_) => Ok(()),
             wire::Control::Goaway { last_stream_id, .. } => {
-                self.goaway_frame(side, last_stream_id, evidence, context)
+                self.goaway_frame(side, last_stream_id, evidence, reporter, context)
             }
             wire::Control::WindowUpdate { increment } => {
-                self.window_update(side, stream_id, increment, evidence, context)
+                self.window_update(side, stream_id, increment, evidence, reporter, context)
             }
-            wire::Control::Continuation(fragment) => {
-                self.block_continue(side, stream_id, fragment, flags, evidence, context)
-            }
+            wire::Control::Continuation(fragment) => self.block_continue(
+                BlockContinue {
+                    at: Pos { side, stream_id },
+                    fragment,
+                    end_headers: flags & wire::FLAG_END_HEADERS != 0,
+                    evidence,
+                },
+                reporter,
+                context,
+            ),
         }
     }
 }

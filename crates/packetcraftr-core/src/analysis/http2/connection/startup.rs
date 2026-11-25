@@ -1,18 +1,20 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! Startup protocol sniffing, direction election, and client preface parsing.
+
 use super::super::Error;
 use super::super::buffer::union_balanced;
-use super::super::model::{IssueScope, Startup, Status};
+use super::super::model::{Startup, Status};
 use super::super::upgrade::Prelude;
-use super::directions::Elected;
-use super::{ConnectionState, Context, DirectionPhase, Directions, Fault, PREFACE_LEN, Phase};
+use super::{
+    ActiveState, ConnectionState, Context, DirectionPhase, Fault, PREFACE_LEN, Phase, Reporter,
+    SniffingState, StepResult,
+};
 use crate::analysis::http2::IssueCode;
-use crate::analysis::http2::budget;
 use crate::analysis::http2::side::Side;
 use crate::protocol::application::http;
 use crate::protocol::application::http2 as wire;
-use crate::protocol::application::http2::hpack;
 
 pub(crate) enum Verdict {
     Wait,
@@ -20,6 +22,12 @@ pub(crate) enum Verdict {
     Prelude,
     Tls,
     Garbage,
+}
+
+pub(crate) enum Election {
+    Pending,
+    Unsupported,
+    Elected { index: usize, startup: Startup },
 }
 
 pub(crate) fn tls_like(bytes: &[u8]) -> bool {
@@ -81,111 +89,98 @@ pub(crate) fn classify(bytes: &[u8]) -> Verdict {
     }
 }
 
-impl ConnectionState {
-    pub(crate) fn elect(&mut self, context: &mut Context<'_>) -> Result<(), Error> {
-        for index in 0..self.directions.candidates().len() {
-            match classify(self.directions.candidates()[index].buffer.bytes()) {
+impl SniffingState {
+    pub(crate) fn classify_candidates(&mut self) -> Election {
+        for index in 0..self.directions.candidates.len() {
+            match classify(self.directions.candidates[index].buffer.bytes()) {
                 Verdict::Wait => continue,
-                Verdict::Tls => {
-                    self.status = Status::Unsupported;
-                    self.fail(context, Status::Unsupported)?;
-                    return Ok(());
-                }
+                Verdict::Tls => return Election::Unsupported,
                 Verdict::Garbage => {
-                    self.directions.candidates_mut()[index].garbage = true;
-                    continue;
+                    self.directions.candidates[index].garbage = true;
                 }
                 Verdict::Prior => {
-                    self.elect_client(index, Startup::PriorKnowledge, context)?;
-                    if let Some(dir) = self.directions.get_mut(Side::Client) {
-                        dir.phase = DirectionPhase::Preface;
-                    }
-                    self.phase = Phase::H2;
-                    return Ok(());
+                    return Election::Elected {
+                        index,
+                        startup: Startup::PriorKnowledge,
+                    };
                 }
                 Verdict::Prelude => {
-                    self.elect_client(index, Startup::Unknown, context)?;
-                    if let Some(dir) = self.directions.get_mut(Side::Client) {
-                        dir.phase = DirectionPhase::Prelude;
-                    }
-                    if let Some(dir) = self.directions.get_mut(Side::Server) {
-                        dir.phase = DirectionPhase::Prelude;
-                    }
-                    self.upgrade.prelude = Some(Prelude::new());
-                    context.charge(&mut self.charge, budget::DIR_OVERHEAD)?;
-                    self.phase = Phase::Prelude;
-                    return Ok(());
+                    return Election::Elected {
+                        index,
+                        startup: Startup::Unknown,
+                    };
                 }
             }
         }
-        Ok(())
+        Election::Pending
     }
+}
 
-    fn elect_client(
+impl ConnectionState {
+    pub(crate) fn promote_sniffing(
         &mut self,
-        index: usize,
+        client_index: usize,
         startup: Startup,
         context: &mut Context<'_>,
     ) -> Result<(), Error> {
-        let Directions::Candidates(mut candidates) =
-            std::mem::replace(&mut self.directions, Directions::Candidates(Vec::new()))
-        else {
-            return Err(Error::Invariant("election after election"));
+        let prelude = match startup {
+            Startup::PriorKnowledge => None,
+            Startup::H2c | Startup::Unknown => Some(Prelude::new(context)?),
         };
-        let mut client = candidates.swap_remove(index);
-        client.decoder = Some(hpack::Decoder::new(context.limits.hpack())?);
-        self.startup = startup;
-        let mut server = None;
-        for mut dir in candidates {
-            if !dir.buffer.is_empty() {
-                self.clean_start = false;
+        let placeholder = Phase::Sniffing(SniffingState {
+            directions: super::SniffingDirections::new(),
+        });
+        let Phase::Sniffing(sniff) = std::mem::replace(&mut self.phase, placeholder) else {
+            return Err(Error::Invariant("election outside sniffing phase"));
+        };
+        let (directions, clean_start) = match sniff.directions.elect(client_index, startup, context)
+        {
+            Ok(elected) => elected,
+            Err(error) => {
+                if let Some(prelude) = prelude {
+                    let _ = prelude.release_all(context);
+                }
+                return Err(error);
             }
-            dir.decoder = Some(hpack::Decoder::new(context.limits.hpack())?);
-            dir.phase = match startup {
-                Startup::PriorKnowledge => DirectionPhase::Frames,
-                _ => DirectionPhase::Prelude,
-            };
-            server = Some(dir);
-        }
-        self.directions = Directions::Elected(Box::new(Elected { client, server }));
+        };
+        self.reporter.startup = startup;
+        self.phase = Phase::Active(Box::new(ActiveState::new(directions, prelude, clean_start)));
         Ok(())
     }
+}
 
+impl ActiveState {
     pub(crate) fn preface_step(
         &mut self,
         side: Side,
+        reporter: &mut Reporter,
         context: &mut Context<'_>,
-    ) -> Result<bool, Error> {
-        let dir = self
-            .directions
-            .get_mut(side)
-            .ok_or(Error::Invariant("direction not found"))?;
+    ) -> StepResult<bool> {
+        let Some(dir) = self.directions.get_mut(side) else {
+            return Ok(false);
+        };
         let have = dir.buffer.len().min(PREFACE_LEN);
         if dir.buffer.bytes()[..have] != wire::CLIENT_PREFACE[..have] {
             let flow = dir.flow.clone();
             let take = dir.buffer.len();
             let (wire, sets) = dir.buffer.take(take, context)?;
             let sources = union_balanced(sets)?;
-            self.reject(
+            return reporter.reject(
                 context,
-                Fault::new(
+                Fault::connection(
                     flow,
-                    IssueScope::Connection,
                     Status::Malformed,
                     IssueCode::BadPreface,
                     "client connection preface does not match the HTTP/2 magic",
                 )
-                .evidence(wire, sources),
-            )?;
-            return Ok(true);
+                .with_evidence(wire, sources),
+            );
         }
         if dir.buffer.len() < PREFACE_LEN {
             return Ok(false);
         }
         dir.buffer.discard(PREFACE_LEN, context)?;
-        if let Some(dir) = self.directions.get_mut(side) {
-            dir.phase = DirectionPhase::Frames;
-        }
+        dir.phase = DirectionPhase::Frames;
         Ok(true)
     }
 }

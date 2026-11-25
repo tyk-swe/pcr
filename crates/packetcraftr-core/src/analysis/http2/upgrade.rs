@@ -1,21 +1,27 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::budget::Charge;
-use crate::analysis::http2::side::PerSide;
-use crate::protocol::application::http::{self, Head, StartLine};
+use super::Error;
+use super::budget::{self, Charge, Context};
+use super::stream::MessageBuilder;
+use crate::analysis::http2::side::{PerSide, Side};
+use crate::protocol::application::http::{self, BodyDecoder, Head, StartLine};
 use crate::protocol::application::http2::Setting;
 use std::collections::{BTreeMap, VecDeque};
+
+#[derive(Default)]
+pub(crate) struct PreludeSide {
+    pub body: Option<BodyDecoder>,
+    pub live_message: Option<MessageBuilder>,
+    pub body_charge: Charge,
+}
 
 pub(crate) struct Prelude {
     pub requests: VecDeque<Pending>,
     pub offers: BTreeMap<u64, Offer>,
-    pub client_body: Option<crate::protocol::application::http::BodyDecoder>,
-    pub server_body: Option<crate::protocol::application::http::BodyDecoder>,
-    pub live_request: Option<super::stream::MessageBuilder>,
-    pub live_response: Option<super::stream::MessageBuilder>,
+    pub sides: PerSide<PreludeSide>,
     pub upgraded: bool,
-    pub body_charge: PerSide<Charge>,
+    charge: Charge,
 }
 
 pub(crate) struct Pending {
@@ -26,21 +32,83 @@ pub(crate) struct Pending {
 
 pub(crate) struct Offer {
     pub settings: Vec<Setting>,
-    pub msg: Option<super::stream::MessageBuilder>,
+    pub msg: Option<MessageBuilder>,
 }
 
 impl Prelude {
-    pub(crate) fn new() -> Self {
-        Self {
+    pub(crate) fn new(context: &mut Context<'_>) -> Result<Self, Error> {
+        let mut charge = Charge::default();
+        context.charge(&mut charge, budget::DIR_OVERHEAD)?;
+        Ok(Self {
             requests: VecDeque::new(),
             offers: BTreeMap::new(),
-            client_body: None,
-            server_body: None,
-            live_request: None,
-            live_response: None,
+            sides: PerSide::default(),
             upgraded: false,
-            body_charge: PerSide::default(),
+            charge,
+        })
+    }
+
+    pub(crate) fn push_request(
+        &mut self,
+        pending: Pending,
+        context: &mut Context<'_>,
+    ) -> Result<(), Error> {
+        context.charge(&mut self.charge, budget::PENDING_OVERHEAD)?;
+        self.requests.push_back(pending);
+        Ok(())
+    }
+
+    pub(crate) fn pop_request(
+        &mut self,
+        context: &mut Context<'_>,
+    ) -> Result<Option<Pending>, Error> {
+        let Some(pending) = self.requests.pop_front() else {
+            return Ok(None);
+        };
+        context.release(&mut self.charge, budget::PENDING_OVERHEAD)?;
+        Ok(Some(pending))
+    }
+
+    pub(crate) fn insert_offer(
+        &mut self,
+        index: u64,
+        offer: Offer,
+        context: &mut Context<'_>,
+    ) -> Result<(), Error> {
+        context.charge(
+            &mut self.charge,
+            budget::offer_cost(offer.settings.capacity()),
+        )?;
+        self.offers.insert(index, offer);
+        Ok(())
+    }
+
+    pub(crate) fn remove_offer(
+        &mut self,
+        index: u64,
+        context: &mut Context<'_>,
+    ) -> Result<Option<Offer>, Error> {
+        let Some(offer) = self.offers.remove(&index) else {
+            return Ok(None);
+        };
+        context.release(
+            &mut self.charge,
+            budget::offer_cost(offer.settings.capacity()),
+        )?;
+        Ok(Some(offer))
+    }
+
+    pub(crate) fn release_all(mut self, context: &mut Context<'_>) -> Result<(), Error> {
+        for side in Side::BOTH {
+            context.release_all(&mut self.sides[side].body_charge)?;
+            if let Some(mut msg) = self.sides[side].live_message.take() {
+                context.release_all(&mut msg.charge)?;
+            }
         }
+        for mut msg in self.offers.into_values().filter_map(|offer| offer.msg) {
+            context.release_all(&mut msg.charge)?;
+        }
+        context.release_all(&mut self.charge)
     }
 }
 
@@ -175,7 +243,7 @@ pub(crate) fn upgrade_offer(head: &Head) -> Result<Option<Vec<Setting>>, &'stati
         return Err("HTTP2-Settings must appear exactly once");
     }
     let decoded = base64url(encoded)?;
-    if decoded.len() % 6 != 0 {
+    if !decoded.len().is_multiple_of(6) {
         return Err("HTTP2-Settings payload is not a SETTINGS list");
     }
     let mut pairs = Vec::with_capacity(decoded.len() / 6);

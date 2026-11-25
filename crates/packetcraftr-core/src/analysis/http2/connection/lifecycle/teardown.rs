@@ -1,52 +1,42 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Partial-message flushing, final resource teardown, and connection publication.
+//! Partial-message flushing, final status classification, and connection publication.
 
-use crate::analysis::http2::IssueCode;
-use crate::analysis::http2::budget;
-
-use crate::analysis::http2::Error;
+use super::super::reporter::ConnectionSnapshot;
+use super::super::{
+    ActiveState, ConnectionState, Context, DirectionPhase, Fault, Phase, Reporter,
+    SniffingDirections, SniffingState, StepAbort,
+};
 use crate::analysis::http2::buffer::union_balanced;
-use crate::analysis::http2::connection::{ConnectionState, Context, DirectionPhase, Fault, Phase};
-use crate::analysis::http2::model::{Certainty, Connection, IssueScope, Startup, Status};
+use crate::analysis::http2::model::{Certainty, Startup, Status};
 use crate::analysis::http2::side::Side;
-use crate::analysis::http2::stream::Phase as StreamPhase;
+use crate::analysis::http2::{Error, IssueCode};
 
-impl ConnectionState {
+impl ActiveState {
     pub(crate) fn flush_messages(
         &mut self,
         status: Status,
+        reporter: &mut Reporter,
         context: &mut Context<'_>,
     ) -> Result<usize, Error> {
         let mut pending_msgs = Vec::new();
-        let promises = std::mem::take(&mut self.deferred.promises);
-        context.release(&mut self.charge, promises.len() * budget::PENDING_OVERHEAD)?;
-        for msg in promises {
-            pending_msgs.push((Side::Server, msg.stream_id, msg));
+        for msg in self.deferred.take_all_promises(context)? {
+            pending_msgs.push((Side::Server, msg));
         }
-        let immediate = std::mem::take(&mut self.deferred.awaiting_ack);
-        context.release(&mut self.charge, immediate.len() * budget::PENDING_OVERHEAD)?;
-        for (side, msg, _) in immediate {
-            pending_msgs.push((side, msg.stream_id, msg));
+        for (side, msg, _) in self.deferred.take_all_awaiting_ack(context)? {
+            pending_msgs.push((side, msg));
         }
+        pending_msgs.extend(self.streams.drain_open_messages());
 
-        for (id, stream) in self.streams.open.iter_mut() {
-            for side in Side::BOTH {
-                if let Some(msg) = stream.msgs[side].take() {
-                    pending_msgs.push((side, *id, msg));
-                }
-            }
-            stream.phase = StreamPhase::Closed;
-        }
         let mut upgrade_evidence = Vec::new();
         let mut release = Vec::new();
-        if let Some(prelude) = self.upgrade.prelude.as_mut() {
-            if let Some(mut msg) = prelude.live_request.take() {
+        if let Some(prelude) = self.prelude.as_mut() {
+            if let Some(mut msg) = prelude.sides[Side::Client].live_message.take() {
                 if prelude.offers.contains_key(&msg.index) {
                     if prelude.upgraded {
                         msg.stream_id = 1;
-                        pending_msgs.push((Side::Client, 1, msg));
+                        pending_msgs.push((Side::Client, msg));
                     } else {
                         upgrade_evidence.push(msg);
                     }
@@ -54,12 +44,12 @@ impl ConnectionState {
                     release.push(msg);
                 }
             }
-            release.extend(prelude.live_response.take());
+            release.extend(prelude.sides[Side::Server].live_message.take());
             for offer in prelude.offers.values_mut() {
                 if let Some(mut msg) = offer.msg.take() {
                     if prelude.upgraded {
                         msg.stream_id = 1;
-                        pending_msgs.push((Side::Client, 1, msg));
+                        pending_msgs.push((Side::Client, msg));
                     } else {
                         upgrade_evidence.push(msg);
                     }
@@ -73,154 +63,127 @@ impl ConnectionState {
                 .ok_or(Error::Invariant("upgrade request head"))?;
             let sources = union_balanced(std::mem::take(&mut msg.sets))?;
             context.release_all(&mut msg.charge)?;
-            self.issue(
+            reporter.issue(
                 context,
-                Fault::new(
-                    self.dir_flow(Side::Client),
-                    IssueScope::Capture,
+                Fault::capture(
+                    self.directions.flow(Side::Client),
                     status,
                     IssueCode::IncompleteUpgrade,
                     "the byte stream ended before the h2c upgrade completed",
                 )
-                .evidence(head.wire().clone(), sources),
+                .with_evidence(head.wire().clone(), sources),
             )?;
         }
         for mut msg in release {
             context.release_all(&mut msg.charge)?;
         }
         let emitted = pending_msgs.len();
-        for (side, _, msg) in pending_msgs {
-            self.emit_message(side, msg, status, context)?;
+        for (side, msg) in pending_msgs {
+            self.emit_message(side, msg, status, reporter, context)?;
         }
         Ok(emitted)
     }
 
-    pub(crate) fn release_prelude(&mut self, context: &mut Context<'_>) -> Result<(), Error> {
-        let Some(mut prelude) = self.upgrade.prelude.take() else {
-            return Ok(());
-        };
-        let mut release = prelude.requests.len() * budget::PENDING_OVERHEAD;
-        release += prelude
-            .offers
-            .values()
-            .map(|offer| budget::offer_cost(offer.settings.capacity()))
-            .sum::<usize>();
-        release += budget::DIR_OVERHEAD;
-        context.release(&mut self.charge, release)?;
+    fn audit_directions_at_finish(
+        &mut self,
+        reporter: &mut Reporter,
+        context: &mut Context<'_>,
+    ) -> Result<(), Error> {
+        self.settings_audited = true;
         for side in Side::BOTH {
-            context.release_all(&mut prelude.body_charge[side])?;
-        }
-        for mut msg in [prelude.live_request, prelude.live_response]
-            .into_iter()
-            .flatten()
-            .chain(prelude.offers.into_values().filter_map(|o| o.msg))
-        {
-            context.release_all(&mut msg.charge)?;
+            let Some(dir) = self.directions.get_mut(side) else {
+                continue;
+            };
+            if !dir.buffer.is_empty() {
+                let partial = dir.buffer.len();
+                let (wire, sets) = dir.buffer.take(partial, context)?;
+                let sources = union_balanced(sets)?;
+                reporter.issue(
+                    context,
+                    Fault::capture(
+                        dir.flow.clone(),
+                        Status::Incomplete,
+                        IssueCode::UnconsumedBytes,
+                        "the capture ended with undecoded bytes",
+                    )
+                    .with_evidence(wire, sources),
+                )?;
+            }
+            if !self.control.settings[side].seen
+                && (self.clean_start || dir.saw_frame || !dir.buffer.is_empty())
+            {
+                reporter.issue(
+                    context,
+                    Fault::connection(
+                        dir.flow.clone(),
+                        Status::Incomplete,
+                        IssueCode::SettingsUnobserved,
+                        "the endpoint's initial SETTINGS were never observed",
+                    )
+                    .with_certainty(if self.clean_start {
+                        Certainty::Confirmed
+                    } else {
+                        Certainty::Indeterminate
+                    }),
+                )?;
+            }
         }
         Ok(())
     }
 
+    fn classify_final_status(&self, reporter: &mut Reporter) {
+        if self.is_h2() {
+            let missing_frames = Side::BOTH.into_iter().any(|side| {
+                self.directions
+                    .get(side)
+                    .is_none_or(|dir| dir.phase != DirectionPhase::Frames)
+            });
+            let missing_settings = self
+                .control
+                .settings
+                .iter()
+                .any(|direction| !direction.seen);
+            if missing_frames || missing_settings || self.streams.has_unfinished_open_streams() {
+                reporter.worst(Status::Incomplete);
+            }
+            if self.upgrade.refused {
+                reporter.worst(Status::Unsupported);
+            } else if self.directions.server.is_none() && reporter.frames > 0 {
+                reporter.worst(Status::Incomplete);
+            }
+            return;
+        }
+        let no_pending_offers = self
+            .prelude
+            .as_ref()
+            .is_none_or(|prelude| prelude.offers.is_empty());
+        reporter.worst(
+            if self.upgrade.refused || (self.done && no_pending_offers) {
+                Status::Unsupported
+            } else {
+                Status::Incomplete
+            },
+        );
+    }
+}
+
+impl ConnectionState {
     pub(crate) fn finish(mut self, context: &mut Context<'_>) -> Result<(), Error> {
         context.check_deadline()?;
-        self.finalizing = true;
-        if self.phase == Phase::H2 {
-            self.pump(context)?;
-        }
-        self.report_unmatched_response_at_eof(context)?;
-        for side in Side::BOTH {
-            if let Some(dir) = self.directions.get_mut(side) {
-                if !dir.buffer.is_empty() && !matches!(self.phase, Phase::Dead) {
-                    let partial = dir.buffer.len();
-                    let (wire, sets) = dir.buffer.take(partial, context)?;
-                    let sources = union_balanced(sets)?;
-                    let flow = dir.flow.clone();
-                    self.issue(
-                        context,
-                        Fault::new(
-                            flow,
-                            IssueScope::Capture,
-                            Status::Incomplete,
-                            IssueCode::UnconsumedBytes,
-                            "the capture ended with undecoded bytes",
-                        )
-                        .evidence(wire, sources),
-                    )?;
-                }
-                if !self.control.settings[side].seen
-                    && self.directions.get(side).is_some_and(|dir| {
-                        self.clean_start || dir.saw_frame || !dir.buffer.is_empty()
-                    })
-                {
-                    self.issue(
-                        context,
-                        Fault::new(
-                            self.dir_flow(side),
-                            IssueScope::Connection,
-                            Status::Incomplete,
-                            IssueCode::SettingsUnobserved,
-                            "the endpoint's initial SETTINGS were never observed",
-                        )
-                        .certainty(if self.clean_start {
-                            Certainty::Confirmed
-                        } else {
-                            Certainty::Indeterminate
-                        }),
-                    )?;
-                }
-            }
-        }
-        if !matches!(self.phase, Phase::Dead) {
-            if matches!(self.phase, Phase::H2)
-                && (Side::BOTH.into_iter().any(|side| {
-                    self.directions
-                        .get(side)
-                        .is_none_or(|dir| dir.phase != DirectionPhase::Frames)
-                }) || self
-                    .control
-                    .settings
-                    .iter()
-                    .any(|direction| !direction.seen)
-                    || self
-                        .streams
-                        .open
-                        .values()
-                        .any(|stream| !stream.ended.all(|ended| *ended)))
-            {
-                self.worst(Status::Incomplete);
-            }
-            if self.directions.get(Side::Client).is_none() {
-                let candidates = self.directions.candidates();
+        match &mut self.phase {
+            Phase::Dead(_) => {}
+            Phase::Sniffing(sniff) => {
+                let candidates = &sniff.directions.candidates;
                 let all_garbage = candidates.iter().any(|dir| dir.received)
                     && candidates.iter().all(|dir| !dir.received || dir.garbage);
-                self.worst(if self.startup == Startup::Unknown && all_garbage {
-                    Status::Unsupported
-                } else {
-                    Status::Incomplete
-                });
-            } else if matches!(self.phase, Phase::Prelude | Phase::Sniff) {
-                self.worst(
-                    if self.upgrade.refused
-                        || (self.done
-                            && self
-                                .upgrade
-                                .prelude
-                                .as_ref()
-                                .is_none_or(|prelude| prelude.offers.is_empty()))
-                    {
+                self.reporter.worst(
+                    if self.reporter.startup == Startup::Unknown && all_garbage {
                         Status::Unsupported
                     } else {
                         Status::Incomplete
                     },
                 );
-            } else if self.upgrade.prelude.is_some() && !self.upgrade.refused {
-                self.worst(Status::Incomplete);
-            } else if self.upgrade.refused {
-                self.worst(Status::Unsupported);
-            } else if self.directions.get(Side::Server).is_none() && self.frames > 0 {
-                self.worst(Status::Incomplete);
-            }
-            if !self.done {
-                let flow = self.flow();
+                let flow = self.primary_flow();
                 self.terminate(
                     &flow,
                     Status::Incomplete,
@@ -229,50 +192,86 @@ impl ConnectionState {
                     context,
                 )?;
             }
-            let flushed = self.flush_messages(Status::Incomplete, context)?;
-            if flushed > 0 {
-                self.worst(Status::Incomplete);
+            Phase::Active(active) => {
+                active.finalizing = true;
+                let pump_result = if active.is_h2() {
+                    active.pump(&mut self.reporter, context)
+                } else {
+                    Ok(())
+                };
+                match pump_result {
+                    Ok(()) => self.finish_active(context)?,
+                    Err(StepAbort::ConnectionFailed(status)) => {
+                        self.fail_to_dead(status, context)?;
+                    }
+                    Err(StepAbort::Fatal(error)) => return Err(error),
+                }
             }
         }
-        self.emit_connection(context)?;
-        self.drain(context)?;
-        context.release_all(&mut self.charge)
+        self.emit_and_release_dead(context)
     }
 
-    pub(crate) fn emit_connection(&mut self, context: &mut Context<'_>) -> Result<(), Error> {
-        if self.emitted {
+    fn finish_active(&mut self, context: &mut Context<'_>) -> Result<(), Error> {
+        let Phase::Active(active) = &mut self.phase else {
             return Ok(());
+        };
+        active.report_unmatched_response_at_eof(&mut self.reporter, context)?;
+        active.audit_directions_at_finish(&mut self.reporter, context)?;
+        active.classify_final_status(&mut self.reporter);
+        if !active.done {
+            let flow = active.directions.primary_flow();
+            return self.terminate(
+                &flow,
+                Status::Incomplete,
+                IssueCode::CaptureEnd,
+                "the capture ended before connection analysis completed",
+                context,
+            );
         }
-        self.emitted = true;
-        let charge = budget::EVENT_OVERHEAD
-            + budget::MESSAGE_OVERHEAD
-            + self
-                .upgrade
-                .response
-                .as_ref()
-                .map_or(0, |head| head.wire().len())
-            + self.upgrade.sources.as_ref().map_or(0, budget::set_cost);
-        context.charge_retained(charge)?;
-        let pending = self.control.pending_counts();
-        context.connection(Connection {
-            stream: self.stream,
-            generation: self.generation,
-            flow: self.flow(),
-            startup: self.startup,
-            status: self.status,
-            client_settings: self.control.settings[Side::Client].advertised,
-            server_settings: self.control.settings[Side::Server].advertised,
-            client_window: self.control.send_window[Side::Client],
-            server_window: self.control.send_window[Side::Server],
-            streams: self.streams.admitted,
-            frames: self.frames,
-            issues: self.issues,
-            pending_settings: pending.settings,
-            pending_pings: pending.pings,
-            upgrade_response: self.upgrade.response.take(),
-            upgrade_sources: self.upgrade.sources.take(),
+        let flushed = active.flush_messages(Status::Incomplete, &mut self.reporter, context)?;
+        if flushed > 0 {
+            self.reporter.worst(Status::Incomplete);
+        }
+        let placeholder = Phase::Sniffing(SniffingState {
+            directions: SniffingDirections::new(),
         });
-        context.release_all(&mut self.upgrade.charge)?;
+        if let Phase::Active(active) = std::mem::replace(&mut self.phase, placeholder) {
+            let dead = active.into_dead(None, &mut self.reporter, context)?;
+            self.phase = Phase::Dead(Box::new(dead));
+        }
         Ok(())
+    }
+
+    fn emit_and_release_dead(mut self, context: &mut Context<'_>) -> Result<(), Error> {
+        let Phase::Dead(mut dead) = self.phase else {
+            return Err(Error::Invariant("finish must reach dead state"));
+        };
+        for (flow, certainty) in dead.unobserved_settings {
+            self.reporter.issue(
+                context,
+                Fault::connection(
+                    flow,
+                    Status::Incomplete,
+                    IssueCode::SettingsUnobserved,
+                    "the endpoint's initial SETTINGS were never observed",
+                )
+                .with_certainty(certainty),
+            )?;
+        }
+        let snapshot = ConnectionSnapshot {
+            flow: dead.flow,
+            client_settings: dead.client_settings,
+            server_settings: dead.server_settings,
+            client_window: dead.client_window,
+            server_window: dead.server_window,
+            streams: dead.streams_admitted,
+            pending_settings: dead.pending.settings,
+            pending_pings: dead.pending.pings,
+            upgrade_response: dead.upgrade.response.take(),
+            upgrade_sources: dead.upgrade.sources.take(),
+            upgrade_charge: dead.upgrade.charge,
+        };
+        self.reporter.emit_connection(snapshot, context)?;
+        context.release_all(&mut dead.overhead)
     }
 }

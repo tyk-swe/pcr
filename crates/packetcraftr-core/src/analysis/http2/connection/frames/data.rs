@@ -3,12 +3,11 @@
 
 //! DATA payload validation, stream flow control, and message body retention.
 
-use super::super::{ConnectionState, Context, Evidence, Fault};
-use crate::analysis::http2::Error;
-use crate::analysis::http2::IssueCode;
-use crate::analysis::http2::budget;
+use super::super::{ActiveState, Context, Evidence, Fault, Reporter, StepAbort, StepResult};
 use crate::analysis::http2::model::{Certainty, IssueScope, Status};
 use crate::analysis::http2::side::Side;
+use crate::analysis::http2::stream::Phase as StreamPhase;
+use crate::analysis::http2::{Error, IssueCode};
 
 pub(super) struct DataHead {
     pub(super) side: Side,
@@ -18,20 +17,66 @@ pub(super) struct DataHead {
     pub(super) end_stream: bool,
 }
 
-impl ConnectionState {
+impl ActiveState {
     pub(super) fn data_frame(
         &mut self,
         head: DataHead,
         evidence: Evidence,
+        reporter: &mut Reporter,
         context: &mut Context<'_>,
-    ) -> Result<(), Error> {
-        let DataHead {
-            side,
-            stream_id,
-            length,
-            data_bytes,
-            end_stream,
-        } = head;
+    ) -> StepResult {
+        if self.apply_connection_data_window(
+            head.side,
+            head.stream_id,
+            head.length,
+            &evidence,
+            reporter,
+            context,
+        )? {
+            return Ok(());
+        }
+        // In-flight peer DATA after a reset still consumes connection credit,
+        // but cannot establish a stream error from cross-direction ordering.
+        if self
+            .streams
+            .is_peer_reset_in_flight(head.side, head.stream_id)
+        {
+            return Ok(());
+        }
+        if !self.streams.is_open(head.stream_id) {
+            return self.handle_non_open_stream_data(head, evidence, reporter, context);
+        }
+        if self.check_open_stream_rejects_data(
+            head.side,
+            head.stream_id,
+            &evidence,
+            reporter,
+            context,
+        )? {
+            return Ok(());
+        }
+        if self.apply_stream_data_window(
+            head.side,
+            head.stream_id,
+            head.length,
+            &evidence,
+            reporter,
+            context,
+        )? {
+            return Ok(());
+        }
+        self.record_open_stream_data(head, evidence, reporter, context)
+    }
+
+    fn apply_connection_data_window(
+        &mut self,
+        side: Side,
+        stream_id: u32,
+        length: u32,
+        evidence: &Evidence,
+        reporter: &mut Reporter,
+        context: &mut Context<'_>,
+    ) -> StepResult<bool> {
         self.control.send_window[side] = self.control.send_window[side]
             .checked_sub(i64::from(length))
             .ok_or(Error::Application(
@@ -40,374 +85,338 @@ impl ConnectionState {
                     limit: 0x8000_0000,
                 },
             ))?;
-        if self.control.send_window[side] < -(1i64 << 31) {
-            let flow = self.dir_flow(side);
-            self.reject(
+        let window = self.control.send_window[side];
+        if window < -(1i64 << 31) {
+            return reporter.reject(
                 context,
-                Fault::new(
-                    flow,
-                    IssueScope::Connection,
+                Fault::connection(
+                    self.directions.flow(side),
                     Status::Malformed,
                     IssueCode::ConnectionWindowUnderflow,
                     "connection flow window passed the 31-bit floor",
                 )
-                .stream(Some(stream_id))
-                .evidence(evidence.wire.clone(), evidence.sources.clone()),
-            )?;
-            return Ok(());
-        } else if length > 0 && self.control.send_window[side] < 0 {
-            let flow = self.dir_flow(side);
-            self.issue(
+                .with_stream(Some(stream_id))
+                .with_evidence_ref(evidence),
+            );
+        }
+        if length > 0 && window < 0 {
+            reporter.issue(
                 context,
-                Fault::new(
-                    flow,
-                    IssueScope::Connection,
+                Fault::connection(
+                    self.directions.flow(side),
                     Status::Malformed,
                     IssueCode::ConnectionWindowExceeded,
                     "DATA exceeded the observed connection window",
                 )
-                .stream(Some(stream_id))
-                .certainty(Certainty::ObservedOrder)
-                .evidence(evidence.wire.clone(), evidence.sources.clone()),
+                .with_stream(Some(stream_id))
+                .with_certainty(Certainty::ObservedOrder)
+                .with_evidence_ref(evidence),
             )?;
         }
-        if self.control.send_window[side] < 0
-            && self.reconcile_closed_credit(side, Some(stream_id), context)?
-        {
-            return Ok(());
+        if window < 0 && self.reconcile_closed_credit(side, Some(stream_id), reporter, context)? {
+            return Ok(true);
         }
-        // In-flight peer DATA after a reset still consumes connection credit,
-        // but cannot establish a stream error from cross-direction ordering.
-        if self
-            .streams
-            .closed
-            .get(&stream_id)
-            .is_some_and(|closed| closed.reset_by == Some(side.peer()) && !closed.ended[side])
-        {
-            return Ok(());
-        }
-        let Some(stream) = self.streams.open.get_mut(&stream_id) else {
-            let owner = Side::initiator_of(stream_id);
-            let closed = self.streams.closed.contains_key(&stream_id)
-                || stream_id <= self.streams.max_initiated[owner];
-            if !closed
-                && self.clean_start
-                && side == Side::Server
-                && owner == Side::Client
-                && self
-                    .streams
-                    .early_responses
-                    .get(&stream_id)
-                    .is_none_or(|early| !early.final_seen || early.ended)
-            {
-                self.issue(
+        Ok(false)
+    }
+
+    fn handle_non_open_stream_data(
+        &mut self,
+        head: DataHead,
+        evidence: Evidence,
+        reporter: &mut Reporter,
+        context: &mut Context<'_>,
+    ) -> StepResult {
+        let DataHead {
+            side,
+            stream_id,
+            data_bytes,
+            end_stream,
+            ..
+        } = head;
+        let owner = Side::initiator_of(stream_id);
+        let closed = self.streams.is_closed_or_implicit(stream_id);
+        if !closed && self.clean_start && side == Side::Server && owner == Side::Client {
+            let early = self.streams.early_response(stream_id).copied();
+            if early.is_none_or(|state| !state.final_seen || state.ended) {
+                reporter.issue(
                     context,
-                    Fault::new(
-                        self.dir_flow(side),
-                        IssueScope::Stream,
+                    Fault::stream(
+                        self.directions.flow(side),
+                        stream_id,
                         Status::Malformed,
                         IssueCode::DataWithoutHeaders,
                         "server DATA preceded any response HEADERS in the same ordered byte stream",
                     )
-                    .stream(Some(stream_id))
-                    .evidence(evidence.wire, evidence.sources),
+                    .with_evidence(evidence.wire, evidence.sources),
                 )?;
-                if !self.streams.early_responses.contains_key(&stream_id) {
-                    context.check_streams()?;
-                    self.streams.admitted += 1;
-                    context.charge(&mut self.charge, budget::CLOSED_STREAM_OVERHEAD)?;
-                }
                 self.streams
-                    .early_responses
-                    .entry(stream_id)
-                    .or_default()
+                    .ensure_early_response(stream_id, context)?
                     .ended = true;
                 return Ok(());
             }
             // A capture-early final response that cannot carry content is
             // contradicted by content in the server's own ordered bytes.
-            if !closed
-                && self.clean_start
-                && side == Side::Server
-                && owner == Side::Client
-                && data_bytes > 0
-                && let Some(early) = self.streams.early_responses.get_mut(&stream_id)
+            if data_bytes > 0
+                && let Some(early) = self.streams.early_response_mut(stream_id)
                 && early.final_seen
                 && early.bodyless
                 && !early.ended
             {
                 early.ended = true;
-                self.issue(
+                reporter.issue(
                     context,
-                    Fault::new(
-                        self.dir_flow(side),
-                        IssueScope::Stream,
+                    Fault::stream(
+                        self.directions.flow(side),
+                        stream_id,
                         Status::Malformed,
                         IssueCode::BodylessResponseBody,
                         "a capture-delayed response that must not carry content carried DATA",
                     )
-                    .stream(Some(stream_id))
-                    .evidence(evidence.wire, evidence.sources),
+                    .with_evidence(evidence.wire, evidence.sources),
                 )?;
                 return Ok(());
             }
-            let uncertain = !closed && (!self.clean_start || side != owner);
-            if side == Side::Server
-                && end_stream
-                && let Some(early) = self.streams.early_responses.get_mut(&stream_id)
-            {
-                early.ended = true;
-            }
-            let flow = self.dir_flow(side);
-            self.issue(
-                context,
-                Fault::new(
-                    flow,
-                    if closed {
-                        IssueScope::Stream
-                    } else {
-                        IssueScope::Connection
-                    },
-                    if uncertain {
-                        Status::Incomplete
-                    } else {
-                        Status::Malformed
-                    },
-                    if closed {
-                        IssueCode::DataClosedStream
-                    } else {
-                        IssueCode::DataUnknownStream
-                    },
-                    if closed {
-                        "DATA arrived on a fully closed stream"
-                    } else {
-                        "DATA arrived on a stream that was never opened"
-                    },
-                )
-                .stream(Some(stream_id))
-                .certainty(if uncertain {
-                    Certainty::Indeterminate
-                } else {
-                    Certainty::Confirmed
-                })
-                .evidence(evidence.wire, evidence.sources),
-            )?;
-            if !closed && !uncertain {
-                self.fail(context, Status::Malformed)?;
-            }
-            return Ok(());
+        }
+        let uncertain = !closed && (!self.clean_start || side != owner);
+        if side == Side::Server
+            && end_stream
+            && let Some(early) = self.streams.early_response_mut(stream_id)
+        {
+            early.ended = true;
+        }
+        let (scope, code, detail) = if closed {
+            (
+                IssueScope::Stream,
+                IssueCode::DataClosedStream,
+                "DATA arrived on a fully closed stream",
+            )
+        } else {
+            (
+                IssueScope::Connection,
+                IssueCode::DataUnknownStream,
+                "DATA arrived on a stream that was never opened",
+            )
         };
-        if stream.phase != crate::analysis::http2::stream::Phase::Open || stream.ended[side] {
-            let reserved = stream.phase == crate::analysis::http2::stream::Phase::Reserved;
-            let preserve_delayed_request = side == Side::Server && stream.early_response.is_some();
-            let flow = self.dir_flow(side);
-            self.issue(
-                context,
-                Fault::new(
-                    flow,
-                    if reserved {
-                        IssueScope::Connection
-                    } else {
-                        IssueScope::Stream
-                    },
-                    Status::Malformed,
-                    IssueCode::DataClosedStream,
-                    "DATA arrived on a stream closed to the sender",
-                )
-                .stream(Some(stream_id))
-                .evidence(evidence.wire, evidence.sources),
-            )?;
-            if reserved {
-                self.fail(context, Status::Malformed)?;
-            } else if !preserve_delayed_request {
-                self.close_stream(stream_id, Status::Malformed, None, context)?;
-            }
-            return Ok(());
+        let (status, certainty) = if uncertain {
+            (Status::Incomplete, Certainty::Indeterminate)
+        } else {
+            (Status::Malformed, Certainty::Confirmed)
+        };
+        reporter.issue(
+            context,
+            Fault::new(self.directions.flow(side), scope, status, code, detail)
+                .with_stream(Some(stream_id))
+                .with_certainty(certainty)
+                .with_evidence(evidence.wire, evidence.sources),
+        )?;
+        if !closed && !uncertain {
+            return Err(StepAbort::ConnectionFailed(Status::Malformed));
         }
+        Ok(())
+    }
+
+    fn check_open_stream_rejects_data(
+        &mut self,
+        side: Side,
+        stream_id: u32,
+        evidence: &Evidence,
+        reporter: &mut Reporter,
+        context: &mut Context<'_>,
+    ) -> StepResult<bool> {
+        let Some(stream) = self.streams.open_get(stream_id) else {
+            return Ok(true);
+        };
+        if stream.phase == StreamPhase::Open && !stream.ended[side] {
+            return Ok(false);
+        }
+        let reserved = stream.phase == StreamPhase::Reserved;
+        let preserve_delayed_request = side == Side::Server && stream.early_response.is_some();
+        let scope = if reserved {
+            IssueScope::Connection
+        } else {
+            IssueScope::Stream
+        };
+        reporter.issue(
+            context,
+            Fault::new(
+                self.directions.flow(side),
+                scope,
+                Status::Malformed,
+                IssueCode::DataClosedStream,
+                "DATA arrived on a stream closed to the sender",
+            )
+            .with_stream(Some(stream_id))
+            .with_evidence_ref(evidence),
+        )?;
+        if reserved {
+            return Err(StepAbort::ConnectionFailed(Status::Malformed));
+        }
+        if !preserve_delayed_request {
+            self.close_stream(stream_id, Status::Malformed, None, reporter, context)?;
+        }
+        Ok(true)
+    }
+
+    fn apply_stream_data_window(
+        &mut self,
+        side: Side,
+        stream_id: u32,
+        length: u32,
+        evidence: &Evidence,
+        reporter: &mut Reporter,
+        context: &mut Context<'_>,
+    ) -> StepResult<bool> {
+        let Some(stream) = self.streams.open_mut(stream_id) else {
+            return Ok(true);
+        };
         stream.send_window[side] -= i64::from(length);
+        let window = stream.send_window[side];
         if length > 0 {
-            stream.credit_exceeded[side] = stream.send_window[side] < 0;
+            stream.credit_exceeded[side] = window < 0;
         }
-        if stream.send_window[side] < -(1i64 << 31) {
-            let flow = self.dir_flow(side);
-            self.issue(
+        if window < -(1i64 << 31) {
+            reporter.issue(
                 context,
-                Fault::new(
-                    flow,
-                    IssueScope::Stream,
+                Fault::stream(
+                    self.directions.flow(side),
+                    stream_id,
                     Status::Malformed,
                     IssueCode::StreamWindowUnderflow,
                     "stream flow window passed the 31-bit floor",
                 )
-                .stream(Some(stream_id))
-                .evidence(evidence.wire.clone(), evidence.sources.clone()),
+                .with_evidence_ref(evidence),
             )?;
-            self.close_stream(stream_id, Status::Malformed, None, context)?;
-            return Ok(());
-        } else if length > 0 && stream.send_window[side] < 0 {
-            let flow = self.dir_flow(side);
-            self.issue(
+            self.close_stream(stream_id, Status::Malformed, None, reporter, context)?;
+            return Ok(true);
+        }
+        if length > 0 && window < 0 {
+            reporter.issue(
                 context,
-                Fault::new(
-                    flow,
-                    IssueScope::Stream,
+                Fault::stream(
+                    self.directions.flow(side),
+                    stream_id,
                     Status::Malformed,
                     IssueCode::StreamWindowExceeded,
                     "DATA exceeded the observed stream window",
                 )
-                .stream(Some(stream_id))
-                .certainty(Certainty::ObservedOrder)
-                .evidence(evidence.wire.clone(), evidence.sources.clone()),
+                .with_certainty(Certainty::ObservedOrder)
+                .with_evidence_ref(evidence),
             )?;
         }
-        if self.reconcile_closed_credit(side, Some(stream_id), context)? {
+        self.reconcile_closed_credit(side, Some(stream_id), reporter, context)
+    }
+
+    fn record_open_stream_data(
+        &mut self,
+        head: DataHead,
+        evidence: Evidence,
+        reporter: &mut Reporter,
+        context: &mut Context<'_>,
+    ) -> StepResult {
+        let DataHead {
+            side,
+            stream_id,
+            data_bytes,
+            end_stream,
+            ..
+        } = head;
+        let flow = self.directions.flow(side);
+        let Some(stream) = self.streams.open_mut(stream_id) else {
             return Ok(());
-        }
-        let stream = self
-            .streams
-            .open
-            .get_mut(&stream_id)
-            .ok_or(Error::Invariant("stream"))?;
+        };
         let trace_content = side == Side::Client && stream.method.as_deref() == Some(b"TRACE");
         if data_bytes > 0 && (trace_content || (stream.response_bodyless && side == Side::Server)) {
-            let flow = self.dir_flow(side);
-            self.issue(
+            let code = if trace_content {
+                IssueCode::TraceRequestBody
+            } else {
+                IssueCode::BodylessResponseBody
+            };
+            reporter.issue(
                 context,
-                Fault::new(
-                    flow,
-                    IssueScope::Stream,
+                Fault::stream(
+                    flow.clone(),
+                    stream_id,
                     Status::Malformed,
-                    if trace_content {
-                        IssueCode::TraceRequestBody
-                    } else {
-                        IssueCode::BodylessResponseBody
-                    },
+                    code,
                     "a message that must not carry content carried DATA",
                 )
-                .stream(Some(stream_id))
-                .evidence(evidence.wire.clone(), evidence.sources.clone()),
+                .with_evidence_ref(&evidence),
             )?;
-            let stream = self
-                .streams
-                .open
-                .get_mut(&stream_id)
-                .ok_or(Error::Invariant("stream"))?;
             if let Some(msg) = stream.msgs[side].as_mut() {
                 msg.failure = Some(Status::Malformed);
             }
         }
-        let stream = self
-            .streams
-            .open
-            .get_mut(&stream_id)
-            .ok_or(Error::Invariant("stream"))?;
-        if stream.msgs[side]
-            .as_ref()
-            .is_some_and(|msg| msg.trailers_seen)
-        {
-            let flow = self.dir_flow(side);
-            self.issue(
-                context,
-                Fault::new(
-                    flow,
-                    IssueScope::Stream,
-                    Status::Malformed,
-                    IssueCode::DataAfterTrailers,
-                    "DATA arrived after a trailer block",
-                )
-                .stream(Some(stream_id))
-                .evidence(evidence.wire.clone(), evidence.sources.clone()),
-            )?;
-            let stream = self
-                .streams
-                .open
-                .get_mut(&stream_id)
-                .ok_or(Error::Invariant("stream"))?;
-            if let Some(msg) = stream.msgs[side].as_mut() {
-                msg.failure = Some(Status::Malformed);
-            }
-        }
-        let stream = self
-            .streams
-            .open
-            .get_mut(&stream_id)
-            .ok_or(Error::Invariant("stream"))?;
-        if let Some(msg) = stream.msgs[side].as_mut() {
-            msg.saw_body = true;
-            msg.body_bytes = msg.body_bytes.saturating_add(data_bytes);
-            if msg.body_bytes > context.limits.max_body_bytes {
-                let flow = self.dir_flow(side);
-                self.reject(
+        let Some(msg) = stream.msgs[side].as_mut() else {
+            if side == Side::Server && stream.early_response.is_some_and(|early| early.final_seen) {
+                reporter.issue(
                     context,
-                    Fault::new(
+                    Fault::stream(
                         flow,
-                        IssueScope::Stream,
-                        Status::Limit,
-                        IssueCode::BodyLimit,
-                        "observed message body exceeds the configured bound",
+                        stream_id,
+                        Status::Incomplete,
+                        IssueCode::DataAfterEarlyResponse,
+                        "DATA follows response HEADERS observed before the delayed client opener",
                     )
-                    .stream(Some(stream_id))
-                    .evidence(evidence.wire.clone(), evidence.sources.clone()),
+                    .with_certainty(Certainty::Indeterminate)
+                    .with_evidence(evidence.wire, evidence.sources),
                 )?;
+                if end_stream {
+                    self.end_side(side, stream_id, Status::Complete, reporter, context)?;
+                }
                 return Ok(());
             }
-            if let Some(sources) = evidence.sources.clone() {
-                let stream = self
-                    .streams
-                    .open
-                    .get_mut(&stream_id)
-                    .ok_or(Error::Invariant("stream"))?;
-                match stream.msgs[side].as_mut() {
-                    Some(msg) => {
-                        context.track(&mut msg.charge, &sources)?;
-                        msg.sets.push(sources);
-                    }
-                    None => context.charge(&mut self.charge, budget::set_cost(&sources))?,
-                }
-            }
-        } else if side == Side::Server
-            && stream.early_response.is_some_and(|early| early.final_seen)
-        {
-            self.issue(
+            reporter.issue(
                 context,
-                Fault::new(
-                    self.dir_flow(side),
-                    IssueScope::Stream,
-                    Status::Incomplete,
-                    IssueCode::DataAfterEarlyResponse,
-                    "DATA follows response HEADERS observed before the delayed client opener",
-                )
-                .stream(Some(stream_id))
-                .certainty(Certainty::Indeterminate)
-                .evidence(evidence.wire, evidence.sources),
-            )?;
-        } else {
-            let flow = self.dir_flow(side);
-            self.issue(
-                context,
-                Fault::new(
+                Fault::stream(
                     flow,
-                    IssueScope::Stream,
+                    stream_id,
                     Status::Malformed,
                     IssueCode::DataWithoutHeaders,
                     "DATA arrived before a header block on the stream",
                 )
-                .stream(Some(stream_id))
-                .evidence(evidence.wire, evidence.sources),
+                .with_evidence(evidence.wire, evidence.sources),
             )?;
-            self.close_stream(stream_id, Status::Malformed, None, context)?;
+            self.close_stream(stream_id, Status::Malformed, None, reporter, context)?;
             return Ok(());
+        };
+        if msg.trailers_seen {
+            reporter.issue(
+                context,
+                Fault::stream(
+                    flow.clone(),
+                    stream_id,
+                    Status::Malformed,
+                    IssueCode::DataAfterTrailers,
+                    "DATA arrived after a trailer block",
+                )
+                .with_evidence_ref(&evidence),
+            )?;
+            msg.failure = Some(Status::Malformed);
         }
-        if self
-            .streams
-            .open
-            .get(&stream_id)
-            .and_then(|stream| stream.msgs[side].as_ref())
-            .is_some_and(|msg| msg.failure == Some(Status::Malformed))
-        {
-            self.close_stream(stream_id, Status::Malformed, None, context)?;
+        msg.saw_body = true;
+        msg.body_bytes = msg.body_bytes.saturating_add(data_bytes);
+        if msg.body_bytes > context.limits.max_body_bytes {
+            return reporter.reject(
+                context,
+                Fault::stream(
+                    flow,
+                    stream_id,
+                    Status::Limit,
+                    IssueCode::BodyLimit,
+                    "observed message body exceeds the configured bound",
+                )
+                .with_evidence(evidence.wire, evidence.sources),
+            );
+        }
+        if let Some(sources) = evidence.sources {
+            context.track(&mut msg.charge, &sources)?;
+            msg.sets.push(sources);
+        }
+        let malformed = msg.failure == Some(Status::Malformed);
+        if malformed {
+            self.close_stream(stream_id, Status::Malformed, None, reporter, context)?;
         } else if end_stream {
-            self.end_side(side, stream_id, Status::Complete, context)?;
+            self.end_side(side, stream_id, Status::Complete, reporter, context)?;
         }
         Ok(())
     }

@@ -3,20 +3,17 @@
 
 //! Message construction, resource accounting, and ordered publication.
 
-use super::super::{ConnectionState, Context, Fault, Head};
+use super::super::{ActiveState, Context, Fault, Head, Reporter, StepResult};
 use crate::analysis::http_headers::final_status_forbids_content;
-use crate::analysis::http2::Error;
-use crate::analysis::http2::IssueCode;
 use crate::analysis::http2::budget;
 use crate::analysis::http2::buffer::union_balanced;
-use crate::analysis::http2::headers::FieldRole;
-use crate::analysis::http2::model::{IssueScope, Message, MessageKind, Status};
+use crate::analysis::http2::model::{Message, MessageKind, Status};
 use crate::analysis::http2::side::Side;
-use crate::analysis::http2::stream::{Decoded, HeaderSection, MessageBuilder};
+use crate::analysis::http2::stream::{Decoded, HeadKind, HeaderSection, MessageBuilder};
+use crate::analysis::http2::{Error, IssueCode};
 
-impl ConnectionState {
+impl ActiveState {
     pub(crate) fn new_message(
-        &mut self,
         stream_id: u32,
         kind: MessageKind,
         context: &mut Context<'_>,
@@ -32,31 +29,40 @@ impl ConnectionState {
         side: Side,
         build: MessageBuilder,
         status: Status,
+        reporter: &mut Reporter,
         context: &mut Context<'_>,
     ) -> Result<(), Error> {
-        if status == Status::Complete
-            && (self.waiting_settings_ack(Side::Client) || self.waiting_settings_ack(Side::Server))
-        {
-            context.charge(&mut self.charge, budget::PENDING_OVERHEAD)?;
-            self.deferred.awaiting_ack.push_back((side, build, status));
-            return Ok(());
+        if status == Status::Complete && self.waiting_any_settings_ack() {
+            return self
+                .deferred
+                .push_awaiting_ack(side, build, status, context);
         }
-        self.emit_message_with_completion(side, build, status, status == Status::Complete, context)
-            .map(|_| ())
+        self.emit_message_with_completion(
+            side,
+            build,
+            status,
+            status == Status::Complete,
+            reporter,
+            context,
+        )
+        .map(|_| ())
     }
 
     pub(super) fn emit_message_with_completion(
-        &mut self,
+        &self,
         side: Side,
         mut build: MessageBuilder,
         status: Status,
         complete: bool,
+        reporter: &mut Reporter,
         context: &mut Context<'_>,
     ) -> Result<Status, Error> {
         let (cl_exempt, connect_cl_illegal) = match build.status_code {
             Some(status) => {
-                let stream = self.streams.open.get(&build.stream_id);
-                let method = stream.and_then(|s| s.method.as_deref());
+                let method = self
+                    .streams
+                    .open_get(build.stream_id)
+                    .and_then(|stream| stream.method.as_deref());
                 let connect = method == Some(b"CONNECT") && (200..300).contains(&status);
                 (
                     method == Some(b"HEAD")
@@ -69,18 +75,18 @@ impl ConnectionState {
             }
             None => (false, false),
         };
+        let flow = self.directions.flow(side);
         if connect_cl_illegal {
-            self.issue(
+            reporter.issue(
                 context,
-                Fault::new(
-                    self.dir_flow(side),
-                    IssueScope::Stream,
+                Fault::stream(
+                    flow.clone(),
+                    build.stream_id,
                     Status::Malformed,
                     IssueCode::ConnectContentLength,
                     "a CONNECT 2xx response must not carry content-length",
                 )
-                .stream(Some(build.stream_id))
-                .evidence(
+                .with_evidence(
                     build.header_blocks.last().cloned().unwrap_or_default(),
                     union_balanced(build.sets.clone())?,
                 ),
@@ -92,17 +98,15 @@ impl ConnectionState {
             && let Some(declared) = build.content_length
             && declared != build.body_bytes
         {
-            let flow = self.dir_flow(side);
-            self.issue(
+            reporter.issue(
                 context,
-                Fault::new(
-                    flow,
-                    IssueScope::Stream,
+                Fault::stream(
+                    flow.clone(),
+                    build.stream_id,
                     Status::Malformed,
                     IssueCode::ContentLengthMismatch,
                     "observed body length does not match content-length",
-                )
-                .stream(Some(build.stream_id)),
+                ),
             )?;
             build.failure = build.failure.or(Some(Status::Malformed));
         }
@@ -120,10 +124,10 @@ impl ConnectionState {
         )?;
         context.message(Message {
             index: build.index,
-            stream: self.stream,
-            generation: self.generation,
+            stream: reporter.stream,
+            generation: reporter.generation,
             http2_stream_id: build.stream_id,
-            flow: self.dir_flow(side),
+            flow,
             kind: build.kind,
             request: build.request,
             promised_by: build.promised_by,
@@ -145,35 +149,32 @@ impl ConnectionState {
         stream_id: u32,
         head: Head,
         decoded: Decoded,
+        reporter: &mut Reporter,
         context: &mut Context<'_>,
     ) -> Result<(), Error> {
-        let Head { role, meta, flawed } = head;
-        let kind = match role {
-            FieldRole::Request => MessageKind::Request,
-            FieldRole::Response => match meta.status {
+        let Head { kind, meta, flawed } = head;
+        let msg_kind = match kind {
+            HeadKind::Request => MessageKind::Request,
+            HeadKind::Response => match meta.status {
                 Some(status) if (100..200).contains(&status) => MessageKind::Informational,
                 _ => MessageKind::Response,
             },
-            FieldRole::Trailer => {
-                return Err(Error::Invariant("direction not found"));
-            }
         };
-        let mut msg = self.new_message(stream_id, kind, context)?;
+        let mut msg = Self::new_message(stream_id, msg_kind, context)?;
         if flawed {
             msg.failure = Some(Status::Malformed);
         }
         msg.retain_headers(HeaderSection::Initial, decoded, context)?;
         msg.content_length = meta.content_length;
         msg.status_code = meta.status;
-        let stream = self
-            .streams
-            .open
-            .get_mut(&stream_id)
-            .ok_or(Error::Invariant("stream"))?;
+        let Some(stream) = self.streams.open_mut(stream_id) else {
+            context.release_all(&mut msg.charge)?;
+            return Err(Error::Invariant("stream"));
+        };
         if let Some(method) = meta.method {
             stream.method = Some(method);
         }
-        if role == FieldRole::Request {
+        if kind == HeadKind::Request {
             stream.request = Some(msg.index);
         } else {
             msg.request = stream.request;
@@ -186,67 +187,53 @@ impl ConnectionState {
                 || final_status_forbids_content(status);
         }
         let unprocessed = stream.unprocessed;
-        if kind == MessageKind::Informational {
-            self.emit_message(
-                side,
-                msg,
-                if unprocessed {
-                    Status::Unprocessed
-                } else {
-                    Status::Complete
-                },
-                context,
-            )?;
+        if msg_kind == MessageKind::Informational {
+            let emit_status = if unprocessed {
+                Status::Unprocessed
+            } else {
+                Status::Complete
+            };
+            self.emit_message(side, msg, emit_status, reporter, context)?;
         } else {
-            let stream = self
-                .streams
-                .open
-                .get_mut(&stream_id)
-                .ok_or(Error::Invariant("stream"))?;
             stream.msgs[side] = Some(msg);
         }
-        if role == FieldRole::Request {
-            self.release_parent_promises(stream_id, context)?;
+        if kind == HeadKind::Request {
+            self.release_parent_promises(stream_id, reporter, context)?;
         }
         Ok(())
     }
 
     pub(crate) fn release_ack_deferred_messages(
         &mut self,
+        reporter: &mut Reporter,
         context: &mut Context<'_>,
-    ) -> Result<(), Error> {
-        if self.waiting_settings_ack(Side::Client) || self.waiting_settings_ack(Side::Server) {
+    ) -> StepResult {
+        if self.waiting_any_settings_ack() {
             return Ok(());
         }
-        let immediate = std::mem::take(&mut self.deferred.awaiting_ack);
-        context.release(&mut self.charge, immediate.len() * budget::PENDING_OVERHEAD)?;
-        for (side, msg, status) in immediate {
+        for (side, msg, status) in self.deferred.take_all_awaiting_ack(context)? {
             context.check_deadline()?;
-            self.emit_message(side, msg, status, context)?;
+            self.emit_message(side, msg, status, reporter, context)?;
         }
         let scratch = self
             .streams
-            .open
-            .len()
-            .saturating_mul(2 * size_of::<(usize, u32)>());
-        context.reserve_scratch(scratch)?;
-        let result = (|| {
-            let mut completed = Vec::with_capacity(self.streams.open.len().saturating_mul(2));
-            for (id, stream) in &self.streams.open {
+            .open_len()
+            .saturating_mul(2 * size_of::<(Side, u32)>());
+        context.with_scratch(scratch, |context| {
+            let mut completed = Vec::with_capacity(self.streams.open_len().saturating_mul(2));
+            for (id, stream) in self.streams.open_iter() {
                 context.check_deadline()?;
                 for side in Side::BOTH {
                     if stream.ended[side] && stream.msgs[side].is_some() {
-                        completed.push((side, *id));
+                        completed.push((side, id));
                     }
                 }
             }
             for (side, id) in completed {
                 context.check_deadline()?;
-                self.end_side(side, id, Status::Complete, context)?;
+                self.end_side(side, id, Status::Complete, reporter, context)?;
             }
             Ok(())
-        })();
-        context.release_scratch(scratch)?;
-        result
+        })
     }
 }

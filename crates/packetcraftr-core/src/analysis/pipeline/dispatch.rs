@@ -275,7 +275,7 @@ impl ReassemblyDispatch {
             segment.clone()
         };
 
-        let keep = input.syn || self.trim_post_fin_retransmission(&mut input);
+        let keep = input.syn || input.rst || self.trim_post_fin_retransmission(&mut input);
         if !keep {
             return Ok(output);
         }
@@ -623,6 +623,14 @@ mod tests {
                 "post-FIN retransmission produced {events:?}"
             );
         }
+        let mut reset = segment(&client, 102, &[], false, false);
+        reset.rst = true;
+        let events = dispatch.dispatch_segment(None, &reset, now, 4).unwrap();
+        assert!(
+            events
+                .iter()
+                .any(|record| matches!(&record.event, TcpEvent::Closed { reset: true, .. }))
+        );
     }
 
     #[test]

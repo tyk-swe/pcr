@@ -326,6 +326,7 @@ impl<'c, P: PacketProviders, K: Clock> ClientExecutor<'c, P, K> {
                 (attempts, stats, ExchangeOutcome::Silent(error))
             }
         };
+        self.operation.spend.record_neighbors(&stats);
         if attempts > 0 {
             self.requested.insert(target.key());
         }

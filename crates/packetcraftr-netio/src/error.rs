@@ -316,6 +316,19 @@ fn classified_cli(
     classified(code, Kind::Usage, remediation)
 }
 
+// These associated constants are the owning crate's supported handoff points
+// for codes consumed by a higher layer.
+#[allow(non_upper_case_globals)]
+impl Error {
+    pub const InternalLiveIoInvariant: packetcraftr_core::error::Code =
+        crate::code::InternalLiveIoInvariant;
+    pub const IoDevice: packetcraftr_core::error::Code = crate::code::IoDevice;
+    pub const IoHostnameAddressLimit: packetcraftr_core::error::Code =
+        crate::code::IoHostnameAddressLimit;
+    pub const IoHostnameResolution: packetcraftr_core::error::Code =
+        crate::code::IoHostnameResolution;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -372,17 +385,4 @@ mod tests {
             vec![SendEvidenceFault::AcceptedBytesDiffer.to_string()]
         );
     }
-}
-
-// These associated constants are the owning crate's supported handoff points
-// for codes consumed by a higher layer.
-#[allow(non_upper_case_globals)]
-impl Error {
-    pub const InternalLiveIoInvariant: packetcraftr_core::error::Code =
-        crate::code::InternalLiveIoInvariant;
-    pub const IoDevice: packetcraftr_core::error::Code = crate::code::IoDevice;
-    pub const IoHostnameAddressLimit: packetcraftr_core::error::Code =
-        crate::code::IoHostnameAddressLimit;
-    pub const IoHostnameResolution: packetcraftr_core::error::Code =
-        crate::code::IoHostnameResolution;
 }

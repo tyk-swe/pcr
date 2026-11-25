@@ -132,7 +132,6 @@ fn parse_snapshot(
         };
         let port = match transport {
             crate::output::network::Transport::Ip => projected.ip_protocol.map(u64::from),
-            crate::output::network::Transport::Icmp => projected.port.map(u64::from),
             _ => projected.port.map(u64::from),
         };
         let port_required = transport != crate::output::network::Transport::Icmp;

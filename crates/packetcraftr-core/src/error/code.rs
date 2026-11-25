@@ -1,611 +1,160 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+/// A stable wire error code. The string form is the compatibility contract;
+/// crate-local constants decide which layer may introduce each code.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum Code {
-    AnalysisMessageProtocol,
-    AnalysisVerifyObservationContract,
-    CapabilityCaptureSetting,
-    CapabilityDnsScope,
-    CapabilityDnsTcp,
-    CapabilityDnsTcpScope,
-    CapabilityLinkMode,
-    CapabilityMissingDependency,
-    CapabilityPrivilege,
-    CapabilityReplayLinkType,
-    CapabilityRoute,
-    CapabilityScanTcpRoute,
-    CapabilityTracerouteScope,
-    CapabilityUnavailable,
-    CapabilityUnsupported,
-    CapabilityZoneResolution,
-    CaptureDifferentialIncomplete,
-    CaptureEvidenceIncomplete,
-    CaptureIngressTimeUnavailable,
-    CapturePcap,
-    CliAnalysisLimit,
-    CliAuditRequest,
-    CliCaptureDecodeFormat,
-    CliCaptureFiles,
-    CliCaptureFilter,
-    CliCaptureGroup,
-    CliCaptureLimit,
-    CliCaptureMergeSources,
-    CliCaptureNormalizeFormat,
-    CliCaptureNormalizePcap,
-    CliCaptureOption,
-    CliCaptureOptions,
-    CliCaptureRewriteFormat,
-    CliCaptureSetting,
-    CliCaptureTimeout,
-    CliConversationLimit,
-    CliConversationOptions,
-    CliConversationRecipe,
-    CliDecodeAs,
-    CliDifferentialLimit,
-    CliDissectUnsupportedFormat,
-    CliDnsExecutor,
-    CliDnsLimit,
-    CliDocumentField,
-    CliDocumentLimit,
-    CliDocumentProtocol,
-    CliDocumentSchema,
-    CliDocumentSyntax,
-    CliError,
-    CliExchangeLimit,
-    CliExportSelection,
-    CliExpressionField,
-    CliExpressionLimit,
-    CliExpressionProtocol,
-    CliExpressionSyntax,
-    CliFilter,
-    CliFilterUnsupportedField,
-    CliFrameSelection,
-    CliFuzzLimit,
-    CliHeterogeneousExchangeRoute,
-    CliIdentifyOsExecutor,
-    CliIdentifyOsLimit,
-    CliIdentifyRecordLimit,
-    CliIdentifyRequest,
-    CliInputSource,
-    CliInterfaceRequired,
-    CliLayerIndex,
-    CliLiveTarget,
-    CliNeighborLimit,
-    CliOutputFormat,
-    CliProjectionField,
-    CliProtocol,
-    CliReplayLimit,
-    CliReversedTimeBounds,
-    CliScanDiscovery,
-    CliScanExecutor,
-    CliScanLimit,
-    CliScanMethod,
-    CliSecurityInput,
-    CliSelector,
-    CliSendLimit,
-    CliTargetSelection,
-    CliTcpConnectTimeout,
-    CliTcpExchangeLimit,
-    CliTemplateDuplicateAxis,
-    CliTemplateField,
-    CliTemplateLimit,
-    CliTemplateRange,
-    CliTlsLimits,
-    CliTlsServerName,
-    CliTopic,
-    CliTracerouteExecutor,
-    CliTracerouteLimit,
-    CliTreeRequiresDissect,
-    CliTreeUnsupportedFormat,
-    CliUdpExchangeLimit,
-    CliUdpProfile,
-    CliVerifyRule,
-    CliWorkerCapacity,
-    DocumentFifo,
-    DocumentOsFingerprints,
-    DocumentServiceExclusions,
-    DocumentServiceProbes,
-    InternalApplicationSources,
-    InternalCaptureFiles,
-    InternalCaptureGroup,
-    InternalCaptureStatistics,
-    InternalCaptureTransformIdentity,
-    InternalCodecContract,
-    InternalDerivedFrame,
-    InternalDifferentialEvidence,
-    InternalDnsEvidence,
-    InternalDnsExecutor,
-    InternalDnsTcpRequest,
-    InternalError,
-    InternalExchangeEventCoherence,
-    InternalExportSources,
-    InternalFuzzEventCoherence,
-    InternalFuzzEvidence,
-    InternalFuzzExecutor,
-    InternalHttp2Failed,
-    InternalHttp2Invariant,
-    InternalIdentifyOsEvidence,
-    InternalIdentifyProvider,
-    InternalIpReassembly,
-    InternalLiveIoInvariant,
-    InternalNdjsonStream,
-    InternalNeighborInvariant,
-    InternalProgressiveOutput,
-    InternalProgressiveOutputWorkerExhausted,
-    InternalProvenanceScope,
-    InternalRegistry,
-    InternalReplayEventCoherence,
-    InternalReplayEvidence,
-    InternalReplayRebuild,
-    InternalRouteContract,
-    InternalRouteResponse,
-    InternalScanCandidateIndex,
-    InternalScanEventCoherence,
-    InternalScanEvidence,
-    InternalScanPipelineEvent,
-    InternalScanProbeMismatch,
-    InternalScopeComposition,
-    InternalSendEventCoherence,
-    InternalSourceFrame,
-    InternalTargetPlan,
-    InternalTcpConnectState,
-    InternalTracerouteEventCoherence,
-    InternalTracerouteEvidence,
-    InternalUnresolvedInterface,
-    IoAmbiguousInterface,
-    IoAudit,
-    IoCancelled,
-    IoCapture,
-    IoCaptureCompression,
-    IoCaptureEvidenceLoss,
-    IoCaptureFile,
-    IoCaptureFilter,
-    IoCaptureOverflow,
-    IoCaptureReadiness,
-    IoDeadlineExceeded,
-    IoDevice,
-    IoDifferential,
-    IoDnsClock,
-    IoDnsEntropy,
-    IoDnsTcp,
-    IoDnsTcpTimeout,
-    IoDocumentation,
-    IoFuzzClock,
-    IoHostnameAddressLimit,
-    IoHostnameResolution,
-    IoIdentifyOs,
-    IoIdentifyOsClock,
-    IoInterface,
-    IoInterfaceDiscovery,
-    IoInterfaceNotFound,
-    IoNeighbor,
-    IoNeighborClock,
-    IoNeighborTimeout,
-    IoOutputDeadline,
-    IoOutputFile,
-    IoOutputRecordLimit,
-    IoPartialSend,
-    IoReplay,
-    IoRoute,
-    IoRouteChanged,
-    IoRouteNotFound,
-    IoRouteSelection,
-    IoRuntime,
-    IoScanClock,
-    IoSend,
-    IoSendClock,
-    IoStdout,
-    IoTcpConnect,
-    IoTcpConnectCapacity,
-    IoTcpConnectEvidence,
-    IoTcpConnectWorker,
-    IoTest,
-    IoTlsProtocol,
-    IoTlsTransport,
-    IoTracerouteClock,
-    IoTracerouteEntropy,
-    IoUdpExchange,
-    IoUdpPeer,
-    PacketBuildResourceLimit,
-    PacketCaptureCompressionLimit,
-    PacketCaptureFile,
-    PacketCaptureMergeMetadata,
-    PacketCaptureMergeOrder,
-    PacketCaptureSize,
-    PacketCaptureTransformMetadata,
-    PacketCodec,
-    PacketDecode,
-    PacketDhcp,
-    PacketDns,
-    PacketDnsQuery,
-    PacketDnsTcpFrame,
-    PacketEmpty,
-    PacketError,
-    PacketFrameMetadata,
-    PacketFuzzBuild,
-    PacketFuzzMutation,
-    PacketFuzzRecipe,
-    PacketFuzzTarget,
-    PacketHttp,
-    PacketHttp2,
-    PacketHttp2Compression,
-    PacketInvalidLayer,
-    PacketJson,
-    PacketLengthOverflow,
-    PacketMaterialization,
-    PacketMissingCodec,
-    PacketMtu,
-    PacketOfflineLinkHeader,
-    PacketPaddingBoundary,
-    PacketPlan,
-    PacketReassembly,
-    PacketReplayNetwork,
-    PacketReplayRebuild,
-    PacketReplayTiming,
-    PacketReplayTruncated,
-    PacketSemantics,
-    PacketTargetAddressFamily,
-    PacketTemplate,
-    PacketTest,
-    PacketTimestamp,
-    PacketTimestampRange,
-    PacketTimestampUnavailable,
-    PacketTls,
-    PacketTransformChecksum,
-    PacketTransformInput,
-    PacketTransformUnsupported,
-    PacketTransmissionFrame,
-    PacketUnboundLayers,
-    PolicyAnalysisResourceLimit,
-    PolicyApplicationLimit,
-    PolicyBudgetOverflow,
-    PolicyBuildResourceLimit,
-    PolicyByteLimit,
-    PolicyCaptureFileBytes,
-    PolicyCaptureStreamLimit,
-    PolicyDecodeResourceLimit,
-    PolicyDenied,
-    PolicyDestinationNotAllowed,
-    PolicyDhcpLimit,
-    PolicyDifferentialPlan,
-    PolicyDifferentialResourceLimit,
-    PolicyDnsDurationLimit,
-    PolicyDnsLimit,
-    PolicyDurationLimit,
-    PolicyExchangeDurationLimit,
-    PolicyExportLimit,
-    PolicyFuzzResourceLimit,
-    PolicyHostnameResolution,
-    PolicyHttp2Limit,
-    PolicyHttpLimit,
-    PolicyInvalidPacketSemantics,
-    PolicyPacketLimit,
-    PolicyPermissiveLiveOptIn,
-    PolicyPermissivePacket,
-    PolicyProjectionLimit,
-    PolicyProvenanceLimit,
-    PolicyPublicDestination,
-    PolicyReplayLimit,
-    PolicyScanDurationLimit,
-    PolicyScanPipelineLimit,
-    PolicySecurityLimit,
-    PolicySourceOwnership,
-    PolicyTlsLimit,
-    PolicyTracerouteDurationLimit,
-    PolicyTrafficByteLimit,
-    PolicyTrafficUnitLimit,
-    PolicyTransformLimit,
-    PolicyTreeOutputLimit,
-    PolicyVerifyEvidenceLimit,
-    PolicyVerifyReportLimit,
-    PolicyVerifyScratchLimit,
-}
+pub struct Code(&'static str);
 
 impl Code {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::AnalysisMessageProtocol => "analysis.message_protocol",
-            Self::AnalysisVerifyObservationContract => "analysis.verify_observation_contract",
-            Self::CapabilityCaptureSetting => "capability.capture_setting",
-            Self::CapabilityDnsScope => "capability.dns_scope",
-            Self::CapabilityDnsTcp => "capability.dns_tcp",
-            Self::CapabilityDnsTcpScope => "capability.dns_tcp_scope",
-            Self::CapabilityLinkMode => "capability.link_mode",
-            Self::CapabilityMissingDependency => "capability.missing_dependency",
-            Self::CapabilityPrivilege => "capability.privilege",
-            Self::CapabilityReplayLinkType => "capability.replay_link_type",
-            Self::CapabilityRoute => "capability.route",
-            Self::CapabilityScanTcpRoute => "capability.scan_tcp_route",
-            Self::CapabilityTracerouteScope => "capability.traceroute_scope",
-            Self::CapabilityUnavailable => "capability.unavailable",
-            Self::CapabilityUnsupported => "capability.unsupported",
-            Self::CapabilityZoneResolution => "capability.zone_resolution",
-            Self::CaptureDifferentialIncomplete => "capture.differential_incomplete",
-            Self::CaptureEvidenceIncomplete => "capture.evidence_incomplete",
-            Self::CaptureIngressTimeUnavailable => "capture.ingress_time_unavailable",
-            Self::CapturePcap => "capture.pcap",
-            Self::CliAnalysisLimit => "cli.analysis_limit",
-            Self::CliAuditRequest => "cli.audit_request",
-            Self::CliCaptureDecodeFormat => "cli.capture_decode_format",
-            Self::CliCaptureFiles => "cli.capture_files",
-            Self::CliCaptureFilter => "cli.capture_filter",
-            Self::CliCaptureGroup => "cli.capture_group",
-            Self::CliCaptureLimit => "cli.capture_limit",
-            Self::CliCaptureMergeSources => "cli.capture_merge_sources",
-            Self::CliCaptureNormalizeFormat => "cli.capture_normalize_format",
-            Self::CliCaptureNormalizePcap => "cli.capture_normalize_pcap",
-            Self::CliCaptureOption => "cli.capture_option",
-            Self::CliCaptureOptions => "cli.capture_options",
-            Self::CliCaptureRewriteFormat => "cli.capture_rewrite_format",
-            Self::CliCaptureSetting => "cli.capture_setting",
-            Self::CliCaptureTimeout => "cli.capture_timeout",
-            Self::CliConversationLimit => "cli.conversation_limit",
-            Self::CliConversationOptions => "cli.conversation_options",
-            Self::CliConversationRecipe => "cli.conversation_recipe",
-            Self::CliDecodeAs => "cli.decode_as",
-            Self::CliDifferentialLimit => "cli.differential_limit",
-            Self::CliDissectUnsupportedFormat => "cli.dissect_unsupported_format",
-            Self::CliDnsExecutor => "cli.dns_executor",
-            Self::CliDnsLimit => "cli.dns_limit",
-            Self::CliDocumentField => "cli.document_field",
-            Self::CliDocumentLimit => "cli.document_limit",
-            Self::CliDocumentProtocol => "cli.document_protocol",
-            Self::CliDocumentSchema => "cli.document_schema",
-            Self::CliDocumentSyntax => "cli.document_syntax",
-            Self::CliError => "cli.error",
-            Self::CliExchangeLimit => "cli.exchange_limit",
-            Self::CliExportSelection => "cli.export_selection",
-            Self::CliExpressionField => "cli.expression_field",
-            Self::CliExpressionLimit => "cli.expression_limit",
-            Self::CliExpressionProtocol => "cli.expression_protocol",
-            Self::CliExpressionSyntax => "cli.expression_syntax",
-            Self::CliFilter => "cli.filter",
-            Self::CliFilterUnsupportedField => "cli.filter_unsupported_field",
-            Self::CliFrameSelection => "cli.frame_selection",
-            Self::CliFuzzLimit => "cli.fuzz_limit",
-            Self::CliHeterogeneousExchangeRoute => "cli.heterogeneous_exchange_route",
-            Self::CliIdentifyOsExecutor => "cli.identify_os_executor",
-            Self::CliIdentifyOsLimit => "cli.identify_os_limit",
-            Self::CliIdentifyRecordLimit => "cli.identify_record_limit",
-            Self::CliIdentifyRequest => "cli.identify_request",
-            Self::CliInputSource => "cli.input_source",
-            Self::CliInterfaceRequired => "cli.interface_required",
-            Self::CliLayerIndex => "cli.layer_index",
-            Self::CliLiveTarget => "cli.live_target",
-            Self::CliNeighborLimit => "cli.neighbor_limit",
-            Self::CliOutputFormat => "cli.output_format",
-            Self::CliProjectionField => "cli.projection_field",
-            Self::CliProtocol => "cli.protocol",
-            Self::CliReplayLimit => "cli.replay_limit",
-            Self::CliReversedTimeBounds => "cli.reversed_time_bounds",
-            Self::CliScanDiscovery => "cli.scan_discovery",
-            Self::CliScanExecutor => "cli.scan_executor",
-            Self::CliScanLimit => "cli.scan_limit",
-            Self::CliScanMethod => "cli.scan_method",
-            Self::CliSecurityInput => "cli.security_input",
-            Self::CliSelector => "cli.selector",
-            Self::CliSendLimit => "cli.send_limit",
-            Self::CliTargetSelection => "cli.target_selection",
-            Self::CliTcpConnectTimeout => "cli.tcp_connect_timeout",
-            Self::CliTcpExchangeLimit => "cli.tcp_exchange_limit",
-            Self::CliTemplateDuplicateAxis => "cli.template_duplicate_axis",
-            Self::CliTemplateField => "cli.template_field",
-            Self::CliTemplateLimit => "cli.template_limit",
-            Self::CliTemplateRange => "cli.template_range",
-            Self::CliTlsLimits => "cli.tls_limits",
-            Self::CliTlsServerName => "cli.tls_server_name",
-            Self::CliTopic => "cli.topic",
-            Self::CliTracerouteExecutor => "cli.traceroute_executor",
-            Self::CliTracerouteLimit => "cli.traceroute_limit",
-            Self::CliTreeRequiresDissect => "cli.tree_requires_dissect",
-            Self::CliTreeUnsupportedFormat => "cli.tree_unsupported_format",
-            Self::CliUdpExchangeLimit => "cli.udp_exchange_limit",
-            Self::CliUdpProfile => "cli.udp_profile",
-            Self::CliVerifyRule => "cli.verify_rule",
-            Self::CliWorkerCapacity => "cli.worker_capacity",
-            Self::DocumentFifo => "document.fifo",
-            Self::DocumentOsFingerprints => "document.os_fingerprints",
-            Self::DocumentServiceExclusions => "document.service_exclusions",
-            Self::DocumentServiceProbes => "document.service_probes",
-            Self::InternalApplicationSources => "internal.application_sources",
-            Self::InternalCaptureFiles => "internal.capture_files",
-            Self::InternalCaptureGroup => "internal.capture_group",
-            Self::InternalCaptureStatistics => "internal.capture_statistics",
-            Self::InternalCaptureTransformIdentity => "internal.capture_transform_identity",
-            Self::InternalCodecContract => "internal.codec_contract",
-            Self::InternalDerivedFrame => "internal.derived_frame",
-            Self::InternalDifferentialEvidence => "internal.differential_evidence",
-            Self::InternalDnsEvidence => "internal.dns_evidence",
-            Self::InternalDnsExecutor => "internal.dns_executor",
-            Self::InternalDnsTcpRequest => "internal.dns_tcp_request",
-            Self::InternalError => "internal.error",
-            Self::InternalExchangeEventCoherence => "internal.exchange_event_coherence",
-            Self::InternalExportSources => "internal.export_sources",
-            Self::InternalFuzzEventCoherence => "internal.fuzz_event_coherence",
-            Self::InternalFuzzEvidence => "internal.fuzz_evidence",
-            Self::InternalFuzzExecutor => "internal.fuzz_executor",
-            Self::InternalHttp2Failed => "internal.http2_failed",
-            Self::InternalHttp2Invariant => "internal.http2_invariant",
-            Self::InternalIdentifyOsEvidence => "internal.identify_os_evidence",
-            Self::InternalIdentifyProvider => "internal.identify_provider",
-            Self::InternalIpReassembly => "internal.ip_reassembly",
-            Self::InternalLiveIoInvariant => "internal.live_io_invariant",
-            Self::InternalNdjsonStream => "internal.ndjson_stream",
-            Self::InternalNeighborInvariant => "internal.neighbor_invariant",
-            Self::InternalProgressiveOutput => "internal.progressive_output",
-            Self::InternalProgressiveOutputWorkerExhausted => {
-                "internal.progressive_output_worker_exhausted"
-            }
-            Self::InternalProvenanceScope => "internal.provenance_scope",
-            Self::InternalRegistry => "internal.registry",
-            Self::InternalReplayEventCoherence => "internal.replay_event_coherence",
-            Self::InternalReplayEvidence => "internal.replay_evidence",
-            Self::InternalReplayRebuild => "internal.replay_rebuild",
-            Self::InternalRouteContract => "internal.route_contract",
-            Self::InternalRouteResponse => "internal.route_response",
-            Self::InternalScanCandidateIndex => "internal.scan_candidate_index",
-            Self::InternalScanEventCoherence => "internal.scan_event_coherence",
-            Self::InternalScanEvidence => "internal.scan_evidence",
-            Self::InternalScanPipelineEvent => "internal.scan_pipeline_event",
-            Self::InternalScanProbeMismatch => "internal.scan_probe_mismatch",
-            Self::InternalScopeComposition => "internal.scope_composition",
-            Self::InternalSendEventCoherence => "internal.send_event_coherence",
-            Self::InternalSourceFrame => "internal.source_frame",
-            Self::InternalTargetPlan => "internal.target_plan",
-            Self::InternalTcpConnectState => "internal.tcp_connect_state",
-            Self::InternalTracerouteEventCoherence => "internal.traceroute_event_coherence",
-            Self::InternalTracerouteEvidence => "internal.traceroute_evidence",
-            Self::InternalUnresolvedInterface => "internal.unresolved_interface",
-            Self::IoAmbiguousInterface => "io.ambiguous_interface",
-            Self::IoAudit => "io.audit",
-            Self::IoCancelled => "io.cancelled",
-            Self::IoCapture => "io.capture",
-            Self::IoCaptureCompression => "io.capture_compression",
-            Self::IoCaptureEvidenceLoss => "io.capture_evidence_loss",
-            Self::IoCaptureFile => "io.capture_file",
-            Self::IoCaptureFilter => "io.capture_filter",
-            Self::IoCaptureOverflow => "io.capture_overflow",
-            Self::IoCaptureReadiness => "io.capture_readiness",
-            Self::IoDeadlineExceeded => "io.deadline_exceeded",
-            Self::IoDevice => "io.device",
-            Self::IoDifferential => "io.differential",
-            Self::IoDnsClock => "io.dns_clock",
-            Self::IoDnsEntropy => "io.dns_entropy",
-            Self::IoDnsTcp => "io.dns_tcp",
-            Self::IoDnsTcpTimeout => "io.dns_tcp_timeout",
-            Self::IoDocumentation => "io.documentation",
-            Self::IoFuzzClock => "io.fuzz_clock",
-            Self::IoHostnameAddressLimit => "io.hostname_address_limit",
-            Self::IoHostnameResolution => "io.hostname_resolution",
-            Self::IoIdentifyOs => "io.identify_os",
-            Self::IoIdentifyOsClock => "io.identify_os_clock",
-            Self::IoInterface => "io.interface",
-            Self::IoInterfaceDiscovery => "io.interface_discovery",
-            Self::IoInterfaceNotFound => "io.interface_not_found",
-            Self::IoNeighbor => "io.neighbor",
-            Self::IoNeighborClock => "io.neighbor_clock",
-            Self::IoNeighborTimeout => "io.neighbor_timeout",
-            Self::IoOutputDeadline => "io.output_deadline",
-            Self::IoOutputFile => "io.output_file",
-            Self::IoOutputRecordLimit => "io.output_record_limit",
-            Self::IoPartialSend => "io.partial_send",
-            Self::IoReplay => "io.replay",
-            Self::IoRoute => "io.route",
-            Self::IoRouteChanged => "io.route_changed",
-            Self::IoRouteNotFound => "io.route_not_found",
-            Self::IoRouteSelection => "io.route_selection",
-            Self::IoRuntime => "io.runtime",
-            Self::IoScanClock => "io.scan_clock",
-            Self::IoSend => "io.send",
-            Self::IoSendClock => "io.send_clock",
-            Self::IoStdout => "io.stdout",
-            Self::IoTcpConnect => "io.tcp_connect",
-            Self::IoTcpConnectCapacity => "io.tcp_connect_capacity",
-            Self::IoTcpConnectEvidence => "io.tcp_connect_evidence",
-            Self::IoTcpConnectWorker => "io.tcp_connect_worker",
-            Self::IoTest => "io.test",
-            Self::IoTlsProtocol => "io.tls_protocol",
-            Self::IoTlsTransport => "io.tls_transport",
-            Self::IoTracerouteClock => "io.traceroute_clock",
-            Self::IoTracerouteEntropy => "io.traceroute_entropy",
-            Self::IoUdpExchange => "io.udp_exchange",
-            Self::IoUdpPeer => "io.udp_peer",
-            Self::PacketBuildResourceLimit => "packet.build_resource_limit",
-            Self::PacketCaptureCompressionLimit => "packet.capture_compression_limit",
-            Self::PacketCaptureFile => "packet.capture_file",
-            Self::PacketCaptureMergeMetadata => "packet.capture_merge_metadata",
-            Self::PacketCaptureMergeOrder => "packet.capture_merge_order",
-            Self::PacketCaptureSize => "packet.capture_size",
-            Self::PacketCaptureTransformMetadata => "packet.capture_transform_metadata",
-            Self::PacketCodec => "packet.codec",
-            Self::PacketDecode => "packet.decode",
-            Self::PacketDhcp => "packet.dhcp",
-            Self::PacketDns => "packet.dns",
-            Self::PacketDnsQuery => "packet.dns_query",
-            Self::PacketDnsTcpFrame => "packet.dns_tcp_frame",
-            Self::PacketEmpty => "packet.empty",
-            Self::PacketError => "packet.error",
-            Self::PacketFrameMetadata => "packet.frame_metadata",
-            Self::PacketFuzzBuild => "packet.fuzz_build",
-            Self::PacketFuzzMutation => "packet.fuzz_mutation",
-            Self::PacketFuzzRecipe => "packet.fuzz_recipe",
-            Self::PacketFuzzTarget => "packet.fuzz_target",
-            Self::PacketHttp => "packet.http",
-            Self::PacketHttp2 => "packet.http2",
-            Self::PacketHttp2Compression => "packet.http2_compression",
-            Self::PacketInvalidLayer => "packet.invalid_layer",
-            Self::PacketJson => "packet.json",
-            Self::PacketLengthOverflow => "packet.length_overflow",
-            Self::PacketMaterialization => "packet.materialization",
-            Self::PacketMissingCodec => "packet.missing_codec",
-            Self::PacketMtu => "packet.mtu",
-            Self::PacketOfflineLinkHeader => "packet.offline_link_header",
-            Self::PacketPaddingBoundary => "packet.padding_boundary",
-            Self::PacketPlan => "packet.plan",
-            Self::PacketReassembly => "packet.reassembly",
-            Self::PacketReplayNetwork => "packet.replay_network",
-            Self::PacketReplayRebuild => "packet.replay_rebuild",
-            Self::PacketReplayTiming => "packet.replay_timing",
-            Self::PacketReplayTruncated => "packet.replay_truncated",
-            Self::PacketSemantics => "packet.semantics",
-            Self::PacketTargetAddressFamily => "packet.target_address_family",
-            Self::PacketTemplate => "packet.template",
-            Self::PacketTest => "packet.test",
-            Self::PacketTimestamp => "packet.timestamp",
-            Self::PacketTimestampRange => "packet.timestamp_range",
-            Self::PacketTimestampUnavailable => "packet.timestamp_unavailable",
-            Self::PacketTls => "packet.tls",
-            Self::PacketTransformChecksum => "packet.transform_checksum",
-            Self::PacketTransformInput => "packet.transform_input",
-            Self::PacketTransformUnsupported => "packet.transform_unsupported",
-            Self::PacketTransmissionFrame => "packet.transmission_frame",
-            Self::PacketUnboundLayers => "packet.unbound_layers",
-            Self::PolicyAnalysisResourceLimit => "policy.analysis_resource_limit",
-            Self::PolicyApplicationLimit => "policy.application_limit",
-            Self::PolicyBudgetOverflow => "policy.budget_overflow",
-            Self::PolicyBuildResourceLimit => "policy.build_resource_limit",
-            Self::PolicyByteLimit => "policy.byte_limit",
-            Self::PolicyCaptureFileBytes => "policy.capture_file_bytes",
-            Self::PolicyCaptureStreamLimit => "policy.capture_stream_limit",
-            Self::PolicyDecodeResourceLimit => "policy.decode_resource_limit",
-            Self::PolicyDenied => "policy.denied",
-            Self::PolicyDestinationNotAllowed => "policy.destination_not_allowed",
-            Self::PolicyDhcpLimit => "policy.dhcp_limit",
-            Self::PolicyDifferentialPlan => "policy.differential_plan",
-            Self::PolicyDifferentialResourceLimit => "policy.differential_resource_limit",
-            Self::PolicyDnsDurationLimit => "policy.dns_duration_limit",
-            Self::PolicyDnsLimit => "policy.dns_limit",
-            Self::PolicyDurationLimit => "policy.duration_limit",
-            Self::PolicyExchangeDurationLimit => "policy.exchange_duration_limit",
-            Self::PolicyExportLimit => "policy.export_limit",
-            Self::PolicyFuzzResourceLimit => "policy.fuzz_resource_limit",
-            Self::PolicyHostnameResolution => "policy.hostname_resolution",
-            Self::PolicyHttp2Limit => "policy.http2_limit",
-            Self::PolicyHttpLimit => "policy.http_limit",
-            Self::PolicyInvalidPacketSemantics => "policy.invalid_packet_semantics",
-            Self::PolicyPacketLimit => "policy.packet_limit",
-            Self::PolicyPermissiveLiveOptIn => "policy.permissive_live_opt_in",
-            Self::PolicyPermissivePacket => "policy.permissive_packet",
-            Self::PolicyProjectionLimit => "policy.projection_limit",
-            Self::PolicyProvenanceLimit => "policy.provenance_limit",
-            Self::PolicyPublicDestination => "policy.public_destination",
-            Self::PolicyReplayLimit => "policy.replay_limit",
-            Self::PolicyScanDurationLimit => "policy.scan_duration_limit",
-            Self::PolicyScanPipelineLimit => "policy.scan_pipeline_limit",
-            Self::PolicySecurityLimit => "policy.security_limit",
-            Self::PolicySourceOwnership => "policy.source_ownership",
-            Self::PolicyTlsLimit => "policy.tls_limit",
-            Self::PolicyTracerouteDurationLimit => "policy.traceroute_duration_limit",
-            Self::PolicyTrafficByteLimit => "policy.traffic_byte_limit",
-            Self::PolicyTrafficUnitLimit => "policy.traffic_unit_limit",
-            Self::PolicyTransformLimit => "policy.transform_limit",
-            Self::PolicyTreeOutputLimit => "policy.tree_output_limit",
-            Self::PolicyVerifyEvidenceLimit => "policy.verify_evidence_limit",
-            Self::PolicyVerifyReportLimit => "policy.verify_report_limit",
-            Self::PolicyVerifyScratchLimit => "policy.verify_scratch_limit",
-        }
+    /// Validates the dotted lowercase wire format. Constants evaluated at
+    /// compile time reject malformed codes during compilation.
+    pub const fn new(code: &'static str) -> Self {
+        assert!(
+            valid(code),
+            "error codes must match [a-z][a-z0-9]*.[a-z0-9_.]+"
+        );
+        Self(code)
     }
+
+    pub const fn as_str(self) -> &'static str {
+        self.0
+    }
+}
+
+const fn valid(code: &str) -> bool {
+    let bytes = code.as_bytes();
+    if bytes.len() < 3 || !bytes[0].is_ascii_lowercase() {
+        return false;
+    }
+    let mut index = 1;
+    while index < bytes.len() && bytes[index] != b'.' {
+        if !bytes[index].is_ascii_lowercase() && !bytes[index].is_ascii_digit() {
+            return false;
+        }
+        index += 1;
+    }
+    if index == 1 || index + 1 >= bytes.len() {
+        return false;
+    }
+    index += 1;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if !byte.is_ascii_lowercase() && !byte.is_ascii_digit() && byte != b'_' && byte != b'.' {
+            return false;
+        }
+        index += 1;
+    }
+    true
+}
+
+// Constant names preserve the former enum variants, keeping the crate-local
+// ownership split from adding a second source-level renaming migration.
+#[allow(non_upper_case_globals)]
+impl Code {
+    pub const AnalysisMessageProtocol: Self = Self::new("analysis.message_protocol");
+    pub const AnalysisVerifyObservationContract: Self =
+        Self::new("analysis.verify_observation_contract");
+    pub const CliAnalysisLimit: Self = Self::new("cli.analysis_limit");
+    pub const CliCaptureLimit: Self = Self::new("cli.capture_limit");
+    pub const CliCaptureMergeSources: Self = Self::new("cli.capture_merge_sources");
+    pub const CliCaptureOption: Self = Self::new("cli.capture_option");
+    pub const CliConversationLimit: Self = Self::new("cli.conversation_limit");
+    pub const CliConversationOptions: Self = Self::new("cli.conversation_options");
+    pub const CliConversationRecipe: Self = Self::new("cli.conversation_recipe");
+    pub const CliDocumentField: Self = Self::new("cli.document_field");
+    pub const CliDocumentLimit: Self = Self::new("cli.document_limit");
+    pub const CliDocumentProtocol: Self = Self::new("cli.document_protocol");
+    pub const CliDocumentSchema: Self = Self::new("cli.document_schema");
+    pub const CliDocumentSyntax: Self = Self::new("cli.document_syntax");
+    pub const CliError: Self = Self::new("cli.error");
+    pub const CliExportSelection: Self = Self::new("cli.export_selection");
+    pub const CliExpressionField: Self = Self::new("cli.expression_field");
+    pub const CliExpressionLimit: Self = Self::new("cli.expression_limit");
+    pub const CliExpressionProtocol: Self = Self::new("cli.expression_protocol");
+    pub const CliExpressionSyntax: Self = Self::new("cli.expression_syntax");
+    pub const CliFilter: Self = Self::new("cli.filter");
+    pub const CliFilterUnsupportedField: Self = Self::new("cli.filter_unsupported_field");
+    pub const CliFuzzLimit: Self = Self::new("cli.fuzz_limit");
+    pub const CliLayerIndex: Self = Self::new("cli.layer_index");
+    pub const CliProjectionField: Self = Self::new("cli.projection_field");
+    pub const CliProtocol: Self = Self::new("cli.protocol");
+    pub const CliReversedTimeBounds: Self = Self::new("cli.reversed_time_bounds");
+    pub const CliSecurityInput: Self = Self::new("cli.security_input");
+    pub const CliSelector: Self = Self::new("cli.selector");
+    pub const CliTemplateDuplicateAxis: Self = Self::new("cli.template_duplicate_axis");
+    pub const CliTemplateField: Self = Self::new("cli.template_field");
+    pub const CliTemplateLimit: Self = Self::new("cli.template_limit");
+    pub const CliTemplateRange: Self = Self::new("cli.template_range");
+    pub const CliVerifyRule: Self = Self::new("cli.verify_rule");
+    pub const DocumentOsFingerprints: Self = Self::new("document.os_fingerprints");
+    pub const DocumentServiceExclusions: Self = Self::new("document.service_exclusions");
+    pub const DocumentServiceProbes: Self = Self::new("document.service_probes");
+    pub const InternalApplicationSources: Self = Self::new("internal.application_sources");
+    pub const InternalCaptureTransformIdentity: Self =
+        Self::new("internal.capture_transform_identity");
+    pub const InternalCodecContract: Self = Self::new("internal.codec_contract");
+    pub const InternalDerivedFrame: Self = Self::new("internal.derived_frame");
+    pub const InternalError: Self = Self::new("internal.error");
+    pub const InternalExportSources: Self = Self::new("internal.export_sources");
+    pub const InternalHttp2Failed: Self = Self::new("internal.http2_failed");
+    pub const InternalHttp2Invariant: Self = Self::new("internal.http2_invariant");
+    pub const InternalIpReassembly: Self = Self::new("internal.ip_reassembly");
+    pub const InternalProvenanceScope: Self = Self::new("internal.provenance_scope");
+    pub const InternalRegistry: Self = Self::new("internal.registry");
+    pub const InternalScopeComposition: Self = Self::new("internal.scope_composition");
+    pub const IoCancelled: Self = Self::new("io.cancelled");
+    pub const IoCaptureCompression: Self = Self::new("io.capture_compression");
+    pub const IoCaptureFile: Self = Self::new("io.capture_file");
+    pub const PacketCaptureCompressionLimit: Self = Self::new("packet.capture_compression_limit");
+    pub const PacketCaptureFile: Self = Self::new("packet.capture_file");
+    pub const PacketCaptureMergeMetadata: Self = Self::new("packet.capture_merge_metadata");
+    pub const PacketCaptureMergeOrder: Self = Self::new("packet.capture_merge_order");
+    pub const PacketCaptureTransformMetadata: Self = Self::new("packet.capture_transform_metadata");
+    pub const PacketCodec: Self = Self::new("packet.codec");
+    pub const PacketDecode: Self = Self::new("packet.decode");
+    pub const PacketDhcp: Self = Self::new("packet.dhcp");
+    pub const PacketDns: Self = Self::new("packet.dns");
+    pub const PacketEmpty: Self = Self::new("packet.empty");
+    pub const PacketFrameMetadata: Self = Self::new("packet.frame_metadata");
+    pub const PacketFuzzBuild: Self = Self::new("packet.fuzz_build");
+    pub const PacketFuzzMutation: Self = Self::new("packet.fuzz_mutation");
+    pub const PacketFuzzRecipe: Self = Self::new("packet.fuzz_recipe");
+    pub const PacketFuzzTarget: Self = Self::new("packet.fuzz_target");
+    pub const PacketHttp: Self = Self::new("packet.http");
+    pub const PacketHttp2: Self = Self::new("packet.http2");
+    pub const PacketHttp2Compression: Self = Self::new("packet.http2_compression");
+    pub const PacketInvalidLayer: Self = Self::new("packet.invalid_layer");
+    pub const PacketLengthOverflow: Self = Self::new("packet.length_overflow");
+    pub const PacketMissingCodec: Self = Self::new("packet.missing_codec");
+    pub const PacketPaddingBoundary: Self = Self::new("packet.padding_boundary");
+    pub const PacketReassembly: Self = Self::new("packet.reassembly");
+    pub const PacketSemantics: Self = Self::new("packet.semantics");
+    pub const PacketTimestamp: Self = Self::new("packet.timestamp");
+    pub const PacketTimestampUnavailable: Self = Self::new("packet.timestamp_unavailable");
+    pub const PacketTls: Self = Self::new("packet.tls");
+    pub const PacketTransformChecksum: Self = Self::new("packet.transform_checksum");
+    pub const PacketTransformInput: Self = Self::new("packet.transform_input");
+    pub const PacketTransformUnsupported: Self = Self::new("packet.transform_unsupported");
+    pub const PacketUnboundLayers: Self = Self::new("packet.unbound_layers");
+    pub const PolicyAnalysisResourceLimit: Self = Self::new("policy.analysis_resource_limit");
+    pub const PolicyApplicationLimit: Self = Self::new("policy.application_limit");
+    pub const PolicyBuildResourceLimit: Self = Self::new("policy.build_resource_limit");
+    pub const PolicyCaptureStreamLimit: Self = Self::new("policy.capture_stream_limit");
+    pub const PolicyDecodeResourceLimit: Self = Self::new("policy.decode_resource_limit");
+    pub const PolicyDhcpLimit: Self = Self::new("policy.dhcp_limit");
+    pub const PolicyDnsLimit: Self = Self::new("policy.dns_limit");
+    pub const PolicyDurationLimit: Self = Self::new("policy.duration_limit");
+    pub const PolicyExportLimit: Self = Self::new("policy.export_limit");
+    pub const PolicyFuzzResourceLimit: Self = Self::new("policy.fuzz_resource_limit");
+    pub const PolicyHttp2Limit: Self = Self::new("policy.http2_limit");
+    pub const PolicyHttpLimit: Self = Self::new("policy.http_limit");
+    pub const PolicyProjectionLimit: Self = Self::new("policy.projection_limit");
+    pub const PolicyProvenanceLimit: Self = Self::new("policy.provenance_limit");
+    pub const PolicySecurityLimit: Self = Self::new("policy.security_limit");
+    pub const PolicyTransformLimit: Self = Self::new("policy.transform_limit");
+    pub const PolicyVerifyEvidenceLimit: Self = Self::new("policy.verify_evidence_limit");
+    pub const PolicyVerifyScratchLimit: Self = Self::new("policy.verify_scratch_limit");
 }
 
 impl serde::Serialize for Code {

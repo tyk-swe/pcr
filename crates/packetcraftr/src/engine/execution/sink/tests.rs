@@ -70,7 +70,7 @@ fn cooperative_errors_are_output_errors() {
     let sink = forwarding(|_, _| {
         Err::<bool, BoundaryError>(BoundaryError::new(
             "refused",
-            Classification::new(packetcraftr_core::error::Code::IoTest, Kind::Io, None),
+            Classification::new(crate::code::IoTest, Kind::Io, None),
             Vec::new(),
         ))
     });

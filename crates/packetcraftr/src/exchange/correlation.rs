@@ -239,7 +239,7 @@ impl Accumulator {
         if received_at.is_none() {
             self.diagnostics.push_once(
                 Diagnostic::new(Severity::Warning,
-                    packetcraftr_core::error::Code::CaptureIngressTimeUnavailable.as_str(),
+                    crate::code::CaptureIngressTimeUnavailable.as_str(),
                     "a capture provider returned a frame without an ingress marker; the frame was retained but not correlated"),
             );
         }

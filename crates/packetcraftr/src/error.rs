@@ -67,29 +67,29 @@ impl Classified for Error {
             Self::Policy(error) => error.classification(),
             Self::Io(error) => error.classification(),
             Self::Template { .. } => Classification::new(
-                packetcraftr_core::error::Code::PacketTemplate,
+                crate::code::PacketTemplate,
                 Kind::Packet,
                 Some("reduce or correct the bounded packet-template expansion"),
             ),
             Self::PacketMaterialization { .. } => Classification::new(
-                packetcraftr_core::error::Code::PacketMaterialization,
+                crate::code::PacketMaterialization,
                 Kind::Packet,
                 Some(
                     "correct the route-dependent packet fields; post-build shape changes are rejected",
                 ),
             ),
             Self::PacketExceedsMtu { .. } => Classification::new(
-                packetcraftr_core::error::Code::PacketMtu,
+                crate::code::PacketMtu,
                 Kind::Packet,
                 Some("reduce the network packet or apply an explicit fragmentation transform"),
             ),
             Self::UnresolvedNeighbor { .. } => Classification::new(
-                packetcraftr_core::error::Code::IoRouteChanged,
+                crate::code::IoRouteChanged,
                 Kind::Io,
                 Some("retry once the route to the target is stable"),
             ),
             Self::Clock { .. } => Classification::new(
-                packetcraftr_core::error::Code::IoNeighborClock,
+                crate::code::IoNeighborClock,
                 Kind::Io,
                 Some(
                     "inspect the pacing clock and account for the neighbor requests already transmitted",
@@ -139,4 +139,12 @@ impl From<packetcraftr_core::template::Error> for Error {
             source: Some(source),
         }
     }
+}
+
+// These associated constants are the owning crate's supported handoff points
+// for codes consumed by a higher layer.
+#[allow(non_upper_case_globals)]
+impl Error {
+    pub const CliExchangeLimit: packetcraftr_core::error::Code = crate::code::CliExchangeLimit;
+    pub const CliSendLimit: packetcraftr_core::error::Code = crate::code::CliSendLimit;
 }

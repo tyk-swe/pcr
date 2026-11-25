@@ -33,11 +33,7 @@ pub fn snapshot() -> NativeSnapshot {
 fn failure(message: impl Into<String>) -> BoundaryError {
     BoundaryError::new(
         message,
-        Classification::new(
-            packetcraftr_core::error::Code::IoHostnameResolution,
-            Kind::Io,
-            None,
-        ),
+        Classification::new(crate::code::IoHostnameResolution, Kind::Io, None),
         Vec::new(),
     )
 }
@@ -51,11 +47,7 @@ fn failure_with_source(
         .collect();
     BoundaryError::with_source(
         message,
-        Classification::new(
-            packetcraftr_core::error::Code::IoHostnameResolution,
-            Kind::Io,
-            None,
-        ),
+        Classification::new(crate::code::IoHostnameResolution, Kind::Io, None),
         causes,
         error,
     )
@@ -129,11 +121,7 @@ pub fn system(
         let resolved = (hostname.as_str(), 0).to_socket_addrs().map_err(|error| {
             BoundaryError::with_source(
                 "system hostname lookup failed",
-                Classification::new(
-                    packetcraftr_core::error::Code::IoHostnameResolution,
-                    Kind::Io,
-                    None,
-                ),
+                Classification::new(crate::code::IoHostnameResolution, Kind::Io, None),
                 Vec::new(),
                 error,
             )
@@ -156,11 +144,7 @@ fn retain_addresses(
         if addresses.len() >= limit {
             return Err(BoundaryError::new(
                 format!("hostname {hostname} exceeds the {limit}-address limit"),
-                Classification::new(
-                    packetcraftr_core::error::Code::IoHostnameAddressLimit,
-                    Kind::Io,
-                    None,
-                ),
+                Classification::new(crate::code::IoHostnameAddressLimit, Kind::Io, None),
                 Vec::new(),
             ));
         }

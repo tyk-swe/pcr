@@ -28,7 +28,7 @@ impl TreeArgs {
         if self.tree && format != Format::Text {
             return Err(CliError::from_classification(
                 Classification::new(
-                    packetcraftr_core::error::Code::CliTreeUnsupportedFormat,
+                    crate::code::CliTreeUnsupportedFormat,
                     Kind::Usage,
                     Some("use --output text to show the field tree"),
                 ),

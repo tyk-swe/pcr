@@ -75,14 +75,14 @@ impl Classified for Error {
             Self::Authorization(error) => error.classification(),
             Self::Execution { source, .. } | Self::Output { source } => source.classification(),
             Self::Clock { .. } => Classification::new(
-                packetcraftr_core::error::Code::IoFuzzClock,
+                crate::code::IoFuzzClock,
                 Kind::Io,
                 Some("inspect the fuzz rate timer and account for cases already transmitted"),
             ),
             Self::InvalidEvidence { .. }
             | Self::UnverifiableRoute { .. }
             | Self::StatisticsOverflow { .. } => Classification::new(
-                packetcraftr_core::error::Code::InternalFuzzEvidence,
+                crate::code::InternalFuzzEvidence,
                 Kind::Internal,
                 Some("treat the fuzz operation as incomplete because evidence was inconsistent"),
             ),

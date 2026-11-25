@@ -38,7 +38,7 @@ pub enum DataSources {
 }
 
 impl DataSources {
-    pub fn slices<'a>(&self, bytes: &'a Bytes) -> Vec<(Bytes, Option<SourceSet>)> {
+    pub fn slices(&self, bytes: &Bytes) -> Vec<(Bytes, Option<SourceSet>)> {
         match self {
             Self::Empty => vec![(bytes.clone(), None)],
             Self::Single(sources) => vec![(bytes.clone(), Some(sources.clone()))],

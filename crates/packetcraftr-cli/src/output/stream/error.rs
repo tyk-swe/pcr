@@ -52,7 +52,7 @@ impl Classified for EncodeError {
     fn classification(&self) -> Classification {
         match self {
             Self::Deadline { .. } => Classification::new(
-                packetcraftr_core::error::Code::IoOutputDeadline,
+                crate::code::IoOutputDeadline,
                 Kind::Io,
                 Some(
                     "treat the operation as incomplete; serialization and publication share the remaining duration budget",
@@ -60,19 +60,19 @@ impl Classified for EncodeError {
             ),
             Self::Cancelled(source) => source.classification(),
             Self::RecordLimit { .. } => Classification::new(
-                packetcraftr_core::error::Code::IoOutputRecordLimit,
+                crate::code::IoOutputRecordLimit,
                 Kind::Io,
                 Some(
                     "reduce record contents or select a smaller input; account for earlier records",
                 ),
             ),
             Self::Write { .. } => Classification::new(
-                packetcraftr_core::error::Code::IoStdout,
+                crate::code::IoStdout,
                 Kind::Io,
                 Some("inspect the output sink and account for records already written"),
             ),
             _ => Classification::new(
-                packetcraftr_core::error::Code::InternalNdjsonStream,
+                crate::code::InternalNdjsonStream,
                 Kind::Internal,
                 Some("treat the structured stream as incomplete"),
             ),

@@ -112,28 +112,28 @@ impl Classified for Error {
             Self::Io { source, .. } | Self::Cleanup { source, .. } => source.classification(),
             Self::OperationAndCleanup { operation, .. } => operation.classification(),
             Self::NotFound { .. } => Classification::new(
-                packetcraftr_core::error::Code::IoNeighborTimeout,
+                crate::code::IoNeighborTimeout,
                 Kind::Io,
                 Some(
                     "inspect the selected gateway, VLAN, and interface; the finite neighbor-resolution budget was exhausted",
                 ),
             ),
             Self::Resolution { .. } => Classification::new(
-                packetcraftr_core::error::Code::IoNeighbor,
+                crate::code::IoNeighbor,
                 Kind::Io,
                 Some(
                     "inspect the correlated ARP/NDP evidence and selected logical link before retrying",
                 ),
             ),
             Self::InvalidOptions { .. } => Classification::new(
-                packetcraftr_core::error::Code::CliNeighborLimit,
+                crate::code::CliNeighborLimit,
                 Kind::Usage,
                 Some(
                     "use finite non-zero neighbor attempts, timeouts, cache limits, and capture bounds",
                 ),
             ),
             Self::InvalidRequest { .. } | Self::State { .. } => Classification::new(
-                packetcraftr_core::error::Code::InternalNeighborInvariant,
+                crate::code::InternalNeighborInvariant,
                 Kind::Internal,
                 Some(
                     "do not transmit with the incomplete neighbor request or inconsistent resolver state",

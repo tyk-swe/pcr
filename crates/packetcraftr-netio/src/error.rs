@@ -161,66 +161,66 @@ impl Classified for Error {
             Self::Cancelled(source) => source.classification(),
             Self::Unsupported(unsupported) => unsupported.classification(),
             Self::MissingDependency { .. } => classified(
-                packetcraftr_core::error::Code::CapabilityMissingDependency,
+                crate::code::CapabilityMissingDependency,
                 Kind::Capability,
                 "install the named native dependency from its trusted platform source and retry",
             ),
             Self::Privilege { .. } => classified(
-                packetcraftr_core::error::Code::CapabilityPrivilege,
+                crate::code::CapabilityPrivilege,
                 Kind::Capability,
                 "grant the minimum raw-socket or capture permission required by the selected native backend",
             ),
             Self::InterfaceDiscovery { .. } => crate::interface::discovery_classification(),
             Self::Device { .. } => classified(
-                packetcraftr_core::error::Code::IoDevice,
+                crate::code::IoDevice,
                 Kind::Io,
                 "select an existing, enabled interface that supports the requested link mode",
             ),
             Self::Send { .. } => classified(
-                packetcraftr_core::error::Code::IoSend,
+                crate::code::IoSend,
                 Kind::Io,
                 "inspect the selected route, interface state, and platform socket restrictions before retrying",
             ),
             Self::PartialSend { .. } => classified(
-                packetcraftr_core::error::Code::IoPartialSend,
+                crate::code::IoPartialSend,
                 Kind::Io,
                 "treat the operation as incomplete; do not retry without accounting for the attempted transmission",
             ),
             Self::Capture { .. } => classified(
-                packetcraftr_core::error::Code::IoCapture,
+                crate::code::IoCapture,
                 Kind::Io,
                 "inspect the capture device state and native backend diagnostic before retrying",
             ),
             Self::InvalidCaptureFilter { .. } => classified_cli(
-                packetcraftr_core::error::Code::CliCaptureFilter,
+                crate::code::CliCaptureFilter,
                 "use a valid libpcap/Npcap BPF capture-filter expression",
             ),
             Self::CaptureFilterTooLong { .. } => classified_cli(
-                packetcraftr_core::error::Code::CliCaptureFilter,
+                crate::code::CliCaptureFilter,
                 "shorten the capture filter to the documented 64 KiB maximum",
             ),
             Self::CaptureFilterInstallation { .. } => classified(
-                packetcraftr_core::error::Code::IoCaptureFilter,
+                crate::code::IoCaptureFilter,
                 Kind::Io,
                 "inspect the selected interface and native backend diagnostic before retrying",
             ),
             Self::CaptureReadiness { .. } => classified(
-                packetcraftr_core::error::Code::IoCaptureReadiness,
+                crate::code::IoCaptureReadiness,
                 Kind::Io,
                 "fix capture startup before transmitting; capture-before-send readiness cannot be bypassed",
             ),
             Self::DeadlineExceeded { .. } => classified(
-                packetcraftr_core::error::Code::IoDeadlineExceeded,
+                crate::code::IoDeadlineExceeded,
                 Kind::Io,
                 "increase the finite operation timeout or reduce readiness, send, and capture work",
             ),
             Self::CaptureQueueOverflow { .. } => classified(
-                packetcraftr_core::error::Code::IoCaptureOverflow,
+                crate::code::IoCaptureOverflow,
                 Kind::Io,
                 "treat the capture as incomplete or explicitly select a lossy overflow policy with visible statistics",
             ),
             Self::CaptureEvidenceLoss { .. } => classified(
-                packetcraftr_core::error::Code::IoCaptureEvidenceLoss,
+                crate::code::IoCaptureEvidenceLoss,
                 Kind::Io,
                 "treat the capture as incomplete; inspect receiver-drop counters and reduce native capture pressure before retrying",
             ),
@@ -229,29 +229,29 @@ impl Classified for Error {
                 "use non-zero capture limits whose snap length fits the aggregate byte ceiling",
             ),
             Self::InvalidCaptureSetting { .. } => classified_cli(
-                packetcraftr_core::error::Code::CliCaptureSetting,
+                crate::code::CliCaptureSetting,
                 "use a finite in-range value or drop the explicit native capture setting",
             ),
             Self::UnsupportedCaptureSetting { .. } => classified(
-                packetcraftr_core::error::Code::CapabilityCaptureSetting,
+                crate::code::CapabilityCaptureSetting,
                 Kind::Capability,
                 "remove the setting or select a value the interface supports; the interfaces command lists advertised timestamp types",
             ),
             Self::InvalidCaptureTimeout { .. } => classified_cli(
-                packetcraftr_core::error::Code::CliCaptureTimeout,
+                crate::code::CliCaptureTimeout,
                 "use a finite capture wait no longer than the documented one-hour maximum",
             ),
             Self::InvalidTransmissionFrame { .. } => classified(
-                packetcraftr_core::error::Code::PacketTransmissionFrame,
+                crate::code::PacketTransmissionFrame,
                 Kind::Packet,
                 "rebuild a complete route-consistent IP datagram without fields the native kernel would rewrite",
             ),
             Self::InvalidCaptureGroup { .. } => classified_cli(
-                packetcraftr_core::error::Code::CliCaptureGroup,
+                crate::code::CliCaptureGroup,
                 "select 1 to 15 distinct interfaces whose shared queue limits hold one full snapshot each",
             ),
             Self::CaptureSourceContract { .. } | Self::CaptureGroupState => classified(
-                packetcraftr_core::error::Code::InternalCaptureGroup,
+                crate::code::InternalCaptureGroup,
                 Kind::Internal,
                 "report the inconsistent capture provider or call order; do not treat the capture as complete",
             ),
@@ -295,7 +295,7 @@ impl Error {
 
 pub(crate) fn live_io_invariant() -> Classification {
     classified(
-        packetcraftr_core::error::Code::InternalLiveIoInvariant,
+        crate::code::InternalLiveIoInvariant,
         Kind::Internal,
         "report the inconsistent provider result; do not reinterpret it as a successful operation",
     )
@@ -372,4 +372,17 @@ mod tests {
             vec![SendEvidenceFault::AcceptedBytesDiffer.to_string()]
         );
     }
+}
+
+// These associated constants are the owning crate's supported handoff points
+// for codes consumed by a higher layer.
+#[allow(non_upper_case_globals)]
+impl Error {
+    pub const InternalLiveIoInvariant: packetcraftr_core::error::Code =
+        crate::code::InternalLiveIoInvariant;
+    pub const IoDevice: packetcraftr_core::error::Code = crate::code::IoDevice;
+    pub const IoHostnameAddressLimit: packetcraftr_core::error::Code =
+        crate::code::IoHostnameAddressLimit;
+    pub const IoHostnameResolution: packetcraftr_core::error::Code =
+        crate::code::IoHostnameResolution;
 }

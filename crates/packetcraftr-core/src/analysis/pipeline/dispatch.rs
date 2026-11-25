@@ -424,11 +424,7 @@ impl ReassemblyDispatch {
     fn observe_segment(&mut self, segment: &Segment, produced: &[TcpEvent], pure_syn: bool) {
         let meta = self.meta(&segment.flow, None);
         let direction = meta.direction(&segment.flow);
-        if pure_syn {
-            direction.half_open_pure_syn = true;
-        } else {
-            direction.half_open_pure_syn = false;
-        }
+        direction.half_open_pure_syn = pure_syn;
         direction.active = true;
         direction.saw_prior_traffic |= !segment.payload.is_empty()
             || produced

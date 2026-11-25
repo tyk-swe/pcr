@@ -273,7 +273,7 @@ mod tests {
         let error = prepare_request(&args, invalid_limits).unwrap_err();
         assert_eq!(
             error.classification.code,
-            packetcraftr_core::error::Code::CliExchangeLimit
+            packetcraftr::Error::CliExchangeLimit
         );
         assert!(error.message.contains("timeout"));
 

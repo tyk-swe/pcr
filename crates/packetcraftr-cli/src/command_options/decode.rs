@@ -108,7 +108,7 @@ impl DecodeArgs {
         .map_err(|source| {
             CliError::from_classification(
                 Classification::new(
-                    packetcraftr_core::error::Code::CliDecodeAs,
+                    crate::code::CliDecodeAs,
                     Kind::Usage,
                     Some("declare one compatible protocol per TCP or UDP port"),
                 ),
@@ -141,7 +141,7 @@ fn insert(
 fn error(message: impl Into<String>) -> CliError {
     CliError::from_classification(
         Classification::new(
-            packetcraftr_core::error::Code::CliDecodeAs,
+            crate::code::CliDecodeAs,
             Kind::Usage,
             Some("declare one compatible protocol per TCP or UDP port"),
         ),

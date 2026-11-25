@@ -56,7 +56,7 @@ fn unattributed_encoder_refuses_records_but_reports_errors() {
     assert!(stream.is_open());
     stream
         .emit_error(Error::new(
-            Classification::new(packetcraftr_core::error::Code::IoStdout, Kind::Io, None),
+            Classification::new(crate::code::IoStdout, Kind::Io, None),
             "startup failed",
             Vec::new(),
         ))
@@ -394,7 +394,7 @@ fn regular_file_records_match_the_unbatched_stream_through_either_terminal() {
         |stream| {
             stream
                 .emit_error(Error::new(
-                    Classification::new(packetcraftr_core::error::Code::IoStdout, Kind::Io, None),
+                    Classification::new(crate::code::IoStdout, Kind::Io, None),
                     "stopped",
                     Vec::new(),
                 ))
@@ -457,11 +457,7 @@ fn expired_batch_admission_preserves_accepted_records_for_terminal_error() {
         stream
             .terminal()
             .emit_error(Error::new(
-                Classification::new(
-                    packetcraftr_core::error::Code::IoOutputDeadline,
-                    Kind::Io,
-                    None,
-                ),
+                Classification::new(crate::code::IoOutputDeadline, Kind::Io, None),
                 "stopped",
                 Vec::new(),
             ))

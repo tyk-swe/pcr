@@ -105,7 +105,7 @@ impl<P: PacketProviders, K: Clock> Pipeline<'_, P, K> {
         ) {
             return Err(BoundaryError::internal_execution(
                 "materialized scan packet differs from its probe",
-                packetcraftr_core::error::Code::InternalScanProbeMismatch,
+                crate::code::InternalScanProbeMismatch,
                 "preserve the planned endpoint and identity",
             ));
         }

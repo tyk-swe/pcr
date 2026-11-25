@@ -65,32 +65,18 @@ impl Error {
 impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
-            Self::InvalidLimits => Classification::new(
-                packetcraftr_core::error::Code::CliTlsLimits,
-                Kind::Usage,
-                None,
-            ),
-            Self::InvalidServerName => Classification::new(
-                packetcraftr_core::error::Code::CliTlsServerName,
-                Kind::Usage,
-                None,
-            ),
+            Self::InvalidLimits => {
+                Classification::new(crate::code::CliTlsLimits, Kind::Usage, None)
+            }
+            Self::InvalidServerName => {
+                Classification::new(crate::code::CliTlsServerName, Kind::Usage, None)
+            }
             Self::Interrupted(source) => source.classification(),
-            Self::WireLimit { .. } | Self::StepLimit { .. } => Classification::new(
-                packetcraftr_core::error::Code::PolicyTlsLimit,
-                Kind::Policy,
-                None,
-            ),
-            Self::Io(_) => Classification::new(
-                packetcraftr_core::error::Code::IoTlsTransport,
-                Kind::Io,
-                None,
-            ),
-            Self::Protocol(_) => Classification::new(
-                packetcraftr_core::error::Code::IoTlsProtocol,
-                Kind::Io,
-                None,
-            ),
+            Self::WireLimit { .. } | Self::StepLimit { .. } => {
+                Classification::new(crate::code::PolicyTlsLimit, Kind::Policy, None)
+            }
+            Self::Io(_) => Classification::new(crate::code::IoTlsTransport, Kind::Io, None),
+            Self::Protocol(_) => Classification::new(crate::code::IoTlsProtocol, Kind::Io, None),
         }
     }
 }

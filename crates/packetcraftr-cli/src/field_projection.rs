@@ -268,7 +268,7 @@ mod tests {
         let context = Context::frame(&decoded, 1);
         for (maximum, expected) in [
             (record_limit, core::error::Code::PolicyProjectionLimit),
-            (record_limit * 2, core::error::Code::IoOutputRecordLimit),
+            (record_limit * 2, crate::code::IoOutputRecordLimit),
         ] {
             let mut projector = Projector::prepare(
                 &["raw.bytes".to_owned()],

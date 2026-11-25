@@ -99,11 +99,7 @@ fn max_wait_secs() -> usize {
 pub(in crate::scan) fn limit(field: &'static str, maximum: usize) -> BoundaryError {
     BoundaryError::new(
         format!("scan pipeline exceeds {field}={maximum}"),
-        ErrorClassification::new(
-            packetcraftr_core::error::Code::PolicyScanPipelineLimit,
-            Kind::Policy,
-            None,
-        ),
+        ErrorClassification::new(crate::code::PolicyScanPipelineLimit, Kind::Policy, None),
         Vec::new(),
     )
 }
@@ -128,11 +124,7 @@ fn check<P: PacketProviders, K: Clock>(
     if client.now() >= deadline {
         return Err(BoundaryError::new(
             "packet scan pipeline reached the operation deadline",
-            ErrorClassification::new(
-                packetcraftr_core::error::Code::PolicyScanDurationLimit,
-                Kind::Policy,
-                None,
-            ),
+            ErrorClassification::new(crate::code::PolicyScanDurationLimit, Kind::Policy, None),
             Vec::new(),
         ));
     }
@@ -348,7 +340,7 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
                 output.event(PipelineEvent::Diagnostic(
                     packetcraftr_core::diagnostic::Diagnostic::new(
                         packetcraftr_core::diagnostic::Severity::Warning,
-                        packetcraftr_core::error::Code::CaptureEvidenceIncomplete.as_str(),
+                        crate::code::CaptureEvidenceIncomplete.as_str(),
                         format!(
                             "source {} on interface {} (index {}): {loss}",
                             source.index,

@@ -14,7 +14,7 @@ use crate::{
 use packetcraftr_core::{
     build::{Builder, Options as BuildOptions},
     codec::Addresses,
-    error::{Classified as _, Code},
+    error::Classified as _,
     frame::{Frame, LinkType},
     packet::Packet,
     protocol::{builtin, network::Ipv4, transport::Tcp},
@@ -660,7 +660,10 @@ fn long_source_names_respect_prepared_memory_limits_before_capture() {
         &mut history(),
     )
     .unwrap_err();
-    assert_eq!(error.classification().code, Code::PolicyScanPipelineLimit);
+    assert_eq!(
+        error.classification().code,
+        crate::code::PolicyScanPipelineLimit
+    );
     assert!(network.0.lock().unwrap().armed.is_empty());
     assert!(feed.sent.is_empty());
 

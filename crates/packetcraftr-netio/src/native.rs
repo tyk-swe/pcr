@@ -73,33 +73,33 @@ impl Classified for Error {
             }
             Self::Unsupported(unsupported) => unsupported.classification(),
             Self::RouteNotFound { .. } => Classification::new(
-                packetcraftr_core::error::Code::IoRouteNotFound,
+                crate::code::IoRouteNotFound,
                 Kind::Io,
                 Some(
                     "add or select a route for the destination; PacketcraftR will not fall back to another link mode",
                 ),
             ),
             Self::InterfaceNotFound { .. } => Classification::new(
-                packetcraftr_core::error::Code::IoInterfaceNotFound,
+                crate::code::IoInterfaceNotFound,
                 Kind::Io,
                 Some("select an existing interface using its current name and index"),
             ),
             Self::InterfaceMismatch { .. }
             | Self::SourceFamilyMismatch { .. }
             | Self::SourceUnavailable { .. } => Classification::new(
-                packetcraftr_core::error::Code::IoRouteSelection,
+                crate::code::IoRouteSelection,
                 Kind::Io,
                 Some(
                     "choose an interface-owned source and interface compatible with the destination family",
                 ),
             ),
             Self::InvalidResponse { .. } => Classification::new(
-                packetcraftr_core::error::Code::InternalRouteResponse,
+                crate::code::InternalRouteResponse,
                 Kind::Internal,
                 Some("report the invalid native route response; do not use it for transmission"),
             ),
             Self::OperatingSystem { .. } => Classification::new(
-                packetcraftr_core::error::Code::IoRoute,
+                crate::code::IoRoute,
                 Kind::Io,
                 Some(
                     "inspect the operating-system route diagnostic and current network configuration",

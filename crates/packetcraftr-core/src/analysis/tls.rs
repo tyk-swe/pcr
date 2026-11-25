@@ -379,7 +379,7 @@ impl Collector {
                 return;
             };
             let before = live.buffered();
-            let verdict = live.feed(direction, &payload, ceiling, &mut limit_hits);
+            let verdict = live.feed(direction, payload, ceiling, &mut limit_hits);
             let after = live.buffered();
             self.buffered_bytes = self
                 .buffered_bytes

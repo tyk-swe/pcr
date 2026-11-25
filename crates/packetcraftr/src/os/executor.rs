@@ -16,7 +16,7 @@ use crate::{
 };
 
 const FAULT: ExecutorFault = ExecutorFault::new(
-    packetcraftr_core::error::Code::CliIdentifyOsExecutor,
+    crate::code::CliIdentifyOsExecutor,
     "use bounded single-probe OS batches",
 );
 
@@ -146,7 +146,7 @@ pub(super) fn failure(source: impl std::error::Error + Send + Sync + 'static) ->
     BoundaryError::with_source(
         "OS execution failed",
         packetcraftr_core::error::Classification::new(
-            packetcraftr_core::error::Code::IoIdentifyOs,
+            crate::code::IoIdentifyOs,
             packetcraftr_core::error::Kind::Io,
             None,
         ),

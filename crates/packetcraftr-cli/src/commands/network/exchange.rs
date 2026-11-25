@@ -199,7 +199,7 @@ mod tests {
         let error = run(&invocation, arguments).unwrap_err();
         assert_eq!(
             error.classification.code,
-            packetcraftr_core::error::Code::CliExchangeLimit
+            packetcraftr::Error::CliExchangeLimit
         );
     }
 }

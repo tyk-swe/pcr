@@ -43,34 +43,21 @@ pub(in crate::analysis::reassembly::tcp) fn commit_push(
         .direct_payload
         .as_ref()
         .and_then(|range| crate::frame::checked_slice(&payload, range.start, range.end));
+    let incoming = Incoming {
+        direct_payload,
+        payload: &payload,
+        sources: &sources,
+    };
     let (replacement, mut events) = if changes_generation {
         let mut state = TcpFlowState::new(first_payload_sequence, last_update, deadline);
-        let events = commit_flow_push(
-            &mut state,
-            &flow,
-            now,
-            max_bytes_per_flow,
-            plan,
-            direct_payload,
-            &payload,
-            sources.clone(),
-        );
+        let events = commit_flow_push(&mut state, &flow, now, max_bytes_per_flow, plan, incoming);
         (Some(state), events)
     } else {
         let state = reassembler
             .flows
             .get_mut(&flow)
             .expect("an unchanged generation has an established flow");
-        let events = commit_flow_push(
-            state,
-            &flow,
-            now,
-            max_bytes_per_flow,
-            plan,
-            direct_payload,
-            &payload,
-            sources,
-        );
+        let events = commit_flow_push(state, &flow, now, max_bytes_per_flow, plan, incoming);
         state.deadline = deadline;
         (None, events)
     };
@@ -93,15 +80,20 @@ pub(in crate::analysis::reassembly::tcp) fn commit_push(
     events
 }
 
+#[derive(Clone)]
+struct Incoming<'a> {
+    direct_payload: Option<Bytes>,
+    payload: &'a [u8],
+    sources: &'a Option<crate::analysis::provenance::SourceSet>,
+}
+
 fn commit_flow_push(
     state: &mut TcpFlowState,
     flow: &ScopedFlowKey,
     now: Instant,
     max_bytes_per_flow: usize,
     plan: PushPlan,
-    direct_payload: Option<Bytes>,
-    incoming_payload: &[u8],
-    incoming_sources: Option<crate::analysis::provenance::SourceSet>,
+    incoming: Incoming<'_>,
 ) -> Vec<Event> {
     let PushPlan {
         payload_sequence,
@@ -131,9 +123,9 @@ fn commit_flow_push(
         state.emitted_history = history;
     }
     if !merge.direct_output
-        && let Some(sources) = incoming_sources.clone()
+        && let Some(sources) = incoming.sources.clone()
     {
-        let payload_len = incoming_payload.len().saturating_sub(merge.payload_start);
+        let payload_len = incoming.payload.len().saturating_sub(merge.payload_start);
         insert_pending_source(
             state,
             merge.offset,
@@ -141,8 +133,8 @@ fn commit_flow_push(
             sources,
         );
     }
-    let direct_sources = incoming_sources;
-    let output = apply_pending_merge(state, merge, incoming_payload);
+    let direct_sources = incoming.sources.clone();
+    let output = apply_pending_merge(state, merge, incoming.payload);
     state.pending_bytes = pending_bytes;
     if state.fin_offset.is_none() {
         state.fin_offset = incoming_fin_offset;
@@ -159,7 +151,7 @@ fn commit_flow_push(
         });
     }
 
-    if let Some(bytes) = direct_payload {
+    if let Some(bytes) = incoming.direct_payload {
         state.pending_bytes = state.pending_bytes.saturating_sub(bytes.len());
         let sources = direct_sources
             .clone()

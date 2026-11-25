@@ -113,7 +113,7 @@ impl Classified for Unsupported {
     fn classification(&self) -> Classification {
         match self.capability {
             NativeCapability::Route => Classification::new(
-                packetcraftr_core::error::Code::CapabilityRoute,
+                crate::code::CapabilityRoute,
                 Kind::Capability,
                 Some(
                     "enable the native-route capability on a supported target or inject a route provider",
@@ -122,7 +122,7 @@ impl Classified for Unsupported {
             NativeCapability::InterfaceEnumeration
             | NativeCapability::Capture
             | NativeCapability::Transmission(_) => Classification::new(
-                packetcraftr_core::error::Code::CapabilityUnsupported,
+                crate::code::CapabilityUnsupported,
                 Kind::Capability,
                 Some(
                     "enable and configure the requested native capability; PacketcraftR will not change transmission modes automatically",

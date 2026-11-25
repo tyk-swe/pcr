@@ -66,7 +66,7 @@ fn profile_error(error: impl std::fmt::Display) -> BoundaryError {
     BoundaryError::new(
         error.to_string(),
         packetcraftr_core::error::Classification::new(
-            packetcraftr_core::error::Code::CliUdpProfile,
+            crate::code::CliUdpProfile,
             packetcraftr_core::error::Kind::Usage,
             None,
         ),

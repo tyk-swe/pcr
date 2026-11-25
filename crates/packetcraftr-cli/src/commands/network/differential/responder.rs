@@ -151,6 +151,37 @@ fn write_log(staged: &mut StagedFile, records: &[lib::ReceptionRecord]) -> Resul
     Ok(())
 }
 
+struct CollectingEmitter<'a, E> {
+    collector: &'a mut lib::ResponderCollector,
+    emitter: E,
+}
+
+impl<E> packetcraftr::Sink<lib::ResponderEvent> for CollectingEmitter<'_, E>
+where
+    E: packetcraftr::Sink<lib::ResponderEvent, Ack = ()>,
+{
+    type Ack = ();
+
+    fn publish(
+        &mut self,
+        event: lib::ResponderEvent,
+    ) -> Result<(), packetcraftr_core::error::BoundaryError> {
+        self.publish_controlled(
+            event,
+            &packetcraftr_core::budget::Deadline::new(Duration::MAX),
+        )
+    }
+
+    fn publish_controlled(
+        &mut self,
+        event: lib::ResponderEvent,
+        control: &packetcraftr_core::budget::Deadline,
+    ) -> Result<(), packetcraftr_core::error::BoundaryError> {
+        self.collector.publish_controlled(event.clone(), control)?;
+        self.emitter.publish_controlled(event, control)
+    }
+}
+
 fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<(), CliError> {
     let token = parse_token(&arguments.token)?;
     let log = ReceptionLog::stage(invocation, arguments.log_file.as_deref())?;
@@ -167,9 +198,15 @@ fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<()
 
     let outcome = match format {
         Format::Ndjson => {
-            let emit =
+            let emitter =
                 crate::commands::execution::emitter(invocation, rendering::emit_responder_event)?;
-            lib::respond(request, emit)
+            lib::respond(
+                request,
+                CollectingEmitter {
+                    collector: &mut collector,
+                    emitter,
+                },
+            )
         }
         Format::Text | Format::Json => lib::respond(request, &mut collector),
         other => other.unreachable(),
@@ -418,10 +455,7 @@ mod tests {
 
     #[test]
     fn blocked_live_output_does_not_send_a_reply_after_duration() {
-        assert_eq!(
-            blocked_live_output(false),
-            packetcraftr_core::error::Code::IoStdout
-        );
+        assert_eq!(blocked_live_output(false), crate::code::IoStdout);
     }
 
     #[test]

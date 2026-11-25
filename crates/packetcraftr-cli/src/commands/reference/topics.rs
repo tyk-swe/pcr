@@ -91,7 +91,7 @@ fn render(name: Option<&str>) -> Result<String, CliError> {
         .ok_or_else(|| {
             CliError::from_classification(
                 Classification::new(
-                    packetcraftr_core::error::Code::CliTopic,
+                    crate::code::CliTopic,
                     Kind::Usage,
                     Some("run `packetcraftr reference topics` to list the topics"),
                 ),

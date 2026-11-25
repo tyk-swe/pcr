@@ -100,7 +100,7 @@ pub(super) fn render(
 fn report_limit_error() -> CliError {
     CliError::from_classification(
         packetcraftr_core::error::Classification::new(
-            packetcraftr_core::error::Code::PolicyVerifyReportLimit,
+            crate::code::PolicyVerifyReportLimit,
             packetcraftr_core::error::Kind::Policy,
             Some("reduce the report detail budget"),
         ),

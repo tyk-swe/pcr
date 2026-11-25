@@ -75,11 +75,11 @@ pub(crate) struct TcpEvidence {
 }
 
 const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
-    packetcraftr_core::error::Code::CliDnsExecutor,
+    crate::code::CliDnsExecutor,
     "use one bounded UDP DNS query and retain at least one response",
 );
 const RESULT_FAULT: ExecutorFault = ExecutorFault::new(
-    packetcraftr_core::error::Code::InternalDnsExecutor,
+    crate::code::InternalDnsExecutor,
     "treat the DNS operation as incomplete because client evidence was inconsistent",
 );
 

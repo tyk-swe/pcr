@@ -895,7 +895,7 @@ fn cancellation_and_output_failure_stop_batches() {
                         return Err(crate::traceroute::Error::Output {
                             source: BoundaryError::internal_execution(
                                 "test output closed",
-                                packetcraftr_core::error::Code::IoTest,
+                                crate::code::IoTest,
                                 "test",
                             ),
                         });

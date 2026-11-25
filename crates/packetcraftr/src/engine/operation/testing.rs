@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use packetcraftr_core::budget::Deadline;
-use packetcraftr_core::error::{BoundaryError, Classification, Code, Kind};
+use packetcraftr_core::error::{BoundaryError, Classification, Kind};
 use packetcraftr_core::frame::LinkType;
 use packetcraftr_core::packet::MacAddress;
 use packetcraftr_core::protocol::builtin;
@@ -173,7 +173,7 @@ impl<E: Send + 'static> Sink<E> for FailSink<E> {
         self.calls.fetch_add(1, Ordering::Relaxed);
         Err(BoundaryError::new(
             "test sink refused the first event",
-            Classification::new(Code::IoTest, Kind::Io, None),
+            Classification::new(crate::code::IoTest, Kind::Io, None),
             Vec::new(),
         ))
     }

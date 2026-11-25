@@ -75,7 +75,7 @@ impl Classified for Error {
             | Self::NameTooLong
             | Self::QueryTypeSyntax
             | Self::QueryTypeRange(_) => Classification::new(
-                packetcraftr_core::error::Code::PacketDnsQuery,
+                crate::code::PacketDnsQuery,
                 Kind::Packet,
                 Some(
                     "use a bounded ASCII DNS name, a 16-bit query type, and an EDNS payload size within 512..=65535 when enabled",

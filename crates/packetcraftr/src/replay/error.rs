@@ -169,7 +169,7 @@ impl Classified for Error {
             Self::InvalidLimit { .. }
             | Self::InvalidDuration { .. }
             | Self::InvalidTiming { .. } => Classification::new(
-                packetcraftr_core::error::Code::CliReplayLimit,
+                crate::code::CliReplayLimit,
                 Kind::Usage,
                 Some("use finite non-zero replay limits and a valid positive timing value"),
             ),
@@ -177,19 +177,19 @@ impl Classified for Error {
             Self::SourceFrameLimit { .. }
             | Self::TransmittedByteLimit { .. }
             | Self::DurationLimit { .. } => Classification::new(
-                packetcraftr_core::error::Code::PolicyReplayLimit,
+                crate::code::PolicyReplayLimit,
                 Kind::Policy,
                 Some("reduce the replay input or deliberately raise the finite operation budget"),
             ),
             Self::FrameSizeLimit { .. } => Classification::new(
-                packetcraftr_core::error::Code::PacketCaptureSize,
+                crate::code::PacketCaptureSize,
                 Kind::Packet,
                 Some(
                     "reduce the captured frame size or deliberately raise the bounded frame limit",
                 ),
             ),
             Self::Timing { .. } => Classification::new(
-                packetcraftr_core::error::Code::PacketReplayTiming,
+                crate::code::PacketReplayTiming,
                 Kind::Packet,
                 Some("reduce the captured interval or select a bounded replay timing"),
             ),
@@ -200,7 +200,7 @@ impl Classified for Error {
             ),
             Self::UnsupportedLinkType { .. } | Self::LinkModeMismatch { .. } => {
                 Classification::new(
-                    packetcraftr_core::error::Code::CapabilityReplayLinkType,
+                    crate::code::CapabilityReplayLinkType,
                     Kind::Capability,
                     Some(
                         "replay complete Ethernet frames through Layer 2 or raw IPv4/IPv6 datagrams through Layer 3",
@@ -216,21 +216,21 @@ impl Classified for Error {
             Self::Authorization { source, .. } => source.classification(),
             Self::Transmission { source, .. } => source.classification(),
             Self::InvalidEvidence { .. } => Classification::new(
-                packetcraftr_core::error::Code::InternalReplayEvidence,
+                crate::code::InternalReplayEvidence,
                 Kind::Internal,
                 Some(
                     "treat the operation as incomplete; the backend did not confirm the exact submitted bytes",
                 ),
             ),
             Self::IncoherentEvents { .. } => Classification::new(
-                packetcraftr_core::error::Code::InternalReplayEventCoherence,
+                crate::code::InternalReplayEventCoherence,
                 Kind::Internal,
                 Some("collect every replay event once, from one replay, in publication order"),
             ),
             // Output keeps the sink's failure as its source but publishes
             // replay's own I/O code: the sink is replay's output.
             Self::Clock { .. } | Self::Output { .. } => Classification::new(
-                packetcraftr_core::error::Code::IoReplay,
+                crate::code::IoReplay,
                 Kind::Io,
                 Some(
                     "inspect the replay timer or output sink and account for frames already transmitted",

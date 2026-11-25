@@ -11,7 +11,7 @@
 //!
 //! | Layer | Modules |
 //! | --- | --- |
-//! | 1. Shared published contract | `output`: types that lower layers or several commands publish |
+//! | 1. Error codes and shared published contract | `code`, `output` |
 //! | 2. Foundation | `errors`, `filtering`, `cancellation`, `resources` |
 //! | 3. Options | `command_options` |
 //! | 4. Invocation | `invocation`: one command's output stream, deadline, cancellation, and diagnostics |
@@ -30,6 +30,7 @@
 mod app;
 mod cancellation;
 mod capture_output;
+mod code;
 mod command_options;
 mod commands;
 mod errors;

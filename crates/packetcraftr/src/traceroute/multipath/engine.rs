@@ -210,11 +210,7 @@ fn nonce() -> Result<u64, Error> {
             sequence: 0,
             source: BoundaryError::new(
                 error.to_string(),
-                Classification::new(
-                    packetcraftr_core::error::Code::IoTracerouteEntropy,
-                    Kind::Io,
-                    None,
-                ),
+                Classification::new(crate::code::IoTracerouteEntropy, Kind::Io, None),
                 Vec::new(),
             ),
         })?;

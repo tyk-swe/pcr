@@ -229,13 +229,12 @@ where
             self.request.timeout,
             &mut *self.executor,
             |executor, grant| {
-                let execution = executor.execute(&Exchange {
+                executor.execute(&Exchange {
                     probe: probe.clone(),
                     timeout: grant.timeout,
                     limits,
                     permit: grant.permit,
-                });
-                execution
+                })
             },
             |_, execution, grant, _| {
                 validate_dns_execution(probe, execution, limits, grant.timeout)

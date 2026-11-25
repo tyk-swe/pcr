@@ -62,7 +62,6 @@ ERROR_CAST_FILES = (
     "crates/packetcraftr-core/src/capture_file/compression.rs",
     "crates/packetcraftr-core/src/capture_file/error.rs",
     "crates/packetcraftr-netio/src/tls/error.rs",
-    "crates/packetcraftr/src/dns/engine/attempts.rs",
     "crates/packetcraftr/src/identify/io.rs",
     "crates/packetcraftr/src/replay/engine.rs",
 )

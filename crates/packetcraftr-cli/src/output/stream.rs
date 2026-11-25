@@ -180,11 +180,7 @@ impl StreamEncoder {
                 .map_err(|source| {
                     BoundaryError::with_source(
                         "write NDJSON output failed",
-                        Classification::new(
-                            packetcraftr_core::error::Code::IoStdout,
-                            Kind::Io,
-                            None,
-                        ),
+                        Classification::new(crate::code::IoStdout, Kind::Io, None),
                         source_causes(&source),
                         source,
                     )

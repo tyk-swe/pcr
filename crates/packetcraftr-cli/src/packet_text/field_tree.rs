@@ -160,7 +160,7 @@ impl FieldTree {
 fn limit_error(message: String) -> CliError {
     CliError::from_classification(
         Classification::new(
-            packetcraftr_core::error::Code::PolicyTreeOutputLimit,
+            crate::code::PolicyTreeOutputLimit,
             Kind::Policy,
             Some("select fewer frames or deliberately raise --max-tree-bytes"),
         ),

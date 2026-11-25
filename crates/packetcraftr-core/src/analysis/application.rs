@@ -331,7 +331,6 @@ impl TcpStreamFilter {
                     generation: record.generation,
                 });
             }
-            TcpEvent::Retransmission { .. } => {}
             TcpEvent::Gap { .. } => output.push(Event::Gap {
                 flow: flow.clone(),
                 stream: record.stream,
@@ -350,7 +349,7 @@ impl TcpStreamFilter {
                     generation: record.generation,
                 });
             }
-            TcpEvent::Evicted { .. } => {}
+            TcpEvent::Retransmission { .. } | TcpEvent::Evicted { .. } => {}
         }
         Ok(())
     }

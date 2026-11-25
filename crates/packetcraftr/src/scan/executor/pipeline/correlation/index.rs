@@ -60,7 +60,7 @@ impl CandidateIndex {
         if source >= self.scopes.len() || self.entries.contains_key(&index) {
             return Err(BoundaryError::internal_execution(
                 "scan candidate index received an invalid source or repeated attempt",
-                packetcraftr_core::error::Code::InternalScanCandidateIndex,
+                crate::code::InternalScanCandidateIndex,
                 "retain unique attempt identity within the armed capture group",
             ));
         }

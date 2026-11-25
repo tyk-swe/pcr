@@ -110,22 +110,22 @@ impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
             Self::UnsupportedFormat { .. } => Classification::new(
-                packetcraftr_core::error::Code::CliOutputFormat,
+                crate::code::CliOutputFormat,
                 Kind::Usage,
                 Some("choose one of the formats listed for this command"),
             ),
             Self::TimestampOutOfRange => Classification::new(
-                packetcraftr_core::error::Code::PacketTimestampRange,
+                crate::code::PacketTimestampRange,
                 Kind::Packet,
                 Some("use a capture whose timestamp fits signed 64-bit Unix seconds"),
             ),
             Self::InvalidSourceFrame => Classification::new(
-                packetcraftr_core::error::Code::InternalSourceFrame,
+                crate::code::InternalSourceFrame,
                 Kind::Internal,
                 Some("use the one-based source position assigned while reading or capturing"),
             ),
             Self::IncoherentFuzzEvents(_) => Classification::new(
-                packetcraftr_core::error::Code::InternalFuzzEventCoherence,
+                crate::code::InternalFuzzEventCoherence,
                 Kind::Internal,
                 Some("collect cases from exactly one complete campaign in publication order"),
             ),

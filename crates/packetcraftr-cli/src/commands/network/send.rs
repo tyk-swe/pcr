@@ -260,7 +260,7 @@ mod tests {
             arguments.repeat = repeat;
             arguments.rate = rate;
             let error = prepare(&invocation, arguments).err().unwrap();
-            assert_eq!(error.classification.code, core::error::Code::CliSendLimit);
+            assert_eq!(error.classification.code, packetcraftr::Error::CliSendLimit);
         }
     }
 }

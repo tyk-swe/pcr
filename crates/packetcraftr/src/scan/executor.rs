@@ -40,7 +40,7 @@ use packetcraftr_netio::interface;
 use packetcraftr_netio::link::Mode;
 
 pub(super) const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
-    packetcraftr_core::error::Code::CliScanExecutor,
+    crate::code::CliScanExecutor,
     "use one correlated probe per scan batch and retain at least one response",
 );
 

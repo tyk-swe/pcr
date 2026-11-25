@@ -39,12 +39,12 @@ impl Classified for Error {
             Self::Entropy(source) => source.classification(),
             Self::Cancelled(source) => source.classification(),
             Self::Request { .. } => Classification::new(
-                packetcraftr_core::error::Code::CliIdentifyRequest,
+                crate::code::CliIdentifyRequest,
                 Kind::Usage,
                 Some("select numeric TCP/UDP endpoints and finite identification limits"),
             ),
             Self::Provider { .. } => Classification::new(
-                packetcraftr_core::error::Code::InternalIdentifyProvider,
+                crate::code::InternalIdentifyProvider,
                 Kind::Internal,
                 Some("correct the provider's endpoint and byte accounting"),
             ),

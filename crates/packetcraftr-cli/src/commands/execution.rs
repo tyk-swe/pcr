@@ -81,13 +81,11 @@ where
     }
 }
 
-pub(crate) fn emitter<E: Send + 'static>(
-    invocation: &Invocation,
-    publish: impl FnMut(E, &StreamEncoder) -> Result<(), CliError> + Send + 'static,
-) -> Result<
-    Emitter<E, impl FnMut(E, &StreamEncoder) -> Result<(), CliError> + Send + 'static>,
-    CliError,
-> {
+pub(crate) fn emitter<E, F>(invocation: &Invocation, publish: F) -> Result<Emitter<E, F>, CliError>
+where
+    E: Send + 'static,
+    F: FnMut(E, &StreamEncoder) -> Result<(), CliError> + Send + 'static,
+{
     let sink = CooperativeEmitter {
         invocation: invocation.clone(),
         publish,

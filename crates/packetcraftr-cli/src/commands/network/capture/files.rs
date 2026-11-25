@@ -131,21 +131,15 @@ impl Classified for Error {
                 Kind::Io,
                 None,
             ),
-            Self::Invalid(_) => Classification::new(
-                packetcraftr_core::error::Code::CliCaptureFiles,
-                Kind::Usage,
-                None,
-            ),
-            Self::FrameTooLarge { .. } => Classification::new(
-                packetcraftr_core::error::Code::PolicyCaptureFileBytes,
-                Kind::Policy,
-                None,
-            ),
-            Self::State | Self::Counters | Self::ElapsedRegressed => Classification::new(
-                packetcraftr_core::error::Code::InternalCaptureFiles,
-                Kind::Internal,
-                None,
-            ),
+            Self::Invalid(_) => {
+                Classification::new(crate::code::CliCaptureFiles, Kind::Usage, None)
+            }
+            Self::FrameTooLarge { .. } => {
+                Classification::new(crate::code::PolicyCaptureFileBytes, Kind::Policy, None)
+            }
+            Self::State | Self::Counters | Self::ElapsedRegressed => {
+                Classification::new(crate::code::InternalCaptureFiles, Kind::Internal, None)
+            }
         }
     }
 }

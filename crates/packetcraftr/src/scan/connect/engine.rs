@@ -56,28 +56,31 @@ impl<P: TargetProviders + TcpProviders, K: Clock> Client<P, K> {
             Error::Output { source }
         })?;
         run(
-            &request,
-            &mut admission,
-            &Arc::new(TcpOf(Arc::clone(&self.providers))),
-            &self.clock,
-            &mut deadline,
-            started,
-            operation.spend.clone(),
+            Context {
+                request: &request,
+                authorizer: &mut admission,
+                provider: &Arc::new(TcpOf(Arc::clone(&self.providers))),
+                clock: &self.clock,
+                deadline: &mut deadline,
+                started,
+                spend: operation.spend.clone(),
+            },
             |probe, deadline| publish(Event::Probe(probe), deadline),
         )
     }
 }
 
-pub(super) fn run<Q, A, C, F>(
-    request: &Request,
-    authorizer: &mut A,
-    provider: &Arc<Q>,
-    clock: &C,
-    deadline: &mut Deadline,
+pub(super) struct Context<'a, Q, A, C> {
+    request: &'a Request,
+    authorizer: &'a mut A,
+    provider: &'a Arc<Q>,
+    clock: &'a C,
+    deadline: &'a mut Deadline,
     started: Instant,
     spend: crate::engine::operation::SpendLedger,
-    mut emit: F,
-) -> Result<Report, Error>
+}
+
+pub(super) fn run<Q, A, C, F>(context: Context<'_, Q, A, C>, mut emit: F) -> Result<Report, Error>
 where
     Q: Provider + 'static,
     Q::Stream: 'static,
@@ -85,6 +88,15 @@ where
     C: Clock,
     F: FnMut(ProbeEvidence, &Deadline) -> Result<(), Error>,
 {
+    let Context {
+        request,
+        authorizer,
+        provider,
+        clock,
+        deadline,
+        started,
+        spend,
+    } = context;
     enforce_deadline::<Error>(deadline)?;
     let (targets, planned) = planned(
         request,

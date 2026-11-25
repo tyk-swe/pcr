@@ -27,7 +27,7 @@ impl CaptureOutput {
             _ if normalize => {
                 return Err(CliError::from_classification(
                     Classification::new(
-                        packetcraftr_core::error::Code::CliCaptureNormalizeFormat,
+                        crate::code::CliCaptureNormalizeFormat,
                         Kind::Usage,
                         Some("use --normalize with --output pcapng or --output pcap"),
                     ),
@@ -78,7 +78,7 @@ fn validate_rewrite_format(
     if output != input {
         return Err(CliError::from_classification(
             Classification::new(
-                packetcraftr_core::error::Code::CliCaptureRewriteFormat,
+                crate::code::CliCaptureRewriteFormat,
                 Kind::Usage,
                 Some("select the capture output format matching the input capture"),
             ),

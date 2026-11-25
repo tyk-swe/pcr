@@ -302,7 +302,7 @@ impl Envelope<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use packetcraftr_core::{diagnostic, error::Code};
+    use packetcraftr_core::diagnostic;
     use serde_json::json;
 
     #[test]
@@ -333,13 +333,13 @@ mod tests {
         assert_eq!(value["stats"]["bytes"], 27);
         assert_eq!(value["stats"]["elapsed"], json!({ "secs": 1, "nanos": 2 }));
         let classification = Classification::new(
-            Code::CliSendLimit,
+            packetcraftr::Error::CliSendLimit,
             packetcraftr_core::error::Kind::Usage,
             None,
         );
         let error = serde_json::to_value(Error::new(classification, "invalid options", Vec::new()))
             .unwrap();
         assert_eq!(error["kind"], "usage");
-        assert_eq!(error["code"], Code::CliSendLimit.as_str());
+        assert_eq!(error["code"], packetcraftr::Error::CliSendLimit.as_str());
     }
 }

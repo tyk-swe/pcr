@@ -359,7 +359,7 @@ impl<C: Session> Transaction<C> {
         }
         self.captured.diagnostics.push_once(
             packetcraftr_core::diagnostic::Diagnostic::new(Severity::Warning,
-                packetcraftr_core::error::Code::CaptureEvidenceIncomplete.as_str(),
+                crate::code::CaptureEvidenceIncomplete.as_str(),
                 format!(
                     "capture backend reported {} overflow event(s), {} receiver drop(s), {} total dropped frame(s), and {} dropped byte(s) under {}",
                     statistics.overflow_events,

@@ -1456,7 +1456,7 @@ fn fragmented_tcp_resolves_event_filter_and_stream_dependencies() {
             |_| Ok(()),
             |event| {
                 if let TcpEvent::Data { bytes, .. } = &event.event {
-                    delivered.extend_from_slice(&bytes);
+                    delivered.extend_from_slice(bytes);
                 }
                 Ok(())
             },

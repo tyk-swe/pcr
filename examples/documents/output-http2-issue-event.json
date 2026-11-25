@@ -1,8 +1,9 @@
 {
-  "schema": "packetcraftr.output/v22",
+  "schema": "packetcraftr.output/v23",
+  "payload_schema": "packetcraftr.output.http2/v1",
   "command": "http2",
   "mode": "stream",
-  "sequence": 7,
+  "seq": 7,
   "event": "http2_issue",
   "status": "success",
   "result": {

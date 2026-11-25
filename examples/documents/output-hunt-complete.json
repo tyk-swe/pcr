@@ -140,7 +140,8 @@
       }
     ]
   },
-  "schema": "packetcraftr.output/v22",
-  "sequence": 5,
+  "schema": "packetcraftr.output/v23",
+  "payload_schema": "packetcraftr.output.hunt/v1",
+  "seq": 5,
   "status": "success"
 }

@@ -193,7 +193,7 @@ class RuntimeValidationTests(unittest.TestCase):
         path = Path(directory) / 'fake-cli'
         success = stdout if stdout is not None else json.dumps(document) + '\n'
         failure = stdout if stdout is not None else json.dumps(dict(document, status=failure_status)) + '\n'
-        stream = stdout if stdout is not None else json.dumps(dict(document, mode='stream', event='complete', sequence=0)) + '\n'
+        stream = stdout if stdout is not None else json.dumps(dict(document, mode='stream', event='complete', seq=0)) + '\n'
         path.write_text(
             f'#!{sys.executable}\nimport sys\n'
             "failed = 'missing' in sys.argv\n"
@@ -240,9 +240,9 @@ class RuntimeValidationTests(unittest.TestCase):
     def test_ndjson_exit_status_matches_the_final_record(self):
         command = checker.RuntimeCommand(('--output', 'ndjson', 'missing'), succeeds=False)
         validator = checker.load_validator(SCHEMA)
-        success = json.dumps(dict(VALID, mode='stream', event='event', sequence=0))
-        error = json.dumps(dict(VALID, mode='stream', status='error', event='error', sequence=1))
-        complete = json.dumps(dict(VALID, mode='stream', event='complete', sequence=0))
+        success = json.dumps(dict(VALID, mode='stream', event='event', seq=0))
+        error = json.dumps(dict(VALID, mode='stream', status='error', event='error', seq=1))
+        complete = json.dumps(dict(VALID, mode='stream', event='complete', seq=0))
         with tempfile.TemporaryDirectory() as directory:
             binary = self.fake_binary(directory, VALID, stdout=f'{success}\n{error}\n')
             self.assertEqual(checker.runtime_problems(binary, Path(directory), validator, set(), (command,)), [])
@@ -254,7 +254,7 @@ class RuntimeValidationTests(unittest.TestCase):
     def test_runtime_ndjson_requires_one_terminal_record_at_the_end(self):
         command = checker.RuntimeCommand(('--output', 'ndjson', 'stream'), succeeds=True)
         identity = checker.read_identity((ROOT / checker.CONTRACT).read_text(encoding='utf-8'))
-        validator = checker.load_validator(json.loads((ROOT / identity.schema_path).read_text(encoding='utf-8')))
+        validator = checker.load_schema_set(ROOT, identity).validator
         examples = ROOT / 'examples/documents'
         records = {
             event: json.loads((examples / f'output-read-{event}.json').read_text(encoding='utf-8'))
@@ -444,6 +444,15 @@ class RepositoryTests(unittest.TestCase):
                 inputs = {
                     checker.CONTRACT: f'pub const OUTPUT_SCHEMA: &str = "{IDENTITY.identifier}";\n',
                     IDENTITY.schema_path: json.dumps(SCHEMA),
+                    checker.COMMON_SCHEMA: json.dumps({
+                        '$schema': 'https://json-schema.org/draft/2020-12/schema',
+                        '$id': checker.COMMON_URN,
+                        '$defs': {},
+                    }),
+                    'schemas/output/build.v1.schema.json': json.dumps({
+                        '$schema': 'https://json-schema.org/draft/2020-12/schema',
+                        '$id': 'urn:packetcraftr:output:build:v1',
+                    }),
                     checker.RELEASE_ASSETS: json.dumps(assets),
                     path: json.dumps(value),
                 }

@@ -3,8 +3,6 @@
 
 //! Compare scan observations without coupling comparison rules to an output format.
 
-mod legacy;
-
 use super::{Error, Finding, Limits, Report, Severity};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
@@ -57,17 +55,6 @@ impl Snapshot {
         }
         Ok(index)
     }
-}
-
-/// Compare historical successful aggregate scan JSON documents.
-///
-/// This compatibility entry point retains its original validation and input limits.
-/// Use [`compare_snapshots`] when observations are already available as typed data.
-pub fn compare(before: &[u8], after: &[u8], limits: Limits) -> Result<Report, Error> {
-    limits.validate()?;
-    let before = legacy::parse(before, limits)?;
-    let after = legacy::parse(after, limits)?;
-    compare_snapshots(&before, &after, limits)
 }
 
 /// Compare scoped observations without interpreting their retained JSON evidence.

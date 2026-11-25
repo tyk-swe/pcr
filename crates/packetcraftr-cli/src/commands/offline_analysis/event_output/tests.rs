@@ -109,7 +109,7 @@ fn ndjson_serializes_once_with_exact_charges() {
         .collect();
     assert_eq!(lines.len(), 64);
     for (sequence, line) in lines.iter().enumerate() {
-        assert_eq!(line["sequence"], sequence);
+        assert_eq!(line["seq"], sequence);
         assert_eq!(line["result"], value);
         assert!(serde_json::to_vec(line).unwrap().len() > bytes);
     }

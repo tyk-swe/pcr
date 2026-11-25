@@ -1,0 +1,269 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:packetcraftr:output:expert:v1",
+  "title": "PacketcraftR expert output payload v1",
+  "description": "Success payload contract for the expert command. The stable envelope is validated separately.",
+  "allOf": [
+    {
+      "type": "object",
+      "required": [
+        "command",
+        "payload_schema"
+      ],
+      "properties": {
+        "command": {
+          "const": "expert"
+        },
+        "payload_schema": {
+          "const": "packetcraftr.output.expert/v1"
+        }
+      }
+    },
+    {
+      "oneOf": [
+        {
+          "allOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/aggregateSuccessEnvelope"
+            },
+            {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/expertSuccess"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/streamSuccessEnvelope"
+            },
+            {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/expertStreamSuccess"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "$defs": {
+    "expertCodeCount": {
+      "type": "object",
+      "required": [
+        "code",
+        "findings"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "findings": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        }
+      },
+      "additionalProperties": true
+    },
+    "expertFinding": {
+      "type": "object",
+      "required": [
+        "severity",
+        "code",
+        "frame",
+        "message"
+      ],
+      "properties": {
+        "severity": {
+          "type": "string",
+          "enum": [
+            "info",
+            "warning",
+            "error"
+          ]
+        },
+        "code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "frame": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "transport": {
+          "enum": [
+            "tcp",
+            "udp"
+          ]
+        },
+        "stream": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "dependentRequired": {
+        "transport": [
+          "stream"
+        ],
+        "stream": [
+          "transport"
+        ]
+      },
+      "additionalProperties": true
+    },
+    "expertResult": {
+      "type": "object",
+      "required": [
+        "frames_read",
+        "frames_matched",
+        "errors",
+        "warnings",
+        "notes",
+        "codes",
+        "findings",
+        "ip_reassembly"
+      ],
+      "properties": {
+        "frames_read": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "frames_matched": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "errors": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "warnings": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "notes": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "codes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/expertCodeCount"
+          }
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/expertFinding"
+          }
+        },
+        "ip_reassembly": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/ipReassemblyReport"
+        },
+        "clock": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/captureClock"
+        }
+      },
+      "additionalProperties": true
+    },
+    "expertStreamSuccess": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "expert"
+        }
+      },
+      "required": [
+        "command",
+        "result"
+      ],
+      "oneOf": [
+        {
+          "properties": {
+            "event": {
+              "const": "finding"
+            },
+            "result": {
+              "$ref": "#/$defs/expertFinding"
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "complete"
+            },
+            "result": {
+              "$ref": "#/$defs/expertResult"
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "ip_overlap_resolved"
+            },
+            "result": {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/ipOverlapResolvedEvent"
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "ip_datagram_completed"
+            },
+            "result": {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/ipDatagramCompletedEvent"
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "ip_datagram_incomplete"
+            },
+            "result": {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/ipDatagramIncompleteEvent"
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        }
+      ]
+    },
+    "expertSuccess": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "expert"
+        },
+        "result": {
+          "$ref": "#/$defs/expertResult"
+        }
+      },
+      "required": [
+        "command",
+        "result"
+      ]
+    }
+  }
+}

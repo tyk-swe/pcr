@@ -1,0 +1,523 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:packetcraftr:output:http3:v1",
+  "title": "PacketcraftR http3 output payload v1",
+  "description": "Success payload contract for the http3 command. The stable envelope is validated separately.",
+  "allOf": [
+    {
+      "type": "object",
+      "required": [
+        "command",
+        "payload_schema"
+      ],
+      "properties": {
+        "command": {
+          "const": "http3"
+        },
+        "payload_schema": {
+          "const": "packetcraftr.output.http3/v1"
+        }
+      }
+    },
+    {
+      "oneOf": [
+        {
+          "allOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/aggregateSuccessEnvelope"
+            },
+            {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/http3Success"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/streamSuccessEnvelope"
+            },
+            {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/http3StreamSuccess"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "$defs": {
+    "http3Connection": {
+      "type": "object",
+      "properties": {
+        "connection": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "scope": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/captureScope"
+        },
+        "version": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint32"
+        },
+        "client_endpoint": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/tlsEndpoint"
+        },
+        "server_endpoint": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/tlsEndpoint"
+        },
+        "first_frame": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "last_frame": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "source_frames": {
+          "type": "array",
+          "items": {
+            "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+          }
+        },
+        "source_frames_omitted": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "pending_packets": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "transport_incomplete": {
+          "type": "boolean"
+        },
+        "client": {
+          "$ref": "#/$defs/http3CriticalStreams"
+        },
+        "server": {
+          "$ref": "#/$defs/http3CriticalStreams"
+        }
+      },
+      "required": [
+        "connection",
+        "scope",
+        "version",
+        "client_endpoint",
+        "server_endpoint",
+        "first_frame",
+        "last_frame",
+        "source_frames",
+        "source_frames_omitted",
+        "pending_packets",
+        "transport_incomplete",
+        "client",
+        "server"
+      ],
+      "additionalProperties": false
+    },
+    "http3CriticalStreams": {
+      "type": "object",
+      "properties": {
+        "control_stream": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "encoder_stream": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "max_table_capacity": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "qpack_blocked_streams": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "encoder_inserts": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "issues": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/http3Issue"
+          }
+        }
+      },
+      "required": [
+        "encoder_inserts",
+        "issues"
+      ],
+      "additionalProperties": false
+    },
+    "http3Exchange": {
+      "type": "object",
+      "properties": {
+        "connection": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "stream": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "request": {
+          "$ref": "#/$defs/http3Side"
+        },
+        "response": {
+          "$ref": "#/$defs/http3Side"
+        }
+      },
+      "required": [
+        "connection",
+        "stream"
+      ],
+      "additionalProperties": false,
+      "anyOf": [
+        {
+          "required": [
+            "request"
+          ]
+        },
+        {
+          "required": [
+            "response"
+          ]
+        }
+      ]
+    },
+    "http3Field": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        },
+        "value_hex": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/hexBytes"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false,
+      "not": {
+        "required": [
+          "value",
+          "value_hex"
+        ]
+      }
+    },
+    "http3HeaderSection": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "enum": [
+            "request",
+            "informational",
+            "response",
+            "trailers",
+            "unclassified"
+          ]
+        },
+        "offset": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "encoded_bytes": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "required_insert_count": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64",
+          "description": "Zero for static or literal decoding. A positive count identifies the unique decode supported by the observed encoder history."
+        },
+        "method": {
+          "type": "string"
+        },
+        "status": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 599
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/http3Field"
+          }
+        }
+      },
+      "required": [
+        "kind",
+        "offset",
+        "encoded_bytes",
+        "fields"
+      ],
+      "additionalProperties": false
+    },
+    "http3Issue": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "enum": [
+            "missing_control_stream",
+            "closed_control_stream",
+            "closed_qpack_encoder_stream",
+            "closed_qpack_decoder_stream",
+            "duplicate_critical_stream",
+            "missing_settings",
+            "invalid_settings",
+            "encoder_stream_gap",
+            "qpack_encoder_error",
+            "qpack_unavailable",
+            "qpack_ambiguous",
+            "qpack_invalid",
+            "stream_gap",
+            "stream_reset",
+            "conflicting_stream",
+            "omitted_stream_bytes",
+            "truncated_frame",
+            "invalid_frame",
+            "invalid_frame_placement",
+            "invalid_headers",
+            "content_length_mismatch",
+            "unexpected_response_content",
+            "extended_connect_disabled",
+            "extended_connect_settings_unavailable",
+            "missing_initial_headers",
+            "missing_final_response",
+            "limit"
+          ]
+        },
+        "offset": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        }
+      },
+      "required": [
+        "code"
+      ],
+      "additionalProperties": false
+    },
+    "http3Result": {
+      "type": "object",
+      "properties": {
+        "connections": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/http3Connection"
+          }
+        },
+        "exchanges": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/http3Exchange"
+          }
+        },
+        "summary": {
+          "$ref": "#/$defs/http3Summary"
+        }
+      },
+      "required": [
+        "connections",
+        "exchanges",
+        "summary"
+      ],
+      "additionalProperties": false
+    },
+    "http3Side": {
+      "type": "object",
+      "properties": {
+        "complete": {
+          "type": "boolean"
+        },
+        "prefix_bytes": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "reset_error": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "header_sections": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/http3HeaderSection"
+          }
+        },
+        "data_frames": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "data_bytes": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "first_data_offset": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "issues": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/http3Issue"
+          }
+        },
+        "issues_omitted": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        }
+      },
+      "required": [
+        "complete",
+        "prefix_bytes",
+        "header_sections",
+        "data_frames",
+        "data_bytes",
+        "issues",
+        "issues_omitted"
+      ],
+      "additionalProperties": false
+    },
+    "http3StreamSuccess": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "http3"
+        },
+        "result": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "command",
+        "result"
+      ],
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "event": {
+              "const": "http3_connection"
+            },
+            "result": {
+              "type": "object",
+              "properties": {
+                "connection": {
+                  "$ref": "#/$defs/http3Connection"
+                }
+              },
+              "required": [
+                "connection"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "event": {
+              "const": "http3_exchange"
+            },
+            "result": {
+              "type": "object",
+              "properties": {
+                "exchange": {
+                  "$ref": "#/$defs/http3Exchange"
+                }
+              },
+              "required": [
+                "exchange"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "event": {
+              "const": "complete"
+            },
+            "result": {
+              "type": "object",
+              "properties": {
+                "summary": {
+                  "$ref": "#/$defs/http3Summary"
+                }
+              },
+              "required": [
+                "summary"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        }
+      ]
+    },
+    "http3Success": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "http3"
+        },
+        "result": {
+          "$ref": "#/$defs/http3Result"
+        }
+      },
+      "required": [
+        "command",
+        "result"
+      ]
+    },
+    "http3Summary": {
+      "type": "object",
+      "properties": {
+        "frames_read": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "input_incomplete": {
+          "type": "boolean"
+        },
+        "connections": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "exchanges": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "unknown_alpn": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "skipped_alpn": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "quic_limit_hits": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "quic_evictions": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "quic_unassociated_packets": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "keylog_records_rejected": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        }
+      },
+      "required": [
+        "frames_read",
+        "input_incomplete",
+        "connections",
+        "exchanges",
+        "unknown_alpn",
+        "skipped_alpn",
+        "quic_limit_hits",
+        "quic_evictions",
+        "quic_unassociated_packets",
+        "keylog_records_rejected"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

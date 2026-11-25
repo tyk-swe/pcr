@@ -1,8 +1,9 @@
 {
-  "schema": "packetcraftr.output/v22",
+  "schema": "packetcraftr.output/v23",
+  "payload_schema": "packetcraftr.output.dns-read/v1",
   "command": "dns-read",
   "mode": "stream",
-  "sequence": 2,
+  "seq": 2,
   "event": "complete",
   "status": "success",
   "result": {

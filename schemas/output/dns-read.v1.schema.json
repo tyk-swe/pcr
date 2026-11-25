@@ -1,0 +1,561 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:packetcraftr:output:dns-read:v1",
+  "title": "PacketcraftR dns-read output payload v1",
+  "description": "Success payload contract for the dns-read command. The stable envelope is validated separately.",
+  "allOf": [
+    {
+      "type": "object",
+      "required": [
+        "command",
+        "payload_schema"
+      ],
+      "properties": {
+        "command": {
+          "const": "dns-read"
+        },
+        "payload_schema": {
+          "const": "packetcraftr.output.dns-read/v1"
+        }
+      }
+    },
+    {
+      "oneOf": [
+        {
+          "allOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/aggregateSuccessEnvelope"
+            },
+            {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/dnsAnalysisSuccess"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/streamSuccessEnvelope"
+            },
+            {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/dnsAnalysisStreamSuccess"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "$defs": {
+    "dnsAnalysisComplete": {
+      "type": "object",
+      "required": [
+        "frames_read",
+        "frames_matched",
+        "summary",
+        "scopes",
+        "incomplete_datagrams",
+        "source_outcomes_omitted",
+        "ip_reassembly"
+      ],
+      "properties": {
+        "frames_read": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "frames_matched": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "summary": {
+          "$ref": "#/$defs/dnsAnalysisSummary"
+        },
+        "scopes": {
+          "type": "array",
+          "items": {
+            "$ref": "urn:packetcraftr:output:common:v1#/$defs/captureScope"
+          }
+        },
+        "incomplete_datagrams": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "source_outcomes_omitted": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "ip_reassembly": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/ipReassemblyReport"
+        }
+      },
+      "additionalProperties": true
+    },
+    "dnsAnalysisIssue": {
+      "type": "object",
+      "required": [
+        "number",
+        "flow",
+        "stream",
+        "status"
+      ],
+      "properties": {
+        "number": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "flow": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/applicationFlow"
+        },
+        "stream": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "status": {
+          "enum": [
+            "complete",
+            "malformed",
+            "incomplete",
+            "gap",
+            "conflict",
+            "reset",
+            "evicted"
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "dnsAnalysisMessage": {
+      "type": "object",
+      "required": [
+        "index",
+        "transport",
+        "stream",
+        "generation",
+        "flow",
+        "status",
+        "wire_hex",
+        "framing_hex",
+        "declared_length",
+        "fields",
+        "error",
+        "sources"
+      ],
+      "properties": {
+        "index": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "transport": {
+          "enum": [
+            "udp",
+            "tcp"
+          ]
+        },
+        "stream": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "generation": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "flow": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/applicationFlow"
+        },
+        "status": {
+          "enum": [
+            "complete",
+            "malformed",
+            "incomplete",
+            "gap",
+            "conflict",
+            "reset",
+            "evicted"
+          ]
+        },
+        "wire_hex": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/hexBytes"
+        },
+        "framing_hex": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/hexBytes"
+        },
+        "declared_length": {
+          "anyOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint16"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fields": {
+          "anyOf": [
+            {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "urn:packetcraftr:output:common:v1#/$defs/fieldValue"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "urn:packetcraftr:output:common:v1#/$defs/applicationSource"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "dnsAnalysisResult": {
+      "type": "object",
+      "required": [
+        "frames_read",
+        "frames_matched",
+        "summary",
+        "scopes",
+        "incomplete_datagrams",
+        "source_outcomes_omitted",
+        "ip_reassembly",
+        "messages",
+        "transactions",
+        "issues"
+      ],
+      "properties": {
+        "frames_read": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "frames_matched": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "summary": {
+          "$ref": "#/$defs/dnsAnalysisSummary"
+        },
+        "scopes": {
+          "type": "array",
+          "items": {
+            "$ref": "urn:packetcraftr:output:common:v1#/$defs/captureScope"
+          }
+        },
+        "incomplete_datagrams": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "source_outcomes_omitted": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "ip_reassembly": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/ipReassemblyReport"
+        },
+        "messages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/dnsAnalysisMessage"
+          }
+        },
+        "transactions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/dnsAnalysisTransaction"
+          }
+        },
+        "issues": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/dnsAnalysisIssue"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "dnsAnalysisStreamSuccess": {
+      "type": "object",
+      "required": [
+        "command",
+        "event",
+        "result"
+      ],
+      "properties": {
+        "command": {
+          "const": "dns-read"
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "event",
+            "result"
+          ],
+          "properties": {
+            "event": {
+              "const": "dns_message"
+            },
+            "result": {
+              "$ref": "#/$defs/dnsAnalysisMessage"
+            }
+          }
+        },
+        {
+          "required": [
+            "event",
+            "result"
+          ],
+          "properties": {
+            "event": {
+              "const": "dns_transaction"
+            },
+            "result": {
+              "$ref": "#/$defs/dnsAnalysisTransaction"
+            }
+          }
+        },
+        {
+          "required": [
+            "event",
+            "result"
+          ],
+          "properties": {
+            "event": {
+              "const": "dns_stream_issue"
+            },
+            "result": {
+              "$ref": "#/$defs/dnsAnalysisIssue"
+            }
+          }
+        },
+        {
+          "required": [
+            "event",
+            "result"
+          ],
+          "properties": {
+            "event": {
+              "const": "complete"
+            },
+            "result": {
+              "$ref": "#/$defs/dnsAnalysisComplete"
+            }
+          }
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "ip_overlap_resolved"
+            },
+            "result": {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/ipOverlapResolvedEvent"
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "ip_datagram_completed"
+            },
+            "result": {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/ipDatagramCompletedEvent"
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "ip_datagram_incomplete"
+            },
+            "result": {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/ipDatagramIncompleteEvent"
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        }
+      ]
+    },
+    "dnsAnalysisSuccess": {
+      "type": "object",
+      "required": [
+        "command",
+        "result"
+      ],
+      "properties": {
+        "command": {
+          "const": "dns-read"
+        },
+        "result": {
+          "$ref": "#/$defs/dnsAnalysisResult"
+        }
+      }
+    },
+    "dnsAnalysisSummary": {
+      "type": "object",
+      "required": [
+        "messages",
+        "complete_messages",
+        "transactions",
+        "matched_transactions",
+        "unanswered_transactions",
+        "orphan_responses",
+        "duplicate_responses"
+      ],
+      "properties": {
+        "messages": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "complete_messages": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "transactions": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "matched_transactions": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "unanswered_transactions": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "orphan_responses": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "duplicate_responses": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        }
+      },
+      "additionalProperties": true
+    },
+    "dnsAnalysisTransaction": {
+      "type": "object",
+      "required": [
+        "transport",
+        "stream",
+        "generation",
+        "flow",
+        "status",
+        "dns_id",
+        "queries",
+        "response",
+        "original_response",
+        "first_query_latency",
+        "latest_query_latency",
+        "sources"
+      ],
+      "properties": {
+        "transport": {
+          "enum": [
+            "udp",
+            "tcp"
+          ]
+        },
+        "stream": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "generation": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "flow": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/applicationFlow"
+        },
+        "status": {
+          "enum": [
+            "matched",
+            "unanswered",
+            "orphan_response",
+            "duplicate_response"
+          ]
+        },
+        "dns_id": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint16"
+        },
+        "queries": {
+          "type": "array",
+          "items": {
+            "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+          }
+        },
+        "response": {
+          "anyOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "original_response": {
+          "anyOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "first_query_latency": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/dnsLatency"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "latest_query_latency": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/dnsLatency"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "urn:packetcraftr:output:common:v1#/$defs/applicationSource"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "dnsLatency": {
+      "type": "object",
+      "required": [
+        "nanoseconds",
+        "negative"
+      ],
+      "properties": {
+        "nanoseconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "negative": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

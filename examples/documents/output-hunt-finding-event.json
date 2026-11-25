@@ -23,7 +23,8 @@
     "subject": "example.test.",
     "summary": "Observed value matches a local indicator"
   },
-  "schema": "packetcraftr.output/v22",
-  "sequence": 0,
+  "schema": "packetcraftr.output/v23",
+  "payload_schema": "packetcraftr.output.hunt/v1",
+  "seq": 0,
   "status": "success"
 }

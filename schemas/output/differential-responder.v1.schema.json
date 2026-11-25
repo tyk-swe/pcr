@@ -1,0 +1,183 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:packetcraftr:output:differential-responder:v1",
+  "title": "PacketcraftR differential-responder output payload v1",
+  "description": "Success payload contract for the differential-responder command. The stable envelope is validated separately.",
+  "allOf": [
+    {
+      "type": "object",
+      "required": [
+        "command",
+        "payload_schema"
+      ],
+      "properties": {
+        "command": {
+          "const": "differential-responder"
+        },
+        "payload_schema": {
+          "const": "packetcraftr.output.differential-responder/v1"
+        }
+      }
+    },
+    {
+      "oneOf": [
+        {
+          "allOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/aggregateSuccessEnvelope"
+            },
+            {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/differentialResponderSuccess"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/streamSuccessEnvelope"
+            },
+            {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/differentialResponderStreamSuccess"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "$defs": {
+    "differentialReception": {
+      "type": "object",
+      "required": [
+        "variant",
+        "attempt_seq",
+        "source",
+        "payload_sha256"
+      ],
+      "properties": {
+        "variant": {
+          "type": "string"
+        },
+        "attempt_seq": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "source": {
+          "type": "string"
+        },
+        "payload_sha256": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "differentialResponderResult": {
+      "type": "object",
+      "required": [
+        "received",
+        "ignored",
+        "replies_sent",
+        "records"
+      ],
+      "properties": {
+        "received": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "ignored": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "replies_sent": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "records": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/differentialReception"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "differentialResponderStreamSuccess": {
+      "description": "One Responder reception event or the terminal complete event with reception counters.",
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "differential-responder"
+        }
+      },
+      "required": [
+        "command",
+        "result"
+      ],
+      "oneOf": [
+        {
+          "properties": {
+            "event": {
+              "const": "received"
+            },
+            "result": {
+              "$ref": "#/$defs/differentialReception"
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "complete"
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "received",
+                "ignored",
+                "replies_sent"
+              ],
+              "properties": {
+                "received": {
+                  "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+                },
+                "ignored": {
+                  "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+                },
+                "replies_sent": {
+                  "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        }
+      ]
+    },
+    "differentialResponderSuccess": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "differential-responder"
+        },
+        "result": {
+          "$ref": "#/$defs/differentialResponderResult"
+        }
+      },
+      "required": [
+        "command",
+        "result"
+      ]
+    }
+  }
+}

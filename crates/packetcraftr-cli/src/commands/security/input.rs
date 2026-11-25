@@ -4,7 +4,7 @@
 use super::invalid;
 use crate::commands::Command;
 use crate::errors::CliError;
-use packetcraftr_core::security::{Report, Source, input};
+use packetcraftr_core::security::{Report, Source};
 use sha2::{Digest, Sha256};
 use std::path::Path;
 
@@ -66,7 +66,7 @@ pub(in crate::commands) fn report(bytes: &[u8]) -> Result<Report, CliError> {
         .chain(&engagement_commands)
         .copied()
         .collect();
-    let envelope = input::aggregate::<serde_json::Value>(bytes, &allowed)
+    let envelope = crate::output::contract::aggregate_input::<serde_json::Value>(bytes, &allowed)
         .map_err(|error| invalid(error.to_string()))?;
     if security_commands.contains(&envelope.command.as_str()) {
         let result: Report =
@@ -76,32 +76,8 @@ pub(in crate::commands) fn report(bytes: &[u8]) -> Result<Report, CliError> {
         }
         return Ok(result);
     }
-    engagement(&envelope.command, envelope.result, diagnostic_codes(bytes))
-}
-
-#[derive(serde::Deserialize, Default)]
-struct DiagnosticCode {
-    #[serde(default)]
-    code: String,
-}
-
-#[derive(serde::Deserialize, Default)]
-struct EnvelopeDiagnostics {
-    #[serde(default)]
-    diagnostics: Vec<DiagnosticCode>,
-}
-
-fn diagnostic_codes(bytes: &[u8]) -> Vec<String> {
-    serde_json::from_slice::<EnvelopeDiagnostics>(bytes).map_or_else(
-        |_| Vec::new(),
-        |envelope| {
-            envelope
-                .diagnostics
-                .into_iter()
-                .map(|diagnostic| diagnostic.code)
-                .collect()
-        },
-    )
+    let diagnostics = envelope.diagnostic_codes();
+    engagement(&envelope.command, envelope.result, diagnostics)
 }
 
 fn is_plan(command: &str, result: &serde_json::Value) -> bool {
@@ -114,8 +90,7 @@ fn is_plan(command: &str, result: &serde_json::Value) -> bool {
 
 #[derive(serde::Deserialize)]
 struct ScanEndpoint {
-    #[serde(default)]
-    classification: String,
+    classification: crate::commands::network::scan::output::Classification,
 }
 
 #[derive(serde::Deserialize, Default)]
@@ -139,10 +114,9 @@ struct ScanResult {
     retained_evidence_bytes: Option<u64>,
 }
 
-#[derive(serde::Deserialize, Default)]
+#[derive(serde::Deserialize)]
 struct DifferentialRow {
-    #[serde(default)]
-    verdict: String,
+    verdict: crate::commands::network::differential::output::Verdict,
 }
 
 #[derive(serde::Deserialize, Default)]
@@ -159,7 +133,7 @@ struct DifferentialResult {
 struct FuzzResult {
     seed: u64,
     first_case: u64,
-    mode: String,
+    mode: crate::commands::packet::fuzz::output::Mode,
     cases_generated: u64,
     cases_built: u64,
     cases_rejected: u64,
@@ -193,7 +167,7 @@ struct TracerouteSummary {
     edges: u64,
 }
 
-#[derive(serde::Deserialize, Default)]
+#[derive(serde::Deserialize)]
 struct TracerouteResult {
     #[serde(default)]
     mode: Option<String>,
@@ -205,9 +179,9 @@ struct TracerouteResult {
     completions: Vec<serde::de::IgnoredAny>,
     target: String,
     destination: String,
-    strategy: String,
+    strategy: crate::output::network::Transport,
     #[serde(default)]
-    completion: Option<String>,
+    completion: Option<crate::commands::network::traceroute::output::Completion>,
     #[serde(default)]
     destination_port: Option<u64>,
     #[serde(default)]
@@ -524,8 +498,11 @@ fn summarize(command: &str, result: Engagement, diagnostics: &[String]) -> Repor
                 serde_json::json!(trace.undecoded.len()),
             );
             if matches!(
-                trace.completion.as_deref(),
-                Some("maximum_hops" | "timeout")
+                trace.completion,
+                Some(
+                    crate::commands::network::traceroute::output::Completion::MaximumHops
+                        | crate::commands::network::traceroute::output::Completion::Timeout
+                )
             ) {
                 report
                     .completeness
@@ -702,7 +679,7 @@ mod tests {
 
     #[test]
     fn unrelated_output_identity_is_rejected() {
-        let unknown = format!("{}/unsupported", packetcraftr_core::security::OUTPUT_SCHEMA);
+        let unknown = format!("{}/unsupported", crate::output::contract::OUTPUT_SCHEMA);
         for schema in [
             "packetcraftr.output/v2",
             "packetcraftr.output/v18",

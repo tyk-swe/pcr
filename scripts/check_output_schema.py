@@ -18,13 +18,16 @@ from rust_source import blank_comments, is_test_path, without_test_items
 from script_support import read_json, strict_json
 
 ROOT = Path(__file__).resolve().parent.parent
-CONTRACT = 'crates/packetcraftr-core/src/security.rs'
+CONTRACT = 'crates/packetcraftr-cli/src/output/contract.rs'
 RELEASE_ASSETS = 'scripts/release-assets.json'
 REGISTRY = 'published registry (Spec::PUBLISHED rows under crates/packetcraftr-cli/src)'
 CLI_SRC = 'crates/packetcraftr-cli/src'
 RUNTIME_IDENTIFIER = re.compile(
     r'^pub const OUTPUT_SCHEMA: &str = "(packetcraftr\.output/v([1-9][0-9]*))";[ \t]*$', re.MULTILINE)
-OUTPUT_SCHEMA_ASSET = re.compile(r'^schemas/(?:historical/)?packetcraftr\.output\.')
+OUTPUT_SCHEMA_ASSET = re.compile(r'^schemas/(?:(?:historical/)?packetcraftr\.output\.|output/.+\.schema\.json$)')
+COMMON_SCHEMA = 'schemas/output/common.v1.schema.json'
+COMMON_URN = 'urn:packetcraftr:output:common:v1'
+OUTPUT_SCHEMA_DIR = 'schemas/output'
 RUNTIME_TIMEOUT_SECONDS = 60
 MAX_PROBLEMS_PER_DOCUMENT = 5
 
@@ -99,13 +102,15 @@ def check_identity(schema: Any, identity: Identity) -> list[str]:
     return problems
 
 
-def check_release_assets(assets: Iterable[str], identity: Identity) -> list[str]:
+def check_release_assets(assets: Iterable[str], identity: Identity,
+                         required: Iterable[str] = ()) -> list[str]:
     assets = list(assets)
-    problems = [] if identity.schema_path in assets else [
-        f'{RELEASE_ASSETS}: the current output schema {identity.schema_path} is not shipped']
-    problems.extend(f'{RELEASE_ASSETS}: ships {asset}, which is not the current output schema'
+    required = [identity.schema_path, *required]
+    problems = [f'{RELEASE_ASSETS}: the current output schema {asset} is not shipped'
+                for asset in required if asset not in assets]
+    problems.extend(f'{RELEASE_ASSETS}: ships {asset}, which is not part of the current output schema set'
                     for asset in assets
-                    if OUTPUT_SCHEMA_ASSET.match(asset) and asset != identity.schema_path)
+                    if OUTPUT_SCHEMA_ASSET.match(asset) and asset not in required)
     return problems
 
 
@@ -125,6 +130,138 @@ def load_validator(schema: Any) -> Any:
     except jsonschema.SchemaError as error:
         raise CheckError(f'the output schema is not a valid Draft 2020-12 schema: {error.message}') from error
     return jsonschema.Draft202012Validator(schema)
+
+
+class SchemaSet(NamedTuple):
+    envelope_schema: Any
+    common_schema: Any
+    command_schemas: dict[str, Any]
+    registry: Any
+    validator: Any
+    merged_schema: Any
+    required_assets: tuple[str, ...]
+
+
+def _localize_common_refs(node: Any) -> Any:
+    prefix = f'{COMMON_URN}#/$defs/'
+    if isinstance(node, dict):
+        return {
+            key: (f'#/$defs/{value[len(prefix):]}'
+                  if key == '$ref' and isinstance(value, str) and value.startswith(prefix)
+                  else _localize_common_refs(value))
+            for key, value in node.items()
+        }
+    if isinstance(node, list):
+        return [_localize_common_refs(value) for value in node]
+    return node
+
+
+def load_schema_set(root: Path, identity: Identity) -> SchemaSet:
+    jsonschema = load_jsonschema()
+    try:
+        from referencing import Registry, Resource
+    except ImportError as error:
+        raise CheckError('multi-file output schema resolution requires the referencing package') from error
+
+    envelope_path = root / identity.schema_path
+    common_path = root / COMMON_SCHEMA
+    command_paths = sorted((root / OUTPUT_SCHEMA_DIR).glob('*.v1.schema.json'))
+    command_paths = [path for path in command_paths if path.name != 'common.v1.schema.json']
+    if not envelope_path.is_file():
+        raise CheckError(f'{identity.schema_path}: schema file does not exist')
+    if not common_path.is_file():
+        raise CheckError(f'{COMMON_SCHEMA}: schema file does not exist')
+    if not command_paths:
+        raise CheckError(f'{OUTPUT_SCHEMA_DIR}: no command payload schemas found')
+
+    envelope = read_json(envelope_path)
+    common = read_json(common_path)
+    commands: dict[str, Any] = {}
+    documents: dict[str, Any] = {}
+    for uri, schema, path in [(identity.urn, envelope, envelope_path),
+                              (COMMON_URN, common, common_path)]:
+        if not isinstance(schema, dict):
+            raise CheckError(f'{path.relative_to(root)}: expected a JSON object')
+        if schema.get('$id') != uri:
+            raise CheckError(f'{path.relative_to(root)}: $id is {schema.get("$id")!r}, expected {uri!r}')
+        documents[uri] = schema
+    for path in command_paths:
+        command = path.name.removesuffix('.v1.schema.json')
+        schema = read_json(path)
+        uri = f'urn:packetcraftr:output:{command}:v1'
+        if not isinstance(schema, dict):
+            raise CheckError(f'{path.relative_to(root)}: expected a JSON object')
+        if schema.get('$id') != uri:
+            raise CheckError(f'{path.relative_to(root)}: $id is {schema.get("$id")!r}, expected {uri!r}')
+        commands[command] = schema
+        documents[uri] = schema
+
+    for uri, schema in documents.items():
+        try:
+            jsonschema.Draft202012Validator.check_schema(schema)
+        except jsonschema.SchemaError as error:
+            raise CheckError(f'{uri}: invalid Draft 2020-12 schema: {error.message}') from error
+    registry = Registry()
+    for uri, schema in documents.items():
+        registry = registry.with_resource(uri, Resource.from_contents(schema))
+
+    merged_definitions = dict(_localize_common_refs(common.get('$defs', {})))
+    for schema in commands.values():
+        for name, definition in schema.get('$defs', {}).items():
+            if name in merged_definitions:
+                raise CheckError(f'schemas/output: duplicate definition {name!r}')
+            merged_definitions[name] = _localize_common_refs(definition)
+    aggregate_refs = []
+    stream_refs = []
+    for schema in commands.values():
+        for variant in schema.get('allOf', [{}])[-1].get('oneOf', []):
+            refs = variant.get('allOf', [])
+            if len(refs) != 2:
+                continue
+            shell = refs[0].get('$ref', '')
+            payloads = refs[1].get('oneOf', [])
+            target = aggregate_refs if 'aggregateSuccessEnvelope' in shell else stream_refs
+            target.extend(ref.get('$ref', '').rsplit('/', 1)[-1] for ref in payloads)
+    if aggregate_refs:
+        merged_definitions['aggregateSuccess'] = {
+            'allOf': [{'$ref': '#/$defs/aggregateSuccessEnvelope'},
+                      {'oneOf': [{'$ref': f'#/$defs/{name}'} for name in sorted(set(aggregate_refs))]}],
+        }
+    if stream_refs:
+        merged_definitions['streamSuccess'] = {
+            'allOf': [{'$ref': '#/$defs/streamSuccessEnvelope'},
+                      {'oneOf': [{'$ref': f'#/$defs/{name}'} for name in sorted(set(stream_refs))]}],
+        }
+    merged = {'$defs': merged_definitions}
+
+    envelope_validator = jsonschema.Draft202012Validator(envelope, registry=registry)
+    command_validators = {
+        command: jsonschema.Draft202012Validator(schema, registry=registry)
+        for command, schema in commands.items()
+    }
+
+    class Validator:
+        def iter_errors(self, document: Any):
+            errors = sorted(envelope_validator.iter_errors(document),
+                            key=lambda error: list(error.absolute_path))
+            if errors:
+                return iter(errors)
+            if not isinstance(document, dict) or document.get('status') != 'success':
+                return iter(())
+            command = document.get('command')
+            expected = f'packetcraftr.output.{command}/v1' if isinstance(command, str) else None
+            if document.get('payload_schema') != expected:
+                return iter([jsonschema.ValidationError(
+                    f'payload_schema {document.get("payload_schema")!r} does not match command {command!r}')])
+            validator = command_validators.get(command)
+            if validator is None:
+                return iter([jsonschema.ValidationError(f'no command payload schema for {command!r}')])
+            return iter(sorted(validator.iter_errors(document),
+                               key=lambda error: list(error.absolute_path)))
+
+    required = (COMMON_SCHEMA,
+                *(f'{OUTPUT_SCHEMA_DIR}/{path.name}' for path in command_paths))
+    return SchemaSet(envelope, common, commands, registry, Validator(), merged, required)
 
 
 def document_problems(validator: Any, label: str, document: Any) -> list[str]:
@@ -414,7 +551,7 @@ def registry_problems(root: Path, schema: Any, jsonschema: Any, published: set[s
 
     for root_name in ('aggregateSuccess', 'streamSuccess'):
         for name in _refs(definitions.get(root_name, {})):
-            if name == 'baseEnvelope':
+            if name in ('baseEnvelope', 'aggregateSuccessEnvelope', 'streamSuccessEnvelope'):
                 continue
             expected = set(_consts(definitions.get(name, {}), 'command'))
             if claimed.get(name, set()) != expected:
@@ -427,24 +564,21 @@ def registry_problems(root: Path, schema: Any, jsonschema: Any, published: set[s
 
 def check(root: Path, binary: Path | None = None) -> list[str]:
     identity = read_identity((root / CONTRACT).read_text(encoding='utf-8'))
-    schema = read_json(root / identity.schema_path)
-    if not isinstance(schema, dict):
-        raise CheckError(f'{identity.schema_path}: expected a JSON object')
+    schema_set = load_schema_set(root, identity)
     try:
         inventory = validate_manifest(read_json(root / RELEASE_ASSETS))
     except ValueError as error:
         raise CheckError(f'{RELEASE_ASSETS}: {error}') from error
-    problems = check_identity(schema, identity)
-    problems.extend(check_release_assets(inventory.source_assets, identity))
-    validator = load_validator(schema)
+    problems = check_identity(schema_set.envelope_schema, identity)
+    problems.extend(check_release_assets(inventory.source_assets, identity, schema_set.required_assets))
     published = published_codes(root)
     try:
-        problems.extend(registry_problems(root, schema, load_jsonschema(), published))
+        problems.extend(registry_problems(root, schema_set.merged_schema, load_jsonschema(), published))
     except CheckError as error:
         raise CheckError(f'{identity.schema_path}: {error}') from error
-    problems.extend(example_problems(root, validator, published))
+    problems.extend(example_problems(root, schema_set.validator, published))
     if binary is not None:
-        problems.extend(runtime_problems(binary, root, validator, published))
+        problems.extend(runtime_problems(binary, root, schema_set.validator, published))
     return problems
 
 

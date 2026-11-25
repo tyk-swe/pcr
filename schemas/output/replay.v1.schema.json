@@ -1,0 +1,274 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:packetcraftr:output:replay:v1",
+  "title": "PacketcraftR replay output payload v1",
+  "description": "Success payload contract for the replay command. The stable envelope is validated separately.",
+  "allOf": [
+    {
+      "type": "object",
+      "required": [
+        "command",
+        "payload_schema"
+      ],
+      "properties": {
+        "command": {
+          "const": "replay"
+        },
+        "payload_schema": {
+          "const": "packetcraftr.output.replay/v1"
+        }
+      }
+    },
+    {
+      "oneOf": [
+        {
+          "allOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/aggregateSuccessEnvelope"
+            },
+            {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/replaySuccess"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/streamSuccessEnvelope"
+            },
+            {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/replayFrameSuccess"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "$defs": {
+    "replayFrameResult": {
+      "type": "object",
+      "required": [
+        "source_sequence",
+        "interface",
+        "link_mode",
+        "scheduled_delay",
+        "bytes_sent",
+        "frame",
+        "pass"
+      ],
+      "properties": {
+        "source_sequence": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "interface": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/interfaceId"
+        },
+        "link_mode": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/linkMode"
+        },
+        "scheduled_delay": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/duration"
+        },
+        "bytes_sent": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "frame": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/frame"
+        },
+        "pass": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1024
+        }
+      },
+      "additionalProperties": true
+    },
+    "replayFrameSuccess": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "replay"
+        }
+      },
+      "required": [
+        "command",
+        "result"
+      ],
+      "oneOf": [
+        {
+          "properties": {
+            "event": {
+              "const": "frame"
+            },
+            "result": {
+              "$ref": "#/$defs/replayFrameResult"
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "complete"
+            },
+            "result": {
+              "$ref": "#/$defs/replayResult"
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        }
+      ]
+    },
+    "replayResult": {
+      "type": "object",
+      "required": [
+        "source_format",
+        "timing",
+        "requested_interface",
+        "requested_link_mode",
+        "frames_attempted",
+        "frames_completed",
+        "bytes_completed",
+        "scheduled_duration",
+        "frames",
+        "passes_completed",
+        "interfaces_used"
+      ],
+      "properties": {
+        "source_format": {
+          "type": "string",
+          "enum": [
+            "pcap",
+            "pcap_ng"
+          ]
+        },
+        "timing": {
+          "$ref": "#/$defs/replayTiming"
+        },
+        "requested_interface": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/interfaceId"
+            }
+          ]
+        },
+        "requested_link_mode": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/linkMode"
+        },
+        "frames_attempted": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "frames_completed": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "bytes_completed": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "scheduled_duration": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/duration"
+        },
+        "frames": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/replayFrameResult"
+          }
+        },
+        "passes_completed": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1024
+        },
+        "interfaces_used": {
+          "type": "array",
+          "items": {
+            "$ref": "urn:packetcraftr:output:common:v1#/$defs/interfaceId"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "replaySuccess": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "replay"
+        },
+        "result": {
+          "$ref": "#/$defs/replayResult"
+        }
+      },
+      "required": [
+        "command",
+        "result"
+      ]
+    },
+    "replayTiming": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "original",
+            "immediate"
+          ]
+        },
+        {
+          "type": "object",
+          "required": [
+            "scaled"
+          ],
+          "properties": {
+            "scaled": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          },
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "required": [
+            "fixed_rate"
+          ],
+          "properties": {
+            "fixed_rate": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          },
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "required": [
+            "bit_rate"
+          ],
+          "properties": {
+            "bit_rate": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 18446744073709551615
+            }
+          },
+          "additionalProperties": true
+        }
+      ]
+    }
+  }
+}

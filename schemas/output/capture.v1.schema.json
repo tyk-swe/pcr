@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:packetcraftr:output:capture:v1",
+  "title": "PacketcraftR capture output payload v1",
+  "description": "Success payload contract for the capture command. The stable envelope is validated separately.",
+  "allOf": [
+    {
+      "type": "object",
+      "required": [
+        "command",
+        "payload_schema"
+      ],
+      "properties": {
+        "command": {
+          "const": "capture"
+        },
+        "payload_schema": {
+          "const": "packetcraftr.output.capture/v1"
+        }
+      }
+    },
+    {
+      "oneOf": [
+        {
+          "allOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/aggregateSuccessEnvelope"
+            },
+            {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/captureAggregateSuccess"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/streamSuccessEnvelope"
+            },
+            {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/captureSuccess"
+                },
+                {
+                  "$ref": "urn:packetcraftr:output:common:v1#/$defs/projectionStreamSuccess"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "$defs": {
+    "captureAggregateSuccess": {
+      "type": "object",
+      "required": [
+        "command",
+        "result",
+        "stats"
+      ],
+      "properties": {
+        "command": {
+          "const": "capture"
+        },
+        "result": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/captureSummary"
+        }
+      }
+    },
+    "captureSuccess": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "capture"
+        }
+      },
+      "required": [
+        "command",
+        "result"
+      ],
+      "allOf": [
+        {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/terminalWithStats"
+        }
+      ],
+      "oneOf": [
+        {
+          "properties": {
+            "event": {
+              "const": "frame"
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "source_frame",
+                "frame"
+              ],
+              "properties": {
+                "source_frame": {
+                  "$ref": "urn:packetcraftr:output:common:v1#/$defs/sourceFrame"
+                },
+                "frame": {
+                  "$ref": "urn:packetcraftr:output:common:v1#/$defs/frame"
+                },
+                "decoded": {
+                  "$ref": "urn:packetcraftr:output:common:v1#/$defs/decodedStack"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "complete"
+            },
+            "result": {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/captureSummary"
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        }
+      ]
+    }
+  }
+}

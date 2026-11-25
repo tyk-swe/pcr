@@ -67,7 +67,7 @@ See [QUIC transport analysis](docs/quic-analysis.md) for offline and live decryp
 
 The protocol fixture manifest at [`examples/captures/protocols.manifest.json`](examples/captures/protocols.manifest.json) links synthetic captures to their packet documents and optional decode bindings. Public JSON contracts live under [`schemas/`](schemas/), with matching input and output examples under [`examples/documents/`](examples/documents/).
 
-All current CLI JSON and NDJSON envelopes emit the `packetcraftr.output/v22` schema identifier defined in [`schemas/packetcraftr.output.v22.schema.json`](schemas/packetcraftr.output.v22.schema.json). Output contract identifiers are immutable and never reused.
+All current CLI JSON and NDJSON envelopes emit the `packetcraftr.output/v23` schema identifier defined in [`schemas/packetcraftr.output.v23.schema.json`](schemas/packetcraftr.output.v23.schema.json). Success envelopes also carry a `payload_schema` identifier resolved against the command schemas in [`schemas/output`](schemas/output). Output contract identifiers are immutable and never reused.
 
 ## Generated references
 

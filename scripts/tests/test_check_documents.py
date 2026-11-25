@@ -32,7 +32,7 @@ def workspace(files: dict[str, str]):
     }
     base = {
         "examples/consumers/forwarding.py": 'SCHEMA = "packetcraftr.output/v19"\n',
-        "crates/packetcraftr-core/src/security.rs":
+        "crates/packetcraftr-cli/src/output/contract.rs":
             'pub const OUTPUT_SCHEMA: &str = "packetcraftr.output/v19";\n',
         "schemas/packetcraftr.indicators.v1.schema.json": json.dumps(SCHEMA),
     }
@@ -112,7 +112,7 @@ class CheckDocumentsTests(unittest.TestCase):
         self.assertTrue(any("byte-identical" in problem for problem in problems))
 
     def test_duplicate_runtime_identifier_is_reported_at_its_source(self):
-        contract = "crates/packetcraftr-core/src/security.rs"
+        contract = "crates/packetcraftr-cli/src/output/contract.rs"
         problems = self.check({
             "examples/documents/indicators.json": '{"schema": "packetcraftr.indicators/v1"}',
             contract: 'pub const OUTPUT_SCHEMA: &str = "packetcraftr.output/v19";\n'

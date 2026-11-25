@@ -1,8 +1,9 @@
 {
-  "schema": "packetcraftr.output/v22",
+  "schema": "packetcraftr.output/v23",
+  "payload_schema": "packetcraftr.output.traceroute/v1",
   "command": "traceroute",
   "mode": "stream",
-  "sequence": 3,
+  "seq": 3,
   "status": "success",
   "result": {
     "target": "router.lab",

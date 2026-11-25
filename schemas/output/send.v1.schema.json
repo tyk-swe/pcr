@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:packetcraftr:output:send:v1",
+  "title": "PacketcraftR send output payload v1",
+  "description": "Success payload contract for the send command. The stable envelope is validated separately.",
+  "allOf": [
+    {
+      "type": "object",
+      "required": [
+        "command",
+        "payload_schema"
+      ],
+      "properties": {
+        "command": {
+          "const": "send"
+        },
+        "payload_schema": {
+          "const": "packetcraftr.output.send/v1"
+        }
+      }
+    },
+    {
+      "oneOf": [
+        {
+          "allOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/aggregateSuccessEnvelope"
+            },
+            {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/sendSuccess"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "$defs": {
+    "sendResult": {
+      "type": "object",
+      "required": [
+        "frames",
+        "passes_completed"
+      ],
+      "properties": {
+        "frames": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/sentFrame"
+          }
+        },
+        "passes_completed": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint32"
+        }
+      },
+      "additionalProperties": true
+    },
+    "sendSuccess": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "send"
+        },
+        "result": {
+          "$ref": "#/$defs/sendResult"
+        }
+      },
+      "required": [
+        "command",
+        "result"
+      ]
+    },
+    "sentFrame": {
+      "type": "object",
+      "required": [
+        "pass",
+        "index",
+        "frame",
+        "route"
+      ],
+      "properties": {
+        "pass": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint32",
+          "description": "One-based repetition pass over the packet set."
+        },
+        "index": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64",
+          "description": "Zero-based packet index within one expansion pass."
+        },
+        "frame": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/wireFrame"
+        },
+        "route": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/materializedRoute"
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

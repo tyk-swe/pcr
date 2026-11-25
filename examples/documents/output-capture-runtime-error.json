@@ -1,9 +1,9 @@
 {
-  "schema": "packetcraftr.output/v22",
+  "schema": "packetcraftr.output/v23",
   "command": "capture",
   "mode": "stream",
   "status": "error",
-  "sequence": 0,
+  "seq": 0,
   "event": "error",
   "error": {
     "code": "io.stdout",

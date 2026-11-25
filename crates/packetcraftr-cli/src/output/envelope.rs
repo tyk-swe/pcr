@@ -201,9 +201,11 @@ enum OutputPayload<T> {
 #[derive(Clone, Debug, Serialize)]
 pub struct Envelope<T> {
     schema: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    payload_schema: Option<String>,
     command: Option<Command>,
     mode: Mode,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "seq", skip_serializing_if = "Option::is_none")]
     sequence: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     event: Option<&'static str>,
@@ -225,6 +227,7 @@ impl<T> Envelope<T> {
         } = published;
         Self {
             schema: SCHEMA,
+            payload_schema: Some(super::contract::payload_schema(command.as_str())),
             command: Some(command),
             mode: Mode::Aggregate,
             sequence: None,
@@ -245,6 +248,7 @@ impl<T> Envelope<T> {
     ) -> Self {
         Self {
             schema: SCHEMA,
+            payload_schema: Some(super::contract::payload_schema(command.as_str())),
             command: Some(command),
             mode: Mode::Stream,
             sequence: Some(sequence),
@@ -273,6 +277,7 @@ impl Envelope<()> {
     pub fn error(command: Option<Command>, error: Error) -> Self {
         Self {
             schema: SCHEMA,
+            payload_schema: None,
             command,
             mode: Mode::Aggregate,
             sequence: None,
@@ -287,6 +292,7 @@ impl Envelope<()> {
     pub(super) fn error_record(command: Option<Command>, sequence: u64, error: Error) -> Self {
         Self {
             schema: SCHEMA,
+            payload_schema: None,
             command,
             mode: Mode::Stream,
             sequence: Some(sequence),

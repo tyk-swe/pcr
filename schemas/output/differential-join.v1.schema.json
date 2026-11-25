@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:packetcraftr:output:differential-join:v1",
+  "title": "PacketcraftR differential-join output payload v1",
+  "description": "Success payload contract for the differential-join command. The stable envelope is validated separately.",
+  "allOf": [
+    {
+      "type": "object",
+      "required": [
+        "command",
+        "payload_schema"
+      ],
+      "properties": {
+        "command": {
+          "const": "differential-join"
+        },
+        "payload_schema": {
+          "const": "packetcraftr.output.differential-join/v1"
+        }
+      }
+    },
+    {
+      "oneOf": [
+        {
+          "allOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/aggregateSuccessEnvelope"
+            },
+            {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/differentialJoinSuccess"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "$defs": {
+    "differentialJoinSuccess": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "differential-join"
+        },
+        "result": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/differentialResult"
+        }
+      },
+      "required": [
+        "command",
+        "result"
+      ]
+    }
+  }
+}

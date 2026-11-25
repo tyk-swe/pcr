@@ -1,8 +1,9 @@
 {
-  "schema": "packetcraftr.output/v22",
+  "schema": "packetcraftr.output/v23",
+  "payload_schema": "packetcraftr.output.differential/v1",
   "command": "differential",
   "mode": "stream",
-  "sequence": 18,
+  "seq": 18,
   "event": "complete",
   "status": "success",
   "result": {

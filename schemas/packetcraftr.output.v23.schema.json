@@ -1,0 +1,136 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:packetcraftr:output:v23",
+  "$comment": "Packet documents remain independently versioned at packetcraftr.packet/v1. Output identifiers are immutable and never reused. Resolve this schema from the release archive; never fetch a moving branch to validate archived evidence.",
+  "title": "PacketcraftR command output envelope v23",
+  "description": "Stable aggregate JSON and sequenced NDJSON envelope. Validate success payloads with the schema named by payload_schema.",
+  "oneOf": [
+    {
+      "$ref": "urn:packetcraftr:output:common:v1#/$defs/aggregateSuccessEnvelope"
+    },
+    {
+      "$ref": "urn:packetcraftr:output:common:v1#/$defs/streamSuccessEnvelope"
+    },
+    {
+      "$ref": "urn:packetcraftr:output:common:v1#/$defs/aggregateError"
+    },
+    {
+      "$ref": "urn:packetcraftr:output:common:v1#/$defs/streamError"
+    }
+  ],
+  "$defs": {
+    "baseEnvelope": {
+      "type": "object",
+      "required": [
+        "schema",
+        "command",
+        "mode",
+        "status",
+        "diagnostics"
+      ],
+      "properties": {
+        "schema": {
+          "const": "packetcraftr.output/v23"
+        },
+        "command": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            null,
+            "build",
+            "dissect",
+            "protocols",
+            "plan",
+            "send",
+            "exchange",
+            "capture",
+            "expert",
+            "follow",
+            "read",
+            "replay",
+            "scan",
+            "stats",
+            "tls",
+            "traceroute",
+            "dns",
+            "fuzz",
+            "interfaces",
+            "routes",
+            "fragment",
+            "merge",
+            "dns-read",
+            "http",
+            "export",
+            "rewrite",
+            "verify-forwarding",
+            "http2",
+            "identify",
+            "identify-os",
+            "hunt",
+            "dns-anomalies",
+            "beacons",
+            "audit-tls",
+            "audit-http",
+            "scan-diff",
+            "report",
+            "messages",
+            "differential",
+            "differential-responder",
+            "differential-join",
+            "quic",
+            "inventory",
+            "http3"
+          ]
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "aggregate",
+            "stream"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "success",
+            "error"
+          ]
+        },
+        "seq": {
+          "description": "Zero-based ordinal of this emitted NDJSON record within one command invocation. Records are contiguous, and domain identifiers remain in result or error context.",
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "result": {
+          "type": "object"
+        },
+        "error": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/error"
+        },
+        "diagnostics": {
+          "type": "array",
+          "items": {
+            "$ref": "urn:packetcraftr:output:common:v1#/$defs/diagnostic"
+          }
+        },
+        "stats": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/operationStats"
+        },
+        "event": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Stream record discriminator; complete and error terminate the stream."
+        },
+        "resources": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/resourceReport"
+        },
+        "payload_schema": {
+          "type": "string",
+          "pattern": "^packetcraftr\\.output\\.[a-z0-9-]+/v1$",
+          "description": "Command payload schema identifier; present on every success envelope."
+        }
+      }
+    }
+  }
+}

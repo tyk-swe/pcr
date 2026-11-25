@@ -1,8 +1,9 @@
 {
-  "schema": "packetcraftr.output/v22",
+  "schema": "packetcraftr.output/v23",
+  "payload_schema": "packetcraftr.output.dissect/v1",
   "command": "dissect",
   "mode": "stream",
-  "sequence": 0,
+  "seq": 0,
   "event": "fields",
   "status": "success",
   "result": {

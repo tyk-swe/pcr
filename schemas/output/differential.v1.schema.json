@@ -1,0 +1,218 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:packetcraftr:output:differential:v1",
+  "title": "PacketcraftR differential output payload v1",
+  "description": "Success payload contract for the differential command. The stable envelope is validated separately.",
+  "allOf": [
+    {
+      "type": "object",
+      "required": [
+        "command",
+        "payload_schema"
+      ],
+      "properties": {
+        "command": {
+          "const": "differential"
+        },
+        "payload_schema": {
+          "const": "packetcraftr.output.differential/v1"
+        }
+      }
+    },
+    {
+      "oneOf": [
+        {
+          "allOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/aggregateSuccessEnvelope"
+            },
+            {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/differentialSuccess"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/streamSuccessEnvelope"
+            },
+            {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/differentialStreamSuccess"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "$defs": {
+    "differentialPlanResult": {
+      "type": "object",
+      "required": [
+        "plan_digest",
+        "token",
+        "repeats",
+        "rows",
+        "total_packets",
+        "total_wire_bytes"
+      ],
+      "properties": {
+        "plan_digest": {
+          "type": "string"
+        },
+        "token": {
+          "type": "string"
+        },
+        "repeats": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "rows": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "variant",
+              "hypothesis",
+              "packets_per_attempt"
+            ],
+            "properties": {
+              "variant": {
+                "type": "string"
+              },
+              "hypothesis": {
+                "type": "string"
+              },
+              "packets_per_attempt": {
+                "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "total_packets": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "total_wire_bytes": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        }
+      },
+      "additionalProperties": false
+    },
+    "differentialStreamSuccess": {
+      "description": "One progressive differential attempt event, a diagnostic, or the terminal complete event carrying the verdict rows.",
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "differential"
+        }
+      },
+      "required": [
+        "command",
+        "result"
+      ],
+      "allOf": [
+        {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/terminalWithStats"
+        }
+      ],
+      "oneOf": [
+        {
+          "properties": {
+            "event": {
+              "const": "attempt"
+            },
+            "result": {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/differentialAttempt"
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "diagnostic"
+            },
+            "result": {
+              "type": "object",
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "complete"
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "valid",
+                "provisional",
+                "plan_digest",
+                "rows"
+              ],
+              "properties": {
+                "valid": {
+                  "type": "boolean"
+                },
+                "provisional": {
+                  "type": "boolean"
+                },
+                "plan_digest": {
+                  "type": "string"
+                },
+                "rows": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "urn:packetcraftr:output:common:v1#/$defs/differentialRow"
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        }
+      ]
+    },
+    "differentialSuccess": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "differential"
+        },
+        "result": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/differentialPlanResult"
+            },
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/differentialResult"
+            }
+          ]
+        }
+      },
+      "required": [
+        "command",
+        "result"
+      ]
+    }
+  }
+}

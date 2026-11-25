@@ -1,0 +1,689 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:packetcraftr:output:stats:v1",
+  "title": "PacketcraftR stats output payload v1",
+  "description": "Success payload contract for the stats command. The stable envelope is validated separately.",
+  "allOf": [
+    {
+      "type": "object",
+      "required": [
+        "command",
+        "payload_schema"
+      ],
+      "properties": {
+        "command": {
+          "const": "stats"
+        },
+        "payload_schema": {
+          "const": "packetcraftr.output.stats/v1"
+        }
+      }
+    },
+    {
+      "oneOf": [
+        {
+          "allOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/aggregateSuccessEnvelope"
+            },
+            {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/statsSuccess"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "$defs": {
+    "captureInterface": {
+      "type": "object",
+      "description": "One capture-source interface description, identified by the global interface ID that frame records reference.",
+      "required": [
+        "id",
+        "link_type",
+        "snap_length"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint32"
+        },
+        "link_type": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint32"
+        },
+        "snap_length": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint32"
+        }
+      },
+      "additionalProperties": true
+    },
+    "statsConversation": {
+      "type": "object",
+      "required": [
+        "transport",
+        "stream",
+        "address_a",
+        "port_a",
+        "address_b",
+        "port_b",
+        "frames_a_to_b",
+        "bytes_a_to_b",
+        "frames_b_to_a",
+        "bytes_b_to_a",
+        "first_timestamp",
+        "last_timestamp",
+        "duration"
+      ],
+      "properties": {
+        "transport": {
+          "enum": [
+            "tcp",
+            "udp"
+          ]
+        },
+        "stream": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "address_a": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/ipAddress"
+        },
+        "port_a": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "address_b": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/ipAddress"
+        },
+        "port_b": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "frames_a_to_b": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "bytes_a_to_b": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "frames_b_to_a": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "bytes_b_to_a": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "first_timestamp": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/timestamp"
+        },
+        "last_timestamp": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/timestamp"
+        },
+        "duration": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/duration"
+        },
+        "scope": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/captureScope"
+        }
+      },
+      "additionalProperties": true
+    },
+    "statsEndpoint": {
+      "type": "object",
+      "required": [
+        "address",
+        "tx_frames",
+        "tx_bytes",
+        "rx_frames",
+        "rx_bytes"
+      ],
+      "properties": {
+        "address": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/ipAddress"
+        },
+        "tx_frames": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "tx_bytes": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "rx_frames": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "rx_bytes": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        }
+      },
+      "additionalProperties": true
+    },
+    "statsIo": {
+      "type": "object",
+      "required": [
+        "interval",
+        "buckets"
+      ],
+      "properties": {
+        "interval": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/duration"
+        },
+        "buckets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/statsIoBucket"
+          }
+        },
+        "origin": {
+          "anyOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "underflow_frames": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": true
+    },
+    "statsIoBucket": {
+      "type": "object",
+      "required": [
+        "offset",
+        "frames",
+        "bytes"
+      ],
+      "properties": {
+        "offset": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/duration"
+        },
+        "frames": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "bytes": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        }
+      },
+      "additionalProperties": true
+    },
+    "statsPort": {
+      "type": "object",
+      "required": [
+        "transport",
+        "port",
+        "frames",
+        "bytes"
+      ],
+      "properties": {
+        "transport": {
+          "enum": [
+            "tcp",
+            "udp"
+          ]
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "frames": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "bytes": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        }
+      },
+      "additionalProperties": true
+    },
+    "statsProtocol": {
+      "type": "object",
+      "required": [
+        "protocol",
+        "frames",
+        "bytes"
+      ],
+      "properties": {
+        "protocol": {
+          "type": "string"
+        },
+        "frames": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "bytes": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        }
+      },
+      "additionalProperties": true
+    },
+    "statsResult": {
+      "type": "object",
+      "required": [
+        "table",
+        "frames_read",
+        "frames_matched",
+        "bytes_matched",
+        "interfaces"
+      ],
+      "properties": {
+        "table": {
+          "enum": [
+            "conversations",
+            "endpoints",
+            "protocols",
+            "ports",
+            "io",
+            "fragments",
+            "overview"
+          ]
+        },
+        "frames_read": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "frames_matched": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "bytes_matched": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "first_timestamp": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/timestamp"
+        },
+        "last_timestamp": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/timestamp"
+        },
+        "duration": {
+          "description": "Earliest-to-latest matched-timestamp span; absent when nothing matched.",
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/duration"
+        },
+        "average_packet_size": {
+          "description": "Mean captured length over matched frames, in bytes; absent when the match set is empty.",
+          "type": "number",
+          "minimum": 0
+        },
+        "packets_per_second": {
+          "description": "Matched frames per second over duration; absent when duration is missing or zero.",
+          "type": "number",
+          "minimum": 0
+        },
+        "bytes_per_second": {
+          "description": "Matched captured bytes per second over duration; absent under the same rules as packets_per_second.",
+          "type": "number",
+          "minimum": 0
+        },
+        "interfaces": {
+          "description": "Capture-source interface descriptions in the global interface-ID order frame records reference; empty when the source describes none.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/captureInterface"
+          }
+        },
+        "conversations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/statsConversation"
+          }
+        },
+        "endpoints": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/statsEndpoint"
+          }
+        },
+        "protocols": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/statsProtocol"
+          }
+        },
+        "ports": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/statsPort"
+          }
+        },
+        "io": {
+          "$ref": "#/$defs/statsIo"
+        },
+        "fragments": {
+          "description": "Capture-global fragment accounting; derived bytes are separate from the physical matched frame and byte totals.",
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/ipReassemblyReport"
+        },
+        "clock": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/captureClock"
+        },
+        "protocol_count": {
+          "description": "Distinct matched entries before leaderboard truncation.",
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "endpoint_count": {
+          "description": "Distinct matched entries before leaderboard truncation.",
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "conversation_count": {
+          "description": "Distinct matched entries before leaderboard truncation.",
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "table": {
+                "const": "conversations"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "conversations"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "endpoints"
+                  ]
+                },
+                {
+                  "required": [
+                    "protocols"
+                  ]
+                },
+                {
+                  "required": [
+                    "ports"
+                  ]
+                },
+                {
+                  "required": [
+                    "io"
+                  ]
+                },
+                {
+                  "required": [
+                    "fragments"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "table": {
+                "const": "endpoints"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "endpoints"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "conversations"
+                  ]
+                },
+                {
+                  "required": [
+                    "protocols"
+                  ]
+                },
+                {
+                  "required": [
+                    "ports"
+                  ]
+                },
+                {
+                  "required": [
+                    "io"
+                  ]
+                },
+                {
+                  "required": [
+                    "fragments"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "table": {
+                "const": "protocols"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "protocols"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "conversations"
+                  ]
+                },
+                {
+                  "required": [
+                    "endpoints"
+                  ]
+                },
+                {
+                  "required": [
+                    "ports"
+                  ]
+                },
+                {
+                  "required": [
+                    "io"
+                  ]
+                },
+                {
+                  "required": [
+                    "fragments"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "table": {
+                "const": "ports"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "ports"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "conversations"
+                  ]
+                },
+                {
+                  "required": [
+                    "endpoints"
+                  ]
+                },
+                {
+                  "required": [
+                    "protocols"
+                  ]
+                },
+                {
+                  "required": [
+                    "io"
+                  ]
+                },
+                {
+                  "required": [
+                    "fragments"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "table": {
+                "const": "io"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "io"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "conversations"
+                  ]
+                },
+                {
+                  "required": [
+                    "endpoints"
+                  ]
+                },
+                {
+                  "required": [
+                    "protocols"
+                  ]
+                },
+                {
+                  "required": [
+                    "ports"
+                  ]
+                },
+                {
+                  "required": [
+                    "fragments"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "table": {
+                "const": "fragments"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "fragments"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "conversations"
+                  ]
+                },
+                {
+                  "required": [
+                    "endpoints"
+                  ]
+                },
+                {
+                  "required": [
+                    "protocols"
+                  ]
+                },
+                {
+                  "required": [
+                    "ports"
+                  ]
+                },
+                {
+                  "required": [
+                    "io"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "table": {
+                "const": "overview"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "protocol_count",
+              "endpoint_count",
+              "conversation_count",
+              "protocols",
+              "endpoints",
+              "conversations"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "ports"
+                  ]
+                },
+                {
+                  "required": [
+                    "io"
+                  ]
+                },
+                {
+                  "required": [
+                    "fragments"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "additionalProperties": true,
+      "description": "Matched capture statistics. Explicit sorting ranks frames or bytes descending, then the other volume metric, then the natural key, before retention. Default ordering is unchanged; overview defaults to frame ranking and five rows per leaderboard. Counts precede retention."
+    },
+    "statsSuccess": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "stats"
+        },
+        "result": {
+          "$ref": "#/$defs/statsResult"
+        }
+      },
+      "required": [
+        "command",
+        "result"
+      ]
+    }
+  }
+}

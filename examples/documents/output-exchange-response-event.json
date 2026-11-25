@@ -1,8 +1,9 @@
 {
-  "schema": "packetcraftr.output/v22",
+  "schema": "packetcraftr.output/v23",
+  "payload_schema": "packetcraftr.output.exchange/v1",
   "command": "exchange",
   "mode": "stream",
-  "sequence": 1,
+  "seq": 1,
   "status": "success",
   "result": {
     "request_index": 0,

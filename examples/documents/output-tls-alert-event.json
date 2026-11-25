@@ -1,8 +1,9 @@
 {
-  "schema": "packetcraftr.output/v22",
+  "schema": "packetcraftr.output/v23",
+  "payload_schema": "packetcraftr.output.tls/v1",
   "command": "tls",
   "mode": "stream",
-  "sequence": 1,
+  "seq": 1,
   "status": "success",
   "result": {
     "session": 1,

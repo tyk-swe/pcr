@@ -10,7 +10,8 @@
     "reasons": [],
     "scan": "scanned"
   },
-  "schema": "packetcraftr.output/v22",
-  "sequence": 2,
+  "schema": "packetcraftr.output/v23",
+  "payload_schema": "packetcraftr.output.scan/v1",
+  "seq": 2,
   "status": "success"
 }

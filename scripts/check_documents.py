@@ -89,6 +89,8 @@ def check_documents(root: Path = ROOT) -> list[str]:
                 if shown.as_posix() not in SCHEMA_OPTIONAL_DOCUMENTS:
                     problems.append(f"{shown}: expected a top-level 'schema' string")
                 continue
+            if identity.startswith("packetcraftr.output/"):
+                continue
             schema = schema_path(root, identity)
             if schema is None:
                 problems.append(f"{shown}: unrecognised schema identity {identity!r}")

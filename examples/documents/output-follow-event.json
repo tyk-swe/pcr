@@ -1,8 +1,9 @@
 {
-  "schema": "packetcraftr.output/v22",
+  "schema": "packetcraftr.output/v23",
+  "payload_schema": "packetcraftr.output.follow/v1",
   "command": "follow",
   "mode": "stream",
-  "sequence": 0,
+  "seq": 0,
   "status": "success",
   "result": {
     "direction": "client",

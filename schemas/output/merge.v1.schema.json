@@ -1,0 +1,169 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:packetcraftr:output:merge:v1",
+  "title": "PacketcraftR merge output payload v1",
+  "description": "Success payload contract for the merge command. The stable envelope is validated separately.",
+  "allOf": [
+    {
+      "type": "object",
+      "required": [
+        "command",
+        "payload_schema"
+      ],
+      "properties": {
+        "command": {
+          "const": "merge"
+        },
+        "payload_schema": {
+          "const": "packetcraftr.output.merge/v1"
+        }
+      }
+    },
+    {
+      "oneOf": [
+        {
+          "allOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/aggregateSuccessEnvelope"
+            },
+            {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/mergeSuccess"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/streamSuccessEnvelope"
+            },
+            {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/mergeStreamSuccess"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "$defs": {
+    "mergeInterface": {
+      "type": "object",
+      "required": [
+        "source",
+        "source_name",
+        "section",
+        "local_interface",
+        "global_interface",
+        "output_interface"
+      ],
+      "properties": {
+        "source": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "source_name": {
+          "type": "string"
+        },
+        "section": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "local_interface": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "global_interface": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "output_interface": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        }
+      },
+      "additionalProperties": true
+    },
+    "mergeResult": {
+      "type": "object",
+      "required": [
+        "path",
+        "frames",
+        "captured_bytes",
+        "source_frames",
+        "interfaces",
+        "source_metadata_records"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "frames": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "captured_bytes": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "source_frames": {
+          "type": "array",
+          "items": {
+            "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+          }
+        },
+        "interfaces": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/mergeInterface"
+          }
+        },
+        "source_metadata_records": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        }
+      },
+      "additionalProperties": true
+    },
+    "mergeStreamSuccess": {
+      "type": "object",
+      "required": [
+        "command",
+        "result",
+        "event"
+      ],
+      "properties": {
+        "command": {
+          "const": "merge"
+        },
+        "event": {
+          "const": "complete"
+        },
+        "result": {
+          "$ref": "#/$defs/mergeResult"
+        }
+      }
+    },
+    "mergeSuccess": {
+      "type": "object",
+      "required": [
+        "command",
+        "result"
+      ],
+      "properties": {
+        "command": {
+          "const": "merge"
+        },
+        "result": {
+          "$ref": "#/$defs/mergeResult"
+        }
+      }
+    }
+  }
+}

@@ -4,7 +4,7 @@
 use std::{net::Ipv4Addr, path::Path};
 
 use packetcraftr::differential as lib;
-use packetcraftr_core::{error::Kind, security::input};
+use packetcraftr_core::error::Kind;
 use serde::Deserialize;
 
 use crate::{errors::CliError, invocation::Invocation, output::contract::Command};
@@ -91,7 +91,7 @@ pub(crate) fn load(
         MAX_INPUT_BYTES,
     )?;
     invocation.check()?;
-    let campaign = input::aggregate::<Campaign>(
+    let campaign = crate::output::contract::aggregate_input::<Campaign>(
         &bytes,
         &[
             Command::Differential.as_str(),

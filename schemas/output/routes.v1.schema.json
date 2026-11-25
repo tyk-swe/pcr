@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:packetcraftr:output:routes:v1",
+  "title": "PacketcraftR routes output payload v1",
+  "description": "Success payload contract for the routes command. The stable envelope is validated separately.",
+  "allOf": [
+    {
+      "type": "object",
+      "required": [
+        "command",
+        "payload_schema"
+      ],
+      "properties": {
+        "command": {
+          "const": "routes"
+        },
+        "payload_schema": {
+          "const": "packetcraftr.output.routes/v1"
+        }
+      }
+    },
+    {
+      "oneOf": [
+        {
+          "allOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/aggregateSuccessEnvelope"
+            },
+            {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/routesSuccess"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "$defs": {
+    "routesResult": {
+      "type": "object",
+      "required": [
+        "routes"
+      ],
+      "properties": {
+        "routes": {
+          "type": "array",
+          "items": {
+            "$ref": "urn:packetcraftr:output:common:v1#/$defs/routeDecision"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "routesSuccess": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "routes"
+        },
+        "result": {
+          "$ref": "#/$defs/routesResult"
+        }
+      },
+      "required": [
+        "command",
+        "result"
+      ]
+    }
+  }
+}

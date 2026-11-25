@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v22",
+  "schema": "packetcraftr.output/v23",
   "command": "verify-forwarding",
   "mode": "aggregate",
   "status": "error",

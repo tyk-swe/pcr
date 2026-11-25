@@ -16,11 +16,11 @@ fn cooperative_publication_acks_without_handoff() {
     let count = Arc::new(AtomicUsize::new(0));
     let observed = Arc::clone(&count);
     let caller = std::thread::current().id();
-    let sink = move |event| {
+    let sink = forwarding(move |event, _| {
         assert_eq!(std::thread::current().id(), caller);
         observed.fetch_add(1, Ordering::Relaxed);
         Ok(event != 999)
-    };
+    });
     let mut publish = publisher(sink, BoundaryError::from_error, |error| error).unwrap();
     let deadline = Deadline::new(Duration::from_secs(10));
     for event in 0..1000 {
@@ -35,10 +35,10 @@ fn cooperative_publication_acks_without_handoff() {
 fn borrowed_publication_mutates_the_caller_state() {
     let mut events = Vec::new();
     {
-        let mut sink = |event: usize| {
+        let mut sink = forwarding(|event: usize, _| {
             events.push(event);
             Ok::<_, BoundaryError>(())
-        };
+        });
         let mut publish = publisher(&mut sink, BoundaryError::from_error, |error| error).unwrap();
         publish(7, &Deadline::new(Duration::from_secs(1))).unwrap();
     }
@@ -49,10 +49,10 @@ fn borrowed_publication_mutates_the_caller_state() {
 fn cancelled_cooperative_callback_prevents_success() {
     let signal = Cancellation::default();
     let cancel = signal.clone();
-    let sink = move |_| {
+    let sink = forwarding(move |_, _| {
         cancel.cancel();
         Ok(true)
-    };
+    });
     let mut publish = publisher(sink, BoundaryError::from_error, |error| error).unwrap();
     let deadline = Deadline::new(Duration::from_secs(1)).with_cancellation(Some(signal));
     assert_eq!(
@@ -67,13 +67,13 @@ fn cancelled_cooperative_callback_prevents_success() {
 
 #[test]
 fn cooperative_errors_are_output_errors() {
-    let sink = |_| {
+    let sink = forwarding(|_, _| {
         Err::<bool, BoundaryError>(BoundaryError::new(
             "refused",
             Classification::new(packetcraftr_core::error::Code::IoTest, Kind::Io, None),
             Vec::new(),
         ))
-    };
+    });
     let mut publish = publisher(sink, BoundaryError::from_error, |error| error).unwrap();
     assert_eq!(
         publish(0, &Deadline::new(Duration::from_secs(1)))

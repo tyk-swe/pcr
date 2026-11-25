@@ -22,40 +22,24 @@ pub trait Sink<E> {
     }
 }
 
-impl<E, A, F> Sink<E> for F
+impl<E, S> Sink<E> for &mut S
 where
-    F: FnMut(E) -> Result<A, BoundaryError>,
+    S: Sink<E> + ?Sized,
 {
-    type Ack = A;
+    type Ack = S::Ack;
 
-    fn publish(&mut self, event: E) -> Result<A, BoundaryError> {
-        self(event)
+    fn publish(&mut self, event: E) -> Result<Self::Ack, BoundaryError> {
+        (**self).publish(event)
+    }
+
+    fn publish_controlled(
+        &mut self,
+        event: E,
+        control: &Deadline,
+    ) -> Result<Self::Ack, BoundaryError> {
+        (**self).publish_controlled(event, control)
     }
 }
-
-macro_rules! forward_sink {
-    ($collector:ty, $event:ty) => {
-        impl crate::Sink<$event> for &mut $collector {
-            type Ack = <$collector as crate::Sink<$event>>::Ack;
-
-            fn publish(
-                &mut self,
-                event: $event,
-            ) -> Result<Self::Ack, packetcraftr_core::error::BoundaryError> {
-                <$collector as crate::Sink<$event>>::publish(*self, event)
-            }
-
-            fn publish_controlled(
-                &mut self,
-                event: $event,
-                control: &packetcraftr_core::budget::Deadline,
-            ) -> Result<Self::Ack, packetcraftr_core::error::BoundaryError> {
-                <$collector as crate::Sink<$event>>::publish_controlled(*self, event, control)
-            }
-        }
-    };
-}
-pub(crate) use forward_sink;
 
 /// Worker-thread isolation for a blocking sink. This is the boundary that
 /// requires owned, sendable state; unwrapped sinks remain cooperative.
@@ -108,7 +92,7 @@ where
     }
 }
 
-pub(crate) fn forwarding<E, A, F>(callback: F) -> impl Sink<E, Ack = A>
+pub fn forwarding<E, A, F>(callback: F) -> impl Sink<E, Ack = A>
 where
     F: FnMut(E, Option<&Deadline>) -> Result<A, BoundaryError>,
 {

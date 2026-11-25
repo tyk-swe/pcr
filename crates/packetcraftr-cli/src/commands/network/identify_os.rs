@@ -174,7 +174,7 @@ impl crate::commands::Spec for Args {
                         )
                         .map(|_| ())
                         .map_err(CliError::from)
-                });
+                })?;
                 let summary = client
                     .identify_os(request.clone(), emit)
                     .map_err(CliError::classified)?;

@@ -102,7 +102,7 @@ pub(super) fn run(
     if let [request] = requests.as_slice() {
         return match format {
             Format::Ndjson => {
-                let emit = crate::commands::execution::emitter(invocation, rendering::emit_event);
+                let emit = crate::commands::execution::emitter(invocation, rendering::emit_event)?;
                 let summary = client
                     .dns(request.clone(), emit)
                     .map_err(CliError::classified)?;
@@ -146,7 +146,7 @@ pub(super) fn run(
                 |event: packetcraftr::dns::batch::Event, stream| {
                     rendering::emit_event(event.event, stream)
                 },
-            );
+            )?;
             let summary = client
                 .dns_batch(request.clone(), emit)
                 .map_err(CliError::classified)?;

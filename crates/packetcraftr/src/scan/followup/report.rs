@@ -51,8 +51,6 @@ impl Sink<Event> for Collector {
     }
 }
 
-crate::engine::execution::forward_sink!(Collector, Event);
-
 impl Collector {
     pub fn finish(self, report: Report) -> Result<Aggregate, Error> {
         let Report {

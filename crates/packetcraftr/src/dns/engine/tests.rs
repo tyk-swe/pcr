@@ -40,9 +40,10 @@ fn request(server: Ipv4Addr) -> Request {
 fn denied_server_is_refused_before_transmission() {
     let (client, sends) = testing::client(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)));
     let error = client
-        .dns(request(Ipv4Addr::new(10, 0, 0, 2)), |_: Event| {
-            Ok::<(), BoundaryError>(())
-        })
+        .dns(
+            request(Ipv4Addr::new(10, 0, 0, 2)),
+            crate::forwarding(|_: Event, _| Ok::<(), BoundaryError>(())),
+        )
         .unwrap_err();
     assert!(matches!(error, super::Error::Authorization(_)), "{error:?}");
     assert_eq!(sends.load(Ordering::Relaxed), 0);
@@ -67,9 +68,10 @@ fn exhausted_deadline_is_returned_before_transmission() {
     let (client, sends) = testing::client(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)));
     let client = client.with_deadline(Deadline::new(Duration::ZERO));
     let error = client
-        .dns(request(Ipv4Addr::new(10, 0, 0, 1)), |_: Event| {
-            Ok::<(), BoundaryError>(())
-        })
+        .dns(
+            request(Ipv4Addr::new(10, 0, 0, 1)),
+            crate::forwarding(|_: Event, _| Ok::<(), BoundaryError>(())),
+        )
         .unwrap_err();
     assert!(
         matches!(error, super::Error::DurationLimit { .. }),

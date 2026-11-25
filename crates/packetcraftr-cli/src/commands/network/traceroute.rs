@@ -120,7 +120,7 @@ pub(super) fn run(
     }
     match format {
         Format::Ndjson => {
-            let emit = crate::commands::execution::emitter(invocation, rendering::emit_event);
+            let emit = crate::commands::execution::emitter(invocation, rendering::emit_event)?;
             let summary = client
                 .traceroute(request.clone(), emit)
                 .map_err(CliError::classified)?;

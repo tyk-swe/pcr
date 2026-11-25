@@ -43,7 +43,7 @@ pub(super) fn run<P: PacketProviders + TargetProviders, K: Clock>(
         let mut controlled = text_invocation.clone();
         controlled.output = stream.clone();
         render_event(&controlled, event)
-    });
+    })?;
     let report = client
         .traceroute_multipath(request, emitter)
         .map_err(CliError::classified)?;

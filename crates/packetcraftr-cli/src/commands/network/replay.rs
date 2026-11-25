@@ -266,11 +266,15 @@ fn replay_text<P: PacketProviders, K: Clock, R: Read>(
 ) -> Result<(), CliError> {
     // The sink runs on a runtime worker, so it enters the invocation's deadline itself.
     let worker_invocation = invocation.clone();
-    let report = drive(client, request, move |Event::Frame(evidence): Event| {
-        text_record_with(evidence, presentation, |args| {
-            try_write_stdout_line(&worker_invocation, args)
-        })
-    })?;
+    let report = drive(
+        client,
+        request,
+        packetcraftr::forwarding(move |Event::Frame(evidence): Event, _| {
+            text_record_with(evidence, presentation, |args| {
+                try_write_stdout_line(&worker_invocation, args)
+            })
+        }),
+    )?;
     rendering::render_summary(invocation, &report, filtered)
 }
 
@@ -284,14 +288,18 @@ fn replay_aggregate<P: PacketProviders, K: Clock, R: Read>(
     let link_mode = request.options.link_mode;
     let frames = Arc::new(Mutex::new(Vec::new()));
     let collected = Arc::clone(&frames);
-    let report = drive(client, request, move |Event::Frame(evidence): Event| {
-        let frame = output_frame(evidence)?;
-        collected
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push(frame);
-        Ok(())
-    })?;
+    let report = drive(
+        client,
+        request,
+        packetcraftr::forwarding(move |Event::Frame(evidence): Event, _| {
+            let frame = output_frame(evidence)?;
+            collected
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(frame);
+            Ok(())
+        }),
+    )?;
     let frames = std::mem::take(&mut *frames.lock().unwrap_or_else(PoisonError::into_inner));
     let stats = output::stats(&report, started.elapsed());
     let result = output::Report::try_from((report, requested_interface, link_mode, frames))
@@ -312,9 +320,13 @@ fn replay_stream<P: PacketProviders, K: Clock, R: Read>(
     let interface = requested_interface(&request);
     let link_mode = request.options.link_mode;
     let records = stream.clone();
-    let report = drive(client, request, move |Event::Frame(evidence): Event| {
-        render_stream_record(&records, evidence)
-    })?;
+    let report = drive(
+        client,
+        request,
+        packetcraftr::forwarding(move |Event::Frame(evidence): Event, _| {
+            render_stream_record(&records, evidence)
+        }),
+    )?;
     let stats = output::stats(&report, started.elapsed());
     let result = output::Report::try_from((report, interface, link_mode, Vec::new()))
         .map_err(CliError::classified)?;
@@ -397,22 +409,19 @@ where
             request.options.limits,
         )?);
         let records = writer.clone();
-        let replayed =
-            drive(
-                client,
-                request,
-                move |Event::Frame(evidence): Event| match &mut *records
-                    .0
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                {
+        let replayed = drive(
+            client,
+            request,
+            packetcraftr::forwarding(move |Event::Frame(evidence): Event, _| {
+                match &mut *records.0.lock().unwrap_or_else(PoisonError::into_inner) {
                     Some(writer) => render_capture_record(writer, evidence),
                     None => Err(output_failure(
                         "replay capture output is already finished",
                         io::Error::other("capture writer closed"),
                     )),
-                },
-            );
+                }
+            }),
+        );
         let mut writer = writer.take();
         replayed?;
         writer

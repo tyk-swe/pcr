@@ -174,8 +174,6 @@ impl Sink<Event> for Collector {
     }
 }
 
-crate::engine::execution::forward_sink!(Collector, Event);
-
 impl Collected {
     fn observe(&mut self, event: Event) {
         match event {

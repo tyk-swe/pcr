@@ -55,8 +55,6 @@ impl Sink<Event> for Collector {
     }
 }
 
-crate::engine::execution::forward_sink!(Collector, Event);
-
 impl Collected {
     fn qualify(&mut self, qualification: scan::Qualification) {
         // Collector residency belongs to its caller. Each provisional sequence

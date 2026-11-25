@@ -33,9 +33,11 @@ fn prepare(
 fn writing(
     write: impl Fn(&packetcraftr::send::SentFrame) -> Result<(), CliError> + Send + 'static,
 ) -> impl packetcraftr::Sink<packetcraftr::send::Event, Ack = ()> {
-    move |packetcraftr::send::Event::Sent(frame): packetcraftr::send::Event| {
-        write(&frame).map_err(CliError::into_boundary_error)
-    }
+    packetcraftr::forwarding(
+        move |packetcraftr::send::Event::Sent(frame): packetcraftr::send::Event, _| {
+            write(&frame).map_err(CliError::into_boundary_error)
+        },
+    )
 }
 
 fn collect(

@@ -101,7 +101,7 @@ fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<()
     let Prepared { request, client } = prepare_live(invocation, send, template, draft)?;
     match format {
         Format::Ndjson => {
-            let emit = crate::commands::execution::emitter(invocation, rendering::emit_event);
+            let emit = crate::commands::execution::emitter(invocation, rendering::emit_event)?;
             let summary = client
                 .exchange(request.clone(), emit)
                 .map_err(CliError::classified)?;

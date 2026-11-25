@@ -140,7 +140,7 @@ fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<()
 
     match format {
         Format::Ndjson => {
-            let emit = crate::commands::execution::emitter(invocation, rendering::emit_event);
+            let emit = crate::commands::execution::emitter(invocation, rendering::emit_event)?;
             let report = client
                 .differential(request, emit)
                 .map_err(CliError::classified)?;

@@ -143,8 +143,8 @@ fn cooperative_ndjson_flushes_without_handoff() {
                 Vec::new(),
             ))
             .map_err(CliError::from)
-    });
-    assert_eq!(sink.delivery(), Delivery::Cooperative);
+    })
+    .unwrap();
     let providers = ProviderSet::packet(
         packetcraftr_netio::route::SystemProvider,
         packetcraftr_netio::interface::SystemProvider,
@@ -226,7 +226,8 @@ fn unisolated_writers_publish_on_workers() {
                     Vec::new(),
                 ))
                 .map_err(CliError::from)
-        });
+        })
+        .unwrap();
         let providers = ProviderSet::packet(
             packetcraftr_netio::route::SystemProvider,
             packetcraftr_netio::interface::SystemProvider,
@@ -312,7 +313,8 @@ fn cooperative_writer_wait_retains_parent_control() {
                     Vec::new(),
                 ))
                 .map_err(CliError::from)
-        });
+        })
+        .unwrap();
         let cancellation = Cancellation::default();
         let parent = if frozen {
             let now = Instant::now();
@@ -401,7 +403,8 @@ fn successful_event_after_deadline_reports_duration_limit() {
     let mut sink = emitter(&invocation, move |(), _| {
         elapsed.store(2, Ordering::Relaxed);
         Ok(())
-    });
+    })
+    .unwrap();
 
     let error = sink
         .publish_controlled((), &deadline)

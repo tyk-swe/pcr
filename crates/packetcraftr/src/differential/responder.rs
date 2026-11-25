@@ -235,11 +235,14 @@ mod tests {
             let mut request = ResponderRequest::new(Ipv4Addr::LOCALHOST, port, token);
             request.max_duration = Duration::from_millis(400);
             request.cancellation = responder_cancellation;
-            respond(request, move |_| {
-                entered_tx.send(()).unwrap();
-                release_rx.recv().unwrap();
-                Ok(())
-            })
+            respond(
+                request,
+                crate::forwarding(move |_, _| {
+                    entered_tx.send(()).unwrap();
+                    release_rx.recv().unwrap();
+                    Ok(())
+                }),
+            )
         });
         let payload = canary::build_probe(&token, 1, 7, 256);
         let start_deadline = SystemClock.now() + Duration::from_secs(2);

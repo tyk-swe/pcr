@@ -77,8 +77,6 @@ impl Sink<Event> for Collector {
     }
 }
 
-crate::engine::execution::forward_sink!(Collector, Event);
-
 impl Collector {
     #[must_use]
     pub fn finish(self, report: Report) -> Aggregate {

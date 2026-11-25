@@ -168,7 +168,7 @@ fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<()
     let outcome = match format {
         Format::Ndjson => {
             let emit =
-                crate::commands::execution::emitter(invocation, rendering::emit_responder_event);
+                crate::commands::execution::emitter(invocation, rendering::emit_responder_event)?;
             lib::respond(request, emit)
         }
         Format::Text | Format::Json => lib::respond(request, &mut collector),

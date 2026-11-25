@@ -200,7 +200,7 @@ fn execute_offline(
             let emit = crate::commands::execution::emitter(invocation, |case, stream| {
                 let event = output::Event::try_from(case).map_err(CliError::classified)?;
                 Ok(stream.emit_published(Published::new(event, Vec::new()))?)
-            });
+            })?;
             let summary = publish_offline(
                 invocation,
                 &request,
@@ -272,7 +272,7 @@ fn execute_live(
             let emit = crate::commands::execution::emitter(invocation, |event, stream| {
                 let event = output::Event::try_from(event).map_err(CliError::classified)?;
                 Ok(stream.emit_published(Published::new(event, Vec::new()))?)
-            });
+            })?;
             let summary = client
                 .fuzz(request.clone(), emit)
                 .map_err(CliError::classified)?;

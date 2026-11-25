@@ -19,7 +19,7 @@ use std::time::Instant;
 
 use super::Error;
 use super::interface::Id as InterfaceId;
-use packetcraftr_core::budget::Deadline;
+use packetcraftr_core::budget::{Deadline, Interrupted};
 use packetcraftr_core::frame::LinkType;
 
 pub use group::{Group, GroupRequest, MAX_SOURCES, Phase, Source};
@@ -229,6 +229,26 @@ fn admit(deadline: &Deadline, operation: &'static str) -> Result<(), Error> {
         .live_remaining()
         .map(drop)
         .map_err(|interrupted| Error::interrupted(interrupted, operation))
+}
+
+pub(crate) fn check_readiness_control(deadline: &Deadline) -> Result<(), Error> {
+    deadline
+        .live_remaining()
+        .map(drop)
+        .map_err(|interrupted| match interrupted {
+            Interrupted::Cancelled(cancelled) => cancelled.into(),
+            _ => Error::CaptureReadiness {
+                message: "capture readiness deadline expired".to_owned(),
+            },
+        })
+}
+
+pub(crate) fn poll_should_continue(deadline: &Deadline) -> Result<bool, Error> {
+    match deadline.live_remaining() {
+        Ok(_) => Ok(true),
+        Err(Interrupted::Cancelled(cancelled)) => Err(cancelled.into()),
+        Err(_) => Ok(false),
+    }
 }
 
 pub(crate) fn wait_end(deadline: &Deadline) -> Result<Option<Instant>, Error> {

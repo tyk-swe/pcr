@@ -47,10 +47,7 @@ impl ServerCertVerifier for ObservationVerifier {
         _: &[u8],
         _: UnixTime,
     ) -> Result<ServerCertVerified, rustls::Error> {
-        let mut evidence = self
-            .certificates
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut evidence = crate::workers::lock(&self.certificates);
         evidence.chain.clear();
         evidence.truncated = false;
         let mut retained = 0;

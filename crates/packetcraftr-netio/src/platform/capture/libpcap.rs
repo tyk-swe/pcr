@@ -30,8 +30,8 @@ use crate::{
     platform::common::READ_TIMEOUT_MILLIS,
     platform::common::libpcap::map_open_error,
     platform::common::pcap_api::{
-        canonical_link_type, check_setting_status, realize_settings, timestamp_precision_value,
-        timestamp_source_of_value, timestamp_source_value, timestamp_type_list, tstamp_type_string,
+        NativeSetting, apply_native_settings, canonical_link_type, map_timestamp_types,
+        realize_settings, timestamp_type_list, tstamp_type_string,
         validate_effective_snapshot_length,
     },
 };
@@ -73,7 +73,23 @@ pub(crate) fn open_capture(
         .promisc(promiscuous)
         .timeout(READ_TIMEOUT_MILLIS)
         .immediate_mode(true);
-    apply_native_settings(interface, inactive.as_ptr().cast(), native)?;
+    let handle = inactive.as_ptr().cast();
+    apply_native_settings(
+        "libpcap",
+        interface,
+        native,
+        |setting, value| {
+            // SAFETY: handle is a live inactive capture configured by this thread.
+            Ok(unsafe {
+                match setting {
+                    NativeSetting::BufferSize => pcap_set_buffer_size(handle, value),
+                    NativeSetting::TimestampSource => pcap_set_tstamp_type(handle, value),
+                    NativeSetting::TimestampPrecision => pcap_set_tstamp_precision(handle, value),
+                }
+            })
+        },
+        || pcap_error_message(handle),
+    )?;
     let mut capture = inactive
         .open()
         .map_err(|error| map_open_error(interface, error))?;
@@ -130,62 +146,6 @@ pub(crate) fn open_capture(
     })
 }
 
-fn apply_native_settings(
-    interface: &InterfaceId,
-    handle: *mut c_void,
-    settings: &NativeSettings,
-) -> Result<(), Error> {
-    if let Some(buffer_size) = settings.buffer_size {
-        let size = c_int::try_from(buffer_size).map_err(|_| Error::InvalidCaptureSetting {
-            field: "buffer_size",
-            message: format!(
-                "exceeds the native maximum of {} bytes",
-                crate::capture::MAX_NATIVE_BUFFER_SIZE
-            ),
-        })?;
-        // SAFETY: handle is a live inactive capture configured by this thread.
-        let status = unsafe { pcap_set_buffer_size(handle, size) };
-        check_setting_status(
-            "libpcap",
-            interface,
-            "pcap_set_buffer_size",
-            "buffer_size",
-            &buffer_size.to_string(),
-            status,
-            &inactive_error_message(handle),
-        )?;
-    }
-    if let Some(source) = settings.timestamp_source {
-        let value = timestamp_source_value(source);
-        // SAFETY: handle is a live inactive capture configured by this thread.
-        let status = unsafe { pcap_set_tstamp_type(handle, value) };
-        check_setting_status(
-            "libpcap",
-            interface,
-            "pcap_set_tstamp_type",
-            "timestamp_source",
-            source.as_str(),
-            status,
-            &inactive_error_message(handle),
-        )?;
-    }
-    if let Some(precision) = settings.timestamp_precision {
-        let value = timestamp_precision_value(precision);
-        // SAFETY: handle is a live inactive capture configured by this thread.
-        let status = unsafe { pcap_set_tstamp_precision(handle, value) };
-        check_setting_status(
-            "libpcap",
-            interface,
-            "pcap_set_tstamp_precision",
-            "timestamp_precision",
-            precision.as_str(),
-            status,
-            &inactive_error_message(handle),
-        )?;
-    }
-    Ok(())
-}
-
 pub(crate) fn timestamp_types(interface: &InterfaceId) -> Result<Vec<TimestampType>, Error> {
     let capture = Capture::from_device(interface.name.as_str())
         .map_err(|error| map_open_error(interface, error))?;
@@ -198,38 +158,32 @@ pub(crate) fn timestamp_types(interface: &InterfaceId) -> Result<Vec<TimestampTy
         "libpcap",
         interface,
         count,
-        || inactive_error_message(handle),
+        || pcap_error_message(handle),
         // SAFETY: list is the unchanged libpcap allocation, released exactly once.
         || unsafe { pcap_free_tstamp_types(list) },
         // SAFETY: list points to `count` consecutive c_int values libpcap owns.
         |count| unsafe { std::slice::from_raw_parts(list, count) }.to_vec(),
     )?;
-    Ok(values
-        .into_iter()
-        .map(|value| {
-            // SAFETY: both functions return a static NUL-terminated string or NULL, copied at once.
-            let name = unsafe { tstamp_type_string(pcap_tstamp_type_val_to_name(value)) };
-            // SAFETY: same contract as the name lookup.
-            let description =
-                unsafe { tstamp_type_string(pcap_tstamp_type_val_to_description(value)) };
-            TimestampType {
-                value,
-                name,
-                description,
-                source: timestamp_source_of_value(value),
-            }
-        })
-        .collect())
+    Ok(map_timestamp_types(
+        values,
+        // SAFETY: returns a static NUL-terminated string or NULL, copied at once.
+        |value| unsafe { tstamp_type_string(pcap_tstamp_type_val_to_name(value)) },
+        // SAFETY: same contract as the name lookup.
+        |value| unsafe { tstamp_type_string(pcap_tstamp_type_val_to_description(value)) },
+    ))
 }
 
-fn inactive_error_message(handle: *mut c_void) -> String {
-    // SAFETY: handle is a live inactive capture whose error buffer is a
+fn pcap_error_message(handle: *mut c_void) -> String {
+    if handle.is_null() {
+        return "libpcap returned no diagnostic".to_owned();
+    }
+    // SAFETY: handle is a live pcap handle whose error buffer is a
     // NUL-terminated string copied out before returning.
     let message = unsafe { pcap_geterr(handle) };
     if message.is_null() {
         return "libpcap returned no diagnostic".to_owned();
     }
-    // SAFETY: see the call above.
+    // SAFETY: `message` is non-null and points to a valid NUL-terminated C string.
     unsafe { CStr::from_ptr(message) }
         .to_string_lossy()
         .into_owned()

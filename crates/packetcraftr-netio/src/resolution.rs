@@ -4,10 +4,7 @@
 //! Owned blocking hostname lookups. Cancellation stops waiting, while admitted
 //! work and its native capacity remain owned until the resolver actually returns.
 
-use crate::{
-    resources::NativeSnapshot,
-    workers::{self, Admission, Blocked, Pool},
-};
+use crate::workers::{self, Admission, Blocked, Pool};
 use packetcraftr_core::{
     budget::Deadline,
     error::{BoundaryError, Classification, Kind},
@@ -23,11 +20,6 @@ static LOOKUPS: LazyLock<Arc<Admission>> =
     LazyLock::new(|| Arc::new(Admission::new(MAX_PENDING_LOOKUPS, MAX_PENDING_LOOKUPS)));
 fn lookups() -> &'static Arc<Admission> {
     &LOOKUPS
-}
-
-#[must_use]
-pub fn snapshot() -> NativeSnapshot {
-    lookups().snapshot()
 }
 
 fn failure(message: impl Into<String>) -> BoundaryError {

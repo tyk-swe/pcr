@@ -1,10 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::sync::{
-    Arc,
-    mpsc::{self, Receiver, RecvTimeoutError},
-};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 
 use packetcraftr_core::{
     budget::{Deadline, Interrupted},
@@ -15,52 +12,31 @@ use super::{
     ARMING, Limits, Session, admit,
     live::{NativeCaptureParts, NativeCaptureSession, Started},
 };
-use crate::{
-    Error,
-    deadline::POLL_INTERVAL,
-    workers::{
-        Pool,
-        reaper::{ReaperClient, ReaperStartError, shared_reaper},
-    },
-};
+use crate::{Error, deadline::POLL_INTERVAL, workers::reaper::shared_reaper};
 
 pub(super) fn open(
     limits: Limits,
-    deadline: &Deadline,
-    activate: impl FnOnce() -> Result<NativeCaptureParts, Error> + Send + 'static,
-) -> Result<Box<dyn Session>, Error> {
-    open_with(
-        limits,
-        deadline,
-        activate,
-        crate::workers::shared(),
-        shared_reaper,
-    )
-}
-
-fn open_with(
-    limits: Limits,
     caller: &Deadline,
     activate: impl FnOnce() -> Result<NativeCaptureParts, Error> + Send + 'static,
-    pool: &Arc<Pool>,
-    reaper: impl FnOnce() -> Result<ReaperClient, ReaperStartError>,
 ) -> Result<Box<dyn Session>, Error> {
     // Native activation spends wall time even when the caller's clock is frozen.
     let deadline = caller
         .detach()
         .map_err(|interrupted| Error::interrupted(interrupted, ARMING))?;
     // Both fallible cleanup-service steps happen before any native call.
-    let reaper = reaper().map_err(|error| Error::Capture {
+    let reaper = shared_reaper().map_err(|error| Error::Capture {
         message: "native capture cleanup is unavailable".to_owned(),
         source: Some(Source::new(error)),
     })?;
-    let permit = pool.admit().map_err(|error| Error::Capture {
-        message: format!(
-            "native capture activation capacity {} is exhausted",
-            error.capacity
-        ),
-        source: Some(Source::new(error)),
-    })?;
+    let permit = crate::workers::shared()
+        .admit()
+        .map_err(|error| Error::Capture {
+            message: format!(
+                "native capture activation capacity {} is exhausted",
+                error.capacity
+            ),
+            source: Some(Source::new(error)),
+        })?;
     let lease = permit.lease();
     // A rendezvous: the reader starts only once an owner holds its stop flag.
     let (handoff, claim) = mpsc::sync_channel::<Result<Started, Error>>(0);

@@ -26,7 +26,7 @@ use crate::{
     capture::{Limits, Metadata, NativeSettings, TimestampPrecision, TimestampType},
     interface::Id as InterfaceId,
     platform::common::pcap_api::{
-        Diagnostic, canonical_link_type, realize_settings, timestamp_source_of_value,
+        Diagnostic, canonical_link_type, map_timestamp_types, realize_settings,
         timestamp_type_list, tstamp_type_string, validate_effective_snapshot_length,
     },
 };
@@ -129,28 +129,24 @@ pub(crate) fn timestamp_types(interface: &InterfaceId) -> Result<Vec<TimestampTy
         // SAFETY: list points to `count` consecutive c_int values Npcap owns.
         |count| unsafe { std::slice::from_raw_parts(list, count) }.to_vec(),
     )?;
-    Ok(values
-        .into_iter()
-        .map(|value| {
-            let name = handle.api.pcap_tstamp_type_val_to_name.and_then(|name| {
+    Ok(map_timestamp_types(
+        values,
+        |value| {
+            handle.api.pcap_tstamp_type_val_to_name.and_then(|name| {
                 // SAFETY: `name` returns a static NUL-terminated string or NULL, copied at once.
                 unsafe { tstamp_type_string(name(value)) }
-            });
-            let description = handle
+            })
+        },
+        |value| {
+            handle
                 .api
                 .pcap_tstamp_type_val_to_description
                 .and_then(|describe| {
                     // SAFETY: same contract as the name lookup.
                     unsafe { tstamp_type_string(describe(value)) }
-                });
-            TimestampType {
-                value,
-                name,
-                description,
-                source: timestamp_source_of_value(value),
-            }
-        })
-        .collect())
+                })
+        },
+    ))
 }
 
 fn install_capture_filter(

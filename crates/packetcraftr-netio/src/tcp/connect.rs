@@ -37,10 +37,7 @@ pub struct PendingConnect<S> {
 }
 impl<S> PendingConnect<S> {
     pub fn cancel(&mut self) -> bool {
-        let mut state = self
-            .cancel
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut state = workers::lock(&self.cancel);
         state.cancelled = true;
         state.attempted
     }
@@ -113,7 +110,8 @@ impl ConnectBudget {
         self.state.capacity
     }
 
-    pub fn active(&self) -> usize {
+    #[cfg(test)]
+    pub(crate) fn active(&self) -> usize {
         self.state.active.load(Ordering::Relaxed)
     }
 
@@ -211,9 +209,7 @@ where
             let outcome = workers::unwind_after_cleanup(|| {
                 let _lease = connection_lease;
                 let admitted = {
-                    let mut state = cancelled
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    let mut state = workers::lock(&cancelled);
                     let admitted = if state.cancelled {
                         Err(Error::Cancelled(Cancelled))
                     } else {
@@ -230,9 +226,7 @@ where
                     let stream = provider.connect(endpoint, &deadline)?;
                     // A provider may return after cancellation or expiry. Close its
                     // stream before releasing admission instead of publishing success.
-                    let state = cancelled
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    let state = workers::lock(&cancelled);
                     if state.cancelled {
                         return Err(Error::Cancelled(Cancelled));
                     }

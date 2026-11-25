@@ -125,7 +125,6 @@ pub(crate) struct Task<T> {
     retention: RetentionMarker,
 }
 
-#[cfg_attr(not(native_route), allow(dead_code))]
 pub(crate) enum Waited<T> {
     Finished(Result<T, WorkerPanicked>),
     Pending(Task<T>),
@@ -192,7 +191,6 @@ impl<T> Task<T> {
         }
     }
 
-    #[cfg_attr(not(native_route), allow(dead_code))]
     pub(crate) fn wait(mut self, deadline: &Deadline) -> Waited<T> {
         self.wait_ready(deadline);
         match self.try_take() {

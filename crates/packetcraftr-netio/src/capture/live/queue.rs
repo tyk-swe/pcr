@@ -32,9 +32,7 @@ impl CaptureQueue {
     /// Recover poisoned locks: mutations commit atomically with no cross-field
     /// invariant.
     pub(super) fn lock(&self) -> MutexGuard<'_, CaptureState> {
-        self.state
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        crate::workers::lock(&self.state)
     }
 
     pub(super) fn wait_timeout<'a>(

@@ -9,7 +9,7 @@ use std::{
     },
 };
 
-use packetcraftr_core::budget::{Deadline, Interrupted};
+use packetcraftr_core::budget::Deadline;
 
 use crate::deadline::{POLL_INTERVAL, remaining_before};
 use packetcraftr_core::frame::LinkType;
@@ -155,19 +155,10 @@ impl Session for NativeCaptureSession {
         let expired = || Error::CaptureReadiness {
             message: "capture readiness deadline expired".to_owned(),
         };
-        let check_control = || {
-            caller
-                .live_remaining()
-                .map(drop)
-                .map_err(|interrupted| match interrupted {
-                    Interrupted::Cancelled(cancelled) => cancelled.into(),
-                    _ => expired(),
-                })
-        };
-        check_control()?;
+        crate::capture::check_readiness_control(caller)?;
         let mut state = self.shared.lock();
         while !state.ready && !state.closed && state.error.is_none() {
-            check_control()?;
+            crate::capture::check_readiness_control(caller)?;
             let Some(remaining) = deadline.and_then(remaining_before) else {
                 return Err(expired());
             };
@@ -175,9 +166,9 @@ impl Session for NativeCaptureSession {
             state = self
                 .shared
                 .wait_timeout(state, remaining.min(POLL_INTERVAL));
-            check_control()?;
+            crate::capture::check_readiness_control(caller)?;
         }
-        check_control()?;
+        crate::capture::check_readiness_control(caller)?;
         if deadline.and_then(remaining_before).is_none() {
             return Err(expired());
         }
@@ -215,11 +206,8 @@ impl Session for NativeCaptureSession {
             // An immediate poll still drains already queued records above.
             // Quiet waits retain inherited elapsed control as well as their
             // original real-wall ceiling.
-            if let Err(interrupted) = caller.live_remaining() {
-                return match interrupted {
-                    Interrupted::Cancelled(cancelled) => Err(cancelled.into()),
-                    _ => Ok(None),
-                };
+            if !crate::capture::poll_should_continue(caller)? {
+                return Ok(None);
             }
             let Some(remaining) = deadline.and_then(remaining_before) else {
                 return Ok(None);

@@ -100,10 +100,7 @@ impl Drop for Inner {
 
 impl Inner {
     fn retry_pending(&self) {
-        let mut pending = self
-            .pending
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut pending = crate::workers::lock(&self.pending);
         let tasks = std::mem::take(&mut *pending);
         for task in tasks {
             if let Err(task) = self.transfer(task) {
@@ -155,10 +152,7 @@ impl ThreadJoinSlot {
             drop(guard);
         });
         if let Err(task) = inner.transfer(task) {
-            let mut pending = inner
-                .pending
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut pending = crate::workers::lock(&inner.pending);
             debug_assert!(pending.len() < inner.capacity);
             pending.push(task);
             false

@@ -17,12 +17,13 @@ pub(super) struct Validated {
     pub(super) interface: InterfaceId,
     pub(super) destination: IpAddr,
     pub(super) bytes: Bytes,
+    #[cfg(target_os = "windows")]
+    pub(super) packet_source: IpAddr,
+    #[cfg(target_os = "windows")]
+    pub(super) interface_source: IpAddr,
 }
 
-pub(super) fn validate(
-    frame: Layer3Frame<'_>,
-    target_restrictions: impl FnOnce(&Bytes, IpAddr, IpAddr) -> Result<(), Error>,
-) -> Result<Validated, Error> {
+pub(super) fn validate(frame: Layer3Frame<'_>) -> Result<Validated, Error> {
     let bytes = frame.bytes().clone();
     let route = frame.route();
     let decision = route.decision;
@@ -76,12 +77,14 @@ pub(super) fn validate(
         ));
     }
 
-    target_restrictions(&bytes, packet_source, interface_source)?;
-
     Ok(Validated {
         interface: decision.interface.clone(),
         destination,
         bytes,
+        #[cfg(target_os = "windows")]
+        packet_source,
+        #[cfg(target_os = "windows")]
+        interface_source,
     })
 }
 

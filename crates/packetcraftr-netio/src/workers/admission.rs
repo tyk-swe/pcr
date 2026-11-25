@@ -36,7 +36,6 @@ struct State {
     all: Counters,
     tcp: Counters,
     execution: Counters,
-    sockets: Counters,
 }
 
 impl State {
@@ -70,12 +69,9 @@ impl Admission {
         Self::sample(self.data_capacity, lock(&self.state).tcp)
     }
 
+    #[cfg(test)]
     pub(crate) fn execution_snapshot(&self) -> NativeSnapshot {
         Self::sample(self.capacity, lock(&self.state).execution)
-    }
-
-    pub(crate) fn socket_snapshot(&self) -> NativeSnapshot {
-        Self::sample(self.data_capacity, lock(&self.state).sockets)
     }
 
     fn sample(capacity: usize, counters: Counters) -> NativeSnapshot {
@@ -135,9 +131,8 @@ impl Admission {
 // Bit flags; every transition occurs under the admission state lock. A connect
 // may briefly own both execution and its socket, but holds its root/data charge once.
 const EXECUTING: u8 = 1;
-const SOCKET: u8 = 2;
-const RETAINED: u8 = 4;
-const RELEASED: u8 = 8;
+const RETAINED: u8 = 2;
+const RELEASED: u8 = 4;
 
 /// One admitted execution, consumed when its only job is dispatched.
 pub(crate) struct Permit {
@@ -183,9 +178,6 @@ impl RetentionMarker {
             if phase & EXECUTING != 0 {
                 state.execution.retained += 1;
             }
-            if phase & SOCKET != 0 {
-                state.sockets.retained += 1;
-            }
         }
     }
 
@@ -212,12 +204,6 @@ impl RetentionMarker {
                 counters.retained -= 1;
             }
         }
-        if previous & SOCKET != 0 {
-            state.sockets.active -= 1;
-            if previous & RETAINED != 0 {
-                state.sockets.retained -= 1;
-            }
-        }
     }
 }
 
@@ -235,15 +221,6 @@ impl SocketReservation {
     /// Transfer root/data ownership to the socket without acquiring another root
     /// slot. The worker keeps execution admission until its job actually ends.
     pub(crate) fn into_socket(self) -> SocketPermit {
-        let marker = &self.0.0.marker;
-        let mut state = lock(&marker.admission.state);
-        let phase = marker.phase.load(Ordering::Relaxed);
-        marker.phase.store(phase | SOCKET, Ordering::Relaxed);
-        state.sockets.active += 1;
-        if phase & RETAINED != 0 {
-            state.sockets.retained += 1;
-        }
-        drop(state);
         SocketPermit { _root: self.0 }
     }
 }
@@ -288,12 +265,9 @@ impl Pool {
         self.admission.tcp_snapshot()
     }
 
+    #[cfg(test)]
     pub(crate) fn execution_snapshot(&self) -> NativeSnapshot {
         self.admission.execution_snapshot()
-    }
-
-    pub(crate) fn socket_snapshot(&self) -> NativeSnapshot {
-        self.admission.socket_snapshot()
     }
 
     pub(crate) fn admit(self: &Arc<Self>) -> Result<Permit, Exhausted> {

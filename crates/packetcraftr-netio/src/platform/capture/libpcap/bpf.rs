@@ -7,12 +7,13 @@
 )]
 
 use std::{
-    ffi::{CStr, CString, c_char, c_int, c_uint, c_void},
+    ffi::{CString, c_char, c_int, c_uint, c_void},
     mem::MaybeUninit,
 };
 
 use pcap::{Active, Capture};
 
+use super::pcap_error_message;
 use crate::{Error, interface::Id as InterfaceId};
 
 #[link(name = "pcap")]
@@ -26,7 +27,6 @@ unsafe extern "C" {
     ) -> c_int;
     fn pcap_setfilter(handle: *mut c_void, program: *mut c_void) -> c_int;
     fn pcap_freecode(program: *mut c_void);
-    fn pcap_geterr(handle: *mut c_void) -> *mut c_char;
 }
 
 #[repr(C)]
@@ -55,7 +55,10 @@ pub(in crate::platform) fn install_capture_filter(
     // which remains exclusively borrowed until installation returns.
     let install_status = unsafe { pcap_setfilter(handle, (&raw mut program).cast::<c_void>()) };
     if install_status != 0 {
-        return Err(map_filter_install_error(interface, read_pcap_error(handle)));
+        return Err(map_filter_install_error(
+            interface,
+            pcap_error_message(handle),
+        ));
     }
     Ok(())
 }
@@ -84,25 +87,13 @@ fn compile_capture_filter(
         )
     };
     if compile_status != 0 {
-        return Err(map_filter_compile_error(interface, read_pcap_error(handle)));
+        return Err(map_filter_compile_error(
+            interface,
+            pcap_error_message(handle),
+        ));
     }
     // SAFETY: `pcap_compile` returned 0, so the `struct bpf_program` is fully initialized.
     Ok(unsafe { program.assume_init() })
-}
-
-fn read_pcap_error(handle: *mut c_void) -> String {
-    if handle.is_null() {
-        return "unknown libpcap error".to_owned();
-    }
-    // SAFETY: `pcap_geterr` returns a null-terminated string owned by the pcap handle.
-    let error_ptr = unsafe { pcap_geterr(handle) };
-    if error_ptr.is_null() {
-        return "unknown libpcap error".to_owned();
-    }
-    // SAFETY: `error_ptr` is non-null and points to a valid C string.
-    unsafe { CStr::from_ptr(error_ptr) }
-        .to_string_lossy()
-        .into_owned()
 }
 
 fn map_filter_compile_error(interface: &InterfaceId, error: impl std::fmt::Display) -> Error {

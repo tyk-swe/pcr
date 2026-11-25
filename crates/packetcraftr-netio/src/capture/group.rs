@@ -7,10 +7,7 @@ use super::{
 };
 use crate::{Error, interface::Id};
 use packetcraftr_core::clock::{Clock, SystemClock};
-use packetcraftr_core::{
-    budget::{Deadline, Interrupted},
-    frame::LinkType,
-};
+use packetcraftr_core::{budget::Deadline, frame::LinkType};
 use source::Owned;
 use std::{collections::HashSet, fmt, sync::Arc, time::Duration};
 
@@ -243,23 +240,12 @@ impl<C: Session> Group<C> {
                 message: "capture readiness deadline expired".to_owned(),
             });
         };
-        let check_control = || {
-            caller
-                .live_remaining()
-                .map(drop)
-                .map_err(|interrupted| match interrupted {
-                    Interrupted::Cancelled(cancelled) => cancelled.into(),
-                    _ => Error::CaptureReadiness {
-                        message: "capture readiness deadline expired".into(),
-                    },
-                })
-        };
         for owned in &mut self.sources {
-            check_control()?;
+            super::check_readiness_control(caller)?;
             owned.wait_ready(caller, deadline)?;
-            check_control()?;
+            super::check_readiness_control(caller)?;
         }
-        check_control()?;
+        super::check_readiness_control(caller)?;
         self.lifecycle = Lifecycle::Ready;
         Ok(())
     }
@@ -281,11 +267,8 @@ impl<C: Session> Group<C> {
                     return Ok(Some(captured));
                 }
             }
-            if let Err(interrupted) = caller.live_remaining() {
-                return match interrupted {
-                    Interrupted::Cancelled(cancelled) => Err(cancelled.into()),
-                    _ => Ok(None),
-                };
+            if !super::poll_should_continue(caller)? {
+                return Ok(None);
             }
             let Some(remaining) = deadline.and_then(crate::deadline::remaining_before) else {
                 return Ok(None);

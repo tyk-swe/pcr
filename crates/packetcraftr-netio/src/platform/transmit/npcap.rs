@@ -13,7 +13,7 @@ use crate::platform::common::npcap::{
 use crate::{
     Error,
     capture::NativeSettings,
-    platform::common::pcap_api::{Diagnostic, is_permission_denied},
+    platform::common::pcap_api::{Diagnostic, map_send_error},
     transmit::{self, Layer2Frame, Submission},
 };
 
@@ -39,21 +39,14 @@ pub(crate) fn send_layer2(frame: Layer2Frame<'_>) -> Result<transmit::Report, Er
     };
     if result != 0 {
         let diagnostic = handle.error_message();
-        let privilege = is_permission_denied(&diagnostic);
-        let source = Diagnostic::new(Some(result), diagnostic).into_source();
-        if privilege {
-            return Err(Error::Privilege {
-                message: format!(
-                    "cannot inject on {} through Npcap; run with packet capture privileges",
-                    interface.name
-                ),
-                source,
-            });
-        }
-        return Err(Error::Send {
-            message: format!("Npcap injection on {} failed", interface.name),
+        let source = Diagnostic::new(Some(result), diagnostic.clone()).into_source();
+        return Err(map_send_error(
+            "Npcap",
+            "run with packet capture privileges",
+            interface,
+            &diagnostic,
             source,
-        });
+        ));
     }
     Ok(submission.complete(frame.bytes().len(), frame.bytes().clone()))
 }

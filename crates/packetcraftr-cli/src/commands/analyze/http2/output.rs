@@ -5,7 +5,7 @@ pub(crate) mod frame;
 
 pub(crate) use frame::Frame;
 
-use crate::commands::offline_analysis::output::{ScopedFlowKey, analysis_complete};
+use crate::commands::offline_analysis::output::{ScopedFlowKey, analysis_complete, sources};
 use crate::output::published_enum;
 
 use crate::output::contract::Error;
@@ -106,12 +106,6 @@ impl From<packetcraftr_core::protocol::application::http::Head> for UpgradeHead 
     }
 }
 
-fn sources(set: &packetcraftr_core::analysis::provenance::SourceSet) -> Result<Vec<Source>, Error> {
-    set.frames()
-        .iter()
-        .map(Source::try_from)
-        .collect::<Result<_, _>>()
-}
 fn optional_sources(
     set: Option<&packetcraftr_core::analysis::provenance::SourceSet>,
 ) -> Result<Vec<Source>, Error> {

@@ -70,12 +70,9 @@ impl TryFrom<(String, capture_file::SelectionReport, Plan)> for Report {
                 .map(|group| {
                     Ok(Incomplete {
                         key: group.key.into(),
-                        sources: group
-                            .sources
-                            .frames()
-                            .iter()
-                            .map(Source::try_from)
-                            .collect::<Result<_, Error>>()?,
+                        sources: crate::commands::offline_analysis::output::sources(
+                            &group.sources,
+                        )?,
                     })
                 })
                 .collect::<Result<_, Error>>()?,

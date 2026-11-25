@@ -123,52 +123,40 @@ impl DirectionFiles {
         Ok(())
     }
 
-    pub(super) fn publish(self) -> Result<Vec<Written>, CliError> {
-        self.publish_with(StagedFile::sync)
-    }
-
-    fn publish_with(
-        mut self,
-        mut sync: impl FnMut(&StagedFile) -> Result<(), CliError>,
-    ) -> Result<Vec<Written>, CliError> {
+    pub(super) fn publish(mut self) -> Result<Vec<Written>, CliError> {
         // No destination is published until every staged file is written and synchronized.
         for staged in &mut self.staged {
             staged.write_pending()?;
-            sync(&staged.file)?;
         }
-        let mut written = Vec::new();
-        for staged in self.staged {
-            match staged.file.persist() {
-                Ok(file) => {
-                    written.push(Written {
-                        direction: staged.direction,
-                        path: file.destination().display().to_string(),
-                        bytes: staged.bytes,
-                    });
-                }
-                Err(error) => {
-                    let detail = if written.is_empty() {
-                        "no follow output was published".to_owned()
-                    } else {
-                        let paths = written
-                            .iter()
-                            .map(|file| file.path.as_str())
-                            .collect::<Vec<_>>()
-                            .join(", ");
-                        format!(
-                            "retained {} partially published follow output(s): {paths}",
-                            written.len()
-                        )
-                    };
-                    return Err(CliError::from_classification(
-                        error.classification,
-                        format!("{}; {detail}", error.message),
-                        error.causes,
-                    ));
-                }
-            }
-        }
-        Ok(written)
+        let staged = self
+            .staged
+            .into_iter()
+            .map(|staged| ((staged.direction, staged.bytes), staged.file))
+            .collect();
+        crate::commands::offline_analysis::publish_staged(
+            staged,
+            |(direction, bytes), file| Written {
+                direction,
+                path: file.destination().display().to_string(),
+                bytes,
+            },
+            |error, published| {
+                let detail = if published.is_empty() {
+                    "no follow output was published".to_owned()
+                } else {
+                    format!(
+                        "retained {} partially published follow output(s): {}",
+                        published.len(),
+                        published.join(", "),
+                    )
+                };
+                CliError::from_classification(
+                    error.classification,
+                    format!("{}; {detail}", error.message),
+                    error.causes,
+                )
+            },
+        )
     }
 }
 

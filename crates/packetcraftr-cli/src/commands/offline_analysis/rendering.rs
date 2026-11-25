@@ -66,3 +66,44 @@ pub(crate) fn encapsulation_text(path: &[super::output::EncapsulationIdentifier]
         crate::terminal::comma_separated(path)
     }
 }
+
+pub(crate) fn render_tcp_stream_issue<S: std::fmt::Display>(
+    invocation: &crate::invocation::Invocation,
+    issue: &super::output::StreamIssue<S>,
+) -> Result<(), CliError> {
+    crate::terminal::write_stdout_line(
+        invocation,
+        format_args!(
+            "  TCP stream={} frame={} status={}",
+            issue.stream, issue.number, issue.status,
+        ),
+    )
+}
+
+pub(crate) fn render_headers_and_trailers<'a>(
+    invocation: &crate::invocation::Invocation,
+    headers: impl IntoIterator<Item = (&'a str, &'a str)>,
+    trailers: impl IntoIterator<Item = (&'a str, &'a str)>,
+) -> Result<(), CliError> {
+    for (name, value) in headers {
+        crate::terminal::write_stdout_line(
+            invocation,
+            format_args!(
+                "  {}: {}",
+                crate::terminal::escaped(name),
+                crate::terminal::escaped(value)
+            ),
+        )?;
+    }
+    for (name, value) in trailers {
+        crate::terminal::write_stdout_line(
+            invocation,
+            format_args!(
+                "  trailer {}: {}",
+                crate::terminal::escaped(name),
+                crate::terminal::escaped(value)
+            ),
+        )?;
+    }
+    Ok(())
+}

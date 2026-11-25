@@ -8,7 +8,7 @@ use serde::Serialize;
 use packetcraftr_core::diagnostic::Diagnostic as RuntimeDiagnostic;
 use packetcraftr_core::error::{Classification, Classified, Coordinate};
 
-use super::contract::{Command, Mode, SCHEMA};
+use super::contract::{Command, Mode, OUTPUT_SCHEMA};
 
 published_enum! {
     pub enum Kind from packetcraftr_core::error::Kind {
@@ -226,7 +226,7 @@ impl<T> Envelope<T> {
             stats,
         } = published;
         Self {
-            schema: SCHEMA,
+            schema: OUTPUT_SCHEMA,
             payload_schema: Some(super::contract::payload_schema(command.as_str())),
             command: Some(command),
             mode: Mode::Aggregate,
@@ -247,7 +247,7 @@ impl<T> Envelope<T> {
         diagnostics: Vec<RuntimeDiagnostic>,
     ) -> Self {
         Self {
-            schema: SCHEMA,
+            schema: OUTPUT_SCHEMA,
             payload_schema: Some(super::contract::payload_schema(command.as_str())),
             command: Some(command),
             mode: Mode::Stream,
@@ -276,7 +276,7 @@ impl<T> Envelope<T> {
 impl Envelope<()> {
     pub fn error(command: Option<Command>, error: Error) -> Self {
         Self {
-            schema: SCHEMA,
+            schema: OUTPUT_SCHEMA,
             payload_schema: None,
             command,
             mode: Mode::Aggregate,
@@ -291,7 +291,7 @@ impl Envelope<()> {
 
     pub(super) fn error_record(command: Option<Command>, sequence: u64, error: Error) -> Self {
         Self {
-            schema: SCHEMA,
+            schema: OUTPUT_SCHEMA,
             payload_schema: None,
             command,
             mode: Mode::Stream,

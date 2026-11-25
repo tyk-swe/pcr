@@ -242,10 +242,6 @@ impl Wire {
     pub fn bytes(&self) -> &[u8] {
         &self.bytes
     }
-
-    pub fn bytes_hex(&self) -> impl std::fmt::Display + '_ {
-        CompactHex(&self.bytes)
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

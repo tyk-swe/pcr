@@ -282,3 +282,20 @@ impl From<library::ScopedFlowKey> for ScopedFlowKey {
         }
     }
 }
+
+pub(crate) fn sources(
+    set: &library::provenance::SourceSet,
+) -> Result<Vec<crate::output::frame::Source>, Error> {
+    set.frames()
+        .iter()
+        .map(crate::output::frame::Source::try_from)
+        .collect()
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct StreamIssue<S> {
+    pub number: u64,
+    pub flow: ScopedFlowKey,
+    pub stream: u64,
+    pub status: S,
+}

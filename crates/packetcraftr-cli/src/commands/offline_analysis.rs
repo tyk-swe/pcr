@@ -6,7 +6,10 @@ pub(in crate::commands) mod output;
 mod rendering;
 
 pub(super) use self::event_output::EventOutput;
-pub(super) use self::rendering::{encapsulation_text, ip_event_sink, render_clock, render_scope};
+pub(super) use self::rendering::{
+    encapsulation_text, ip_event_sink, render_clock, render_headers_and_trailers, render_scope,
+    render_tcp_stream_issue,
+};
 use crate::command_options::Bounded as _;
 use crate::output::envelope::Published;
 use std::sync::Arc;
@@ -229,4 +232,28 @@ where
         Format::Text => render(invocation, &complete),
         other => other.unreachable(),
     }
+}
+
+/// Syncs every staged file before persisting any, reporting already-published
+/// paths if a later persist fails.
+pub(super) fn publish_staged<T, R>(
+    staged: Vec<(T, crate::staged_output::StagedFile)>,
+    mut on_published: impl FnMut(T, crate::staged_output::Published) -> R,
+    on_error: impl FnOnce(CliError, &[String]) -> CliError,
+) -> Result<Vec<R>, CliError> {
+    for (_, file) in &staged {
+        file.sync()?;
+    }
+    let mut published_paths = Vec::with_capacity(staged.len());
+    let mut results = Vec::with_capacity(staged.len());
+    for (item, file) in staged {
+        match file.persist() {
+            Ok(published) => {
+                published_paths.push(published.destination().display().to_string());
+                results.push(on_published(item, published));
+            }
+            Err(error) => return Err(on_error(error, &published_paths)),
+        }
+    }
+    Ok(results)
 }

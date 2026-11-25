@@ -46,24 +46,17 @@ pub(super) fn render_message(
         ),
     )?;
     if presentation.verbose {
-        for header in &message.headers {
-            write_stdout_line(
-                invocation,
-                format_args!("  {}: {}", escaped(&header.name), escaped(&header.value)),
-            )?;
-        }
-        for trailer in &message.trailers {
-            write_stdout_line(
-                invocation,
-                format_args!(
-                    "  trailer {}: {}",
-                    escaped(&trailer.name),
-                    escaped(&trailer.value)
-                ),
-            )?;
-        }
-    }
-    if presentation.verbose {
+        crate::commands::offline_analysis::render_headers_and_trailers(
+            invocation,
+            message
+                .headers
+                .iter()
+                .map(|header| (header.name.as_str(), header.value.as_str())),
+            message
+                .trailers
+                .iter()
+                .map(|trailer| (trailer.name.as_str(), trailer.value.as_str())),
+        )?;
         crate::terminal::write_details(
             invocation,
             presentation,

@@ -1,12 +1,14 @@
 use super::output::{EarlyData, Stream};
 use crate::{
-    errors::CliError, invocation::Invocation, publication::bounded_json_len,
+    errors::CliError,
+    invocation::Invocation,
+    publication::{bounded_json_len, write_pretty_json_buffered},
     staged_output::StagedFile,
 };
 use packetcraftr_core::error::Kind;
 use serde::Serialize;
 use serde_json::ser::{CompactFormatter, PrettyFormatter};
-use std::io::{self, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 #[derive(Serialize)]
@@ -117,35 +119,22 @@ impl Exporter {
             .map_err(|error| error.into_cli_error(manifest_limit_error))?;
         let path = self.directory.join("quic-manifest.json");
         let mut manifest = self.manifest;
-        let mut writer = io::BufWriter::with_capacity(64 * 1024, manifest.as_file_mut());
-        let written = serde_json::to_writer_pretty(&mut writer, &contents)
-            .map_err(|e| CliError::caused(Kind::Io, &e))
-            .and_then(|()| {
-                writer
-                    .write_all(b"\n")
-                    .and_then(|()| writer.flush())
-                    .map_err(|e| CliError::caused(Kind::Io, &e))
-            });
-        // BufWriter's Drop would retry buffered output after a failed write or flush.
-        let _ = writer.into_parts();
-        written?;
+        write_pretty_json_buffered(manifest.as_file_mut(), &contents)
+            .map_err(|error| CliError::caused(Kind::Io, &error))?;
         self.files.push((path, manifest));
-        for (_, file) in &self.files {
-            file.sync()?;
-        }
-        let mut published = Vec::new();
-        for (path, file) in self.files {
-            if let Err(mut error) = file.persist() {
+        crate::commands::offline_analysis::publish_staged(
+            self.files,
+            |_, _| (),
+            |mut error, published| {
                 if !published.is_empty() {
                     error.causes.push(format!(
                         "already published QUIC files remain at {}",
                         published.join(", ")
                     ));
                 }
-                return Err(error);
-            }
-            published.push(path.display().to_string());
-        }
+                error
+            },
+        )?;
         Ok(json_limit - length)
     }
 }

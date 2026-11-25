@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::collections::BTreeMap;
+use std::ops::Range;
 use std::time::Instant;
 
 use super::history::History;
@@ -47,15 +48,15 @@ impl TcpFlowState {
     }
 }
 
-fn overlapping_sources(
-    sources: &BTreeMap<u64, (u64, SourceSet)>,
+fn overlapping_sources<V>(
+    sources: &BTreeMap<u64, (u64, V)>,
     start: u64,
     end: u64,
 ) -> Vec<(u64, u64)> {
     let prior = sources
         .range(..=start)
         .next_back()
-        .filter(|(_, (source_end, _))| *source_end > start)
+        .filter(|&(&source_start, &(source_end, _))| source_start < start && source_end > start)
         .map(|(&source_start, &(source_end, _))| (source_start, source_end));
     prior
         .into_iter()
@@ -67,19 +68,12 @@ fn overlapping_sources(
         .collect()
 }
 
-/// Insert the not-yet-seen portions of a wire span. Existing spans win, so a
-/// retransmission never replaces the provenance of the first observation.
-pub(super) fn insert_pending_source(
-    state: &mut TcpFlowState,
-    start: u64,
-    end: u64,
-    set: SourceSet,
-) {
+fn uncovered_pieces<V>(sources: &BTreeMap<u64, (u64, V)>, start: u64, end: u64) -> Vec<(u64, u64)> {
     if start >= end {
-        return;
+        return Vec::new();
     }
     let mut pieces = vec![(start, end)];
-    for (existing_start, existing_end) in overlapping_sources(&state.pending_sources, start, end) {
+    for (existing_start, existing_end) in overlapping_sources(sources, start, end) {
         let mut next = Vec::with_capacity(pieces.len());
         for (piece_start, piece_end) in pieces {
             if existing_end <= piece_start || existing_start >= piece_end {
@@ -95,11 +89,54 @@ pub(super) fn insert_pending_source(
         }
         pieces = next;
     }
-    for (piece_start, piece_end) in pieces {
+    pieces
+}
+
+/// Insert the not-yet-seen portions of a wire span. Existing spans win, so a
+/// retransmission never replaces the provenance of the first observation.
+pub(super) fn insert_pending_source(
+    state: &mut TcpFlowState,
+    start: u64,
+    end: u64,
+    set: SourceSet,
+) {
+    for (piece_start, piece_end) in uncovered_pieces(&state.pending_sources, start, end) {
         state
             .pending_sources
             .insert(piece_start, (piece_end, set.clone()));
     }
+}
+
+fn take_source_ranges<V: Clone>(
+    sources: &mut BTreeMap<u64, (u64, V)>,
+    start: u64,
+    end: u64,
+) -> Vec<(u64, u64, V)> {
+    let mut output = Vec::new();
+    let mut cursor = start;
+    while cursor < end {
+        let containing = sources
+            .range(..=cursor)
+            .next_back()
+            .filter(|&(_, &(source_end, _))| source_end > cursor)
+            .map(|(&source_start, _)| source_start);
+        let Some(source_start) = containing else {
+            break;
+        };
+        let Some((source_end, set)) = sources.remove(&source_start) else {
+            break;
+        };
+        if source_start < cursor {
+            sources.insert(source_start, (cursor, set.clone()));
+        }
+        let take_end = source_end.min(end);
+        output.push((cursor, take_end, set.clone()));
+        if source_end > end {
+            sources.insert(end, (source_end, set));
+        }
+        cursor = take_end;
+    }
+    output
 }
 
 /// Remove `[start, end)` and return contiguous byte-length/source-set spans.
@@ -110,35 +147,49 @@ pub(super) fn take_pending_sources(
     start: u64,
     end: u64,
 ) -> Vec<(usize, SourceSet)> {
-    let mut output = Vec::new();
-    let mut cursor = start;
-    while cursor < end {
-        let containing = state
-            .pending_sources
-            .range(..=cursor)
-            .next_back()
-            .filter(|&(_, &(source_end, _))| source_end > cursor)
-            .map(|(&source_start, _)| source_start);
-        let Some(source_start) = containing else {
-            break;
-        };
-        let Some((source_end, set)) = state.pending_sources.remove(&source_start) else {
-            break;
-        };
-        if source_start < cursor {
-            state
-                .pending_sources
-                .insert(source_start, (cursor, set.clone()));
+    take_source_ranges(&mut state.pending_sources, start, end)
+        .into_iter()
+        .map(|(start, end, set)| {
+            (
+                usize::try_from(end.saturating_sub(start)).unwrap_or(usize::MAX),
+                set,
+            )
+        })
+        .collect()
+}
+
+pub(super) fn projected_pending_source_count(
+    state: &TcpFlowState,
+    insert: Option<Range<u64>>,
+    take: Option<Range<u64>>,
+) -> usize {
+    let insert = insert.filter(|range| range.start < range.end);
+    let take = take.filter(|range| range.start < range.end);
+    let start = match (&insert, &take) {
+        (None, None) => return state.pending_sources.len(),
+        (Some(range), None) | (None, Some(range)) => range.start,
+        (Some(insert), Some(take)) => insert.start.min(take.start),
+    };
+    let end = match (&insert, &take) {
+        (Some(range), None) | (None, Some(range)) => range.end,
+        (Some(insert), Some(take)) => insert.end.max(take.end),
+        (None, None) => unreachable!(),
+    };
+    let overlapping = overlapping_sources(&state.pending_sources, start, end);
+    let outside = state.pending_sources.len() - overlapping.len();
+    let mut spans: BTreeMap<u64, (u64, ())> = overlapping
+        .into_iter()
+        .map(|(start, end)| (start, (end, ())))
+        .collect();
+    if let Some(range) = insert {
+        for (piece_start, piece_end) in uncovered_pieces(&spans, range.start, range.end) {
+            spans.insert(piece_start, (piece_end, ()));
         }
-        let take_end = source_end.min(end);
-        let length = usize::try_from(take_end.saturating_sub(cursor)).unwrap_or(usize::MAX);
-        output.push((length, set.clone()));
-        if source_end > end {
-            state.pending_sources.insert(end, (source_end, set));
-        }
-        cursor = take_end;
     }
-    output
+    if let Some(range) = take {
+        take_source_ranges(&mut spans, range.start, range.end);
+    }
+    outside + spans.len()
 }
 
 pub(super) fn retained_bytes(state: &TcpFlowState) -> Option<usize> {

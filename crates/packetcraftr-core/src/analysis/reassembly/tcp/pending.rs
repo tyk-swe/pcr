@@ -9,7 +9,10 @@ use std::ops::Range;
 
 use bytes::Bytes;
 
-use super::state::{TcpFlowState, emitted_history_conflicts, prepare_emitted_history};
+use super::state::{
+    TcpFlowState, emitted_history_conflicts, prepare_emitted_history,
+    projected_pending_source_count,
+};
 use super::{Error, Limits, Malformed, Resource, Segment};
 use crate::analysis::serial::serial_offset;
 
@@ -279,6 +282,11 @@ fn plan_merge_and_accounting(
     let storage_bytes = final_page_count
         .checked_mul(PAGE_CHARGE)
         .ok_or(limits.aggregate_byte_error())?;
+    let insert = (segment.sources.is_some() && !merge.direct_output)
+        .then_some(merge.offset..incoming.remaining_end);
+    let take = (merge.emitted_segment_bytes != 0 && merge.added_bytes != 0 && !merge.direct_output)
+        .then_some(state.next_offset..final_next_offset);
+    let source_span_count = projected_pending_source_count(state, insert, take);
     let accounting = plan_push_accounting(PushAccountingInput {
         limits,
         state,
@@ -286,9 +294,7 @@ fn plan_merge_and_accounting(
         storage_bytes,
         emitted_segment_bytes: merge.emitted_segment_bytes,
         segment_count: merge.segment_count,
-        source_span_count: state.pending_sources.len().saturating_add(usize::from(
-            segment.sources.is_some() && !merge.direct_output,
-        )),
+        source_span_count,
         aggregate_base_bytes,
         aggregate_base_memory_charge,
         retains_flow_state: !closed,

@@ -136,7 +136,6 @@ class SchemaSet(NamedTuple):
     envelope_schema: Any
     common_schema: Any
     command_schemas: dict[str, Any]
-    registry: Any
     validator: Any
     merged_schema: Any
     required_assets: tuple[str, ...]
@@ -158,11 +157,6 @@ def _localize_common_refs(node: Any) -> Any:
 
 def load_schema_set(root: Path, identity: Identity) -> SchemaSet:
     jsonschema = load_jsonschema()
-    try:
-        from referencing import Registry, Resource
-    except ImportError as error:
-        raise CheckError('multi-file output schema resolution requires the referencing package') from error
-
     envelope_path = root / identity.schema_path
     common_path = root / COMMON_SCHEMA
     command_paths = sorted((root / OUTPUT_SCHEMA_DIR).glob('*.v1.schema.json'))
@@ -201,10 +195,6 @@ def load_schema_set(root: Path, identity: Identity) -> SchemaSet:
             jsonschema.Draft202012Validator.check_schema(schema)
         except jsonschema.SchemaError as error:
             raise CheckError(f'{uri}: invalid Draft 2020-12 schema: {error.message}') from error
-    registry = Registry()
-    for uri, schema in documents.items():
-        registry = registry.with_resource(uri, Resource.from_contents(schema))
-
     merged_definitions = dict(_localize_common_refs(common.get('$defs', {})))
     for schema in commands.values():
         for name, definition in schema.get('$defs', {}).items():
@@ -234,9 +224,14 @@ def load_schema_set(root: Path, identity: Identity) -> SchemaSet:
         }
     merged = {'$defs': merged_definitions}
 
-    envelope_validator = jsonschema.Draft202012Validator(envelope, registry=registry)
+    def standalone(schema):
+        localized = _localize_common_refs(schema)
+        localized['$defs'] = merged_definitions
+        return localized
+
+    envelope_validator = jsonschema.Draft202012Validator(standalone(envelope))
     command_validators = {
-        command: jsonschema.Draft202012Validator(schema, registry=registry)
+        command: jsonschema.Draft202012Validator(standalone(schema))
         for command, schema in commands.items()
     }
 
@@ -261,7 +256,7 @@ def load_schema_set(root: Path, identity: Identity) -> SchemaSet:
 
     required = (COMMON_SCHEMA,
                 *(f'{OUTPUT_SCHEMA_DIR}/{path.name}' for path in command_paths))
-    return SchemaSet(envelope, common, commands, registry, Validator(), merged, required)
+    return SchemaSet(envelope, common, commands, Validator(), merged, required)
 
 
 def document_problems(validator: Any, label: str, document: Any) -> list[str]:

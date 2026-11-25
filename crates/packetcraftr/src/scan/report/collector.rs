@@ -207,6 +207,13 @@ impl Collector {
                     });
                 }
                 inferred
+                    .into_iter()
+                    .zip(endpoints)
+                    .map(|(mut inferred, collected)| {
+                        inferred.probes = collected.probes;
+                        inferred
+                    })
+                    .collect()
             }
             None => {
                 for endpoint in &mut endpoints {
@@ -244,5 +251,85 @@ impl Collector {
             rtt: report.rtt,
             scheduling: report.scheduling,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::{IpAddr, Ipv4Addr};
+    use std::time::{Duration, SystemTime};
+
+    use packetcraftr_core::frame::{Frame, LinkType};
+
+    use super::*;
+    use crate::probe::{self, Reply, Status};
+    use crate::{Sink, Stats};
+
+    fn evidence(response: Option<Frame>) -> ProbeEvidence {
+        ProbeEvidence {
+            measurement: scan::Measurement::Response(Reply::TcpSynAck),
+            sequence: 7,
+            stage: Stage::Scan,
+            address: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
+            scope: None,
+            endpoint: probe::Endpoint::Tcp { port: 80 },
+            tcp_scan: Some(scan::TcpScan::Syn),
+            sctp_scan: None,
+            attempt: 1,
+            status: Status::Response,
+            classification: Classification::Open,
+            reply: Some(Reply::TcpSynAck),
+            responder: Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1))),
+            sent_at: SystemTime::UNIX_EPOCH,
+            received_at: Some(SystemTime::UNIX_EPOCH),
+            latency: Some(Duration::from_millis(1)),
+            response,
+            reason: "syn-ack".to_owned(),
+            application: None,
+            tcp_window: Some(4096),
+        }
+    }
+
+    #[test]
+    fn inferences_reuse_collected_reply_frames() {
+        let frame = Frame::new(None, LinkType(1), &b"reply"[..]).unwrap();
+        let mut collector = Collector::default();
+        collector
+            .publish(Event::Probe {
+                target: "192.0.2.1".into(),
+                probe: evidence(Some(frame.clone())),
+            })
+            .unwrap();
+        let stripped = evidence(None);
+        let inferred = vec![Endpoint {
+            address: stripped.address,
+            scope: stripped.scope.clone(),
+            endpoint: stripped.endpoint,
+            classification: stripped.classification,
+            port_hint: None,
+            inference: None,
+            probes: vec![stripped],
+        }];
+        let report = Report {
+            planned_duration: Duration::ZERO,
+            target: "192.0.2.1".to_owned(),
+            resolved_addresses: vec![IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1))],
+            hosts: Vec::new(),
+            counts: Default::default(),
+            retained_evidence_bytes: 0,
+            stats: Stats::default(),
+            rtt: crate::scan::Rtt {
+                sent: 1,
+                ..Default::default()
+            },
+            scheduling: Default::default(),
+        };
+
+        let aggregate = collector.finish_with_inferences(report, inferred).unwrap();
+
+        assert_eq!(
+            aggregate.endpoints[0].probes[0].response.as_ref(),
+            Some(&frame)
+        );
     }
 }

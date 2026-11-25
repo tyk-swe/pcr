@@ -221,12 +221,11 @@ impl ReassemblyDispatch {
     ) -> Result<Vec<TcpEventRecord>, Error> {
         let mut output = Vec::new();
         let reused = self.evict_reused_generation(segment, acknowledgment, &mut output);
-        let mut new_connection = reused;
         if segment.syn {
             let base = segment.sequence.wrapping_add(1);
             let meta = self.meta(&segment.flow, None);
-            new_connection |= meta.direction(&segment.flow).start_syn(base);
-            if new_connection {
+            meta.direction(&segment.flow).start_syn(base);
+            if reused {
                 meta.generation = meta.generation.saturating_add(1);
             }
         }
@@ -458,5 +457,96 @@ fn event_flow(event: &TcpEvent) -> &ScopedFlowKey {
         | TcpEvent::Gap { flow, .. }
         | TcpEvent::Closed { flow, .. }
         | TcpEvent::Evicted { flow, .. } => flow,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Instant;
+
+    use super::*;
+    use crate::analysis::FlowKey;
+    use crate::analysis::scope::Interner;
+
+    fn flow() -> ScopedFlowKey {
+        ScopedFlowKey {
+            scope: Interner::default().intern(None, Vec::new()).unwrap(),
+            flow: FlowKey {
+                source: "192.0.2.1".parse().unwrap(),
+                source_port: 40000,
+                destination: "192.0.2.2".parse().unwrap(),
+                destination_port: 80,
+            },
+        }
+    }
+
+    fn segment(
+        flow: &ScopedFlowKey,
+        sequence: u32,
+        payload: &[u8],
+        syn: bool,
+        fin: bool,
+    ) -> Segment {
+        Segment {
+            flow: flow.clone(),
+            sequence,
+            payload: Bytes::copy_from_slice(payload),
+            sources: None,
+            syn,
+            fin,
+            rst: false,
+        }
+    }
+
+    fn data_generation(events: &[TcpEventRecord]) -> Option<u64> {
+        events.iter().find_map(|record| match &record.event {
+            TcpEvent::Data { .. } => Some(record.generation),
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn fast_open_reuse_keeps_one_handshake_generation() {
+        let client = flow();
+        let server = client.reverse();
+        let now = Instant::now();
+        let mut dispatch = ReassemblyDispatch::new(true, &Limits::default()).unwrap();
+        let mut output = Vec::new();
+
+        for (flow, sequence, acknowledgment, syn, fin) in [
+            (&client, 100, None, true, false),
+            (&server, 200, Some(101), true, false),
+            (&client, 101, Some(201), false, true),
+            (&server, 201, Some(102), false, true),
+        ] {
+            dispatch
+                .dispatch_segment(
+                    acknowledgment,
+                    &segment(flow, sequence, &[], syn, fin),
+                    now,
+                    1,
+                )
+                .unwrap();
+        }
+
+        let request = b"GET / HTTP/1.1\r\nhost: example\r\n\r\n";
+        let events = dispatch
+            .dispatch_segment(None, &segment(&client, 500, request, true, false), now, 2)
+            .unwrap();
+        output.extend(events);
+        let client_generation = data_generation(&output).unwrap();
+        let response = b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\n\r\n";
+        let acknowledgment = 501u32.wrapping_add(request.len() as u32);
+        let events = dispatch
+            .dispatch_segment(
+                Some(acknowledgment),
+                &segment(&server, 900, response, true, false),
+                now,
+                3,
+            )
+            .unwrap();
+
+        assert_eq!(client_generation, 1);
+        assert_eq!(data_generation(&events), Some(client_generation));
     }
 }

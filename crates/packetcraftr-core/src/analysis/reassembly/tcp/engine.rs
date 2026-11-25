@@ -175,3 +175,117 @@ impl Reassembler {
         events
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::UNIX_EPOCH;
+
+    use super::*;
+    use crate::analysis::FlowKey;
+    use crate::analysis::provenance::{SourceFrame, Tracker};
+    use crate::analysis::reassembly::tcp::DataSources;
+    use crate::analysis::scope::Interner;
+    use bytes::Bytes;
+
+    fn flow() -> ScopedFlowKey {
+        ScopedFlowKey {
+            scope: Interner::default().intern(None, Vec::new()).unwrap(),
+            flow: FlowKey {
+                source: "192.0.2.1".parse().unwrap(),
+                source_port: 40000,
+                destination: "192.0.2.2".parse().unwrap(),
+                destination_port: 80,
+            },
+        }
+    }
+
+    fn source(tracker: &Tracker, number: u64) -> crate::analysis::provenance::SourceSet {
+        tracker
+            .single(SourceFrame {
+                number,
+                timestamp: UNIX_EPOCH,
+            })
+            .unwrap()
+    }
+
+    fn segment(
+        flow: &ScopedFlowKey,
+        sequence: u32,
+        payload: &[u8],
+        sources: Option<crate::analysis::provenance::SourceSet>,
+    ) -> Segment {
+        Segment {
+            flow: flow.clone(),
+            sequence,
+            payload: Bytes::copy_from_slice(payload),
+            sources,
+            syn: false,
+            fin: false,
+            rst: false,
+        }
+    }
+
+    #[test]
+    fn split_out_of_order_provenance_stays_accounted() {
+        let tracker = Tracker::new(1 << 20, 32).unwrap();
+        let flow = flow();
+        let base = 1_000;
+        let wire: Vec<u8> = (0..60).map(|offset| (offset % 251) as u8).collect();
+        let mut reassembler = Reassembler::new(Limits::default()).unwrap();
+        let now = Instant::now();
+        let mut syn = segment(&flow, base - 1, &[], None);
+        syn.syn = true;
+        reassembler.push(syn, now).unwrap();
+        for (offset, length, number) in [(10, 10, 1), (30, 10, 2), (5, 40, 3)] {
+            reassembler
+                .push(
+                    segment(
+                        &flow,
+                        base + offset,
+                        &wire[offset as usize..(offset + length) as usize],
+                        Some(source(&tracker, number)),
+                    ),
+                    now,
+                )
+                .unwrap();
+        }
+
+        let events = reassembler
+            .push(
+                segment(&flow, base, &wire[..5], Some(source(&tracker, 4))),
+                now,
+            )
+            .unwrap();
+        let data = events.iter().find_map(|event| match event {
+            Event::Data { bytes, sources, .. } => Some((bytes, sources)),
+            _ => None,
+        });
+        let Some((bytes, sources)) = data else {
+            panic!("gap fill did not emit reassembled data: {events:?}");
+        };
+        assert_eq!(bytes.as_ref(), &wire[..45]);
+        let DataSources::Spans(spans) = sources else {
+            panic!("merged data did not retain span provenance: {sources:?}");
+        };
+        let spans: Vec<(usize, Vec<u64>)> = spans
+            .iter()
+            .map(|(length, sources)| {
+                (
+                    *length,
+                    sources.iter().map(|frame| frame.number).collect::<Vec<_>>(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            spans,
+            vec![
+                (5, vec![4]),
+                (5, vec![3]),
+                (10, vec![1]),
+                (10, vec![3]),
+                (10, vec![2]),
+                (5, vec![3]),
+            ]
+        );
+    }
+}

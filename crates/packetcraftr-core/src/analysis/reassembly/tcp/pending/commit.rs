@@ -11,7 +11,10 @@ use crate::analysis::reassembly::tcp::pages;
 use crate::analysis::reassembly::tcp::state::{
     TcpFlowState, append_emitted_history, trim_emitted_history,
 };
-use crate::analysis::reassembly::tcp::{Event, Reassembler, Segment};
+use crate::analysis::reassembly::tcp::{
+    DataSources, Event, Reassembler, Segment,
+    state::{insert_pending_source, take_pending_sources},
+};
 
 pub(in crate::analysis::reassembly::tcp) fn commit_push(
     reassembler: &mut Reassembler,
@@ -30,38 +33,31 @@ pub(in crate::analysis::reassembly::tcp) fn commit_push(
     let last_update = previous.map_or(now, |state| state.last_update.max(now));
     let deadline = last_update.checked_add(reassembler.limits.idle_expiry);
     let Segment {
-        flow, rst, payload, ..
+        flow,
+        rst,
+        payload,
+        sources,
+        ..
     } = segment;
     let direct_payload = plan
         .direct_payload
         .as_ref()
         .and_then(|range| crate::frame::checked_slice(&payload, range.start, range.end));
+    let incoming = Incoming {
+        direct_payload,
+        payload: &payload,
+        sources: &sources,
+    };
     let (replacement, mut events) = if changes_generation {
         let mut state = TcpFlowState::new(first_payload_sequence, last_update, deadline);
-        let events = commit_flow_push(
-            &mut state,
-            &flow,
-            now,
-            max_bytes_per_flow,
-            plan,
-            direct_payload,
-            &payload,
-        );
+        let events = commit_flow_push(&mut state, &flow, now, max_bytes_per_flow, plan, incoming);
         (Some(state), events)
     } else {
         let state = reassembler
             .flows
             .get_mut(&flow)
             .expect("an unchanged generation has an established flow");
-        let events = commit_flow_push(
-            state,
-            &flow,
-            now,
-            max_bytes_per_flow,
-            plan,
-            direct_payload,
-            &payload,
-        );
+        let events = commit_flow_push(state, &flow, now, max_bytes_per_flow, plan, incoming);
         state.deadline = deadline;
         (None, events)
     };
@@ -84,14 +80,20 @@ pub(in crate::analysis::reassembly::tcp) fn commit_push(
     events
 }
 
+#[derive(Clone)]
+struct Incoming<'a> {
+    direct_payload: Option<Bytes>,
+    payload: &'a [u8],
+    sources: &'a Option<crate::analysis::provenance::SourceSet>,
+}
+
 fn commit_flow_push(
     state: &mut TcpFlowState,
     flow: &ScopedFlowKey,
     now: Instant,
     max_bytes_per_flow: usize,
     plan: PushPlan,
-    direct_payload: Option<Bytes>,
-    incoming_payload: &[u8],
+    incoming: Incoming<'_>,
 ) -> Vec<Event> {
     let PushPlan {
         payload_sequence,
@@ -120,7 +122,19 @@ fn commit_flow_push(
     if let Some(history) = history_replacement {
         state.emitted_history = history;
     }
-    let output = apply_pending_merge(state, merge, incoming_payload);
+    if !merge.direct_output
+        && let Some(sources) = incoming.sources.clone()
+    {
+        let payload_len = incoming.payload.len().saturating_sub(merge.payload_start);
+        insert_pending_source(
+            state,
+            merge.offset,
+            merge.offset.saturating_add(payload_len as u64),
+            sources,
+        );
+    }
+    let direct_sources = incoming.sources.clone();
+    let output = apply_pending_merge(state, merge, incoming.payload);
     state.pending_bytes = pending_bytes;
     if state.fin_offset.is_none() {
         state.fin_offset = incoming_fin_offset;
@@ -137,9 +151,12 @@ fn commit_flow_push(
         });
     }
 
-    if let Some(bytes) = direct_payload {
+    if let Some(bytes) = incoming.direct_payload {
         state.pending_bytes = state.pending_bytes.saturating_sub(bytes.len());
-        emit_data(state, flow, bytes, max_bytes_per_flow, &mut events);
+        let sources = direct_sources
+            .clone()
+            .map_or(DataSources::Empty, DataSources::Single);
+        emit_data(state, flow, bytes, max_bytes_per_flow, sources, &mut events);
     }
 
     if let Some(bytes) = output {
@@ -147,9 +164,30 @@ fn commit_flow_push(
             .pending_bytes
             .checked_sub(bytes.len())
             .expect("planned delivery charge");
-        emit_data(state, flow, bytes, max_bytes_per_flow, &mut events);
+        let output_start = state.next_offset;
+        let output_end = output_start.saturating_add(bytes.len() as u64);
+        let mut spans = take_pending_sources(state, output_start, output_end);
+        coalesce_source_spans(&mut spans);
+        let sources = match spans.len() {
+            0 => DataSources::Empty,
+            1 if spans[0].0 == bytes.len() => DataSources::Single(spans.pop().expect("one span").1),
+            _ => DataSources::Spans(spans),
+        };
+        emit_data(state, flow, bytes, max_bytes_per_flow, sources, &mut events);
     }
     events
+}
+
+fn coalesce_source_spans(spans: &mut Vec<(usize, crate::analysis::provenance::SourceSet)>) {
+    let mut index = 0;
+    while index + 1 < spans.len() {
+        if spans[index].1.ptr_eq(&spans[index + 1].1) {
+            spans[index].0 = spans[index].0.saturating_add(spans[index + 1].0);
+            spans.remove(index + 1);
+        } else {
+            index += 1;
+        }
+    }
 }
 
 // The `as u32` deliberately keeps next_offset modulo 2^32 for wire sequence arithmetic.
@@ -158,6 +196,7 @@ fn emit_data(
     flow: &ScopedFlowKey,
     bytes: Bytes,
     max_bytes_per_flow: usize,
+    sources: DataSources,
     events: &mut Vec<Event>,
 ) {
     let sequence = state.base_sequence.wrapping_add(state.next_offset as u32);
@@ -172,6 +211,7 @@ fn emit_data(
         flow: flow.clone(),
         sequence,
         bytes,
+        sources,
     });
 }
 

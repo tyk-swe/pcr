@@ -34,9 +34,7 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
             crate::engine::operation::Operation::new(self, request.campaign.limits.max_duration);
         let setup = WorkflowSetup::with_authorizer(self, &operation, self.policy.as_ref());
         let mut workflow = setup.start(self, request.campaign.limits.max_duration);
-        let publish = publisher(&self.runtime, sink, duration_limit, |source| {
-            Error::Output { source }
-        })?;
+        let publish = publisher(sink, duration_limit, |source| Error::Output { source })?;
         let mut executor =
             WorkflowExecutor::new(self, &operation, request.send(), request.collection.clone());
         run(&request, &mut workflow, &mut executor, publish)

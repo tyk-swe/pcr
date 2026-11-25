@@ -164,20 +164,10 @@ pub enum Error {
 impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
-            Self::Socket(_) => Classification::new(
-                packetcraftr_core::error::Code::IoUdpExchange,
-                Kind::Io,
-                None,
-            ),
+            Self::Socket(_) => Classification::new(crate::code::IoUdpExchange, Kind::Io, None),
             Self::Interrupted(source) => source.classification(),
-            Self::Limit => Classification::new(
-                packetcraftr_core::error::Code::CliUdpExchangeLimit,
-                Kind::Usage,
-                None,
-            ),
-            Self::Peer { .. } => {
-                Classification::new(packetcraftr_core::error::Code::IoUdpPeer, Kind::Io, None)
-            }
+            Self::Limit => Classification::new(crate::code::CliUdpExchangeLimit, Kind::Usage, None),
+            Self::Peer { .. } => Classification::new(crate::code::IoUdpPeer, Kind::Io, None),
         }
     }
 }

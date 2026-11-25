@@ -4,7 +4,7 @@
 use super::invalid;
 use crate::commands::Command;
 use crate::errors::CliError;
-use packetcraftr_core::security::{Report, Source, input};
+use packetcraftr_core::security::{Report, Source};
 use sha2::{Digest, Sha256};
 use std::path::Path;
 
@@ -66,7 +66,7 @@ pub(in crate::commands) fn report(bytes: &[u8]) -> Result<Report, CliError> {
         .chain(&engagement_commands)
         .copied()
         .collect();
-    let envelope = input::aggregate::<serde_json::Value>(bytes, &allowed)
+    let envelope = crate::output::contract::aggregate_input::<serde_json::Value>(bytes, &allowed)
         .map_err(|error| invalid(error.to_string()))?;
     if security_commands.contains(&envelope.command.as_str()) {
         let result: Report =
@@ -76,32 +76,8 @@ pub(in crate::commands) fn report(bytes: &[u8]) -> Result<Report, CliError> {
         }
         return Ok(result);
     }
-    engagement(&envelope.command, envelope.result, diagnostic_codes(bytes))
-}
-
-#[derive(serde::Deserialize, Default)]
-struct DiagnosticCode {
-    #[serde(default)]
-    code: String,
-}
-
-#[derive(serde::Deserialize, Default)]
-struct EnvelopeDiagnostics {
-    #[serde(default)]
-    diagnostics: Vec<DiagnosticCode>,
-}
-
-fn diagnostic_codes(bytes: &[u8]) -> Vec<String> {
-    serde_json::from_slice::<EnvelopeDiagnostics>(bytes).map_or_else(
-        |_| Vec::new(),
-        |envelope| {
-            envelope
-                .diagnostics
-                .into_iter()
-                .map(|diagnostic| diagnostic.code)
-                .collect()
-        },
-    )
+    let diagnostics = envelope.diagnostic_codes();
+    engagement(&envelope.command, envelope.result, diagnostics)
 }
 
 fn is_plan(command: &str, result: &serde_json::Value) -> bool {
@@ -114,8 +90,7 @@ fn is_plan(command: &str, result: &serde_json::Value) -> bool {
 
 #[derive(serde::Deserialize)]
 struct ScanEndpoint {
-    #[serde(default)]
-    classification: String,
+    classification: crate::commands::network::scan::output::Classification,
 }
 
 #[derive(serde::Deserialize, Default)]
@@ -139,10 +114,9 @@ struct ScanResult {
     retained_evidence_bytes: Option<u64>,
 }
 
-#[derive(serde::Deserialize, Default)]
+#[derive(serde::Deserialize)]
 struct DifferentialRow {
-    #[serde(default)]
-    verdict: String,
+    verdict: crate::commands::network::differential::output::Verdict,
 }
 
 #[derive(serde::Deserialize, Default)]
@@ -159,7 +133,7 @@ struct DifferentialResult {
 struct FuzzResult {
     seed: u64,
     first_case: u64,
-    mode: String,
+    mode: crate::commands::packet::fuzz::output::Mode,
     cases_generated: u64,
     cases_built: u64,
     cases_rejected: u64,
@@ -193,7 +167,7 @@ struct TracerouteSummary {
     edges: u64,
 }
 
-#[derive(serde::Deserialize, Default)]
+#[derive(serde::Deserialize)]
 struct TracerouteResult {
     #[serde(default)]
     mode: Option<String>,
@@ -205,9 +179,9 @@ struct TracerouteResult {
     completions: Vec<serde::de::IgnoredAny>,
     target: String,
     destination: String,
-    strategy: String,
+    strategy: crate::output::network::Transport,
     #[serde(default)]
-    completion: Option<String>,
+    completion: Option<crate::commands::network::traceroute::output::Completion>,
     #[serde(default)]
     destination_port: Option<u64>,
     #[serde(default)]
@@ -524,8 +498,11 @@ fn summarize(command: &str, result: Engagement, diagnostics: &[String]) -> Repor
                 serde_json::json!(trace.undecoded.len()),
             );
             if matches!(
-                trace.completion.as_deref(),
-                Some("maximum_hops" | "timeout")
+                trace.completion,
+                Some(
+                    crate::commands::network::traceroute::output::Completion::MaximumHops
+                        | crate::commands::network::traceroute::output::Completion::Timeout
+                )
             ) {
                 report
                     .completeness
@@ -589,6 +566,102 @@ mod tests {
     #[test]
     fn current_security_output_is_accepted() {
         assert_eq!(report(&current_hunt()).unwrap().kind, "hunt");
+    }
+
+    fn aggregate(command: &str, result: serde_json::Value) -> Vec<u8> {
+        serde_json::to_vec(&serde_json::json!({
+            "schema": crate::output::contract::OUTPUT_SCHEMA,
+            "payload_schema": format!("packetcraftr.output.{command}/v1"),
+            "command": command,
+            "mode": "aggregate",
+            "status": "success",
+            "result": result,
+            "diagnostics": [],
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn real_output_values_roundtrip_through_projection_parsers() {
+        use crate::commands::network::differential::output as differential;
+        use crate::commands::network::scan::output as scan;
+        use crate::commands::network::traceroute::output as traceroute;
+        use crate::commands::packet::fuzz::output as fuzz;
+
+        let endpoint = scan::Endpoint {
+            address: "192.0.2.10".parse().unwrap(),
+            scope: None,
+            transport: crate::output::network::Transport::Tcp,
+            port: Some(443),
+            ip_protocol: None,
+            classification: scan::Classification::Timeout,
+            port_hint: Some("https"),
+            inference: None,
+            probes: Vec::new(),
+        };
+        let scan_result = serde_json::json!({
+            "target": "192.0.2.10",
+            "hosts": [],
+            "resolved_addresses": ["192.0.2.10"],
+            "endpoints": [serde_json::to_value(endpoint).unwrap()],
+        });
+        let imported = report(&aggregate("scan", scan_result)).unwrap();
+        assert_eq!(
+            imported.findings[0].evidence["classifications"]["timeout"],
+            1
+        );
+
+        let row = differential::Row {
+            variant: "baseline".into(),
+            verdict: differential::Verdict::Accepted,
+            answered: 1,
+            rewritten: 0,
+            attempts: 1,
+        };
+        let differential_result = serde_json::json!({
+            "valid": true,
+            "provisional": false,
+            "plan_digest": "digest",
+            "source_port": 40000,
+            "rows": [serde_json::to_value(row).unwrap()],
+            "attempts": [],
+        });
+        let imported = report(&aggregate("differential", differential_result)).unwrap();
+        assert_eq!(imported.findings[0].evidence["verdicts"]["accepted"], 1);
+
+        let fuzz_report = fuzz::Report {
+            seed: 1,
+            first_case: 0,
+            mode: fuzz::Mode::Offline,
+            cases_generated: 1,
+            cases_built: 1,
+            cases_rejected: 0,
+            cases: Vec::new(),
+        };
+        let imported = report(&aggregate(
+            "fuzz",
+            serde_json::to_value(fuzz_report).unwrap(),
+        ))
+        .unwrap();
+        assert_eq!(imported.findings[0].evidence["cases_generated"], 1);
+
+        let traceroute_report = traceroute::Report {
+            target: "example.test".into(),
+            resolved_addresses: vec!["192.0.2.10".parse().unwrap()],
+            destination: "192.0.2.10".parse().unwrap(),
+            strategy: crate::output::network::Transport::Udp,
+            destination_port: Some(33434),
+            hops: Vec::new(),
+            undecoded: Vec::new(),
+            retained_evidence_bytes: 0,
+            completion: traceroute::Completion::DestinationReached,
+        };
+        let imported = report(&aggregate(
+            "traceroute",
+            serde_json::to_value(traceroute_report).unwrap(),
+        ))
+        .unwrap();
+        assert!(imported.completeness.complete);
     }
 
     #[test]
@@ -702,7 +775,7 @@ mod tests {
 
     #[test]
     fn unrelated_output_identity_is_rejected() {
-        let unknown = format!("{}/unsupported", packetcraftr_core::security::OUTPUT_SCHEMA);
+        let unknown = format!("{}/unsupported", crate::output::contract::OUTPUT_SCHEMA);
         for schema in [
             "packetcraftr.output/v2",
             "packetcraftr.output/v18",

@@ -17,7 +17,8 @@
     "subject": "127.0.0.1:46671",
     "summary": "Certificate chain did not validate"
   },
-  "schema": "packetcraftr.output/v22",
-  "sequence": 0,
+  "schema": "packetcraftr.output/v23",
+  "payload_schema": "packetcraftr.output.audit-tls/v1",
+  "seq": 0,
   "status": "success"
 }

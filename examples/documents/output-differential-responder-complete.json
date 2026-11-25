@@ -8,7 +8,8 @@
     "received": 0,
     "replies_sent": 0
   },
-  "schema": "packetcraftr.output/v22",
-  "sequence": 0,
+  "schema": "packetcraftr.output/v23",
+  "payload_schema": "packetcraftr.output.differential-responder/v1",
+  "seq": 0,
   "status": "success"
 }

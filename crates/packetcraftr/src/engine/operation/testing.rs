@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use packetcraftr_core::budget::Deadline;
-use packetcraftr_core::error::{BoundaryError, Classification, Code, Kind};
+use packetcraftr_core::error::{BoundaryError, Classification, Kind};
 use packetcraftr_core::frame::LinkType;
 use packetcraftr_core::packet::MacAddress;
 use packetcraftr_core::protocol::builtin;
@@ -19,7 +19,7 @@ use packetcraftr_netio::{
 
 use crate::policy::{DestinationConstraint, Policy};
 use crate::providers::{PacketProviders, TargetProviders, TcpProviders};
-use crate::{Client, Delivery, ProviderSet, Sink};
+use crate::{Client, ProviderSet, Sink};
 
 #[derive(Clone)]
 struct Routes(Arc<Mutex<route::Decision>>);
@@ -169,15 +169,11 @@ pub(crate) fn fail_sink<E>(calls: &Arc<AtomicUsize>) -> FailSink<E> {
 impl<E: Send + 'static> Sink<E> for FailSink<E> {
     type Ack = ();
 
-    fn delivery(&self) -> Delivery {
-        Delivery::Cooperative
-    }
-
     fn publish(&mut self, _event: E) -> Result<Self::Ack, BoundaryError> {
         self.calls.fetch_add(1, Ordering::Relaxed);
         Err(BoundaryError::new(
             "test sink refused the first event",
-            Classification::new(Code::IoTest, Kind::Io, None),
+            Classification::new(crate::code::IoTest, Kind::Io, None),
             Vec::new(),
         ))
     }

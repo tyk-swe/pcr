@@ -1,0 +1,481 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:packetcraftr:output:http:v1",
+  "title": "PacketcraftR http output payload v1",
+  "description": "Success payload contract for the http command. The stable envelope is validated separately.",
+  "allOf": [
+    {
+      "type": "object",
+      "required": [
+        "command",
+        "payload_schema"
+      ],
+      "properties": {
+        "command": {
+          "const": "http"
+        },
+        "payload_schema": {
+          "const": "packetcraftr.output.http/v1"
+        }
+      }
+    },
+    {
+      "oneOf": [
+        {
+          "allOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/aggregateSuccessEnvelope"
+            },
+            {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/httpSuccess"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/streamSuccessEnvelope"
+            },
+            {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/httpStreamSuccess"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "$defs": {
+    "httpBodyFraming": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "enum": [
+                "none",
+                "chunked",
+                "close",
+                "tunnel"
+              ]
+            }
+          },
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "length"
+          ],
+          "properties": {
+            "type": {
+              "const": "length"
+            },
+            "length": {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+            }
+          },
+          "additionalProperties": true
+        }
+      ]
+    },
+    "httpComplete": {
+      "type": "object",
+      "required": [
+        "frames_read",
+        "frames_matched",
+        "summary",
+        "scopes",
+        "incomplete_datagrams",
+        "source_outcomes_omitted",
+        "ip_reassembly"
+      ],
+      "properties": {
+        "frames_read": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "frames_matched": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "summary": {
+          "$ref": "#/$defs/httpSummary"
+        },
+        "scopes": {
+          "type": "array",
+          "items": {
+            "$ref": "urn:packetcraftr:output:common:v1#/$defs/captureScope"
+          }
+        },
+        "incomplete_datagrams": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "source_outcomes_omitted": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "ip_reassembly": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/ipReassemblyReport"
+        }
+      },
+      "additionalProperties": true
+    },
+    "httpIssue": {
+      "type": "object",
+      "required": [
+        "number",
+        "flow",
+        "stream",
+        "status"
+      ],
+      "properties": {
+        "number": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "flow": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/applicationFlow"
+        },
+        "stream": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "status": {
+          "enum": [
+            "complete",
+            "incomplete",
+            "malformed",
+            "limit",
+            "gap",
+            "conflict",
+            "reset",
+            "evicted",
+            "upgrade"
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "httpMessage": {
+      "type": "object",
+      "required": [
+        "index",
+        "stream",
+        "generation",
+        "flow",
+        "request",
+        "status",
+        "start",
+        "headers",
+        "header_wire_hex",
+        "framing",
+        "body_bytes",
+        "trailers",
+        "error",
+        "sources"
+      ],
+      "properties": {
+        "index": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "stream": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "generation": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "flow": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/applicationFlow"
+        },
+        "request": {
+          "anyOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "enum": [
+            "complete",
+            "incomplete",
+            "malformed",
+            "limit",
+            "gap",
+            "conflict",
+            "reset",
+            "evicted",
+            "upgrade"
+          ]
+        },
+        "start": {
+          "anyOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/httpStartLine"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "headers": {
+          "type": "array",
+          "items": {
+            "$ref": "urn:packetcraftr:output:common:v1#/$defs/httpHeader"
+          }
+        },
+        "header_wire_hex": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/hexBytes"
+        },
+        "framing": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/httpBodyFraming"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "body_bytes": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "trailers": {
+          "type": "array",
+          "items": {
+            "$ref": "urn:packetcraftr:output:common:v1#/$defs/httpHeader"
+          }
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "urn:packetcraftr:output:common:v1#/$defs/applicationSource"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "httpResult": {
+      "type": "object",
+      "required": [
+        "frames_read",
+        "frames_matched",
+        "summary",
+        "scopes",
+        "incomplete_datagrams",
+        "source_outcomes_omitted",
+        "ip_reassembly",
+        "messages",
+        "issues"
+      ],
+      "properties": {
+        "frames_read": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "frames_matched": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "summary": {
+          "$ref": "#/$defs/httpSummary"
+        },
+        "scopes": {
+          "type": "array",
+          "items": {
+            "$ref": "urn:packetcraftr:output:common:v1#/$defs/captureScope"
+          }
+        },
+        "incomplete_datagrams": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "source_outcomes_omitted": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "ip_reassembly": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/ipReassemblyReport"
+        },
+        "messages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/httpMessage"
+          }
+        },
+        "issues": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/httpIssue"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "httpStreamSuccess": {
+      "type": "object",
+      "required": [
+        "command",
+        "event",
+        "result"
+      ],
+      "properties": {
+        "command": {
+          "const": "http"
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "event",
+            "result"
+          ],
+          "properties": {
+            "event": {
+              "const": "http_message"
+            },
+            "result": {
+              "$ref": "#/$defs/httpMessage"
+            }
+          }
+        },
+        {
+          "required": [
+            "event",
+            "result"
+          ],
+          "properties": {
+            "event": {
+              "const": "http_stream_issue"
+            },
+            "result": {
+              "$ref": "#/$defs/httpIssue"
+            }
+          }
+        },
+        {
+          "required": [
+            "event",
+            "result"
+          ],
+          "properties": {
+            "event": {
+              "const": "complete"
+            },
+            "result": {
+              "$ref": "#/$defs/httpComplete"
+            }
+          }
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "ip_overlap_resolved"
+            },
+            "result": {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/ipOverlapResolvedEvent"
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "ip_datagram_completed"
+            },
+            "result": {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/ipDatagramCompletedEvent"
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "ip_datagram_incomplete"
+            },
+            "result": {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/ipDatagramIncompleteEvent"
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        }
+      ]
+    },
+    "httpSuccess": {
+      "type": "object",
+      "required": [
+        "command",
+        "result"
+      ],
+      "properties": {
+        "command": {
+          "const": "http"
+        },
+        "result": {
+          "$ref": "#/$defs/httpResult"
+        }
+      }
+    },
+    "httpSummary": {
+      "type": "object",
+      "required": [
+        "messages",
+        "complete_messages",
+        "incomplete_messages",
+        "malformed_messages",
+        "upgraded_connections",
+        "responses_without_request",
+        "requests_without_final_response"
+      ],
+      "properties": {
+        "messages": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "complete_messages": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "incomplete_messages": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "malformed_messages": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "upgraded_connections": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "responses_without_request": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "requests_without_final_response": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

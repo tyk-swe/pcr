@@ -13,7 +13,7 @@ use super::expiry::ExpiryIndex;
 use state::TcpFlowState;
 
 mod model;
-pub use model::{Error, Event, Malformed, Resource, Segment};
+pub use model::{DataSources, Error, Event, EvictionReason, Malformed, Resource, Segment};
 
 use crate::analysis::ScopedFlowKey;
 mod engine;
@@ -27,6 +27,7 @@ mod state;
 
 // Without a fixed charge, sparse one-byte segments bypass the aggregate ceiling.
 const PENDING_SEGMENT_METADATA_CHARGE: usize = 64;
+const PENDING_SOURCE_SPAN_CHARGE: usize = 64;
 // Without a fixed charge, payload-free flows bypass the aggregate ceiling.
 const TCP_FLOW_STATE_METADATA_CHARGE: usize = 256;
 

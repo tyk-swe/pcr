@@ -676,6 +676,105 @@ fn only_beacons_skip_tcp_stream_events() {
 }
 
 #[test]
+fn fragmented_tls_hunt_attributes_all_contributing_frames() {
+    use crate::{
+        codec::Addresses,
+        frame::{Frame, LinkType},
+        layer::Raw,
+        packet::Packet,
+        protocol::{builtin, link::Ethernet, network::Ipv4, transport::Tcp},
+    };
+    use bytes::Bytes;
+
+    fn decode_hex(input: &str) -> Vec<u8> {
+        (0..input.len())
+            .step_by(2)
+            .map(|index| u8::from_str_radix(&input[index..index + 2], 16).unwrap())
+            .collect()
+    }
+
+    let tls = decode_hex(concat!(
+        "16030300c9010000c50303111111111111111111111111111111111111111111111111111111111111111120",
+        "22222222222222222222222222222222222222222222222222222222222222220008130113021303c02f010000",
+        "740000001500130000106170692e6578616d706c652e746573740010000e000c02683208687474702f312e",
+        "31000a00060004001d0017000d00080006040308040401002b00050403040303003300260024001d002099",
+        "99999999999999999999999999999999999999999999999999999999999999"
+    ));
+    assert_eq!(tls.len(), 206);
+    let registry = builtin::registry();
+    let builder = crate::build::Builder::new(registry.clone());
+    let mut writer = crate::capture_file::Writer::pcap_with_options(
+        Vec::new(),
+        LinkType::ETHERNET,
+        Default::default(),
+    )
+    .unwrap();
+    for (seconds, sequence, flags, payload) in [
+        (0, 1000, Tcp::SYN, &b""[..]),
+        (1, 1001, Tcp::ACK, &tls[..100]),
+        (2, 1101, Tcp::ACK, &tls[100..]),
+    ] {
+        let mut packet = Packet::default();
+        packet.push(Ethernet::default());
+        packet.push(Ipv4 {
+            source: "192.0.2.1".parse().unwrap(),
+            destination: "198.51.100.2".parse().unwrap(),
+            ..Default::default()
+        });
+        packet.push(Tcp {
+            source_port: 54321,
+            destination_port: 443,
+            sequence,
+            flags,
+            ..Default::default()
+        });
+        if !payload.is_empty() {
+            packet.push(Raw::new(Bytes::copy_from_slice(payload)));
+        }
+        let built = builder
+            .build(packet, Addresses::default(), Default::default())
+            .unwrap();
+        let frame = Frame::new(
+            Some(UNIX_EPOCH + Duration::from_secs(seconds)),
+            LinkType::ETHERNET,
+            built.bytes,
+        )
+        .unwrap();
+        writer.write_frame(&frame).unwrap();
+    }
+    let capture = writer.into_inner();
+    let indicators = Document {
+        schema: SCHEMA.into(),
+        indicators: vec![Indicator {
+            id: "tls-sni".into(),
+            kind: Kind::Domain,
+            value: "api.example.test".into(),
+        }],
+    };
+    let collector = Collector::new(
+        Mode::Hunt(indicators),
+        Limits::default(),
+        application::Limits::default(),
+        registry.clone(),
+    )
+    .unwrap();
+    let mut reader =
+        crate::capture_file::Reader::with_limits(&capture[..], Default::default()).unwrap();
+
+    let outcome = crate::analysis::Session::new(registry, Default::default(), collector)
+        .run(&mut reader, |_| Ok(()), |_| Ok(()))
+        .unwrap();
+
+    let finding = outcome
+        .summary
+        .findings
+        .iter()
+        .find(|finding| finding.indicator_id.as_deref() == Some("tls-sni"))
+        .expect("fragmented TLS ClientHello did not match the hunt indicator");
+    assert_eq!(finding.frames, [2, 3]);
+}
+
+#[test]
 fn hunts_match_indicators_in_every_kind_of_dns_answer() {
     use crate::protocol::application::dns::{Dns, Record, RecordValue};
     let indicators = Document {

@@ -18,6 +18,7 @@
     ],
     "rows_written": 1
   },
-  "schema": "packetcraftr.output/v22",
+  "schema": "packetcraftr.output/v23",
+  "payload_schema": "packetcraftr.output.read/v1",
   "status": "success"
 }

@@ -148,7 +148,7 @@ fn normalize_to_pcap<W: Write>(
         Some((_, mut writer)) => writer.flush().map_err(CliError::classified),
         None => Err(CliError::from_classification(
             Classification::new(
-                packetcraftr_core::error::Code::CliCaptureNormalizePcap,
+                crate::code::CliCaptureNormalizePcap,
                 Kind::Usage,
                 Some("select at least one frame, or use --output pcapng for an empty capture"),
             ),

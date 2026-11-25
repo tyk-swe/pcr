@@ -48,12 +48,12 @@ impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
             Self::Socket(_) => Classification::new(
-                packetcraftr_core::error::Code::IoTcpConnect,
+                crate::code::IoTcpConnect,
                 Kind::Io,
                 Some("inspect the socket failure and the destination's reachability"),
             ),
             Self::Evidence { .. } => Classification::new(
-                packetcraftr_core::error::Code::IoTcpConnectEvidence,
+                crate::code::IoTcpConnectEvidence,
                 Kind::Io,
                 Some("inspect the socket endpoint query failure"),
             ),
@@ -62,28 +62,26 @@ impl Classified for Error {
                 operation: "starting a TCP connection",
             }
             .classification(),
-            Self::ExchangeLimit => Classification::new(
-                packetcraftr_core::error::Code::CliTcpExchangeLimit,
-                Kind::Usage,
-                None,
-            ),
+            Self::ExchangeLimit => {
+                Classification::new(crate::code::CliTcpExchangeLimit, Kind::Usage, None)
+            }
             Self::Timeout => Classification::new(
-                packetcraftr_core::error::Code::CliTcpConnectTimeout,
+                crate::code::CliTcpConnectTimeout,
                 Kind::Usage,
                 Some("choose a finite nonzero connection timeout"),
             ),
             Self::Capacity { .. } => Classification::new(
-                packetcraftr_core::error::Code::IoTcpConnectCapacity,
+                crate::code::IoTcpConnectCapacity,
                 Kind::Io,
                 Some("wait for admitted connection cleanup or reduce concurrency"),
             ),
             Self::Spawn(_) | Self::Worker => Classification::new(
-                packetcraftr_core::error::Code::IoTcpConnectWorker,
+                crate::code::IoTcpConnectWorker,
                 Kind::Io,
                 Some("inspect local worker resources and retry"),
             ),
             Self::Completed => Classification::new(
-                packetcraftr_core::error::Code::InternalTcpConnectState,
+                crate::code::InternalTcpConnectState,
                 Kind::Internal,
                 Some("consume each completed connection exactly once"),
             ),

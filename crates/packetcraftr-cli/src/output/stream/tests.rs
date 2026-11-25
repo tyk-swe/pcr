@@ -56,7 +56,7 @@ fn unattributed_encoder_refuses_records_but_reports_errors() {
     assert!(stream.is_open());
     stream
         .emit_error(Error::new(
-            Classification::new(packetcraftr_core::error::Code::IoStdout, Kind::Io, None),
+            Classification::new(crate::code::IoStdout, Kind::Io, None),
             "startup failed",
             Vec::new(),
         ))
@@ -116,9 +116,9 @@ fn reserved_events_preserve_budget_and_sequence() {
             .collect::<Result<_, _>>()
             .unwrap();
         assert_eq!(records.len(), 2);
-        assert_eq!(records[0]["sequence"], 0);
+        assert_eq!(records[0]["seq"], 0);
         assert_eq!(records[0]["event"], "message");
-        assert_eq!(records[1]["sequence"], 1);
+        assert_eq!(records[1]["seq"], 1);
         assert_eq!(records[1]["event"], "complete");
         assert!(matches!(
             stream.emit_published(Published::new(NamedData("complete"), Vec::new())),
@@ -394,7 +394,7 @@ fn regular_file_records_match_the_unbatched_stream_through_either_terminal() {
         |stream| {
             stream
                 .emit_error(Error::new(
-                    Classification::new(packetcraftr_core::error::Code::IoStdout, Kind::Io, None),
+                    Classification::new(crate::code::IoStdout, Kind::Io, None),
                     "stopped",
                     Vec::new(),
                 ))
@@ -457,11 +457,7 @@ fn expired_batch_admission_preserves_accepted_records_for_terminal_error() {
         stream
             .terminal()
             .emit_error(Error::new(
-                Classification::new(
-                    packetcraftr_core::error::Code::IoOutputDeadline,
-                    Kind::Io,
-                    None,
-                ),
+                Classification::new(crate::code::IoOutputDeadline, Kind::Io, None),
                 "stopped",
                 Vec::new(),
             ))
@@ -474,7 +470,7 @@ fn expired_batch_admission_preserves_accepted_records_for_terminal_error() {
             .unwrap();
         assert_eq!(records.len(), 4);
         for (sequence, record) in records.iter().enumerate() {
-            assert_eq!(record["sequence"], sequence);
+            assert_eq!(record["seq"], sequence);
             if sequence < 3 {
                 assert_eq!(record["event"], "message");
                 assert_eq!(record["result"]["value"], sequence);

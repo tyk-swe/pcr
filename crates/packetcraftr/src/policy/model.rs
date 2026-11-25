@@ -174,7 +174,7 @@ pub enum Error {
 }
 
 const INVALID_PACKET_SEMANTICS: Classification = Classification::new(
-    packetcraftr_core::error::Code::PolicyInvalidPacketSemantics,
+    crate::code::PolicyInvalidPacketSemantics,
     Kind::Policy,
     Some("repair malformed or unsupported route-bearing packet fields before live transmission"),
 );
@@ -185,31 +185,31 @@ impl Classified for Error {
             // A malformed resolved-address bound is a caller request error and
             // shares the `cli.live_target` code with target resolution.
             Self::InvalidAddressLimit { .. } => (
-                packetcraftr_core::error::Code::CliLiveTarget,
+                crate::code::CliLiveTarget,
                 "set the resolved-address limit to at least 1 and no more than the supported maximum",
             ),
             Self::PublicDestination { .. } => (
-                packetcraftr_core::error::Code::PolicyPublicDestination,
+                crate::code::PolicyPublicDestination,
                 "explicitly authorize public destinations only for networks you are permitted to test",
             ),
             Self::DestinationNotAllowed { .. } => (
-                packetcraftr_core::error::Code::PolicyDestinationNotAllowed,
+                crate::code::PolicyDestinationNotAllowed,
                 "permit the destination with an exact address or CIDR allowlist entry, or choose a permitted destination",
             ),
             Self::InvalidDestinationConstraint { .. } => (
-                packetcraftr_core::error::Code::CliLiveTarget,
+                crate::code::CliLiveTarget,
                 "use an IP address or canonical CIDR network as the destination constraint",
             ),
             Self::DestinationConstraintLimit { .. } => (
-                packetcraftr_core::error::Code::CliLiveTarget,
+                crate::code::CliLiveTarget,
                 "declare fewer destination constraints, covering adjacent hosts with one CIDR network where possible",
             ),
             Self::DestinationDenied { .. } => (
-                packetcraftr_core::error::Code::PolicyDestinationNotAllowed,
+                crate::code::PolicyDestinationNotAllowed,
                 "choose a destination the engagement scope does not exclude, or amend the scope with approval",
             ),
             Self::InvalidScopeDocument { .. } => (
-                packetcraftr_core::error::Code::CliLiveTarget,
+                crate::code::CliLiveTarget,
                 "provide a packetcraftr.scope/v1 JSON document with a label and IP or canonical CIDR destinations",
             ),
             Self::InvalidPacketSemantics { .. }
@@ -218,35 +218,35 @@ impl Classified for Error {
                 return INVALID_PACKET_SEMANTICS;
             }
             Self::HostnameResolution { .. } => (
-                packetcraftr_core::error::Code::PolicyHostnameResolution,
+                crate::code::PolicyHostnameResolution,
                 "explicitly authorize hostname resolution, then independently authorize every resolved address",
             ),
             Self::PermissivePacket => (
-                packetcraftr_core::error::Code::PolicyPermissivePacket,
+                crate::code::PolicyPermissivePacket,
                 "authorize permissive live traffic in both build options and traffic policy",
             ),
             Self::PermissiveLiveOptIn => (
-                packetcraftr_core::error::Code::PolicyPermissiveLiveOptIn,
+                crate::code::PolicyPermissiveLiveOptIn,
                 "set the explicit per-operation malformed-live opt-in in addition to policy approval",
             ),
             Self::SourceNotInterfaceOwned { .. } => (
-                packetcraftr_core::error::Code::PolicySourceOwnership,
+                crate::code::PolicySourceOwnership,
                 "use an interface-owned source, select it with the route source option, or explicitly authorize source spoofing",
             ),
             Self::PacketLimit { .. } => (
-                packetcraftr_core::error::Code::PolicyPacketLimit,
+                crate::code::PolicyPacketLimit,
                 "reduce the operation packet count or deliberately raise the configured traffic budget",
             ),
             Self::ByteLimit { .. } => (
-                packetcraftr_core::error::Code::PolicyByteLimit,
+                crate::code::PolicyByteLimit,
                 "reduce the operation byte count or deliberately raise the configured traffic budget",
             ),
             Self::TrafficUnitLimit { .. } => (
-                packetcraftr_core::error::Code::PolicyTrafficUnitLimit,
+                crate::code::PolicyTrafficUnitLimit,
                 "reduce the connections, messages, or DNS attempts, or deliberately raise the packet/socket traffic-unit budget",
             ),
             Self::TrafficByteLimit { .. } => (
-                packetcraftr_core::error::Code::PolicyTrafficByteLimit,
+                crate::code::PolicyTrafficByteLimit,
                 "reduce the application or query bytes, or deliberately raise the wire/application byte budget",
             ),
         };

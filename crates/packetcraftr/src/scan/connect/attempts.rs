@@ -17,6 +17,7 @@ use super::planning::StagePlan;
 use super::{Outcome, ProbeEvidence, execution};
 use crate::client::admission::approve_operation;
 use crate::clock::Clock;
+use crate::engine::operation::SpendLedger;
 use crate::policy::{Authorizer, Operation, SocketOperation};
 use crate::target::ResolveTarget;
 
@@ -43,6 +44,7 @@ pub(super) struct Connector<'a, Q, A, C> {
     pub(super) budget: &'a tcp::ConnectBudget,
     pub(super) clock: &'a C,
     pub(super) deadline: &'a mut Deadline,
+    pub(super) spend: SpendLedger,
 }
 
 impl<Q, A, C> Connector<'_, Q, A, C>
@@ -84,6 +86,7 @@ where
             Err(tcp::Error::Capacity { .. }) => return Ok(None),
             Err(source) => return Err(execution(sequence, source)),
         };
+        self.spend.record_traffic(1, 0);
         Ok(Some(Active {
             pending,
             sequence,

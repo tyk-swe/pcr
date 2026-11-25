@@ -74,15 +74,11 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
         // Post-window events get one more finite allowance; they cannot fall inside the window.
         let finalization_limit = request.timeout;
         let mut finalization: Option<Deadline> = None;
-        let mut publish = crate::engine::execution::publisher(
-            &self.runtime,
-            sink,
-            exchange_deadline_error,
-            |source| source,
-        )
-        .map_err(|source| Error::Output {
-            source: Box::new(source),
-        })?;
+        let mut publish =
+            crate::engine::execution::publisher(sink, exchange_deadline_error, |source| source)
+                .map_err(|source| Error::Output {
+                    source: Box::new(source),
+                })?;
         let prepared = self.prepare_exchange(request, &operation)?;
         let mut answered = AnsweredRequests::new(prepared.packets.len());
         let mut stop_predicate =
@@ -166,7 +162,7 @@ fn exchange_deadline_error(error: packetcraftr_core::budget::DeadlineExceeded) -
             error.limit
         ),
         Classification::new(
-            packetcraftr_core::error::Code::PolicyExchangeDurationLimit,
+            crate::code::PolicyExchangeDurationLimit,
             Kind::Policy,
             Some("reduce exchange output backpressure or raise the finite timeout"),
         ),

@@ -4,7 +4,10 @@
 use std::io::{self, Read, Write};
 use std::time::Duration;
 
-use packetcraftr_core::budget::{Deadline, Interrupted};
+use packetcraftr_core::{
+    budget::{Deadline, Interrupted},
+    clock::{Clock, SystemClock},
+};
 
 use super::{Direction, Error, Limits};
 
@@ -66,7 +69,7 @@ impl<S, A> Wire<S, A> {
         }
     }
 
-    fn step(&mut self) -> Result<Duration, Error> {
+    fn check_budget_and_wait(&self) -> Result<Duration, Error> {
         let mut wait = self.deadline.live_remaining()?;
         if let Some(deadline) = &self.operation_deadline {
             wait = wait.min(
@@ -75,13 +78,22 @@ impl<S, A> Wire<S, A> {
                     .map_err(|source| self.operation_error(source))?,
             );
         }
-        if self.steps == self.limits.max_steps {
+        if self.steps >= self.limits.max_steps {
+            return Err(Error::StepLimit {
+                limit: self.limits.max_steps,
+            });
+        }
+        Ok(wait.min(crate::deadline::POLL_INTERVAL))
+    }
+
+    fn charge_step(&mut self) -> Result<(), Error> {
+        if self.steps >= self.limits.max_steps {
             return Err(Error::StepLimit {
                 limit: self.limits.max_steps,
             });
         }
         self.steps += 1;
-        Ok(wait.min(crate::deadline::POLL_INTERVAL))
+        Ok(())
     }
 }
 
@@ -96,17 +108,31 @@ impl<S: crate::tcp::Stream, A> Read for Wire<S, A> {
             .into_io());
         }
         let capacity = remaining.min(bytes.len());
-        let wait = self.step().map_err(Error::into_io)?;
+        let wait = self.check_budget_and_wait().map_err(Error::into_io)?;
         self.inner.set_read_timeout(Some(wait))?;
         self.enforce().map_err(Error::into_io)?;
-        let count = self.inner.read(&mut bytes[..capacity])?;
-        if count > capacity {
-            return Err(io::Error::other(
-                "TLS provider reported an impossible read length",
-            ));
+        let started = SystemClock.now();
+        let outcome = self.inner.read(&mut bytes[..capacity]);
+        match outcome {
+            Ok(count) => {
+                self.charge_step().map_err(Error::into_io)?;
+                if count > capacity {
+                    return Err(io::Error::other(
+                        "TLS provider reported an impossible read length",
+                    ));
+                }
+                self.bytes_read += count;
+                Ok(count)
+            }
+            Err(source) => {
+                let spin = source.kind() == io::ErrorKind::Interrupted
+                    || (crate::bounded::timed_out(&source) && started.elapsed() < wait / 2);
+                if spin || !crate::bounded::retryable(&source) {
+                    self.charge_step().map_err(Error::into_io)?;
+                }
+                Err(source)
+            }
         }
-        self.bytes_read += count;
-        Ok(count)
     }
 }
 
@@ -125,9 +151,10 @@ where
             .into_io());
         }
         let capacity = remaining.min(bytes.len());
-        let wait = self.step().map_err(Error::into_io)?;
+        let wait = self.check_budget_and_wait().map_err(Error::into_io)?;
         self.inner.set_write_timeout(Some(wait))?;
         self.enforce().map_err(Error::into_io)?;
+        self.charge_step().map_err(Error::into_io)?;
         (self.authorize_write)(&bytes[..capacity])?;
         self.enforce().map_err(Error::into_io)?;
         let count = self.inner.write(&bytes[..capacity])?;
@@ -141,9 +168,20 @@ where
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        let wait = self.step().map_err(Error::into_io)?;
+        let wait = self.check_budget_and_wait().map_err(Error::into_io)?;
         self.inner.set_write_timeout(Some(wait))?;
         self.enforce().map_err(Error::into_io)?;
-        self.inner.flush()
+        let outcome = self.inner.flush();
+        if outcome
+            .as_ref()
+            .err()
+            .is_none_or(|source| !crate::bounded::timed_out(source))
+        {
+            self.charge_step().map_err(Error::into_io)?;
+        }
+        outcome
     }
 }
+
+#[cfg(test)]
+mod tests;

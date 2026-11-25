@@ -35,18 +35,18 @@ impl Classified for Error {
         match self {
             Self::Preparation(error) => error.classification(),
             Self::InvalidRequest { .. } => Classification::new(
-                packetcraftr_core::error::Code::CliSendLimit,
+                crate::code::CliSendLimit,
                 Kind::Usage,
                 Some("use finite repetition, rate, and expansion limits for one send operation"),
             ),
             Self::Output { source } => source.classification(),
             Self::IncoherentEvents { .. } => Classification::new(
-                packetcraftr_core::error::Code::InternalSendEventCoherence,
+                crate::code::InternalSendEventCoherence,
                 Kind::Internal,
                 Some("collect every send event once, from one send, in publication order"),
             ),
             Self::Clock { .. } => Classification::new(
-                packetcraftr_core::error::Code::IoSendClock,
+                crate::code::IoSendClock,
                 Kind::Io,
                 Some("inspect the pacing clock and account for frames already transmitted"),
             ),

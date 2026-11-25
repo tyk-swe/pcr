@@ -4,12 +4,11 @@
 mod context;
 mod executor;
 pub(crate) mod limits;
-mod shared;
 mod sink;
 pub(crate) mod validation;
 
 pub(crate) use context::{Context, Grant, Paused, Receipt, pause, rate_delay};
 pub(crate) use executor::{Executor, ExecutorFault, Step};
-pub(crate) use shared::Shared;
-pub use sink::{Delivery, Sink};
-pub(crate) use sink::{forwarding, publisher};
+pub use sink::forwarding;
+pub(crate) use sink::publisher;
+pub use sink::{Isolated, Sink};

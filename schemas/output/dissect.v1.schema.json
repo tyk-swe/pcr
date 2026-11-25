@@ -1,0 +1,154 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:packetcraftr:output:dissect:v1",
+  "title": "PacketcraftR dissect output payload v1",
+  "description": "Success payload contract for the dissect command. The stable envelope is validated separately.",
+  "allOf": [
+    {
+      "type": "object",
+      "required": [
+        "command",
+        "payload_schema"
+      ],
+      "properties": {
+        "command": {
+          "const": "dissect"
+        },
+        "payload_schema": {
+          "const": "packetcraftr.output.dissect/v1"
+        }
+      }
+    },
+    {
+      "oneOf": [
+        {
+          "allOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/aggregateSuccessEnvelope"
+            },
+            {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/dissectSuccess"
+                },
+                {
+                  "$ref": "urn:packetcraftr:output:common:v1#/$defs/projectionAggregateSuccess"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/streamSuccessEnvelope"
+            },
+            {
+              "oneOf": [
+                {
+                  "$ref": "urn:packetcraftr:output:common:v1#/$defs/projectionStreamSuccess"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "$defs": {
+    "dissectAggregateResult": {
+      "type": "object",
+      "oneOf": [
+        {
+          "properties": {
+            "matched": {
+              "const": true
+            },
+            "dissection": {
+              "$ref": "#/$defs/dissectionResult"
+            }
+          },
+          "required": [
+            "matched",
+            "dissection"
+          ]
+        },
+        {
+          "properties": {
+            "matched": {
+              "const": false
+            },
+            "dissection": {
+              "type": "null"
+            }
+          },
+          "required": [
+            "matched",
+            "dissection"
+          ]
+        }
+      ],
+      "properties": {
+        "matched": {
+          "type": "boolean"
+        },
+        "dissection": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/dissectionResult"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "dissectSuccess": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "dissect"
+        },
+        "result": {
+          "$ref": "#/$defs/dissectAggregateResult"
+        }
+      },
+      "required": [
+        "command",
+        "result"
+      ]
+    },
+    "dissectionResult": {
+      "type": "object",
+      "required": [
+        "bytes_hex",
+        "length",
+        "link_type",
+        "packet",
+        "layout"
+      ],
+      "properties": {
+        "bytes_hex": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/hexBytes"
+        },
+        "length": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "link_type": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "packet": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/packetDocument"
+        },
+        "layout": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/packetLayout"
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

@@ -240,7 +240,7 @@ fn failed_initialization_releases_resource() {
 
 #[test]
 fn partial_send_preserves_evidence_without_retry() {
-    use packetcraftr_core::error::{Classified, Code};
+    use packetcraftr_core::error::Classified;
     let counts = Arc::new(Counts::default());
     counts.partial_send.store(true, SeqCst);
     let session = Bounded::new(TestBackend::new(counts.clone()));
@@ -256,7 +256,7 @@ fn partial_send_preserves_evidence_without_retry() {
                 actual: 2
             }
         ));
-        assert_eq!(error.classification().code, Code::IoPartialSend);
+        assert_eq!(error.classification().code, crate::code::IoPartialSend);
     }
     assert_eq!(counts.sends.load(SeqCst), 1);
     assert_eq!(counts.drops.load(SeqCst), 1);

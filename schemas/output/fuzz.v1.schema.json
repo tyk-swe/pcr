@@ -1,0 +1,417 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:packetcraftr:output:fuzz:v1",
+  "title": "PacketcraftR fuzz output payload v1",
+  "description": "Success payload contract for the fuzz command. The stable envelope is validated separately.",
+  "allOf": [
+    {
+      "type": "object",
+      "required": [
+        "command",
+        "payload_schema"
+      ],
+      "properties": {
+        "command": {
+          "const": "fuzz"
+        },
+        "payload_schema": {
+          "const": "packetcraftr.output.fuzz/v1"
+        }
+      }
+    },
+    {
+      "oneOf": [
+        {
+          "allOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/aggregateSuccessEnvelope"
+            },
+            {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/fuzzSuccess"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/streamSuccessEnvelope"
+            },
+            {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/fuzzCaseSuccess"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "$defs": {
+    "fuzzCase": {
+      "type": "object",
+      "required": [
+        "index",
+        "seed",
+        "mutation",
+        "reproduction",
+        "shrink_values",
+        "recipe",
+        "outcome",
+        "responses",
+        "unmatched",
+        "undecoded",
+        "diagnostics"
+      ],
+      "properties": {
+        "index": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "seed": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "mutation": {
+          "$ref": "#/$defs/fuzzMutation"
+        },
+        "reproduction": {
+          "$ref": "#/$defs/fuzzReproduction"
+        },
+        "shrink_values": {
+          "type": "array",
+          "items": {
+            "$ref": "urn:packetcraftr:output:common:v1#/$defs/fieldValue"
+          }
+        },
+        "recipe": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/packetDocument"
+        },
+        "frame": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/wireFrame"
+        },
+        "decoded": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/packetDocument"
+        },
+        "requires_live_opt_in": {
+          "type": "boolean"
+        },
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "built",
+            "rejected",
+            "response",
+            "timeout"
+          ]
+        },
+        "error": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/error"
+        },
+        "sent": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/frame"
+        },
+        "responses": {
+          "type": "array",
+          "items": {
+            "$ref": "urn:packetcraftr:output:common:v1#/$defs/frame"
+          }
+        },
+        "unmatched": {
+          "type": "array",
+          "items": {
+            "$ref": "urn:packetcraftr:output:common:v1#/$defs/frame"
+          }
+        },
+        "undecoded": {
+          "type": "array",
+          "items": {
+            "$ref": "urn:packetcraftr:output:common:v1#/$defs/frame"
+          }
+        },
+        "diagnostics": {
+          "type": "array",
+          "items": {
+            "$ref": "urn:packetcraftr:output:common:v1#/$defs/diagnostic"
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "outcome"
+            ],
+            "properties": {
+              "outcome": {
+                "enum": [
+                  "built",
+                  "response",
+                  "timeout"
+                ]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "frame",
+              "requires_live_opt_in"
+            ]
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "outcome"
+            ],
+            "properties": {
+              "outcome": {
+                "enum": [
+                  "response",
+                  "timeout"
+                ]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "sent"
+            ]
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "outcome"
+            ],
+            "properties": {
+              "outcome": {
+                "const": "rejected"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "error"
+            ]
+          }
+        }
+      ],
+      "additionalProperties": true
+    },
+    "fuzzCaseSuccess": {
+      "description": "One progressive fuzz case or the single terminal complete event. Case index is deterministic domain identity and does not select envelope sequence.",
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "fuzz"
+        }
+      },
+      "required": [
+        "command",
+        "result"
+      ],
+      "allOf": [
+        {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/terminalWithStats"
+        }
+      ],
+      "oneOf": [
+        {
+          "properties": {
+            "event": {
+              "const": "case"
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "operation_seed",
+                "case"
+              ],
+              "properties": {
+                "operation_seed": {
+                  "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+                },
+                "case": {
+                  "$ref": "#/$defs/fuzzCase"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "complete"
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "operation_seed",
+                "first_case",
+                "mode",
+                "cases_generated",
+                "cases_built",
+                "cases_rejected"
+              ],
+              "properties": {
+                "operation_seed": {
+                  "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+                },
+                "first_case": {
+                  "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+                },
+                "mode": {
+                  "$ref": "#/$defs/fuzzMode"
+                },
+                "cases_generated": {
+                  "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+                },
+                "cases_built": {
+                  "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+                },
+                "cases_rejected": {
+                  "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        }
+      ]
+    },
+    "fuzzMode": {
+      "type": "string",
+      "enum": [
+        "offline",
+        "live"
+      ]
+    },
+    "fuzzMutation": {
+      "type": "object",
+      "required": [
+        "layer",
+        "protocol",
+        "field",
+        "strategy",
+        "original",
+        "value"
+      ],
+      "properties": {
+        "layer": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "protocol": {
+          "type": "string",
+          "minLength": 1
+        },
+        "field": {
+          "type": "string",
+          "minLength": 1
+        },
+        "strategy": {
+          "type": "string",
+          "enum": [
+            "boundary",
+            "random",
+            "bit_flip",
+            "malformed"
+          ]
+        },
+        "original": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/fieldValue"
+        },
+        "value": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/fieldValue"
+        }
+      },
+      "additionalProperties": true
+    },
+    "fuzzReproduction": {
+      "type": "object",
+      "required": [
+        "operation_seed",
+        "case_index",
+        "case_seed"
+      ],
+      "properties": {
+        "operation_seed": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "case_index": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "case_seed": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        }
+      },
+      "additionalProperties": true
+    },
+    "fuzzResult": {
+      "type": "object",
+      "required": [
+        "seed",
+        "first_case",
+        "mode",
+        "cases_generated",
+        "cases_built",
+        "cases_rejected",
+        "cases"
+      ],
+      "properties": {
+        "seed": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "first_case": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "mode": {
+          "$ref": "#/$defs/fuzzMode"
+        },
+        "cases_generated": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "cases_built": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "cases_rejected": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "cases": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/fuzzCase"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "fuzzSuccess": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "fuzz"
+        },
+        "result": {
+          "$ref": "#/$defs/fuzzResult"
+        }
+      },
+      "required": [
+        "command",
+        "result"
+      ]
+    }
+  }
+}

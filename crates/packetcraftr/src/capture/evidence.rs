@@ -96,7 +96,7 @@ pub(super) fn evidence_loss(report: &mut Report) -> Option<Cause> {
             }
             report.diagnostics.push(Diagnostic::new(
                 Severity::Warning,
-                packetcraftr_core::error::Code::CaptureEvidenceIncomplete.as_str(),
+                crate::code::CaptureEvidenceIncomplete.as_str(),
                 format!(
                     "source {} ({}): {error}",
                     source.native.index, source.native.metadata.interface.name

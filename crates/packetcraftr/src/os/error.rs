@@ -48,13 +48,11 @@ impl Classified for Error {
             Self::Authorization(source) | Self::Execution { source, .. } | Self::Output(source) => {
                 source.classification()
             }
-            Self::Invalid(_) => Classification::new(
-                packetcraftr_core::error::Code::CliIdentifyOsLimit,
-                Kind::Usage,
-                None,
-            ),
+            Self::Invalid(_) => {
+                Classification::new(crate::code::CliIdentifyOsLimit, Kind::Usage, None)
+            }
             Self::Evidence { .. } => Classification::new(
-                packetcraftr_core::error::Code::InternalIdentifyOsEvidence,
+                crate::code::InternalIdentifyOsEvidence,
                 Kind::Internal,
                 None,
             ),
@@ -87,11 +85,7 @@ impl crate::error::FromFailure for Error {
                 sequence,
                 source: BoundaryError::with_source(
                     "OS probe clock failed",
-                    Classification::new(
-                        packetcraftr_core::error::Code::IoIdentifyOsClock,
-                        Kind::Io,
-                        None,
-                    ),
+                    Classification::new(crate::code::IoIdentifyOsClock, Kind::Io, None),
                     Vec::new(),
                     std::io::Error::other(source),
                 ),

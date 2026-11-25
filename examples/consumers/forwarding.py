@@ -16,7 +16,7 @@ import math
 import sys
 from typing import BinaryIO, Any
 
-SCHEMA = "packetcraftr.output/v22"
+SCHEMA = "packetcraftr.output/v23"
 # Releases 0.3.0 to 0.5.0-beta.2 and later unreleased builds each emitted this
 # identifier with a different schema, so no single schema can validate it.
 AMBIGUOUS_SCHEMA = "packetcraftr.output/v1"
@@ -492,7 +492,7 @@ def consume(source: BinaryIO, output_format: str, exit_code: int) -> dict[str, A
                 require(terminal is None, "record after terminal event")
                 record = decode(line)
                 require(record.get("mode") == "stream", "expected stream envelope")
-                require(type(record.get("sequence")) is int and record["sequence"] == sequence,
+                require(type(record.get("seq")) is int and record["seq"] == sequence,
                         "non-contiguous stream sequence")
                 sequence += 1
                 event = record.get("event")

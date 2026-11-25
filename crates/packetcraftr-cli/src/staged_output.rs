@@ -80,7 +80,7 @@ fn before_publish() {
 }
 
 const CLASSIFICATION: Classification = Classification::new(
-    packetcraftr_core::error::Code::IoOutputFile,
+    crate::code::IoOutputFile,
     Kind::Io,
     Some("choose a destination that does not exist inside a writable directory"),
 );

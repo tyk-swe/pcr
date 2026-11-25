@@ -9,7 +9,7 @@
 //!
 //! | Layer | Modules |
 //! | --- | --- |
-//! | 1. Foundation | `clock`, `deadline`, `data`, `engine::stats`, `engine::correlation`, `probe::model` |
+//! | 1. Foundation | `code`, `clock`, `deadline`, `data`, `engine::stats`, `engine::correlation`, `probe::model` |
 //! | 2. Environment | `error`, `policy`, `target` (model, resolver, and selection), `route`, `neighbor`, `providers`, `runtime`, `client`, `evidence::error` |
 //! | 3. Engine | `engine`, `evidence`, `send::options` |
 //! | 4. Primitives | `send`, `exchange`, `capture`, `probe` |
@@ -46,10 +46,10 @@
 //!     expression::Limits::default(),
 //! )?;
 //! let client = Client::new(registry, Policy::default(), SystemProviders);
-//! let collector = send::Collector::default();
+//! let mut collector = send::Collector::default();
 //! let report = client.send(
 //!     send::Request::new(packetcraftr_core::template::Template::new(packet), send::Options::default()),
-//!     collector.clone(),
+//!     &mut collector,
 //! )?;
 //! let aggregate = collector.finish(report)?;
 //! println!("sent {} bytes", aggregate.stats.bytes);
@@ -62,6 +62,7 @@ pub mod audit;
 pub mod capture;
 mod client;
 pub mod clock;
+mod code;
 pub(crate) mod data;
 pub mod deadline;
 pub mod differential;
@@ -86,9 +87,9 @@ pub mod target;
 pub mod traceroute;
 
 pub use client::Client;
-pub use engine::execution::{Delivery, Sink};
+pub use engine::execution::{Isolated, Sink, forwarding};
 pub use engine::stats::{Stats, StatsOverflow};
-pub use error::{Error, NeighborSpent};
+pub use error::Error;
 pub use providers::{
     CaptureProviders, PacketProviders, ProviderSet, SystemProviders, TargetProviders, TcpProviders,
     TransmitProviders, TransmitSet, UdpProviders,

@@ -16,7 +16,7 @@ use crate::{
 };
 
 const FAULT: ExecutorFault = ExecutorFault::new(
-    packetcraftr_core::error::Code::CliIdentifyOsExecutor,
+    crate::code::CliIdentifyOsExecutor,
     "use bounded single-probe OS batches",
 );
 
@@ -105,10 +105,7 @@ impl<P: PacketProviders, K: Clock> Native<'_, P, K> {
             return Err(FAULT.internal("neighbor evidence was truncated"));
         }
         let stats = resolution.stats(self.client.now().saturating_duration_since(started));
-        self.operation
-            .spent
-            .checked_add_assign(&stats)
-            .map_err(failure)?;
+        self.operation.spend.record_neighbors(&stats);
         Ok(Preparation {
             stats,
             captured: resolution.captured,
@@ -141,10 +138,6 @@ impl<P: PacketProviders, K: Clock> Executor<Batch<PlannedProbe>> for Native<'_, 
             &mut |_, sent, response| classify(client.registry(), probe, sent, response).is_some(),
             None,
         )?;
-        self.operation
-            .spent
-            .checked_add_assign(&aggregate.aggregate.stats)
-            .map_err(failure)?;
         Ok(batch.evidence(aggregate))
     }
 }
@@ -153,7 +146,7 @@ pub(super) fn failure(source: impl std::error::Error + Send + Sync + 'static) ->
     BoundaryError::with_source(
         "OS execution failed",
         packetcraftr_core::error::Classification::new(
-            packetcraftr_core::error::Code::IoIdentifyOs,
+            crate::code::IoIdentifyOs,
             packetcraftr_core::error::Kind::Io,
             None,
         ),

@@ -79,7 +79,7 @@ pub(super) fn run(
     match format {
         Format::Ndjson => {
             let emit =
-                crate::commands::execution::emitter(invocation, super::streaming::emit_event);
+                crate::commands::execution::emitter(invocation, super::streaming::emit_event)?;
             let mut report = client
                 .scan_with_followups(request, emit)
                 .map_err(super::followup_error)?;
@@ -101,9 +101,9 @@ pub(super) fn run(
             super::streaming::emit_complete(summary, stream)
         }
         format => {
-            let collector = followup::Collector::default();
+            let mut collector = followup::Collector::default();
             let report = client
-                .scan_with_followups(request, collector.clone())
+                .scan_with_followups(request, &mut collector)
                 .map_err(super::followup_error)?;
             let aggregate = collector.finish(report).map_err(super::followup_error)?;
             let followup::Aggregate {

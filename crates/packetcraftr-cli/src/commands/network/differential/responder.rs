@@ -6,7 +6,6 @@ use std::net::Ipv4Addr;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use packetcraftr::Sink as _;
 use packetcraftr::differential as lib;
 
 use crate::command_options::{Bounded as _, MaxDurationArgs};
@@ -152,6 +151,37 @@ fn write_log(staged: &mut StagedFile, records: &[lib::ReceptionRecord]) -> Resul
     Ok(())
 }
 
+struct CollectingEmitter<'a, E> {
+    collector: &'a mut lib::ResponderCollector,
+    emitter: E,
+}
+
+impl<E> packetcraftr::Sink<lib::ResponderEvent> for CollectingEmitter<'_, E>
+where
+    E: packetcraftr::Sink<lib::ResponderEvent, Ack = ()>,
+{
+    type Ack = ();
+
+    fn publish(
+        &mut self,
+        event: lib::ResponderEvent,
+    ) -> Result<(), packetcraftr_core::error::BoundaryError> {
+        self.publish_controlled(
+            event,
+            &packetcraftr_core::budget::Deadline::new(Duration::MAX),
+        )
+    }
+
+    fn publish_controlled(
+        &mut self,
+        event: lib::ResponderEvent,
+        control: &packetcraftr_core::budget::Deadline,
+    ) -> Result<(), packetcraftr_core::error::BoundaryError> {
+        self.collector.publish_controlled(event.clone(), control)?;
+        self.emitter.publish_controlled(event, control)
+    }
+}
+
 fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<(), CliError> {
     let token = parse_token(&arguments.token)?;
     let log = ReceptionLog::stage(invocation, arguments.log_file.as_deref())?;
@@ -164,24 +194,21 @@ fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<()
 
     let format = invocation.format;
     let stream = &invocation.output;
-    let collector = lib::ResponderCollector::default();
+    let mut collector = lib::ResponderCollector::default();
 
     let outcome = match format {
         Format::Ndjson => {
-            let recording = collector.clone();
-            let emit = crate::commands::execution::emitter(
-                invocation,
-                move |event: lib::ResponderEvent, stream| {
-                    recording
-                        .clone()
-                        .publish(event.clone())
-                        .map_err(CliError::classified)?;
-                    rendering::emit_responder_event(event, stream)
+            let emitter =
+                crate::commands::execution::emitter(invocation, rendering::emit_responder_event)?;
+            lib::respond(
+                request,
+                CollectingEmitter {
+                    collector: &mut collector,
+                    emitter,
                 },
-            );
-            lib::respond(request, emit)
+            )
         }
-        Format::Text | Format::Json => lib::respond(request, collector.clone()),
+        Format::Text | Format::Json => lib::respond(request, &mut collector),
         other => other.unreachable(),
     };
 
@@ -428,10 +455,7 @@ mod tests {
 
     #[test]
     fn blocked_live_output_does_not_send_a_reply_after_duration() {
-        assert_eq!(
-            blocked_live_output(false),
-            packetcraftr_core::error::Code::IoStdout
-        );
+        assert_eq!(blocked_live_output(false), crate::code::IoStdout);
     }
 
     #[test]

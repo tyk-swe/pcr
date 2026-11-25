@@ -14,7 +14,7 @@ macro_rules! published_enum {
         }
     ) => {
         $(#[$meta])*
-        #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize)]
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize)]
         $vis enum $name {
             $($(#[$variant_meta])* #[serde(rename = $text)] $variant,)+
         }

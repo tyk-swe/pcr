@@ -77,11 +77,7 @@ fn generator_write_failure_precedes_cancellation() {
 fn json_reporting_failure_preserves_diagnostics() {
     let invocation = invocation(Format::Json, Writer::default());
     let error = CliError::from_classification(
-        Classification::new(
-            packetcraftr_core::error::Code::PacketTest,
-            Kind::Packet,
-            Some("repair input"),
-        ),
+        Classification::new(crate::code::PacketTest, Kind::Packet, Some("repair input")),
         "original command failure",
         vec!["original cause".into()],
     )
@@ -123,7 +119,7 @@ fn published_json_errors_prioritize_output_failure() {
         }
         let error = if output_failed {
             CliError::from_classification(
-                Classification::new(packetcraftr_core::error::Code::IoStdout, Kind::Io, None),
+                Classification::new(crate::code::IoStdout, Kind::Io, None),
                 "write failed",
                 Vec::new(),
             )
@@ -206,11 +202,7 @@ fn ndjson_failure_preserves_context_and_cause() {
     );
     invocation.control.cancellation.cancel();
     let error = CliError::from_classification(
-        Classification::new(
-            packetcraftr_core::error::Code::PacketTest,
-            Kind::Packet,
-            None,
-        ),
+        Classification::new(crate::code::PacketTest, Kind::Packet, None),
         "original failure",
         vec!["original cause".into()],
     )

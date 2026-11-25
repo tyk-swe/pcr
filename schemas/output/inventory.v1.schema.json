@@ -1,0 +1,159 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:packetcraftr:output:inventory:v1",
+  "title": "PacketcraftR inventory output payload v1",
+  "description": "Success payload contract for the inventory command. The stable envelope is validated separately.",
+  "allOf": [
+    {
+      "type": "object",
+      "required": [
+        "command",
+        "payload_schema"
+      ],
+      "properties": {
+        "command": {
+          "const": "inventory"
+        },
+        "payload_schema": {
+          "const": "packetcraftr.output.inventory/v1"
+        }
+      }
+    },
+    {
+      "oneOf": [
+        {
+          "allOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/aggregateSuccessEnvelope"
+            },
+            {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/inventorySuccess"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "$defs": {
+    "inventoryHost": {
+      "type": "object",
+      "required": [
+        "address",
+        "mac_addresses",
+        "protocols",
+        "observed_ports",
+        "frames_sent",
+        "frames_received"
+      ],
+      "properties": {
+        "address": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/ipAddress"
+        },
+        "mac_addresses": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "protocols": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "observed_ports": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/inventoryPort"
+          }
+        },
+        "frames_sent": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "frames_received": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        }
+      },
+      "additionalProperties": false
+    },
+    "inventoryPort": {
+      "type": "object",
+      "required": [
+        "transport",
+        "port"
+      ],
+      "properties": {
+        "transport": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/dnsTransport"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        }
+      },
+      "additionalProperties": false
+    },
+    "inventoryProtocol": {
+      "type": "object",
+      "required": [
+        "protocol",
+        "frames"
+      ],
+      "properties": {
+        "protocol": {
+          "type": "string"
+        },
+        "frames": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        }
+      },
+      "additionalProperties": false
+    },
+    "inventoryResult": {
+      "type": "object",
+      "required": [
+        "frames_read",
+        "hosts",
+        "protocols"
+      ],
+      "properties": {
+        "frames_read": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "hosts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/inventoryHost"
+          }
+        },
+        "protocols": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/inventoryProtocol"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "inventorySuccess": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "inventory"
+        },
+        "result": {
+          "$ref": "#/$defs/inventoryResult"
+        }
+      },
+      "required": [
+        "command",
+        "result"
+      ]
+    }
+  }
+}

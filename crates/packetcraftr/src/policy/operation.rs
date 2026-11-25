@@ -86,7 +86,7 @@ pub struct LimitOverflow;
 impl packetcraftr_core::error::Classified for LimitOverflow {
     fn classification(&self) -> packetcraftr_core::error::Classification {
         packetcraftr_core::error::Classification::new(
-            packetcraftr_core::error::Code::PolicyBudgetOverflow,
+            crate::code::PolicyBudgetOverflow,
             packetcraftr_core::error::Kind::Policy,
             Some("reduce the finite operation budget"),
         )

@@ -1,0 +1,835 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:packetcraftr:output:identify-os:v1",
+  "title": "PacketcraftR identify-os output payload v1",
+  "description": "Success payload contract for the identify-os command. The stable envelope is validated separately.",
+  "allOf": [
+    {
+      "type": "object",
+      "required": [
+        "command",
+        "payload_schema"
+      ],
+      "properties": {
+        "command": {
+          "const": "identify-os"
+        },
+        "payload_schema": {
+          "const": "packetcraftr.output.identify-os/v1"
+        }
+      }
+    },
+    {
+      "oneOf": [
+        {
+          "allOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/aggregateSuccessEnvelope"
+            },
+            {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/osSuccess"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/streamSuccessEnvelope"
+            },
+            {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/osStreamSuccess"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "$defs": {
+    "osAdditional": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "additional"
+        },
+        "sequence": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "observation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/osObservation"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "frame": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/frame"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "sequence",
+        "observation",
+        "frame",
+        "reason"
+      ],
+      "additionalProperties": false
+    },
+    "osCandidate": {
+      "type": "object",
+      "properties": {
+        "family": {
+          "type": "string",
+          "enum": [
+            "linux",
+            "windows",
+            "macos"
+          ]
+        },
+        "signature": {
+          "type": "string"
+        },
+        "corpus": {
+          "type": "string"
+        },
+        "corpus_version": {
+          "type": "string"
+        },
+        "reference": {
+          "type": "string"
+        },
+        "matched_predicates": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 64
+        },
+        "confidence": {
+          "const": "qualified"
+        },
+        "observation_indices": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 255
+          },
+          "maxItems": 256
+        }
+      },
+      "required": [
+        "family",
+        "signature",
+        "corpus",
+        "corpus_version",
+        "reference",
+        "matched_predicates",
+        "confidence",
+        "observation_indices"
+      ],
+      "additionalProperties": false
+    },
+    "osComplete": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "complete"
+        },
+        "target": {
+          "type": "string"
+        },
+        "probe_set": {
+          "const": "packetcraftr.os-probes/v1"
+        },
+        "corpus": {
+          "type": "string"
+        },
+        "corpus_version": {
+          "type": "string"
+        },
+        "identification": {
+          "$ref": "#/$defs/osIdentification"
+        },
+        "observations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/osObservation"
+          },
+          "maxItems": 256
+        },
+        "retained_evidence_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1048576
+        },
+        "complete": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "kind",
+        "target",
+        "probe_set",
+        "corpus",
+        "corpus_version",
+        "identification",
+        "observations",
+        "retained_evidence_bytes",
+        "complete"
+      ],
+      "additionalProperties": false
+    },
+    "osDiagnostic": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "diagnostic"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "additionalProperties": false
+    },
+    "osEvidence": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/osPreparation"
+        },
+        {
+          "$ref": "#/$defs/osProbe"
+        },
+        {
+          "$ref": "#/$defs/osAdditional"
+        },
+        {
+          "$ref": "#/$defs/osUndecoded"
+        },
+        {
+          "$ref": "#/$defs/osDiagnostic"
+        }
+      ]
+    },
+    "osIdentification": {
+      "type": "object",
+      "properties": {
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "matched",
+            "ambiguous",
+            "unknown",
+            "inconclusive"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        },
+        "candidates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/osCandidate"
+          },
+          "maxItems": 512
+        }
+      },
+      "required": [
+        "outcome",
+        "reason",
+        "candidates"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "enum": [
+                  "unknown",
+                  "inconclusive"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "candidates": {
+                "maxItems": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "const": "matched"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "candidates": {
+                "minItems": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "const": "ambiguous"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "candidates": {
+                "minItems": 2
+              }
+            }
+          }
+        }
+      ]
+    },
+    "osObservation": {
+      "type": "object",
+      "properties": {
+        "probe": {
+          "type": "string",
+          "enum": [
+            "open_syn",
+            "closed_syn",
+            "timestamp_syn",
+            "echo"
+          ]
+        },
+        "address_family": {
+          "type": "string",
+          "enum": [
+            "ipv4",
+            "ipv6"
+          ]
+        },
+        "tcp": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "flags": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 65535
+                },
+                "window": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 65535
+                },
+                "option_kinds": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 255
+                  },
+                  "maxItems": 40
+                },
+                "mss": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 65535
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "window_scale": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 255
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "sack_permitted": {
+                  "type": "boolean"
+                },
+                "timestamps": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "flags",
+                "window",
+                "option_kinds",
+                "mss",
+                "window_scale",
+                "sack_permitted",
+                "timestamps"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "icmp_type": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 255
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "icmp_code": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 255
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "observed_hop_limit": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255
+        },
+        "ipv4_identification": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 65535
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ipv4_dont_fragment": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sequence": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "acknowledgment": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "timestamp_value": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "timestamp_echo": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "suitable": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "probe",
+        "address_family",
+        "tcp",
+        "icmp_type",
+        "icmp_code",
+        "observed_hop_limit",
+        "ipv4_identification",
+        "ipv4_dont_fragment",
+        "sequence",
+        "acknowledgment",
+        "timestamp_value",
+        "timestamp_echo",
+        "suitable"
+      ],
+      "additionalProperties": false
+    },
+    "osPreparation": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "preparation"
+        },
+        "interface": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "target": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "request_hex": {
+          "anyOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/hexBytes"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "packets_attempted": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "bytes": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "captured": {
+          "type": "array",
+          "items": {
+            "$ref": "urn:packetcraftr:output:common:v1#/$defs/frame"
+          },
+          "maxItems": 256
+        }
+      },
+      "required": [
+        "kind",
+        "interface",
+        "target",
+        "request_hex",
+        "packets_attempted",
+        "bytes",
+        "captured"
+      ],
+      "additionalProperties": false
+    },
+    "osProbe": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "probe"
+        },
+        "sequence": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "probe": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "open_syn",
+                "closed_syn",
+                "timestamp_syn",
+                "echo"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3
+        },
+        "sent": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/frame"
+        },
+        "response": {
+          "anyOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/frame"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "observation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/osObservation"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "received_at": {
+          "anyOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "latency": {
+          "anyOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/duration"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "sequence",
+        "probe",
+        "attempt",
+        "sent",
+        "response",
+        "observation",
+        "received_at",
+        "latency",
+        "reason"
+      ],
+      "additionalProperties": false
+    },
+    "osReport": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "type": "string"
+        },
+        "probe_set": {
+          "const": "packetcraftr.os-probes/v1"
+        },
+        "corpus": {
+          "type": "string"
+        },
+        "corpus_version": {
+          "type": "string"
+        },
+        "identification": {
+          "$ref": "#/$defs/osIdentification"
+        },
+        "observations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/osObservation"
+          },
+          "maxItems": 256
+        },
+        "retained_evidence_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1048576
+        },
+        "complete": {
+          "type": "boolean"
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/osEvidence"
+          },
+          "maxItems": 545
+        }
+      },
+      "required": [
+        "target",
+        "probe_set",
+        "corpus",
+        "corpus_version",
+        "identification",
+        "observations",
+        "retained_evidence_bytes",
+        "complete",
+        "evidence"
+      ],
+      "additionalProperties": false
+    },
+    "osStreamSuccess": {
+      "properties": {
+        "command": {
+          "const": "identify-os"
+        }
+      },
+      "required": [
+        "command",
+        "result",
+        "event"
+      ],
+      "oneOf": [
+        {
+          "properties": {
+            "event": {
+              "const": "os_preparation"
+            },
+            "result": {
+              "$ref": "#/$defs/osPreparation"
+            }
+          }
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "os_probe"
+            },
+            "result": {
+              "$ref": "#/$defs/osProbe"
+            }
+          }
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "os_additional"
+            },
+            "result": {
+              "$ref": "#/$defs/osAdditional"
+            }
+          }
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "os_undecoded"
+            },
+            "result": {
+              "$ref": "#/$defs/osUndecoded"
+            }
+          }
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "diagnostic"
+            },
+            "result": {
+              "$ref": "#/$defs/osDiagnostic"
+            }
+          }
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "complete"
+            },
+            "result": {
+              "$ref": "#/$defs/osComplete"
+            }
+          },
+          "required": [
+            "stats"
+          ]
+        }
+      ]
+    },
+    "osSuccess": {
+      "properties": {
+        "command": {
+          "const": "identify-os"
+        },
+        "result": {
+          "$ref": "#/$defs/osReport"
+        }
+      },
+      "required": [
+        "command",
+        "result",
+        "stats"
+      ]
+    },
+    "osUndecoded": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "undecoded"
+        },
+        "frame": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/frame"
+        }
+      },
+      "required": [
+        "kind",
+        "frame"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

@@ -28,7 +28,7 @@ fn random_u16(
     fill(&mut bytes).map_err(|source| {
         BoundaryError::with_source(
             "could not obtain system randomness for DNS identity",
-            Classification::new(packetcraftr_core::error::Code::IoDnsEntropy, Kind::Io, None),
+            Classification::new(crate::code::IoDnsEntropy, Kind::Io, None),
             std::iter::once(source.to_string())
                 .chain(packetcraftr_core::error::source_chain(&source))
                 .collect(),

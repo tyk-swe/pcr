@@ -95,76 +95,85 @@ fn drive<P: packetcraftr::CaptureProviders, K: packetcraftr::clock::Clock>(
     let sink_invocation = invocation.clone();
     let result = client.capture(
         request,
-        move |event| -> Result<packetcraftr::capture::Control, BoundaryError> {
-            let mut guard = sink_context
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            let context = guard.as_mut().ok_or_else(|| {
-                CliError::new(Kind::Internal, "live QUIC state unavailable").into_boundary_error()
-            })?;
-            let Context {
-                pipeline,
-                collector,
-                secrets,
-                state,
-                interfaces,
-            } = context;
-            let args = &sink_args;
-            let invocation = &sink_invocation;
-            let encoder = &invocation.output;
-            match event {
-                packetcraftr::capture::Event::Started { sources } => {
-                    *interfaces = sources
-                        .iter()
-                        .map(|source| capture_file::Interface {
-                            link_type: source.native.metadata.link_type,
-                            snap_len: u32::try_from(source.native.metadata.snap_length)
-                                .unwrap_or(u32::MAX),
-                            timestamp_resolution: capture_file::TimestampResolution::Decimal(
-                                match source.native.metadata.native.timestamp_precision.effective {
-                                    Some(net::capture::TimestampPrecision::Micro) => 6,
-                                    _ => 9,
+        packetcraftr::forwarding(
+            move |event, _| -> Result<packetcraftr::capture::Control, BoundaryError> {
+                let mut guard = sink_context
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                let context = guard.as_mut().ok_or_else(|| {
+                    CliError::new(Kind::Internal, "live QUIC state unavailable")
+                        .into_boundary_error()
+                })?;
+                let Context {
+                    pipeline,
+                    collector,
+                    secrets,
+                    state,
+                    interfaces,
+                } = context;
+                let args = &sink_args;
+                let invocation = &sink_invocation;
+                let encoder = &invocation.output;
+                match event {
+                    packetcraftr::capture::Event::Started { sources } => {
+                        *interfaces = sources
+                            .iter()
+                            .map(|source| capture_file::Interface {
+                                link_type: source.native.metadata.link_type,
+                                snap_len: u32::try_from(source.native.metadata.snap_length)
+                                    .unwrap_or(u32::MAX),
+                                timestamp_resolution: capture_file::TimestampResolution::Decimal(
+                                    match source
+                                        .native
+                                        .metadata
+                                        .native
+                                        .timestamp_precision
+                                        .effective
+                                    {
+                                        Some(net::capture::TimestampPrecision::Micro) => 6,
+                                        _ => 9,
+                                    },
+                                ),
+                                timestamp_offset: 0,
+                            })
+                            .collect();
+                    }
+                    packetcraftr::capture::Event::Frame {
+                        source_frame,
+                        frame,
+                        ..
+                    } => {
+                        secrets
+                            .poll(collector, invocation, false)
+                            .map_err(CliError::into_boundary_error)?;
+                        collector.refresh(&invocation.control.io_control(), |event| {
+                            state
+                                .event(event, args, invocation, encoder)
+                                .map_err(CliError::into_boundary_error)
+                        })?;
+                        pipeline
+                            .push(
+                                source_frame,
+                                frame,
+                                |_| Ok(()),
+                                |record| {
+                                    for event in collector
+                                        .observe(&record)
+                                        .map_err(BoundaryError::from_error)?
+                                    {
+                                        state
+                                            .event(event, args, invocation, encoder)
+                                            .map_err(CliError::into_boundary_error)?;
+                                    }
+                                    Ok(())
                                 },
-                            ),
-                            timestamp_offset: 0,
-                        })
-                        .collect();
+                            )
+                            .map_err(BoundaryError::from_error)?;
+                    }
                 }
-                packetcraftr::capture::Event::Frame {
-                    source_frame,
-                    frame,
-                    ..
-                } => {
-                    secrets
-                        .poll(collector, invocation, false)
-                        .map_err(CliError::into_boundary_error)?;
-                    collector.refresh(&invocation.control.io_control(), |event| {
-                        state
-                            .event(event, args, invocation, encoder)
-                            .map_err(CliError::into_boundary_error)
-                    })?;
-                    pipeline
-                        .push(
-                            source_frame,
-                            frame,
-                            |_| Ok(()),
-                            |record| {
-                                for event in collector
-                                    .observe(&record)
-                                    .map_err(BoundaryError::from_error)?
-                                {
-                                    state
-                                        .event(event, args, invocation, encoder)
-                                        .map_err(CliError::into_boundary_error)?;
-                                }
-                                Ok(())
-                            },
-                        )
-                        .map_err(BoundaryError::from_error)?;
-                }
-            }
-            Ok(packetcraftr::capture::Control::Continue)
-        },
+                Ok(packetcraftr::capture::Control::Continue)
+            },
+        ),
     );
     let report = match result {
         Ok(report) => report,

@@ -200,7 +200,7 @@ fn execute_offline(
             let emit = crate::commands::execution::emitter(invocation, |case, stream| {
                 let event = output::Event::try_from(case).map_err(CliError::classified)?;
                 Ok(stream.emit_published(Published::new(event, Vec::new()))?)
-            });
+            })?;
             let summary = publish_offline(
                 invocation,
                 &request,
@@ -272,7 +272,7 @@ fn execute_live(
             let emit = crate::commands::execution::emitter(invocation, |event, stream| {
                 let event = output::Event::try_from(event).map_err(CliError::classified)?;
                 Ok(stream.emit_published(Published::new(event, Vec::new()))?)
-            });
+            })?;
             let summary = client
                 .fuzz(request.clone(), emit)
                 .map_err(CliError::classified)?;
@@ -281,9 +281,9 @@ fn execute_live(
         }
         _ => {
             let report = {
-                let collector = packetcraftr::fuzz::Collector::default();
+                let mut collector = packetcraftr::fuzz::Collector::default();
                 let report = client
-                    .fuzz(request.clone(), collector.clone())
+                    .fuzz(request.clone(), &mut collector)
                     .map_err(CliError::classified)?;
                 collector.finish(report)
             };
@@ -314,41 +314,14 @@ fn publish_offline(
     registry: Arc<core::registry::Registry>,
     mut emit: impl packetcraftr::Sink<core::fuzz::Case, Ack = ()>,
 ) -> Result<core::fuzz::Summary, core::fuzz::Error> {
-    let runtime = crate::system::runtime(invocation, Runtime::Fuzz);
-    if emit.delivery() == packetcraftr::Delivery::Cooperative {
-        return core::fuzz::run_observed(request, packet, registry, |case, deadline| {
-            let control = deadline.detach()?;
-            control.enforce()?;
-            let result = emit
-                .publish_controlled(case, &control)
-                .map_err(|source| core::fuzz::Error::Output { source });
-            control.enforce()?;
-            result
-        });
-    }
-    let worker = packetcraftr::runtime::Worker::new_in(
-        &runtime,
-        move |(case, control): (core::fuzz::Case, core::budget::Deadline)| {
-            emit.publish_controlled(case, &control)
-        },
-    )
-    .map_err(|source| core::fuzz::Error::Output { source })?;
+    let _ = invocation;
     core::fuzz::run_observed(request, packet, registry, |case, deadline| {
         let control = deadline.detach()?;
-        worker
-            .emit((case, control.clone()), &control)
-            .map_err(|error| match error {
-                packetcraftr::runtime::Error::Deadline(error) => error.into(),
-                packetcraftr::runtime::Error::Output(source) => {
-                    core::fuzz::Error::Output { source }
-                }
-                error => core::fuzz::Error::Output {
-                    source: CliError::new(
-                        core::error::Kind::Internal,
-                        format!("fuzz progressive output failed: {error}"),
-                    )
-                    .into_boundary_error(),
-                },
-            })
+        control.enforce()?;
+        let result = emit
+            .publish_controlled(case, &control)
+            .map_err(|source| core::fuzz::Error::Output { source });
+        control.enforce()?;
+        result
     })
 }

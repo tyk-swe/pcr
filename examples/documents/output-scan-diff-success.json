@@ -1,5 +1,6 @@
 {
-  "schema": "packetcraftr.output/v22",
+  "schema": "packetcraftr.output/v23",
+  "payload_schema": "packetcraftr.output.scan-diff/v1",
   "command": "scan-diff",
   "mode": "aggregate",
   "status": "success",

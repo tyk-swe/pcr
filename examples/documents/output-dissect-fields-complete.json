@@ -11,7 +11,8 @@
     "frames_read": 1,
     "rows_written": 1
   },
-  "schema": "packetcraftr.output/v22",
-  "sequence": 1,
+  "schema": "packetcraftr.output/v23",
+  "payload_schema": "packetcraftr.output.dissect/v1",
+  "seq": 1,
   "status": "success"
 }

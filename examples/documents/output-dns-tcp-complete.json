@@ -1,5 +1,6 @@
 {
-  "schema": "packetcraftr.output/v22",
+  "schema": "packetcraftr.output/v23",
+  "payload_schema": "packetcraftr.output.dns/v1",
   "command": "dns",
   "mode": "stream",
   "status": "success",
@@ -43,5 +44,5 @@
     }
   },
   "event": "complete",
-  "sequence": 3
+  "seq": 3
 }

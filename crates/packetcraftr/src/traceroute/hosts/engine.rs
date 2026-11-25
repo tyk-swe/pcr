@@ -50,9 +50,7 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
     {
         let mut operation = operation.clone();
         let setup = WorkflowSetup::new(self, &operation);
-        let runtime = operation.runtime.clone();
         let publish = publisher(
-            &runtime,
             sink,
             |error| Error::from_failure(0_u64, crate::error::Failure::DurationLimit(error)),
             |source| Error::Output { source },

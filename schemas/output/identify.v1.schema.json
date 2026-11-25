@@ -1,0 +1,1000 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:packetcraftr:output:identify:v1",
+  "title": "PacketcraftR identify output payload v1",
+  "description": "Success payload contract for the identify command. The stable envelope is validated separately.",
+  "allOf": [
+    {
+      "type": "object",
+      "required": [
+        "command",
+        "payload_schema"
+      ],
+      "properties": {
+        "command": {
+          "const": "identify"
+        },
+        "payload_schema": {
+          "const": "packetcraftr.output.identify/v1"
+        }
+      }
+    },
+    {
+      "oneOf": [
+        {
+          "allOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/aggregateSuccessEnvelope"
+            },
+            {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/identifySuccess"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/streamSuccessEnvelope"
+            },
+            {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/identifyStreamSuccess"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "$defs": {
+    "identifyCandidate": {
+      "type": "object",
+      "properties": {
+        "product": {
+          "type": "string"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "claim",
+            "protocol"
+          ]
+        },
+        "provenance": {
+          "$ref": "#/$defs/identifyProvenance"
+        },
+        "hostname": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/identifySupportedValue"
+            },
+            {
+              "properties": {
+                "source": {
+                  "properties": {
+                    "kind": {
+                      "const": "observed_field"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "device_type": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/identifySupportedValue"
+            },
+            {
+              "properties": {
+                "source": {
+                  "properties": {
+                    "kind": {
+                      "const": "match_rule"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "cpe": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/identifySupportedValue"
+            },
+            {
+              "properties": {
+                "source": {
+                  "properties": {
+                    "kind": {
+                      "const": "match_rule"
+                    }
+                  }
+                },
+                "value": {
+                  "type": "string",
+                  "maxLength": 512,
+                  "pattern": "^cpe:2\\.3:[aho]:(?:[A-Za-z0-9._-]{2,}|[A-Za-z0-9._]):(?:[A-Za-z0-9._-]{2,}|[A-Za-z0-9._]):\\*:(?:\\*|-|[A-Za-z0-9._-]+)(?::(?:\\*|-|[A-Za-z0-9._-]+)){6}$(?![\\s\\S])"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "required": [
+        "product",
+        "version",
+        "confidence",
+        "provenance"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "confidence": {
+                "const": "protocol"
+              }
+            },
+            "required": [
+              "confidence"
+            ]
+          },
+          "then": {
+            "properties": {
+              "version": {
+                "type": "null"
+              },
+              "hostname": false,
+              "device_type": false,
+              "cpe": false
+            }
+          }
+        }
+      ]
+    },
+    "identifyClaim": {
+      "type": "object",
+      "properties": {
+        "field": {
+          "type": "string",
+          "enum": [
+            "ssh_banner",
+            "ssh_software",
+            "http_status",
+            "http_server",
+            "dns_rcode",
+            "dns_txt",
+            "smtp_greeting",
+            "smtp_hostname",
+            "smtp_software",
+            "ftp_greeting"
+          ]
+        },
+        "value_hex": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/hexBytes"
+        },
+        "unauthenticated": {
+          "const": true
+        }
+      },
+      "required": [
+        "field",
+        "value_hex",
+        "unauthenticated"
+      ],
+      "additionalProperties": false
+    },
+    "identifyComplete": {
+      "type": "object",
+      "properties": {
+        "corpus": {
+          "type": "string"
+        },
+        "corpus_version": {
+          "type": "string"
+        },
+        "exclusion_set": {
+          "type": "string"
+        },
+        "exclusion_version": {
+          "type": "string"
+        },
+        "usage": {
+          "$ref": "#/$defs/identifyUsage"
+        },
+        "elapsed": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/duration"
+        },
+        "complete": {
+          "type": "boolean"
+        },
+        "cancelled": {
+          "type": "boolean"
+        },
+        "endpoints": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        }
+      },
+      "required": [
+        "corpus",
+        "corpus_version",
+        "exclusion_set",
+        "exclusion_version",
+        "usage",
+        "elapsed",
+        "complete",
+        "cancelled",
+        "endpoints"
+      ],
+      "additionalProperties": false
+    },
+    "identifyEndpoint": {
+      "type": "object",
+      "properties": {
+        "address": {
+          "type": "string"
+        },
+        "transport": {
+          "type": "string",
+          "enum": [
+            "tcp",
+            "udp"
+          ]
+        }
+      },
+      "required": [
+        "address",
+        "transport"
+      ],
+      "additionalProperties": false
+    },
+    "identifyEvidence": {
+      "type": "object",
+      "properties": {
+        "probe": {
+          "type": "string"
+        },
+        "attempt": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "request_hex": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/hexBytes"
+        },
+        "response_hex": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/hexBytes"
+        },
+        "bytes_written": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "io_outcome": {
+          "type": "string",
+          "enum": [
+            "complete",
+            "eof",
+            "truncated",
+            "timed_out",
+            "cancelled",
+            "failed"
+          ]
+        },
+        "observation": {
+          "$ref": "#/$defs/identifyObservation"
+        },
+        "identification": {
+          "$ref": "#/$defs/identifyIdentification"
+        },
+        "local_address": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "peer_address": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "elapsed": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/duration"
+        },
+        "diagnostic": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "started_at": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/timestamp"
+        },
+        "completed_at": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/timestamp"
+        },
+        "tls": {
+          "$ref": "#/$defs/identifyTlsEvidence"
+        }
+      },
+      "required": [
+        "probe",
+        "attempt",
+        "request_hex",
+        "response_hex",
+        "bytes_written",
+        "io_outcome",
+        "observation",
+        "identification",
+        "local_address",
+        "peer_address",
+        "elapsed",
+        "diagnostic",
+        "started_at",
+        "completed_at"
+      ],
+      "additionalProperties": false
+    },
+    "identifyIdentification": {
+      "type": "object",
+      "properties": {
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "unknown",
+            "matched",
+            "ambiguous",
+            "malformed",
+            "truncated"
+          ]
+        },
+        "candidates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/identifyCandidate"
+          }
+        }
+      },
+      "required": [
+        "outcome",
+        "candidates"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "$ref": "#/$defs/identifyOutcomeInvariants"
+        }
+      ]
+    },
+    "identifyMetadataSource": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "observed_field"
+            },
+            "field": {
+              "const": "smtp_hostname"
+            },
+            "index": {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+            }
+          },
+          "required": [
+            "kind",
+            "field",
+            "index"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "match_rule"
+            },
+            "reference": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "reference"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "identifyObservation": {
+      "type": "object",
+      "properties": {
+        "protocol": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "ssh",
+                "http",
+                "dns",
+                "smtp",
+                "ftp",
+                "messages"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "complete",
+            "unknown",
+            "malformed",
+            "truncated"
+          ]
+        },
+        "claims": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/identifyClaim"
+          }
+        },
+        "diagnostic": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "protocol",
+        "outcome",
+        "claims",
+        "diagnostic"
+      ],
+      "additionalProperties": false
+    },
+    "identifyOutcomeInvariants": {
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "enum": [
+                  "unknown",
+                  "malformed",
+                  "truncated",
+                  "excluded",
+                  "tls_failed"
+                ]
+              }
+            },
+            "required": [
+              "outcome"
+            ]
+          },
+          "then": {
+            "properties": {
+              "candidates": {
+                "maxItems": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "enum": [
+                  "matched"
+                ]
+              }
+            },
+            "required": [
+              "outcome"
+            ]
+          },
+          "then": {
+            "properties": {
+              "candidates": {
+                "minItems": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "enum": [
+                  "ambiguous"
+                ]
+              }
+            },
+            "required": [
+              "outcome"
+            ]
+          },
+          "then": {
+            "properties": {
+              "candidates": {
+                "minItems": 1,
+                "items": {
+                  "properties": {
+                    "version": {
+                      "type": "null"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "identifyProvenance": {
+      "type": "object",
+      "properties": {
+        "corpus": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "probe": {
+          "type": "string"
+        },
+        "rule": {
+          "type": "string"
+        },
+        "field_indices": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+          }
+        }
+      },
+      "required": [
+        "corpus",
+        "version",
+        "probe",
+        "rule",
+        "field_indices"
+      ],
+      "additionalProperties": false
+    },
+    "identifyRecord": {
+      "type": "object",
+      "properties": {
+        "endpoint": {
+          "$ref": "#/$defs/identifyEndpoint"
+        },
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "excluded",
+            "unknown",
+            "matched",
+            "ambiguous",
+            "malformed",
+            "truncated",
+            "budget_exhausted",
+            "tls_failed"
+          ]
+        },
+        "probes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/identifyEvidence"
+          }
+        },
+        "candidates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/identifyCandidate"
+          }
+        }
+      },
+      "required": [
+        "endpoint",
+        "outcome",
+        "probes",
+        "candidates"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "$ref": "#/$defs/identifyOutcomeInvariants"
+        },
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "enum": [
+                  "ambiguous"
+                ]
+              }
+            },
+            "required": [
+              "outcome"
+            ]
+          },
+          "then": {
+            "properties": {
+              "candidates": {
+                "minItems": 2
+              },
+              "probes": {
+                "items": {
+                  "properties": {
+                    "identification": {
+                      "properties": {
+                        "candidates": {
+                          "items": {
+                            "properties": {
+                              "version": {
+                                "type": "null"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "enum": [
+                  "unknown",
+                  "malformed",
+                  "truncated"
+                ]
+              }
+            },
+            "required": [
+              "outcome"
+            ]
+          },
+          "then": {
+            "properties": {
+              "probes": {
+                "items": {
+                  "properties": {
+                    "identification": {
+                      "properties": {
+                        "candidates": {
+                          "maxItems": 0
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "enum": [
+                  "excluded"
+                ]
+              }
+            },
+            "required": [
+              "outcome"
+            ]
+          },
+          "then": {
+            "properties": {
+              "probes": {
+                "maxItems": 0
+              }
+            }
+          }
+        }
+      ]
+    },
+    "identifyReport": {
+      "type": "object",
+      "properties": {
+        "corpus": {
+          "type": "string"
+        },
+        "corpus_version": {
+          "type": "string"
+        },
+        "exclusion_set": {
+          "type": "string"
+        },
+        "exclusion_version": {
+          "type": "string"
+        },
+        "usage": {
+          "$ref": "#/$defs/identifyUsage"
+        },
+        "elapsed": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/duration"
+        },
+        "complete": {
+          "type": "boolean"
+        },
+        "cancelled": {
+          "type": "boolean"
+        },
+        "records": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/identifyRecord"
+          }
+        }
+      },
+      "required": [
+        "corpus",
+        "corpus_version",
+        "exclusion_set",
+        "exclusion_version",
+        "usage",
+        "elapsed",
+        "complete",
+        "cancelled",
+        "records"
+      ],
+      "additionalProperties": false
+    },
+    "identifyStreamSuccess": {
+      "properties": {
+        "command": {
+          "const": "identify"
+        }
+      },
+      "required": [
+        "command",
+        "result",
+        "event"
+      ],
+      "oneOf": [
+        {
+          "properties": {
+            "event": {
+              "const": "identify_endpoint"
+            },
+            "result": {
+              "$ref": "#/$defs/identifyRecord"
+            }
+          }
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "complete"
+            },
+            "result": {
+              "$ref": "#/$defs/identifyComplete"
+            }
+          }
+        }
+      ]
+    },
+    "identifySuccess": {
+      "properties": {
+        "command": {
+          "const": "identify"
+        },
+        "result": {
+          "$ref": "#/$defs/identifyReport"
+        }
+      },
+      "required": [
+        "command",
+        "result"
+      ]
+    },
+    "identifySupportedValue": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/identifyMetadataSource"
+        }
+      },
+      "required": [
+        "value",
+        "source"
+      ],
+      "additionalProperties": false
+    },
+    "identifyTlsEvidence": {
+      "type": "object",
+      "properties": {
+        "server_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "handshake_complete": {
+          "type": "boolean"
+        },
+        "protocol_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cipher_suite": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "certificates_hex": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "$ref": "urn:packetcraftr:output:common:v1#/$defs/hexBytes"
+          }
+        },
+        "certificates_truncated": {
+          "type": "boolean"
+        },
+        "wire_bytes_sent": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "wire_bytes_read": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "steps": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "unauthenticated": {
+          "const": true
+        }
+      },
+      "required": [
+        "server_name",
+        "handshake_complete",
+        "protocol_version",
+        "cipher_suite",
+        "certificates_hex",
+        "certificates_truncated",
+        "wire_bytes_sent",
+        "wire_bytes_read",
+        "steps",
+        "unauthenticated"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "handshake_complete": {
+                "const": true
+              }
+            },
+            "required": [
+              "handshake_complete"
+            ]
+          },
+          "then": {
+            "properties": {
+              "protocol_version": {
+                "type": "string",
+                "minLength": 1
+              },
+              "cipher_suite": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "identifyTlsUsage": {
+      "type": "object",
+      "properties": {
+        "write_bytes": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "read_bytes": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "certificate_bytes": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "steps": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        }
+      },
+      "required": [
+        "write_bytes",
+        "read_bytes",
+        "certificate_bytes",
+        "steps"
+      ],
+      "additionalProperties": false
+    },
+    "identifyUsage": {
+      "type": "object",
+      "properties": {
+        "attempts": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "write_bytes": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "read_bytes": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "tls": {
+          "$ref": "#/$defs/identifyTlsUsage"
+        }
+      },
+      "required": [
+        "attempts",
+        "write_bytes",
+        "read_bytes",
+        "tls"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

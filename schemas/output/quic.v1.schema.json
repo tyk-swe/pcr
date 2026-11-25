@@ -1,0 +1,730 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:packetcraftr:output:quic:v1",
+  "title": "PacketcraftR quic output payload v1",
+  "description": "Success payload contract for the quic command. The stable envelope is validated separately.",
+  "allOf": [
+    {
+      "type": "object",
+      "required": [
+        "command",
+        "payload_schema"
+      ],
+      "properties": {
+        "command": {
+          "const": "quic"
+        },
+        "payload_schema": {
+          "const": "packetcraftr.output.quic/v1"
+        }
+      }
+    },
+    {
+      "oneOf": [
+        {
+          "allOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/aggregateSuccessEnvelope"
+            },
+            {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/quicSuccess"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/streamSuccessEnvelope"
+            },
+            {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/quicStreamSuccess"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "$defs": {
+    "quicCompleteEvent": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "$ref": "#/$defs/quicSummary"
+        },
+        "capture": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/captureSnapshot"
+        }
+      },
+      "required": [
+        "summary"
+      ],
+      "additionalProperties": false
+    },
+    "quicConnection": {
+      "type": "object",
+      "properties": {
+        "connection": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "scope": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/captureScope"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "client_endpoint": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/tlsEndpoint"
+        },
+        "server_endpoint": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/tlsEndpoint"
+        },
+        "first_frame": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "last_frame": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "source_frames": {
+          "type": "array",
+          "items": {
+            "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+          }
+        },
+        "source_frames_omitted": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "connection_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "urn:packetcraftr:output:common:v1#/$defs/hexBytes"
+          }
+        },
+        "paths": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/quicPath"
+          }
+        },
+        "sni": {
+          "type": "string"
+        },
+        "sni_is_outer": {
+          "type": "boolean"
+        },
+        "offered_alpn": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "negotiated_alpn": {
+          "type": "string"
+        },
+        "cipher_suite": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "ja3": {
+          "type": "string"
+        },
+        "ja4": {
+          "type": "string"
+        },
+        "client_hello_frame": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "server_hello_frame": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "hello_elapsed_ms": {
+          "type": "number",
+          "minimum": 0
+        },
+        "client_finished_frame": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "server_finished_frame": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "handshake_done_frame": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "early_data": {
+          "$ref": "#/$defs/quicEarlyData"
+        },
+        "client_transport_parameters": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/quicTransportParameter"
+          }
+        },
+        "server_transport_parameters": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/quicTransportParameter"
+          }
+        },
+        "streams": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/quicStream"
+          }
+        },
+        "metrics": {
+          "$ref": "#/$defs/quicMetrics"
+        },
+        "diagnostics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/quicDiagnostic"
+          }
+        },
+        "diagnostics_omitted": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "pending_packets": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "closed": {
+          "type": "boolean"
+        },
+        "close_error": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "close_reason": {
+          "type": "string"
+        },
+        "stateless_reset": {
+          "type": "boolean"
+        },
+        "incomplete": {
+          "type": "boolean"
+        },
+        "end_reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "connection",
+        "scope",
+        "version",
+        "client_endpoint",
+        "server_endpoint",
+        "first_frame",
+        "last_frame",
+        "source_frames",
+        "source_frames_omitted",
+        "connection_ids",
+        "paths",
+        "sni_is_outer",
+        "offered_alpn",
+        "early_data",
+        "client_transport_parameters",
+        "server_transport_parameters",
+        "streams",
+        "metrics",
+        "diagnostics",
+        "diagnostics_omitted",
+        "pending_packets",
+        "closed",
+        "stateless_reset",
+        "incomplete",
+        "end_reason"
+      ],
+      "additionalProperties": false
+    },
+    "quicConnectionEvent": {
+      "type": "object",
+      "properties": {
+        "connection": {
+          "$ref": "#/$defs/quicConnection"
+        }
+      },
+      "required": [
+        "connection"
+      ],
+      "additionalProperties": false
+    },
+    "quicDiagnostic": {
+      "type": "object",
+      "properties": {
+        "frame": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "frame",
+        "code",
+        "message"
+      ],
+      "additionalProperties": false
+    },
+    "quicDirection": {
+      "enum": [
+        "client",
+        "server"
+      ]
+    },
+    "quicEarlyData": {
+      "enum": [
+        "not_observed",
+        "unknown",
+        "accepted",
+        "rejected"
+      ]
+    },
+    "quicEngineSummary": {
+      "type": "object",
+      "properties": {
+        "connections": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "packets": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "decrypted_packets": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "connections_evicted": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "buffer_limit_hits": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "unsupported_versions": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "unassociated_packets": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "malformed_datagrams": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "ambiguous_packets": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "keylog_records_added": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "keylog_records_rejected": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        }
+      },
+      "required": [
+        "connections",
+        "packets",
+        "decrypted_packets",
+        "connections_evicted",
+        "buffer_limit_hits",
+        "unsupported_versions",
+        "unassociated_packets",
+        "malformed_datagrams",
+        "ambiguous_packets",
+        "keylog_records_added",
+        "keylog_records_rejected"
+      ],
+      "additionalProperties": false
+    },
+    "quicMetrics": {
+      "type": "object",
+      "properties": {
+        "packets": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "decrypted_packets": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "initial_packets": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "handshake_packets": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "zero_rtt_packets": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "one_rtt_packets": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "duplicate_packets": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "reordered_packets": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "observed_packet_gaps": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "repeated_stream_bytes": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "datagrams": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "datagram_bytes": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "flow_control_blocks": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "key_updates": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "path_challenges": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "validated_paths": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "retry_packets": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "authentication_failures": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "ack_samples": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "min_ack_elapsed_ms": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "packets",
+        "decrypted_packets",
+        "initial_packets",
+        "handshake_packets",
+        "zero_rtt_packets",
+        "one_rtt_packets",
+        "duplicate_packets",
+        "reordered_packets",
+        "observed_packet_gaps",
+        "repeated_stream_bytes",
+        "datagrams",
+        "datagram_bytes",
+        "flow_control_blocks",
+        "key_updates",
+        "path_challenges",
+        "validated_paths",
+        "retry_packets",
+        "authentication_failures",
+        "ack_samples"
+      ],
+      "additionalProperties": false
+    },
+    "quicPath": {
+      "type": "object",
+      "properties": {
+        "source": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/tlsEndpoint"
+        },
+        "destination": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/tlsEndpoint"
+        }
+      },
+      "required": [
+        "source",
+        "destination"
+      ],
+      "additionalProperties": false
+    },
+    "quicRange": {
+      "type": "object",
+      "properties": {
+        "offset": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "length": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "data_hex": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/hexBytes"
+        },
+        "file": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "offset",
+        "length"
+      ],
+      "additionalProperties": false
+    },
+    "quicResult": {
+      "type": "object",
+      "properties": {
+        "connections": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/quicConnection"
+          }
+        },
+        "summary": {
+          "$ref": "#/$defs/quicSummary"
+        },
+        "capture": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/captureSnapshot"
+        }
+      },
+      "required": [
+        "connections",
+        "summary"
+      ],
+      "additionalProperties": false
+    },
+    "quicStream": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "direction": {
+          "$ref": "#/$defs/quicDirection"
+        },
+        "ranges": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/quicRange"
+          }
+        },
+        "final_size": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "reset_error": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "complete": {
+          "type": "boolean"
+        },
+        "conflicting_overlap": {
+          "type": "boolean"
+        },
+        "final_size_error": {
+          "type": "boolean"
+        },
+        "omitted_bytes": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "early_data": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "direction",
+        "ranges",
+        "complete",
+        "conflicting_overlap",
+        "final_size_error",
+        "omitted_bytes",
+        "early_data"
+      ],
+      "additionalProperties": false
+    },
+    "quicStreamData": {
+      "type": "object",
+      "properties": {
+        "connection": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "stream": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "direction": {
+          "$ref": "#/$defs/quicDirection"
+        },
+        "offset": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "data_hex": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/hexBytes"
+        },
+        "early_data": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "connection",
+        "stream",
+        "direction",
+        "offset",
+        "data_hex",
+        "early_data"
+      ],
+      "additionalProperties": false
+    },
+    "quicStreamDataEvent": {
+      "type": "object",
+      "properties": {
+        "stream_data": {
+          "$ref": "#/$defs/quicStreamData"
+        }
+      },
+      "required": [
+        "stream_data"
+      ],
+      "additionalProperties": false
+    },
+    "quicStreamSuccess": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "quic"
+        }
+      },
+      "required": [
+        "command",
+        "result"
+      ],
+      "oneOf": [
+        {
+          "properties": {
+            "event": {
+              "const": "connection"
+            },
+            "result": {
+              "$ref": "#/$defs/quicConnectionEvent"
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "stream_data"
+            },
+            "result": {
+              "$ref": "#/$defs/quicStreamDataEvent"
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "complete"
+            },
+            "result": {
+              "$ref": "#/$defs/quicCompleteEvent"
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        }
+      ]
+    },
+    "quicSuccess": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "quic"
+        },
+        "result": {
+          "$ref": "#/$defs/quicResult"
+        }
+      },
+      "required": [
+        "command",
+        "result"
+      ]
+    },
+    "quicSummary": {
+      "type": "object",
+      "properties": {
+        "engine": {
+          "$ref": "#/$defs/quicEngineSummary"
+        },
+        "frames_read": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "frames_matched": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "bytes_read": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "clock": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/captureClock"
+        },
+        "ip_reassembly": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/ipReassemblyReport"
+        },
+        "incomplete_sources": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "source_outcomes_omitted": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "input_incomplete": {
+          "type": "boolean"
+        },
+        "connections_selected": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "connections_omitted": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "application_output_bytes": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        }
+      },
+      "required": [
+        "engine",
+        "frames_read",
+        "frames_matched",
+        "bytes_read",
+        "clock",
+        "ip_reassembly",
+        "incomplete_sources",
+        "source_outcomes_omitted",
+        "input_incomplete",
+        "connections_selected",
+        "connections_omitted",
+        "application_output_bytes"
+      ],
+      "additionalProperties": false
+    },
+    "quicTransportParameter": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "value_hex": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/hexBytes"
+        }
+      },
+      "required": [
+        "id",
+        "value_hex"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

@@ -27,7 +27,7 @@ impl crate::commands::Generate for Args {
         if format != Format::Text {
             return Err(CliError::from_classification(
                 Classification::new(
-                    packetcraftr_core::error::Code::CliOutputFormat,
+                    crate::code::CliOutputFormat,
                     Kind::Usage,
                     Some("choose text output"),
                 ),
@@ -138,7 +138,7 @@ fn render_man_pages(
 fn io_error(operation: &'static str, destination: &Path, error: io::Error) -> CliError {
     CliError::from_classification(
         Classification::new(
-            packetcraftr_core::error::Code::IoDocumentation,
+            crate::code::IoDocumentation,
             Kind::Io,
             Some("choose a writable documentation directory"),
         ),
@@ -152,7 +152,7 @@ fn io_error(operation: &'static str, destination: &Path, error: io::Error) -> Cl
 
 fn contextual_error(mut error: CliError, published: &[PathBuf]) -> CliError {
     error.classification = Classification::new(
-        packetcraftr_core::error::Code::IoDocumentation,
+        crate::code::IoDocumentation,
         error.classification.kind,
         Some("choose a writable documentation directory"),
     );

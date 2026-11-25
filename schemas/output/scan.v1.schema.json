@@ -1,0 +1,4468 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:packetcraftr:output:scan:v1",
+  "title": "PacketcraftR scan output payload v1",
+  "description": "Success payload contract for the scan command. The stable envelope is validated separately.",
+  "allOf": [
+    {
+      "type": "object",
+      "required": [
+        "command",
+        "payload_schema"
+      ],
+      "properties": {
+        "command": {
+          "const": "scan"
+        },
+        "payload_schema": {
+          "const": "packetcraftr.output.scan/v1"
+        }
+      }
+    },
+    {
+      "oneOf": [
+        {
+          "allOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/aggregateSuccessEnvelope"
+            },
+            {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/scanSuccess"
+                },
+                {
+                  "$ref": "#/$defs/scanConnectSuccess"
+                },
+                {
+                  "$ref": "#/$defs/targetListSuccess"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/streamSuccessEnvelope"
+            },
+            {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/scanStreamSuccess"
+                },
+                {
+                  "$ref": "#/$defs/scanConnectStreamSuccess"
+                },
+                {
+                  "$ref": "#/$defs/targetListStreamSuccess"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "$defs": {
+    "rttSummary": {
+      "type": "object",
+      "description": "Confirmed scan attempts partition into received replies, lost (no reply with qualified local coverage), and unavailable (unknown, incomplete, or local operational failure). Lost does not assert a remote cause. Pending no-reply measurements require observation_quality before final inference.",
+      "required": [
+        "sent",
+        "received",
+        "lost",
+        "unavailable"
+      ],
+      "properties": {
+        "sent": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "received": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "lost": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "min": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/duration"
+        },
+        "avg": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/duration"
+        },
+        "max": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/duration"
+        },
+        "unavailable": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        }
+      },
+      "additionalProperties": true
+    },
+    "scanAdaptive": {
+      "type": "object",
+      "description": "The effective adaptive scheduling configuration, published verbatim.",
+      "required": [
+        "min_timeout",
+        "max_timeout",
+        "min_window",
+        "initial_window",
+        "host_timeout",
+        "retry_backoff",
+        "max_backoff"
+      ],
+      "properties": {
+        "min_timeout": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/duration"
+        },
+        "max_timeout": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/duration"
+        },
+        "min_window": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "initial_window": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "host_timeout": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/duration"
+        },
+        "retry_backoff": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/duration"
+        },
+        "max_backoff": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/duration"
+        }
+      },
+      "additionalProperties": true
+    },
+    "scanClassificationCounts": {
+      "type": "object",
+      "required": [
+        "open",
+        "closed",
+        "filtered",
+        "unreachable",
+        "unknown",
+        "timeout"
+      ],
+      "properties": {
+        "open": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "closed": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "filtered": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "unreachable": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "unknown": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "timeout": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        }
+      },
+      "additionalProperties": false
+    },
+    "scanCondition": {
+      "type": "object",
+      "description": "A scheduling condition inferred from observations; loss and filtering remain alternative explanations.",
+      "required": [
+        "kind",
+        "host",
+        "control_responder",
+        "completed",
+        "replies",
+        "losses",
+        "control_sequences",
+        "loss_sequences",
+        "caveat"
+      ],
+      "properties": {
+        "kind": {
+          "const": "suspected_response_rate_limit"
+        },
+        "host": {
+          "$ref": "#/$defs/scanHostId"
+        },
+        "control_responder": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/ipAddress"
+        },
+        "completed": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "replies": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "losses": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "control_sequences": {
+          "type": "array",
+          "items": {
+            "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+          },
+          "maxItems": 8
+        },
+        "loss_sequences": {
+          "type": "array",
+          "items": {
+            "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+          },
+          "maxItems": 8
+        },
+        "caveat": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "scanConnectProbe": {
+      "type": "object",
+      "required": [
+        "sequence",
+        "stage",
+        "address",
+        "port",
+        "attempt",
+        "attempted",
+        "connect_succeeded",
+        "outcome",
+        "classification",
+        "scheduled_at",
+        "finished_at",
+        "elapsed",
+        "local",
+        "error"
+      ],
+      "properties": {
+        "sequence": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "stage": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/scanStage"
+        },
+        "address": {
+          "type": "string"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "attempted": {
+          "type": "boolean"
+        },
+        "connect_succeeded": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "outcome": {
+          "enum": [
+            "connected",
+            "refused",
+            "timed_out",
+            "unreachable",
+            "local_error",
+            "deadline_expired"
+          ]
+        },
+        "classification": {
+          "enum": [
+            "open",
+            "closed",
+            "filtered",
+            "unreachable",
+            "unknown",
+            "timeout"
+          ]
+        },
+        "scheduled_at": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/timestamp"
+        },
+        "finished_at": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/timestamp"
+            }
+          ]
+        },
+        "elapsed": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/duration"
+        },
+        "local": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "error": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "os_code",
+                "message"
+              ],
+              "properties": {
+                "kind": {
+                  "type": "string"
+                },
+                "os_code": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": true
+            }
+          ]
+        },
+        "scope": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/scope"
+        }
+      },
+      "additionalProperties": true
+    },
+    "scanConnectReport": {
+      "type": "object",
+      "required": [
+        "method",
+        "target",
+        "resolved_addresses",
+        "planned_duration",
+        "socket_stats",
+        "endpoints",
+        "plan",
+        "hosts",
+        "scheduling"
+      ],
+      "properties": {
+        "method": {
+          "const": "tcp_connect"
+        },
+        "target": {
+          "type": "string"
+        },
+        "resolved_addresses": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "planned_duration": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/duration"
+        },
+        "socket_stats": {
+          "$ref": "#/$defs/scanConnectStatistics"
+        },
+        "reverse_dns_stats": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/operationStats",
+          "description": "Packet statistics of the reverse-DNS lookups, which socket statistics cannot hold; absent when no lookup ran."
+        },
+        "endpoints": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "address",
+              "port",
+              "classification",
+              "probes",
+              "inference"
+            ],
+            "properties": {
+              "address": {
+                "type": "string"
+              },
+              "port": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535
+              },
+              "classification": {
+                "enum": [
+                  "open",
+                  "closed",
+                  "filtered",
+                  "unreachable",
+                  "unknown",
+                  "timeout"
+                ]
+              },
+              "probes": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/scanConnectProbe"
+                }
+              },
+              "scope": {
+                "$ref": "urn:packetcraftr:output:common:v1#/$defs/scope"
+              },
+              "port_hint": {
+                "$ref": "#/$defs/scanPortHint"
+              },
+              "inference": {
+                "$ref": "#/$defs/scanInference"
+              }
+            },
+            "additionalProperties": true
+          }
+        },
+        "plan": {
+          "$ref": "#/$defs/scanPlan"
+        },
+        "hosts": {
+          "type": "array",
+          "description": "One record per selected target, in selection order.",
+          "items": {
+            "allOf": [
+              {
+                "$ref": "#/$defs/scanHost"
+              },
+              {
+                "properties": {
+                  "probes": {
+                    "items": {
+                      "$ref": "#/$defs/scanConnectProbe"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "scheduling": {
+          "$ref": "#/$defs/scanScheduling"
+        }
+      },
+      "additionalProperties": true
+    },
+    "scanConnectStatistics": {
+      "type": "object",
+      "required": [
+        "connections_scheduled",
+        "connections_attempted",
+        "connections_succeeded",
+        "elapsed",
+        "rtt",
+        "retained_evidence_bytes"
+      ],
+      "properties": {
+        "connections_scheduled": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "connections_attempted": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "connections_succeeded": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "elapsed": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/duration"
+        },
+        "rtt": {
+          "$ref": "#/$defs/rttSummary"
+        },
+        "retained_evidence_bytes": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": true
+    },
+    "scanConnectStreamSuccess": {
+      "type": "object",
+      "required": [
+        "command",
+        "result",
+        "event"
+      ],
+      "properties": {
+        "command": {
+          "const": "scan"
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "event": {
+              "const": "connect_probe"
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "method",
+                "sequence",
+                "stage",
+                "address",
+                "port",
+                "attempt",
+                "attempted",
+                "connect_succeeded",
+                "outcome",
+                "classification",
+                "scheduled_at",
+                "finished_at",
+                "elapsed",
+                "local",
+                "error"
+              ],
+              "properties": {
+                "method": {
+                  "const": "tcp_connect"
+                },
+                "sequence": {
+                  "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+                },
+                "stage": {
+                  "$ref": "urn:packetcraftr:output:common:v1#/$defs/scanStage"
+                },
+                "address": {
+                  "type": "string"
+                },
+                "port": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 65535
+                },
+                "attempt": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "attempted": {
+                  "type": "boolean"
+                },
+                "connect_succeeded": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                "outcome": {
+                  "enum": [
+                    "connected",
+                    "refused",
+                    "timed_out",
+                    "unreachable",
+                    "local_error",
+                    "deadline_expired"
+                  ]
+                },
+                "classification": {
+                  "enum": [
+                    "open",
+                    "closed",
+                    "filtered",
+                    "unreachable",
+                    "unknown",
+                    "timeout"
+                  ]
+                },
+                "scheduled_at": {
+                  "$ref": "urn:packetcraftr:output:common:v1#/$defs/timestamp"
+                },
+                "finished_at": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "urn:packetcraftr:output:common:v1#/$defs/timestamp"
+                    }
+                  ]
+                },
+                "elapsed": {
+                  "$ref": "urn:packetcraftr:output:common:v1#/$defs/duration"
+                },
+                "local": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "error": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "kind",
+                        "os_code",
+                        "message"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "type": "string"
+                        },
+                        "os_code": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "additionalProperties": true
+                    }
+                  ]
+                },
+                "scope": {
+                  "$ref": "urn:packetcraftr:output:common:v1#/$defs/scope"
+                }
+              },
+              "additionalProperties": true
+            }
+          }
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "complete"
+            },
+            "result": {
+              "$ref": "#/$defs/scanConnectSummary"
+            }
+          }
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "connect_endpoint"
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "method",
+                "address",
+                "port",
+                "classification",
+                "inference",
+                "probes"
+              ],
+              "properties": {
+                "method": {
+                  "const": "tcp_connect"
+                },
+                "address": {
+                  "type": "string"
+                },
+                "scope": {
+                  "$ref": "urn:packetcraftr:output:common:v1#/$defs/scope"
+                },
+                "port": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 65535
+                },
+                "classification": {
+                  "enum": [
+                    "open",
+                    "closed",
+                    "filtered",
+                    "unreachable",
+                    "unknown",
+                    "timeout"
+                  ]
+                },
+                "port_hint": {
+                  "$ref": "#/$defs/scanPortHint"
+                },
+                "inference": {
+                  "$ref": "#/$defs/scanInference"
+                },
+                "probes": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+                  }
+                }
+              },
+              "additionalProperties": true
+            }
+          }
+        }
+      ]
+    },
+    "scanConnectSuccess": {
+      "type": "object",
+      "required": [
+        "command",
+        "result"
+      ],
+      "properties": {
+        "command": {
+          "const": "scan"
+        },
+        "result": {
+          "$ref": "#/$defs/scanConnectReport"
+        }
+      }
+    },
+    "scanConnectSummary": {
+      "type": "object",
+      "required": [
+        "method",
+        "target",
+        "resolved_addresses",
+        "planned_duration",
+        "socket_stats",
+        "plan",
+        "scheduling"
+      ],
+      "properties": {
+        "method": {
+          "const": "tcp_connect"
+        },
+        "target": {
+          "type": "string"
+        },
+        "resolved_addresses": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "planned_duration": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/duration"
+        },
+        "socket_stats": {
+          "$ref": "#/$defs/scanConnectStatistics"
+        },
+        "reverse_dns_stats": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/operationStats",
+          "description": "Packet statistics of the reverse-DNS lookups, which socket statistics cannot hold; absent when no lookup ran."
+        },
+        "plan": {
+          "$ref": "#/$defs/scanPlan"
+        },
+        "scheduling": {
+          "$ref": "#/$defs/scanScheduling"
+        }
+      },
+      "additionalProperties": true
+    },
+    "scanCoverage": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "unknown",
+        "no_reported_loss",
+        "incomplete",
+        "transport_timeout"
+      ]
+    },
+    "scanDataSet": {
+      "type": "object",
+      "required": [
+        "name",
+        "version"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": true
+    },
+    "scanDiscoveryPlan": {
+      "type": "object",
+      "required": [
+        "mode",
+        "probes",
+        "neighbor",
+        "excluded_endpoints",
+        "unresponsive"
+      ],
+      "properties": {
+        "mode": {
+          "enum": [
+            "omitted",
+            "skipped",
+            "before",
+            "only"
+          ]
+        },
+        "probes": {
+          "type": "array",
+          "description": "The probes each host received, in order, after any neighbor request.",
+          "items": {
+            "type": "object",
+            "required": [
+              "transport"
+            ],
+            "properties": {
+              "transport": {
+                "enum": [
+                  "tcp",
+                  "udp",
+                  "sctp",
+                  "icmp",
+                  "ip"
+                ]
+              },
+              "port": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535
+              },
+              "ip_protocol": {
+                "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint8"
+              },
+              "icmp_request": {
+                "type": "string",
+                "enum": [
+                  "timestamp",
+                  "netmask"
+                ]
+              },
+              "tcp_scan": {
+                "$ref": "urn:packetcraftr:output:common:v1#/$defs/tcpScan"
+              }
+            },
+            "additionalProperties": true
+          }
+        },
+        "neighbor": {
+          "type": "boolean",
+          "description": "Whether ARP or NDP ran before the probes."
+        },
+        "excluded_endpoints": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64",
+          "description": "Distinct expanded discovery endpoints --exclude-ports removed before planning; the plan's own excluded_endpoints covers the scan stage."
+        },
+        "unresponsive": {
+          "enum": [
+            "skip",
+            "scan"
+          ],
+          "description": "What the scan stage did with hosts that did not answer discovery."
+        },
+        "reverse_dns": {
+          "type": "object",
+          "required": [
+            "server",
+            "port"
+          ],
+          "properties": {
+            "server": {
+              "type": "string"
+            },
+            "port": {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint16"
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "scanEndpoint": {
+      "type": "object",
+      "required": [
+        "address",
+        "transport",
+        "classification",
+        "probes"
+      ],
+      "properties": {
+        "address": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/ipAddress"
+        },
+        "transport": {
+          "type": "string",
+          "enum": [
+            "tcp",
+            "udp",
+            "sctp",
+            "icmp",
+            "ip"
+          ]
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "classification": {
+          "type": "string",
+          "enum": [
+            "open",
+            "closed",
+            "filtered",
+            "unreachable",
+            "unknown",
+            "timeout"
+          ]
+        },
+        "probes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/scanProbe"
+          }
+        },
+        "scope": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/scope"
+        },
+        "port_hint": {
+          "$ref": "#/$defs/scanPortHint"
+        },
+        "inference": {
+          "$ref": "#/$defs/scanInference"
+        },
+        "ip_protocol": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint8"
+        }
+      },
+      "additionalProperties": true,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "probes": {
+                "contains": {
+                  "properties": {
+                    "tcp_scan": {
+                      "properties": {
+                        "mode": {
+                          "const": "syn"
+                        }
+                      },
+                      "required": [
+                        "mode"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "tcp_scan"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "probes"
+            ]
+          },
+          "then": {
+            "properties": {
+              "inference": {
+                "properties": {
+                  "rule": {
+                    "enum": [
+                      "tcp_syn.syn_ack",
+                      "tcp_syn.reset",
+                      "tcp_syn.icmp_unreachable",
+                      "tcp_syn.time_exceeded",
+                      "tcp_syn.unclassified_reply",
+                      "tcp_syn.silence",
+                      "operational_failure"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "probes": {
+                "contains": {
+                  "properties": {
+                    "tcp_scan": {
+                      "properties": {
+                        "mode": {
+                          "const": "ack"
+                        }
+                      },
+                      "required": [
+                        "mode"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "tcp_scan"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "probes"
+            ]
+          },
+          "then": {
+            "properties": {
+              "inference": {
+                "properties": {
+                  "rule": {
+                    "enum": [
+                      "tcp_ack.reset",
+                      "tcp_ack.icmp_unreachable",
+                      "tcp_ack.time_exceeded",
+                      "tcp_ack.unclassified_reply",
+                      "tcp_ack.silence",
+                      "operational_failure"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "probes": {
+                "contains": {
+                  "properties": {
+                    "tcp_scan": {
+                      "properties": {
+                        "mode": {
+                          "const": "window"
+                        }
+                      },
+                      "required": [
+                        "mode"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "tcp_scan"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "probes"
+            ]
+          },
+          "then": {
+            "properties": {
+              "inference": {
+                "properties": {
+                  "rule": {
+                    "enum": [
+                      "tcp_window.reset_nonzero",
+                      "tcp_window.reset_zero",
+                      "tcp_window.unclassified_reply",
+                      "tcp_window.icmp_unreachable",
+                      "tcp_window.time_exceeded",
+                      "tcp_window.silence",
+                      "operational_failure"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "probes": {
+                "contains": {
+                  "properties": {
+                    "tcp_scan": {
+                      "properties": {
+                        "mode": {
+                          "const": "custom"
+                        }
+                      },
+                      "required": [
+                        "mode"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "tcp_scan"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "probes"
+            ]
+          },
+          "then": {
+            "properties": {
+              "inference": {
+                "properties": {
+                  "rule": {
+                    "enum": [
+                      "tcp_custom.reply",
+                      "tcp_custom.silence",
+                      "operational_failure"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "probes": {
+                "contains": {
+                  "properties": {
+                    "tcp_scan": {
+                      "properties": {
+                        "mode": {
+                          "const": "fin"
+                        }
+                      },
+                      "required": [
+                        "mode"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "tcp_scan"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "probes"
+            ]
+          },
+          "then": {
+            "properties": {
+              "inference": {
+                "properties": {
+                  "rule": {
+                    "enum": [
+                      "tcp_fin.reset",
+                      "tcp_fin.icmp_unreachable",
+                      "tcp_fin.time_exceeded",
+                      "tcp_fin.unclassified_reply",
+                      "tcp_fin.silence",
+                      "operational_failure"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "probes": {
+                "contains": {
+                  "properties": {
+                    "tcp_scan": {
+                      "properties": {
+                        "mode": {
+                          "const": "null"
+                        }
+                      },
+                      "required": [
+                        "mode"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "tcp_scan"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "probes"
+            ]
+          },
+          "then": {
+            "properties": {
+              "inference": {
+                "properties": {
+                  "rule": {
+                    "enum": [
+                      "tcp_null.reset",
+                      "tcp_null.icmp_unreachable",
+                      "tcp_null.time_exceeded",
+                      "tcp_null.unclassified_reply",
+                      "tcp_null.silence",
+                      "operational_failure"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "probes": {
+                "contains": {
+                  "properties": {
+                    "tcp_scan": {
+                      "properties": {
+                        "mode": {
+                          "const": "xmas"
+                        }
+                      },
+                      "required": [
+                        "mode"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "tcp_scan"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "probes"
+            ]
+          },
+          "then": {
+            "properties": {
+              "inference": {
+                "properties": {
+                  "rule": {
+                    "enum": [
+                      "tcp_xmas.reset",
+                      "tcp_xmas.icmp_unreachable",
+                      "tcp_xmas.time_exceeded",
+                      "tcp_xmas.unclassified_reply",
+                      "tcp_xmas.silence",
+                      "operational_failure"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "probes": {
+                "contains": {
+                  "properties": {
+                    "tcp_scan": {
+                      "properties": {
+                        "mode": {
+                          "const": "maimon"
+                        }
+                      },
+                      "required": [
+                        "mode"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "tcp_scan"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "probes"
+            ]
+          },
+          "then": {
+            "properties": {
+              "inference": {
+                "properties": {
+                  "rule": {
+                    "enum": [
+                      "tcp_maimon.reset",
+                      "tcp_maimon.icmp_unreachable",
+                      "tcp_maimon.time_exceeded",
+                      "tcp_maimon.unclassified_reply",
+                      "tcp_maimon.silence",
+                      "operational_failure"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "probes": {
+                "contains": {
+                  "properties": {
+                    "sctp_scan": {
+                      "properties": {
+                        "mode": {
+                          "const": "init"
+                        }
+                      },
+                      "required": [
+                        "mode"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "sctp_scan"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "probes"
+            ]
+          },
+          "then": {
+            "properties": {
+              "inference": {
+                "properties": {
+                  "rule": {
+                    "enum": [
+                      "sctp_init.init_ack",
+                      "sctp_init.abort",
+                      "sctp_init.icmp_unreachable",
+                      "sctp_init.time_exceeded",
+                      "sctp_init.unclassified_reply",
+                      "sctp_init.silence",
+                      "operational_failure"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "probes": {
+                "contains": {
+                  "properties": {
+                    "sctp_scan": {
+                      "properties": {
+                        "mode": {
+                          "const": "cookie_echo"
+                        }
+                      },
+                      "required": [
+                        "mode"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "sctp_scan"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "probes"
+            ]
+          },
+          "then": {
+            "properties": {
+              "inference": {
+                "properties": {
+                  "rule": {
+                    "enum": [
+                      "sctp_cookie_echo.abort",
+                      "sctp_cookie_echo.icmp_unreachable",
+                      "sctp_cookie_echo.time_exceeded",
+                      "sctp_cookie_echo.unclassified_reply",
+                      "sctp_cookie_echo.silence",
+                      "operational_failure"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "transport": {
+                "const": "ip"
+              }
+            },
+            "required": [
+              "transport"
+            ]
+          },
+          "then": {
+            "properties": {
+              "inference": {
+                "properties": {
+                  "rule": {
+                    "enum": [
+                      "ip_protocol.reply",
+                      "ip_protocol.protocol_unreachable",
+                      "ip_protocol.icmp_unreachable",
+                      "ip_protocol.time_exceeded",
+                      "ip_protocol.unclassified_reply",
+                      "ip_protocol.silence",
+                      "operational_failure"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "scanHost": {
+      "type": "object",
+      "description": "What discovery observed for one selected target, and whether the scan probed it. no_response is uncertainty, never absence.",
+      "required": [
+        "address",
+        "discovery",
+        "scan",
+        "reasons",
+        "probes"
+      ],
+      "properties": {
+        "address": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/ipAddress"
+        },
+        "scope": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/scope"
+        },
+        "discovery": {
+          "enum": [
+            "not_requested",
+            "skipped",
+            "responded",
+            "no_response"
+          ]
+        },
+        "scan": {
+          "enum": [
+            "scanned",
+            "skipped",
+            "not_requested",
+            "incomplete"
+          ]
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/scanHostReason"
+          }
+        },
+        "neighbor": {
+          "$ref": "#/$defs/scanHostNeighbor"
+        },
+        "reverse_dns": {
+          "$ref": "#/$defs/scanReverseDns"
+        },
+        "probes": {
+          "type": "array",
+          "description": "The discovery probes sent to this host, in sequence order."
+        }
+      },
+      "additionalProperties": true
+    },
+    "scanHostId": {
+      "type": "object",
+      "description": "A scoped host the scheduler names in conditions or as incomplete.",
+      "required": [
+        "address"
+      ],
+      "properties": {
+        "address": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/ipAddress"
+        },
+        "scope": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/scope"
+        }
+      },
+      "additionalProperties": true
+    },
+    "scanHostLink": {
+      "type": "object",
+      "required": [
+        "address",
+        "entry"
+      ],
+      "properties": {
+        "address": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/macAddress"
+        },
+        "entry": {
+          "enum": [
+            "fresh",
+            "cached"
+          ],
+          "description": "fresh: a reply to this request; cached: an entry left by an earlier reply."
+        }
+      },
+      "additionalProperties": true
+    },
+    "scanHostNeighbor": {
+      "type": "object",
+      "required": [
+        "outcome",
+        "interface",
+        "attempts"
+      ],
+      "properties": {
+        "outcome": {
+          "enum": [
+            "resolved",
+            "silent",
+            "routed",
+            "not_applicable"
+          ]
+        },
+        "interface": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/interfaceId",
+          "description": "The interface the host's route selected, where any reply was observed. Possible proxies share a link address on one interface."
+        },
+        "attempts": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "observed_at": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/timestamp",
+          "description": "When the evidence was captured; absent for a reply whose capture carried no wall-clock time."
+        },
+        "link": {
+          "$ref": "#/$defs/scanHostLink"
+        },
+        "next_hop": {
+          "type": "object",
+          "description": "The gateway a routed target is reached through, which is sent no request. Its link address appears only when already cached and is never the target's identity.",
+          "required": [
+            "address"
+          ],
+          "properties": {
+            "address": {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/ipAddress"
+            },
+            "link": {
+              "$ref": "#/$defs/scanHostLink"
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "scanHostReason": {
+      "type": "object",
+      "required": [
+        "kind",
+        "evidence",
+        "basis"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "tcp_syn_ack",
+            "tcp_reset",
+            "tcp_other",
+            "udp_payload",
+            "icmp_echo_reply",
+            "icmp_port_unreachable",
+            "icmp_administratively_prohibited",
+            "icmp_destination_unreachable",
+            "icmp_time_exceeded",
+            "neighbor_reply",
+            "neighbor_cache",
+            "tcp_connected",
+            "tcp_refused",
+            "sctp_init_ack",
+            "sctp_abort",
+            "sctp_other",
+            "icmp_timestamp_reply",
+            "icmp_netmask_reply",
+            "ip_protocol_payload",
+            "icmp_protocol_unreachable"
+          ]
+        },
+        "evidence": {
+          "enum": [
+            "wire",
+            "socket",
+            "cache"
+          ]
+        },
+        "basis": {
+          "enum": [
+            "direct",
+            "cached",
+            "possible_proxy"
+          ],
+          "description": "possible_proxy flags a link address that also answered for another address of the same family, as a target or a next hop; it asserts no cause."
+        },
+        "probe": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "link_address": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/macAddress"
+        },
+        "observed_at": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/timestamp",
+          "description": "When the evidence was captured; absent for a reply whose capture carried no wall-clock time."
+        }
+      },
+      "additionalProperties": true
+    },
+    "scanInference": {
+      "type": "object",
+      "description": "A scan-dependent conclusion drawn from the endpoint's attempts, which remain published beside it. Each attempt sequence appears in exactly one list.",
+      "required": [
+        "rule",
+        "supporting",
+        "conflicting",
+        "unanswered",
+        "failed"
+      ],
+      "properties": {
+        "state": {
+          "enum": [
+            "open",
+            "closed",
+            "filtered",
+            "unfiltered",
+            "open_or_filtered",
+            "unknown"
+          ],
+          "description": "Absent when every attempt was an operational failure. unfiltered is an ACK-scan conclusion: packets reach the port, which says nothing about a listening service."
+        },
+        "rule": {
+          "enum": [
+            "tcp_syn.syn_ack",
+            "tcp_syn.reset",
+            "tcp_syn.icmp_unreachable",
+            "tcp_syn.time_exceeded",
+            "tcp_syn.unclassified_reply",
+            "tcp_syn.silence",
+            "udp.reply",
+            "udp.port_unreachable",
+            "udp.icmp_unreachable",
+            "udp.time_exceeded",
+            "udp.unclassified_reply",
+            "udp.silence",
+            "tcp_ack.reset",
+            "tcp_ack.icmp_unreachable",
+            "tcp_ack.time_exceeded",
+            "tcp_ack.unclassified_reply",
+            "tcp_ack.silence",
+            "tcp_window.reset_nonzero",
+            "tcp_window.reset_zero",
+            "tcp_window.unclassified_reply",
+            "tcp_window.icmp_unreachable",
+            "tcp_window.time_exceeded",
+            "tcp_window.silence",
+            "tcp_custom.reply",
+            "tcp_custom.silence",
+            "tcp_fin.reset",
+            "tcp_fin.icmp_unreachable",
+            "tcp_fin.time_exceeded",
+            "tcp_fin.unclassified_reply",
+            "tcp_fin.silence",
+            "tcp_null.reset",
+            "tcp_null.icmp_unreachable",
+            "tcp_null.time_exceeded",
+            "tcp_null.unclassified_reply",
+            "tcp_null.silence",
+            "tcp_xmas.reset",
+            "tcp_xmas.icmp_unreachable",
+            "tcp_xmas.time_exceeded",
+            "tcp_xmas.unclassified_reply",
+            "tcp_xmas.silence",
+            "tcp_maimon.reset",
+            "tcp_maimon.icmp_unreachable",
+            "tcp_maimon.time_exceeded",
+            "tcp_maimon.unclassified_reply",
+            "tcp_maimon.silence",
+            "tcp_connect.connected",
+            "tcp_connect.refused",
+            "tcp_connect.unreachable",
+            "tcp_connect.timed_out",
+            "operational_failure",
+            "sctp_init.init_ack",
+            "sctp_init.abort",
+            "sctp_init.icmp_unreachable",
+            "sctp_init.time_exceeded",
+            "sctp_init.unclassified_reply",
+            "sctp_init.silence",
+            "sctp_cookie_echo.abort",
+            "sctp_cookie_echo.icmp_unreachable",
+            "sctp_cookie_echo.time_exceeded",
+            "sctp_cookie_echo.unclassified_reply",
+            "sctp_cookie_echo.silence",
+            "ip_protocol.reply",
+            "ip_protocol.protocol_unreachable",
+            "ip_protocol.icmp_unreachable",
+            "ip_protocol.time_exceeded",
+            "ip_protocol.unclassified_reply",
+            "ip_protocol.silence"
+          ]
+        },
+        "supporting": {
+          "type": "array",
+          "items": {
+            "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+          }
+        },
+        "conflicting": {
+          "type": "array",
+          "items": {
+            "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+          }
+        },
+        "unanswered": {
+          "type": "array",
+          "items": {
+            "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+          }
+        },
+        "failed": {
+          "type": "array",
+          "items": {
+            "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+          }
+        }
+      },
+      "additionalProperties": true,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "rule": {
+                "const": "tcp_ack.reset"
+              }
+            },
+            "required": [
+              "rule"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "unfiltered"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rule": {
+                "const": "tcp_ack.icmp_unreachable"
+              }
+            },
+            "required": [
+              "rule"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "filtered"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rule": {
+                "const": "tcp_ack.time_exceeded"
+              }
+            },
+            "required": [
+              "rule"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "unknown"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rule": {
+                "const": "tcp_ack.unclassified_reply"
+              }
+            },
+            "required": [
+              "rule"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "unknown"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rule": {
+                "const": "tcp_ack.silence"
+              }
+            },
+            "required": [
+              "rule"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "filtered"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rule": {
+                "const": "tcp_window.reset_nonzero"
+              }
+            },
+            "required": [
+              "rule"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "open"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rule": {
+                "const": "tcp_window.reset_zero"
+              }
+            },
+            "required": [
+              "rule"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "closed"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rule": {
+                "const": "tcp_window.unclassified_reply"
+              }
+            },
+            "required": [
+              "rule"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "unknown"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rule": {
+                "const": "tcp_window.icmp_unreachable"
+              }
+            },
+            "required": [
+              "rule"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "filtered"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rule": {
+                "const": "tcp_window.time_exceeded"
+              }
+            },
+            "required": [
+              "rule"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "unknown"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rule": {
+                "const": "tcp_window.silence"
+              }
+            },
+            "required": [
+              "rule"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "filtered"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rule": {
+                "const": "tcp_custom.reply"
+              }
+            },
+            "required": [
+              "rule"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "unknown"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rule": {
+                "const": "tcp_custom.silence"
+              }
+            },
+            "required": [
+              "rule"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "unknown"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rule": {
+                "const": "tcp_fin.reset"
+              }
+            },
+            "required": [
+              "rule"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "closed"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rule": {
+                "const": "tcp_fin.icmp_unreachable"
+              }
+            },
+            "required": [
+              "rule"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "filtered"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rule": {
+                "const": "tcp_fin.time_exceeded"
+              }
+            },
+            "required": [
+              "rule"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "unknown"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rule": {
+                "const": "tcp_fin.unclassified_reply"
+              }
+            },
+            "required": [
+              "rule"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "unknown"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rule": {
+                "const": "tcp_fin.silence"
+              }
+            },
+            "required": [
+              "rule"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "open_or_filtered"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rule": {
+                "const": "tcp_null.reset"
+              }
+            },
+            "required": [
+              "rule"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "closed"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rule": {
+                "const": "tcp_null.icmp_unreachable"
+              }
+            },
+            "required": [
+              "rule"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "filtered"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rule": {
+                "const": "tcp_null.time_exceeded"
+              }
+            },
+            "required": [
+              "rule"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "unknown"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rule": {
+                "const": "tcp_null.unclassified_reply"
+              }
+            },
+            "required": [
+              "rule"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "unknown"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rule": {
+                "const": "tcp_null.silence"
+              }
+            },
+            "required": [
+              "rule"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "open_or_filtered"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rule": {
+                "const": "tcp_xmas.reset"
+              }
+            },
+            "required": [
+              "rule"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "closed"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rule": {
+                "const": "tcp_xmas.icmp_unreachable"
+              }
+            },
+            "required": [
+              "rule"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "filtered"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rule": {
+                "const": "tcp_xmas.time_exceeded"
+              }
+            },
+            "required": [
+              "rule"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "unknown"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rule": {
+                "const": "tcp_xmas.unclassified_reply"
+              }
+            },
+            "required": [
+              "rule"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "unknown"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rule": {
+                "const": "tcp_xmas.silence"
+              }
+            },
+            "required": [
+              "rule"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "open_or_filtered"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rule": {
+                "const": "tcp_maimon.reset"
+              }
+            },
+            "required": [
+              "rule"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "closed"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rule": {
+                "const": "tcp_maimon.icmp_unreachable"
+              }
+            },
+            "required": [
+              "rule"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "filtered"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rule": {
+                "const": "tcp_maimon.time_exceeded"
+              }
+            },
+            "required": [
+              "rule"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "unknown"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rule": {
+                "const": "tcp_maimon.unclassified_reply"
+              }
+            },
+            "required": [
+              "rule"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "unknown"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rule": {
+                "const": "tcp_maimon.silence"
+              }
+            },
+            "required": [
+              "rule"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "open_or_filtered"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rule": {
+                "const": "sctp_init.init_ack"
+              }
+            },
+            "required": [
+              "rule"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "open"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rule": {
+                "const": "sctp_init.abort"
+              }
+            },
+            "required": [
+              "rule"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "closed"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rule": {
+                "const": "sctp_init.icmp_unreachable"
+              }
+            },
+            "required": [
+              "rule"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "filtered"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rule": {
+                "const": "sctp_init.time_exceeded"
+              }
+            },
+            "required": [
+              "rule"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "filtered"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rule": {
+                "const": "sctp_init.unclassified_reply"
+              }
+            },
+            "required": [
+              "rule"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "unknown"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rule": {
+                "const": "sctp_init.silence"
+              }
+            },
+            "required": [
+              "rule"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "filtered"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rule": {
+                "const": "sctp_cookie_echo.abort"
+              }
+            },
+            "required": [
+              "rule"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "closed"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rule": {
+                "const": "sctp_cookie_echo.icmp_unreachable"
+              }
+            },
+            "required": [
+              "rule"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "filtered"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rule": {
+                "const": "sctp_cookie_echo.time_exceeded"
+              }
+            },
+            "required": [
+              "rule"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "unknown"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rule": {
+                "const": "sctp_cookie_echo.unclassified_reply"
+              }
+            },
+            "required": [
+              "rule"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "unknown"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rule": {
+                "const": "sctp_cookie_echo.silence"
+              }
+            },
+            "required": [
+              "rule"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "open_or_filtered"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rule": {
+                "const": "ip_protocol.reply"
+              }
+            },
+            "required": [
+              "rule"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "open"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rule": {
+                "const": "ip_protocol.protocol_unreachable"
+              }
+            },
+            "required": [
+              "rule"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "closed"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rule": {
+                "const": "ip_protocol.icmp_unreachable"
+              }
+            },
+            "required": [
+              "rule"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "filtered"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rule": {
+                "const": "ip_protocol.time_exceeded"
+              }
+            },
+            "required": [
+              "rule"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "filtered"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rule": {
+                "const": "ip_protocol.unclassified_reply"
+              }
+            },
+            "required": [
+              "rule"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "unknown"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rule": {
+                "const": "ip_protocol.silence"
+              }
+            },
+            "required": [
+              "rule"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "open_or_filtered"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        }
+      ]
+    },
+    "scanIpProtocolSelection": {
+      "type": "object",
+      "description": "The IP protocol numbers a scan of the listed targets would probe on every target, after exclusions.",
+      "required": [
+        "excluded_protocols",
+        "protocols"
+      ],
+      "properties": {
+        "excluded_protocols": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "protocols": {
+          "type": "array",
+          "items": {
+            "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint8"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "scanMeasurement": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "const": "response"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "coverage"
+          ],
+          "properties": {
+            "kind": {
+              "const": "no_reply"
+            },
+            "coverage": {
+              "$ref": "#/$defs/scanCoverage"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "const": "unavailable"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "scanPlan": {
+      "type": "object",
+      "description": "How the scan was planned: its method, its discovery stage, and the versioned data sets it drew on. tcp_scan names the effective TCP segment for raw scans with TCP scan endpoints.",
+      "required": [
+        "method",
+        "port_catalog",
+        "excluded_endpoints",
+        "discovery"
+      ],
+      "properties": {
+        "method": {
+          "type": "object",
+          "required": [
+            "requested",
+            "selected"
+          ],
+          "properties": {
+            "requested": {
+              "enum": [
+                "raw",
+                "tcp_connect",
+                "automatic"
+              ]
+            },
+            "selected": {
+              "enum": [
+                "raw",
+                "tcp_connect"
+              ]
+            },
+            "reason": {
+              "type": "string",
+              "description": "Why automatic selection chose this method; absent for explicit methods."
+            }
+          },
+          "additionalProperties": true
+        },
+        "timing": {
+          "enum": [
+            "slow",
+            "normal",
+            "fast"
+          ],
+          "description": "The timing preset that composed rate, timeout, attempts, and the in-flight bound; absent when those flags were used directly."
+        },
+        "shuffle_seed": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64",
+          "description": "The seed the endpoint order was shuffled from; absent for the selected order."
+        },
+        "port_catalog": {
+          "$ref": "#/$defs/scanDataSet"
+        },
+        "excluded_endpoints": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "curated_udp_payloads": {
+          "type": "object",
+          "required": [
+            "data_set",
+            "applied",
+            "overridden"
+          ],
+          "properties": {
+            "data_set": {
+              "$ref": "#/$defs/scanDataSet"
+            },
+            "applied": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535
+              }
+            },
+            "overridden": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535
+              }
+            }
+          },
+          "additionalProperties": true
+        },
+        "discovery": {
+          "$ref": "#/$defs/scanDiscoveryPlan"
+        },
+        "tcp_scan": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/tcpScan"
+        },
+        "sctp_scan": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/sctpScan"
+        }
+      },
+      "additionalProperties": true
+    },
+    "scanPortHint": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,31}$",
+      "description": "The catalog's conventional name for this transport and port; a hint, never service identification."
+    },
+    "scanPortSelection": {
+      "type": "object",
+      "description": "The port endpoints a scan of the listed targets would probe on every target, after exclusions.",
+      "required": [
+        "port_catalog",
+        "excluded_endpoints",
+        "endpoints"
+      ],
+      "properties": {
+        "port_catalog": {
+          "$ref": "#/$defs/scanDataSet"
+        },
+        "excluded_endpoints": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "endpoints": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "transport",
+              "port"
+            ],
+            "properties": {
+              "transport": {
+                "type": "string",
+                "enum": [
+                  "tcp",
+                  "udp",
+                  "sctp"
+                ]
+              },
+              "port": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 65535
+              },
+              "port_hint": {
+                "$ref": "#/$defs/scanPortHint"
+              }
+            },
+            "additionalProperties": true
+          }
+        },
+        "tcp_scan": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/tcpScan"
+        },
+        "sctp_scan": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/sctpScan"
+        }
+      },
+      "additionalProperties": true
+    },
+    "scanProbe": {
+      "type": "object",
+      "required": [
+        "sequence",
+        "stage",
+        "protocol",
+        "destination",
+        "attempt",
+        "status",
+        "classification",
+        "sent_at",
+        "reason",
+        "measurement"
+      ],
+      "properties": {
+        "sequence": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "stage": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/scanStage"
+        },
+        "protocol": {
+          "type": "string",
+          "enum": [
+            "tcp",
+            "udp",
+            "sctp",
+            "icmpv4",
+            "icmpv6",
+            "ip"
+          ]
+        },
+        "destination": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/ipAddress"
+        },
+        "destination_port": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "response",
+            "timeout"
+          ]
+        },
+        "classification": {
+          "type": "string",
+          "enum": [
+            "open",
+            "closed",
+            "filtered",
+            "unreachable",
+            "unknown",
+            "timeout"
+          ]
+        },
+        "responder": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/ipAddress"
+        },
+        "sent_at": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/timestamp"
+        },
+        "received_at": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/timestamp"
+        },
+        "latency": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/duration"
+        },
+        "frame": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/frame"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "application": {
+          "$ref": "#/$defs/udpApplicationEvidence"
+        },
+        "scope": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/scope"
+        },
+        "tcp_scan": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/tcpScan"
+        },
+        "tcp_window": {
+          "$ref": "#/$defs/tcpWindow"
+        },
+        "ip_protocol": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint8"
+        },
+        "icmp_request": {
+          "type": "string",
+          "enum": [
+            "timestamp",
+            "netmask"
+          ]
+        },
+        "sctp_scan": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/sctpScan"
+        },
+        "measurement": {
+          "$ref": "#/$defs/scanMeasurement"
+        }
+      },
+      "additionalProperties": true,
+      "dependentRequired": {
+        "tcp_window": [
+          "tcp_scan"
+        ]
+      }
+    },
+    "scanQualification": {
+      "description": "Final source quality for existing pending no-reply measurements in this stage and inclusive sparse sequence interval. Final unknown/incomplete coverage and positive responses are unchanged.",
+      "type": "object",
+      "required": [
+        "stage",
+        "first_sequence",
+        "last_sequence",
+        "coverage"
+      ],
+      "properties": {
+        "stage": {
+          "type": "string",
+          "enum": [
+            "discovery",
+            "scan"
+          ]
+        },
+        "first_sequence": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "last_sequence": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "coverage": {
+          "type": "string",
+          "enum": [
+            "unknown",
+            "no_reported_loss",
+            "incomplete"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "scanResult": {
+      "type": "object",
+      "required": [
+        "target",
+        "resolved_addresses",
+        "endpoints",
+        "undecoded",
+        "rtt",
+        "retained_evidence_bytes",
+        "plan",
+        "unattributed",
+        "hosts",
+        "scheduling"
+      ],
+      "properties": {
+        "target": {
+          "type": "string"
+        },
+        "resolved_addresses": {
+          "type": "array",
+          "items": {
+            "$ref": "urn:packetcraftr:output:common:v1#/$defs/ipAddress"
+          }
+        },
+        "endpoints": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/scanEndpoint"
+          }
+        },
+        "undecoded": {
+          "type": "array",
+          "items": {
+            "$ref": "urn:packetcraftr:output:common:v1#/$defs/frame"
+          }
+        },
+        "planned_duration": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/duration"
+        },
+        "rtt": {
+          "$ref": "#/$defs/rttSummary"
+        },
+        "retained_evidence_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "plan": {
+          "$ref": "#/$defs/scanPlan"
+        },
+        "unattributed": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/scanUnattributed"
+          }
+        },
+        "hosts": {
+          "type": "array",
+          "description": "One record per selected target, in selection order.",
+          "items": {
+            "allOf": [
+              {
+                "$ref": "#/$defs/scanHost"
+              },
+              {
+                "properties": {
+                  "probes": {
+                    "items": {
+                      "$ref": "#/$defs/scanProbe"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "scheduling": {
+          "$ref": "#/$defs/scanScheduling"
+        },
+        "traceroute": {
+          "$ref": "#/$defs/scanTraceroute"
+        }
+      },
+      "additionalProperties": true
+    },
+    "scanReverseDns": {
+      "type": "object",
+      "description": "A PTR lookup through the DNS workflow; names are observations, not authenticated identity.",
+      "required": [
+        "query_name",
+        "status",
+        "names"
+      ],
+      "properties": {
+        "query_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "enum": [
+            "completed",
+            "failed",
+            "unattempted"
+          ]
+        },
+        "outcome": {
+          "enum": [
+            "response",
+            "truncated",
+            "timeout",
+            "unrelated",
+            "decode_failure",
+            "network_failure"
+          ]
+        },
+        "response_code": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint16"
+        },
+        "names": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "names_truncated": {
+          "const": true,
+          "description": "Present when the scan's evidence byte limit, which bounds the names kept across every lookup, dropped later names of this answer."
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "scanScheduling": {
+      "type": "object",
+      "description": "How one operation scheduled its probes. mode is fixed or adaptive; observed_peak_window is the largest count of probes pending at once the operation actually held, not a throughput rate; ceilings are resource bounds, not achieved concurrency.",
+      "required": [
+        "mode",
+        "observed_peak_window",
+        "retries_started",
+        "conditions",
+        "incomplete"
+      ],
+      "properties": {
+        "mode": {
+          "enum": [
+            "fixed",
+            "adaptive"
+          ]
+        },
+        "adaptive": {
+          "$ref": "#/$defs/scanAdaptive"
+        },
+        "observed_peak_window": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "retries_started": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "conditions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/scanCondition"
+          }
+        },
+        "incomplete": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/scanHostId"
+          }
+        },
+        "operation_ceiling": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "process_ceiling": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": true
+    },
+    "scanStreamSuccess": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "scan"
+        }
+      },
+      "required": [
+        "command",
+        "result"
+      ],
+      "oneOf": [
+        {
+          "properties": {
+            "event": {
+              "const": "probe"
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "target",
+                "probe"
+              ],
+              "properties": {
+                "target": {
+                  "type": "string"
+                },
+                "probe": {
+                  "$ref": "#/$defs/scanProbe"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "diagnostic"
+            },
+            "result": {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/diagnosticEvent"
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "undecoded"
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "frame"
+              ],
+              "properties": {
+                "frame": {
+                  "$ref": "urn:packetcraftr:output:common:v1#/$defs/frame"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "complete"
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "target",
+                "resolved_addresses",
+                "counts",
+                "planned_duration",
+                "rtt",
+                "retained_evidence_bytes",
+                "plan",
+                "scheduling"
+              ],
+              "properties": {
+                "target": {
+                  "type": "string"
+                },
+                "resolved_addresses": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "urn:packetcraftr:output:common:v1#/$defs/ipAddress"
+                  }
+                },
+                "counts": {
+                  "$ref": "#/$defs/scanClassificationCounts"
+                },
+                "planned_duration": {
+                  "$ref": "urn:packetcraftr:output:common:v1#/$defs/duration"
+                },
+                "rtt": {
+                  "$ref": "#/$defs/rttSummary"
+                },
+                "retained_evidence_bytes": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "plan": {
+                  "$ref": "#/$defs/scanPlan"
+                },
+                "scheduling": {
+                  "$ref": "#/$defs/scanScheduling"
+                },
+                "traceroute": {
+                  "type": "object",
+                  "required": [
+                    "plan",
+                    "retained_evidence_bytes"
+                  ],
+                  "properties": {
+                    "plan": {
+                      "$ref": "#/$defs/scanTraceroutePlan"
+                    },
+                    "retained_evidence_bytes": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "required": [
+            "event",
+            "result"
+          ],
+          "properties": {
+            "event": {
+              "const": "probe_sent"
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "sent"
+              ],
+              "properties": {
+                "sent": {
+                  "$ref": "urn:packetcraftr:output:common:v1#/$defs/scanSent"
+                }
+              },
+              "additionalProperties": true
+            }
+          }
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "unattributed"
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "unattributed"
+              ],
+              "properties": {
+                "unattributed": {
+                  "$ref": "#/$defs/scanUnattributed"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "endpoint"
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "endpoint"
+              ],
+              "properties": {
+                "endpoint": {
+                  "type": "object",
+                  "required": [
+                    "address",
+                    "transport",
+                    "classification",
+                    "probes"
+                  ],
+                  "properties": {
+                    "address": {
+                      "$ref": "urn:packetcraftr:output:common:v1#/$defs/ipAddress"
+                    },
+                    "scope": {
+                      "$ref": "urn:packetcraftr:output:common:v1#/$defs/scope"
+                    },
+                    "transport": {
+                      "type": "string",
+                      "enum": [
+                        "tcp",
+                        "udp",
+                        "sctp",
+                        "icmp",
+                        "ip"
+                      ]
+                    },
+                    "port": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 65535
+                    },
+                    "classification": {
+                      "type": "string",
+                      "enum": [
+                        "open",
+                        "closed",
+                        "filtered",
+                        "unreachable",
+                        "unknown",
+                        "timeout"
+                      ]
+                    },
+                    "port_hint": {
+                      "$ref": "#/$defs/scanPortHint"
+                    },
+                    "inference": {
+                      "$ref": "#/$defs/scanInference"
+                    },
+                    "probes": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+                      }
+                    },
+                    "ip_protocol": {
+                      "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint8"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "description": "One per target from either scan method, after the last probe and endpoint records and before complete.",
+          "properties": {
+            "event": {
+              "const": "host"
+            },
+            "result": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/scanHost"
+                },
+                {
+                  "properties": {
+                    "probes": {
+                      "items": {
+                        "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "traceroute_probe"
+            },
+            "result": {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/traceProbe"
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "traceroute_undecoded"
+            },
+            "result": {
+              "$ref": "#/$defs/scanTraceUndecoded"
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "traceroute_host"
+            },
+            "result": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/scanTraceHostRecord"
+                },
+                {
+                  "required": [
+                    "probes"
+                  ],
+                  "properties": {
+                    "probes": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "observation_quality"
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "qualification"
+              ],
+              "properties": {
+                "qualification": {
+                  "$ref": "#/$defs/scanQualification"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        }
+      ]
+    },
+    "scanSuccess": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "scan"
+        },
+        "result": {
+          "$ref": "#/$defs/scanResult"
+        }
+      },
+      "required": [
+        "command",
+        "result"
+      ]
+    },
+    "scanTraceHost": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/scanTraceHostRecord"
+        },
+        {
+          "required": [
+            "hops"
+          ],
+          "properties": {
+            "hops": {
+              "type": "array",
+              "items": {
+                "$ref": "urn:packetcraftr:output:common:v1#/$defs/traceHop"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "scanTraceHostRecord": {
+      "type": "object",
+      "description": "One scanned host's trace. not_traced hosts carry a reason and no probes; reused hops are separate from the freshly probed ones.",
+      "required": [
+        "address",
+        "status",
+        "reused_hops"
+      ],
+      "properties": {
+        "address": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/ipAddress"
+        },
+        "scope": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/scope"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "complete",
+            "incomplete",
+            "not_traced"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "no_responsive_probe",
+            "scoped_target"
+          ]
+        },
+        "completion": {
+          "type": "string",
+          "enum": [
+            "destination_reached",
+            "unreachable",
+            "maximum_hops",
+            "timeout"
+          ]
+        },
+        "selection": {
+          "$ref": "#/$defs/scanTraceSelection"
+        },
+        "reused_hops": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/scanTraceReusedHop"
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "not_traced"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "reason"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "completion"
+                  ]
+                },
+                {
+                  "required": [
+                    "selection"
+                  ]
+                }
+              ]
+            }
+          },
+          "else": {
+            "required": [
+              "completion",
+              "selection"
+            ],
+            "not": {
+              "required": [
+                "reason"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "complete"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "completion": {
+                "enum": [
+                  "destination_reached",
+                  "unreachable"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "incomplete"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "completion": {
+                "enum": [
+                  "maximum_hops",
+                  "timeout"
+                ]
+              }
+            }
+          }
+        }
+      ],
+      "additionalProperties": true
+    },
+    "scanTraceReusedHop": {
+      "type": "object",
+      "description": "A hop another host's trace observed in this operation, claimed for this host. It is a sourced claim, not an observation for this host.",
+      "required": [
+        "hop_limit",
+        "source",
+        "probes",
+        "responders",
+        "age"
+      ],
+      "properties": {
+        "hop_limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 255
+        },
+        "source": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/ipAddress"
+        },
+        "probes": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+          },
+          "description": "The source trace's probe sequences that observed the hop."
+        },
+        "responders": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "urn:packetcraftr:output:common:v1#/$defs/ipAddress"
+          }
+        },
+        "observed_at": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/timestamp"
+        },
+        "age": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/duration"
+        }
+      },
+      "additionalProperties": true
+    },
+    "scanTraceSelection": {
+      "type": "object",
+      "description": "The probe a host was traced with and what it rests on.",
+      "required": [
+        "strategy",
+        "basis"
+      ],
+      "properties": {
+        "strategy": {
+          "type": "string",
+          "enum": [
+            "udp",
+            "icmp",
+            "tcp"
+          ]
+        },
+        "destination_port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "basis": {
+          "type": "string",
+          "enum": [
+            "observed",
+            "requested"
+          ]
+        },
+        "observation": {
+          "type": "object",
+          "description": "The scan probe the selection rests on.",
+          "required": [
+            "stage",
+            "sequence",
+            "reply"
+          ],
+          "properties": {
+            "stage": {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/scanStage"
+            },
+            "sequence": {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+            },
+            "reply": {
+              "type": "string",
+              "enum": [
+                "tcp_syn_ack",
+                "tcp_reset",
+                "icmp_echo_reply"
+              ]
+            },
+            "observed_at": {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/timestamp"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "basis": {
+                "const": "observed"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "observation"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "observation"
+              ]
+            }
+          }
+        }
+      ],
+      "additionalProperties": true
+    },
+    "scanTraceUndecoded": {
+      "type": "object",
+      "required": [
+        "destination",
+        "hop_limit",
+        "frame"
+      ],
+      "properties": {
+        "destination": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/ipAddress"
+        },
+        "hop_limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 255
+        },
+        "frame": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/frame"
+        }
+      },
+      "additionalProperties": true
+    },
+    "scanTraceroute": {
+      "type": "object",
+      "description": "The trace stage requested by --traceroute: one record per scanned host, in host order.",
+      "required": [
+        "plan",
+        "hosts",
+        "undecoded",
+        "retained_evidence_bytes"
+      ],
+      "properties": {
+        "plan": {
+          "$ref": "#/$defs/scanTraceroutePlan"
+        },
+        "hosts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/scanTraceHost"
+          }
+        },
+        "undecoded": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/scanTraceUndecoded"
+          }
+        },
+        "retained_evidence_bytes": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": true
+    },
+    "scanTraceroutePlan": {
+      "type": "object",
+      "description": "The bounds the trace stage ran under.",
+      "required": [
+        "first_hop",
+        "max_hops",
+        "attempts",
+        "max_probes"
+      ],
+      "properties": {
+        "first_hop": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 255
+        },
+        "max_hops": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 255
+        },
+        "attempts": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "max_probes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "strategy": {
+          "type": "object",
+          "description": "The probe for hosts no scan observation covered; absent when those hosts were not traced.",
+          "required": [
+            "strategy"
+          ],
+          "properties": {
+            "strategy": {
+              "type": "string",
+              "enum": [
+                "udp",
+                "icmp",
+                "tcp"
+              ]
+            },
+            "destination_port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            }
+          },
+          "additionalProperties": false
+        },
+        "reuse": {
+          "type": "object",
+          "description": "Present when path reuse was enabled for this operation.",
+          "required": [
+            "max_age"
+          ],
+          "properties": {
+            "max_age": {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/duration"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": true
+    },
+    "scanUnattributed": {
+      "type": "object",
+      "required": [
+        "attribution",
+        "frame"
+      ],
+      "properties": {
+        "attribution": {
+          "enum": [
+            "late",
+            "duplicate",
+            "ambiguous"
+          ]
+        },
+        "sequence": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "frame": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/frame"
+        }
+      },
+      "additionalProperties": true
+    },
+    "targetListComplete": {
+      "type": "object",
+      "required": [
+        "method",
+        "target",
+        "resolution_performed",
+        "count",
+        "duplicates"
+      ],
+      "properties": {
+        "method": {
+          "const": "target_list"
+        },
+        "target": {
+          "type": "string"
+        },
+        "resolution_performed": {
+          "type": "boolean"
+        },
+        "count": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "duplicates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/targetOrigin"
+          }
+        },
+        "ports": {
+          "$ref": "#/$defs/scanPortSelection"
+        },
+        "ip_protocols": {
+          "$ref": "#/$defs/scanIpProtocolSelection"
+        },
+        "shuffle_seed": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64",
+          "description": "The seed the listed endpoint order was shuffled from; absent for the selected order."
+        }
+      },
+      "additionalProperties": true
+    },
+    "targetListReport": {
+      "type": "object",
+      "required": [
+        "method",
+        "target",
+        "resolution_performed",
+        "targets",
+        "duplicates"
+      ],
+      "properties": {
+        "method": {
+          "const": "target_list"
+        },
+        "target": {
+          "type": "string"
+        },
+        "resolution_performed": {
+          "type": "boolean"
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/targetListTarget"
+          }
+        },
+        "duplicates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/targetOrigin"
+          }
+        },
+        "ports": {
+          "$ref": "#/$defs/scanPortSelection"
+        },
+        "ip_protocols": {
+          "$ref": "#/$defs/scanIpProtocolSelection"
+        },
+        "shuffle_seed": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64",
+          "description": "The seed the listed endpoint order was shuffled from; absent for the selected order."
+        }
+      },
+      "additionalProperties": true
+    },
+    "targetListStreamSuccess": {
+      "type": "object",
+      "required": [
+        "command",
+        "result",
+        "event"
+      ],
+      "properties": {
+        "command": {
+          "const": "scan"
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "event": {
+              "const": "target"
+            },
+            "result": {
+              "$ref": "#/$defs/targetListTarget"
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "complete"
+            },
+            "result": {
+              "$ref": "#/$defs/targetListComplete"
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        }
+      ]
+    },
+    "targetListSuccess": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "scan"
+        },
+        "result": {
+          "$ref": "#/$defs/targetListReport"
+        }
+      },
+      "required": [
+        "command",
+        "result"
+      ]
+    },
+    "targetListTarget": {
+      "type": "object",
+      "required": [
+        "method",
+        "address",
+        "origins"
+      ],
+      "properties": {
+        "method": {
+          "const": "target_list"
+        },
+        "address": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/ipAddress"
+        },
+        "scope": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/scope"
+        },
+        "origins": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/targetOrigin"
+          },
+          "minItems": 1
+        }
+      },
+      "additionalProperties": true
+    },
+    "targetOrigin": {
+      "type": "object",
+      "required": [
+        "index",
+        "source"
+      ],
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "source": {
+          "type": "string"
+        },
+        "line": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        }
+      },
+      "additionalProperties": true
+    },
+    "tcpWindow": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 65535,
+      "description": "The advertised window of the correlated TCP response, as observed; a window-scan inference input, never an authenticated identity."
+    },
+    "udpApplicationEvidence": {
+      "type": "object",
+      "required": [
+        "profile",
+        "status",
+        "reason"
+      ],
+      "properties": {
+        "profile": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "enum": [
+            "not_observed",
+            "unchecked",
+            "confirmed",
+            "rejected"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

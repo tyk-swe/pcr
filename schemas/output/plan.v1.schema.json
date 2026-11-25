@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:packetcraftr:output:plan:v1",
+  "title": "PacketcraftR plan output payload v1",
+  "description": "Success payload contract for the plan command. The stable envelope is validated separately.",
+  "allOf": [
+    {
+      "type": "object",
+      "required": [
+        "command",
+        "payload_schema"
+      ],
+      "properties": {
+        "command": {
+          "const": "plan"
+        },
+        "payload_schema": {
+          "const": "packetcraftr.output.plan/v1"
+        }
+      }
+    },
+    {
+      "oneOf": [
+        {
+          "allOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/aggregateSuccessEnvelope"
+            },
+            {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/planSuccess"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "$defs": {
+    "planResult": {
+      "type": "object",
+      "required": [
+        "route"
+      ],
+      "properties": {
+        "route": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/plannedRoute"
+        }
+      },
+      "additionalProperties": true
+    },
+    "planSuccess": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "plan"
+        },
+        "result": {
+          "$ref": "#/$defs/planResult"
+        }
+      },
+      "required": [
+        "command",
+        "result"
+      ]
+    }
+  }
+}

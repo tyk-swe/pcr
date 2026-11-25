@@ -309,7 +309,7 @@ where
         _ => {
             return Err(packetcraftr_core::error::BoundaryError::internal_execution(
                 "unexpected attempt event at auxiliary publisher",
-                packetcraftr_core::error::Code::InternalScanPipelineEvent,
+                crate::code::InternalScanPipelineEvent,
                 "preserve the attempt publication boundary",
             ));
         }

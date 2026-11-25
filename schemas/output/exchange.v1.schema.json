@@ -1,0 +1,349 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:packetcraftr:output:exchange:v1",
+  "title": "PacketcraftR exchange output payload v1",
+  "description": "Success payload contract for the exchange command. The stable envelope is validated separately.",
+  "allOf": [
+    {
+      "type": "object",
+      "required": [
+        "command",
+        "payload_schema"
+      ],
+      "properties": {
+        "command": {
+          "const": "exchange"
+        },
+        "payload_schema": {
+          "const": "packetcraftr.output.exchange/v1"
+        }
+      }
+    },
+    {
+      "oneOf": [
+        {
+          "allOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/aggregateSuccessEnvelope"
+            },
+            {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/exchangeSuccess"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/streamSuccessEnvelope"
+            },
+            {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/exchangeStreamSuccess"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "$defs": {
+    "decodedFrame": {
+      "type": "object",
+      "required": [
+        "frame",
+        "packet",
+        "layout",
+        "diagnostics"
+      ],
+      "properties": {
+        "frame": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/frame"
+        },
+        "packet": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/packetDocument"
+        },
+        "layout": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/packetLayout"
+        },
+        "diagnostics": {
+          "type": "array",
+          "items": {
+            "$ref": "urn:packetcraftr:output:common:v1#/$defs/diagnostic"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "exchangeResponse": {
+      "type": "object",
+      "required": [
+        "request_index",
+        "response",
+        "latency"
+      ],
+      "properties": {
+        "request_index": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "response": {
+          "$ref": "#/$defs/decodedFrame"
+        },
+        "latency": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/duration"
+        }
+      },
+      "additionalProperties": true
+    },
+    "exchangeResult": {
+      "type": "object",
+      "required": [
+        "sent",
+        "responses",
+        "unanswered",
+        "unsolicited",
+        "undecoded"
+      ],
+      "properties": {
+        "sent": {
+          "type": "array",
+          "items": {
+            "$ref": "urn:packetcraftr:output:common:v1#/$defs/wireFrame"
+          }
+        },
+        "responses": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/exchangeResponse"
+          }
+        },
+        "unanswered": {
+          "type": "array",
+          "items": {
+            "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+          }
+        },
+        "unsolicited": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/decodedFrame"
+          }
+        },
+        "undecoded": {
+          "type": "array",
+          "items": {
+            "$ref": "urn:packetcraftr:output:common:v1#/$defs/frame"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "exchangeStreamSuccess": {
+      "description": "One progressive exchange event. Sent records follow provider-confirmed transmission, capture evidence follows definitive classification, unanswered records follow successful capture completion, and complete is terminal.",
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "exchange"
+        }
+      },
+      "required": [
+        "command",
+        "result"
+      ],
+      "allOf": [
+        {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/terminalWithStats"
+        }
+      ],
+      "oneOf": [
+        {
+          "properties": {
+            "event": {
+              "const": "sent"
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "request_index",
+                "frame"
+              ],
+              "properties": {
+                "request_index": {
+                  "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+                },
+                "frame": {
+                  "$ref": "urn:packetcraftr:output:common:v1#/$defs/wireFrame"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "response"
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "request_index",
+                "response",
+                "latency"
+              ],
+              "properties": {
+                "request_index": {
+                  "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+                },
+                "response": {
+                  "$ref": "#/$defs/decodedFrame"
+                },
+                "latency": {
+                  "$ref": "urn:packetcraftr:output:common:v1#/$defs/duration"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "unanswered"
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "request_index"
+              ],
+              "properties": {
+                "request_index": {
+                  "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "unsolicited"
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "frame"
+              ],
+              "properties": {
+                "frame": {
+                  "$ref": "#/$defs/decodedFrame"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "undecoded"
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "frame"
+              ],
+              "properties": {
+                "frame": {
+                  "$ref": "urn:packetcraftr:output:common:v1#/$defs/frame"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "diagnostic"
+            },
+            "result": {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/diagnosticEvent"
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "complete"
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "unanswered"
+              ],
+              "properties": {
+                "unanswered": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        }
+      ]
+    },
+    "exchangeSuccess": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "exchange"
+        },
+        "result": {
+          "$ref": "#/$defs/exchangeResult"
+        }
+      },
+      "required": [
+        "command",
+        "result"
+      ]
+    }
+  }
+}

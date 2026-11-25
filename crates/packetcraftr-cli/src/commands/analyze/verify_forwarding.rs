@@ -85,7 +85,7 @@ pub(super) fn run(
     if arguments.ingress == stdin && arguments.egress == stdin {
         return Err(CliError::from_classification(
             Classification::new(
-                packetcraftr_core::error::Code::CliInputSource,
+                crate::code::CliInputSource,
                 Kind::Usage,
                 Some("pipe one capture to stdin and name the other's path"),
             ),

@@ -1,6 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use std::cell::RefCell;
+
 use packetcraftr_core::{budget::Deadline, document::os_fingerprints as core};
 
 use super::{
@@ -35,12 +37,7 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
         let operation = crate::engine::operation::Operation::new(self, request.limits.max_duration);
         let setup = WorkflowSetup::with_authorizer(self, &operation, self.admission());
         let mut workflow = setup.start(self, request.limits.max_duration);
-        let publish = crate::engine::execution::publisher(
-            &self.runtime,
-            sink,
-            Error::Deadline,
-            Error::Output,
-        )?;
+        let publish = crate::engine::execution::publisher(sink, Error::Deadline, Error::Output)?;
         let mut operation = operation
             .with_neighbors(self.neighbors.for_operation(1))
             .with_neighbor_mode(crate::engine::operation::NeighborMode::Cached)
@@ -153,17 +150,19 @@ where
             "neighbor capture exceeds operation evidence budget".into(),
         ));
     }
-    let mut internal = Collector::default();
+    let internal = RefCell::new(Collector::default());
     let prep_stats = preparation.stats.clone();
     if preparation.request_bytes.is_some() || preparation_frames > 0 {
         let event = Event::Preparation(preparation);
-        internal.publish(event.clone()).map_err(Error::Output)?;
+        internal
+            .borrow_mut()
+            .publish(event.clone())
+            .map_err(Error::Output)?;
         publish(event, deadline)?;
     }
     let mut limits = request.limits.evidence;
     limits.max_frames -= preparation_frames;
     limits.max_bytes -= preparation_bytes;
-    let state = internal.clone();
     let mut evidence = BatchEvidence::new_with_retention_limits(
         Workflow::Os,
         request.limits.evidence,
@@ -173,7 +172,10 @@ where
             pending_cleanup: None,
         },
         |event: Event, deadline: &Deadline| {
-            internal.publish(event.clone()).map_err(Error::Output)?;
+            internal
+                .borrow_mut()
+                .publish(event.clone())
+                .map_err(Error::Output)?;
             publish(event, deadline)
         },
     );
@@ -198,7 +200,7 @@ where
             return Ok(None);
         }
         if phase == 2 && attempt == 1 {
-            let observations = state.observations();
+            let observations = internal.borrow().observations();
             for kind in [Probe::OpenSyn, Probe::ClosedSyn] {
                 let flags = if kind == Probe::ClosedSyn { 0x14 } else { 0x12 };
                 if !observations
@@ -254,8 +256,8 @@ where
     stats.checked_add_assign(&prep_stats).map_err(|source| {
         Error::from_failure(sequence, crate::error::Failure::StatsOverflow(source))
     })?;
-    let observations = state.observations();
-    let complete = !state.incomplete();
+    let observations = internal.borrow().observations();
+    let complete = !internal.borrow().incomplete();
     let identification = if complete {
         core::evaluate(&request.corpus, &observations)?
     } else {

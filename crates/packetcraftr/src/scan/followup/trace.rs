@@ -3,7 +3,6 @@
 
 //! The optional trace stage of a scan.
 
-use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use crate::clock::Clock;
@@ -247,21 +246,18 @@ impl Stage {
         K: Clock,
     {
         let request = self.request(&handoff, client.now())?;
-        let latest = Arc::new(Mutex::new(None::<Instant>));
-        let observed = Arc::clone(&latest);
+        let mut latest = None;
         let settled = client.clock.clone();
-        let delivery = emit.delivery();
         let mut emit = emit;
         // The trace runs in the policy allowance the scan left over, not a
         // fresh one.
         let report = client.trace_hosts_in(
             request,
-            crate::engine::execution::forwarding(delivery, move |event: hosts::Event, control| {
+            crate::engine::execution::forwarding(|event: hosts::Event, control| {
                 // The probe's wall-clock sent_at is evidence, not a pacing
                 // marker: the monotonic marker is when its event settled.
                 if let hosts::Event::Probe(_) = &event {
-                    let mut latest = observed.lock().unwrap_or_else(PoisonError::into_inner);
-                    *latest = Some(settled.now());
+                    latest = Some(settled.now());
                 }
                 match control {
                     Some(control) => emit.publish_controlled(event, control),
@@ -270,7 +266,7 @@ impl Stage {
             }),
             operation,
         )?;
-        let last_sent = *latest.lock().unwrap_or_else(PoisonError::into_inner);
+        let last_sent = latest;
         Ok(Streamed { report, last_sent })
     }
 }

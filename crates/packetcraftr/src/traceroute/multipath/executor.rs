@@ -66,9 +66,9 @@ impl<P: PacketProviders, K: Clock> Runner for ClientRunner<'_, P, K> {
         &mut self,
         probes: &[Probe],
         grant: Grant,
-        spent: &Stats,
+        _spent: &Stats,
     ) -> Result<Evidence, BoundaryError> {
-        let operation = self.operation.clone().with_spent(spent.clone());
+        let operation = self.operation.clone();
         let mut matcher = |_: usize, sent: &Packet, received: &DecodedPacket| {
             packet::classify(&operation.registry, self.strategy, sent, received).is_some()
         };
@@ -86,7 +86,7 @@ impl<P: PacketProviders, K: Clock> Runner for ClientRunner<'_, P, K> {
             .map_err(BoundaryError::from_error)
     }
 
-    fn cleanup(&mut self, evidence: &Evidence, spent: &Stats) -> Result<Stats, BoundaryError> {
+    fn cleanup(&mut self, evidence: &Evidence, _spent: &Stats) -> Result<Stats, BoundaryError> {
         if self.strategy != Transport::Tcp {
             return Ok(Stats::default());
         }
@@ -95,7 +95,7 @@ impl<P: PacketProviders, K: Clock> Runner for ClientRunner<'_, P, K> {
             return Ok(Stats::default());
         }
         let started = self.client.clock.now();
-        let operation = self.operation.clone().with_spent(spent.clone());
+        let operation = self.operation.clone();
         let mut stream = self
             .client
             .streaming_in(&self.send, resets.len() as u64, &operation)

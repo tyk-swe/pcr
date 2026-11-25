@@ -1,0 +1,230 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:packetcraftr:output:export:v1",
+  "title": "PacketcraftR export output payload v1",
+  "description": "Success payload contract for the export command. The stable envelope is validated separately.",
+  "allOf": [
+    {
+      "type": "object",
+      "required": [
+        "command",
+        "payload_schema"
+      ],
+      "properties": {
+        "command": {
+          "const": "export"
+        },
+        "payload_schema": {
+          "const": "packetcraftr.output.export/v1"
+        }
+      }
+    },
+    {
+      "oneOf": [
+        {
+          "allOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/aggregateSuccessEnvelope"
+            },
+            {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/exportSuccess"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/streamSuccessEnvelope"
+            },
+            {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/exportStreamSuccess"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "$defs": {
+    "exportIncomplete": {
+      "type": "object",
+      "required": [
+        "key",
+        "sources"
+      ],
+      "properties": {
+        "key": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/ipDatagramKey"
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "urn:packetcraftr:output:common:v1#/$defs/applicationSource"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "exportResult": {
+      "type": "object",
+      "required": [
+        "path",
+        "format",
+        "frames_read",
+        "frames_selected",
+        "captured_bytes_read",
+        "captured_bytes_selected",
+        "interfaces",
+        "metadata_records",
+        "source_frames",
+        "matched_streams",
+        "unmatched_streams",
+        "unmatched_datagram_frames",
+        "selected_complete_datagrams",
+        "selected_incomplete_datagrams",
+        "unselected_incomplete_datagrams",
+        "source_outcomes_omitted",
+        "scopes",
+        "ip_reassembly"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "format": {
+          "enum": [
+            "pcap",
+            "pcapng"
+          ]
+        },
+        "frames_read": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "frames_selected": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "captured_bytes_read": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "captured_bytes_selected": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "interfaces": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "metadata_records": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "source_frames": {
+          "type": "array",
+          "items": {
+            "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+          }
+        },
+        "matched_streams": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/streamReference"
+          }
+        },
+        "unmatched_streams": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/streamReference"
+          }
+        },
+        "unmatched_datagram_frames": {
+          "type": "array",
+          "items": {
+            "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+          }
+        },
+        "selected_complete_datagrams": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "selected_incomplete_datagrams": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/exportIncomplete"
+          }
+        },
+        "unselected_incomplete_datagrams": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "source_outcomes_omitted": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "scopes": {
+          "type": "array",
+          "items": {
+            "$ref": "urn:packetcraftr:output:common:v1#/$defs/captureScope"
+          }
+        },
+        "ip_reassembly": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/ipReassemblyReport"
+        }
+      },
+      "additionalProperties": true
+    },
+    "exportStreamSuccess": {
+      "type": "object",
+      "required": [
+        "command",
+        "event",
+        "result"
+      ],
+      "properties": {
+        "command": {
+          "const": "export"
+        },
+        "event": {
+          "const": "complete"
+        },
+        "result": {
+          "$ref": "#/$defs/exportResult"
+        }
+      }
+    },
+    "exportSuccess": {
+      "type": "object",
+      "required": [
+        "command",
+        "result"
+      ],
+      "properties": {
+        "command": {
+          "const": "export"
+        },
+        "result": {
+          "$ref": "#/$defs/exportResult"
+        }
+      }
+    },
+    "streamReference": {
+      "type": "object",
+      "required": [
+        "transport",
+        "index"
+      ],
+      "properties": {
+        "transport": {
+          "enum": [
+            "tcp",
+            "udp"
+          ]
+        },
+        "index": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

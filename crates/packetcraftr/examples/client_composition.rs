@@ -123,13 +123,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let allowed = packet(Ipv4Addr::new(192, 0, 2, 99))?;
-    let collector = send::Collector::default();
+    let mut collector = send::Collector::default();
     let report = client.send(
         send::Request::new(
             packetcraftr_core::template::Template::new(allowed),
             options.clone(),
         ),
-        collector.clone(),
+        &mut collector,
     )?;
     let sent = collector.finish(report)?;
     println!("sent {} bytes to an allowed destination", sent.stats.bytes);

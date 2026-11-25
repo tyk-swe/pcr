@@ -2333,11 +2333,16 @@ fn termination_releases_state_and_preserves_evidence() {
 fn trailing_eviction_avoids_transport_fault() {
     let mut rig = rig();
     handshake(&mut rig);
-    rig.collector.tcp.associate_test(flow(), 0);
     let run = RunSummary {
-        trailing_tcp_events: vec![crate::analysis::reassembly::tcp::Event::Evicted {
-            flow: flow(),
-            pending_bytes: 3,
+        trailing_tcp_events: vec![crate::analysis::TcpEventRecord {
+            stream: 0,
+            generation: 0,
+            direction_generation: 0,
+            event: crate::analysis::reassembly::tcp::Event::Evicted {
+                flow: flow(),
+                pending_bytes: 3,
+                reason: crate::analysis::reassembly::tcp::EvictionReason::Flush,
+            },
         }],
         ..RunSummary::default()
     };

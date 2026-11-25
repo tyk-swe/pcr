@@ -78,7 +78,7 @@ impl FrameSelection {
 fn selection_error(message: impl Into<String>) -> CliError {
     CliError::from_classification(
         Classification::new(
-            packetcraftr_core::error::Code::CliFrameSelection,
+            crate::code::CliFrameSelection,
             Kind::Usage,
             Some("use --frames such as 1-100,250,300- and --every with a positive integer"),
         ),

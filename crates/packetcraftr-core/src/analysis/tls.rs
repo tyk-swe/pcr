@@ -35,7 +35,7 @@ use serde::Serialize;
 
 use crate::analysis::ScopedFlowKey;
 use crate::analysis::conversation_index::CanonicalFlow;
-use crate::analysis::pipeline::{FrameRecord, Summary as RunSummary};
+use crate::analysis::pipeline::{FrameRecord, Summary as RunSummary, TcpEventRecord};
 use crate::analysis::reassembly::tcp::Event as TcpEvent;
 use crate::analysis::session::{Collector as SessionCollector, CollectorNeeds};
 use crate::error::BoundaryError;
@@ -139,7 +139,7 @@ impl Collector {
             .and_then(|view| view.conversation)
             .map(|stream| stream.flow);
         let last_data = record.tcp_events.iter().rposition(
-            |event| matches!(event, TcpEvent::Data { flow, .. } if Some(flow) == current_flow),
+            |event| matches!(&event.event, TcpEvent::Data { flow, .. } if Some(flow) == current_flow),
         );
         let deferred_close = last_data.and_then(|data| {
             record
@@ -148,7 +148,7 @@ impl Collector {
                 .enumerate()
                 .find_map(|(index, event)| {
                     (index > data
-                        && matches!(event, TcpEvent::Closed { flow, reset: false }
+                        && matches!(&event.event, TcpEvent::Closed { flow, reset: false }
                     if Some(flow) == current_flow))
                     .then_some(index)
                 })
@@ -192,8 +192,6 @@ impl Collector {
         }
         if let Some(live) = self.live_mut(&key) {
             live.note_frame(Some(record.timestamp));
-            let first = live.first_flow().clone();
-            live.dedup().observe_syn(flow, &first, tcp.header);
         }
         self.fold_deliveries(record, &key, &mut events);
         if let Some(close) = deferred_close.and_then(|index| record.tcp_events.get(index)) {
@@ -234,7 +232,7 @@ impl Collector {
         for event in trailing {
             check()?;
             let mut events = Vec::new();
-            if let TcpEvent::Gap { flow, .. } = event {
+            if let TcpEvent::Gap { flow, .. } = &event.event {
                 let key = CanonicalFlow::from_flow(flow);
                 let number = self.last_frame(&key);
                 self.retire(
@@ -273,13 +271,13 @@ impl Collector {
     /// Gap outranks close, which outranks eviction; a reset produces both close and eviction.
     fn fold_reassembly_events(
         &mut self,
-        tcp_events: &[TcpEvent],
+        tcp_events: &[TcpEventRecord],
         number: u64,
         deferred_close: Option<usize>,
         events: &mut Vec<SessionEvent>,
     ) {
         for event in tcp_events {
-            if let TcpEvent::Gap { flow, .. } = event {
+            if let TcpEvent::Gap { flow, .. } = &event.event {
                 let key = CanonicalFlow::from_flow(flow);
                 self.retire(
                     &key,
@@ -290,19 +288,15 @@ impl Collector {
                 );
             }
         }
-        for (index, event) in tcp_events.iter().enumerate() {
+        for (index, record) in tcp_events.iter().enumerate() {
             if deferred_close == Some(index) {
                 continue;
             }
-            if let TcpEvent::Closed { flow, reset } = event {
+            if let TcpEvent::Closed { flow, .. } = &record.event {
                 let key = CanonicalFlow::from_flow(flow);
                 let Some(live) = self.live_mut(&key) else {
                     continue;
                 };
-                if !*reset {
-                    let first = live.first_flow().clone();
-                    live.dedup().mark_closed(flow, &first);
-                }
                 let status = live.close_status();
                 let Some(status) = status else {
                     self.discard(&key);
@@ -311,15 +305,13 @@ impl Collector {
                 self.retire(&key, status, None, number, events);
             }
         }
-        for event in tcp_events {
-            if let TcpEvent::Evicted { flow, .. } = event {
+        for record in tcp_events {
+            if let TcpEvent::Evicted { flow, .. } = &record.event {
                 let key = CanonicalFlow::from_flow(flow);
-                let Some(live) = self.live_mut(&key) else {
+                if self.live_mut(&key).is_none() {
                     self.discard_closed(&key);
                     continue;
-                };
-                let first = live.first_flow().clone();
-                live.dedup().mark_evicted(flow, &first);
+                }
                 self.retire(
                     &key,
                     Status::Gap,
@@ -342,9 +334,10 @@ impl Collector {
         for event in record.tcp_events {
             let TcpEvent::Data {
                 flow: sender,
-                sequence,
                 bytes,
-            } = event
+                sources,
+                ..
+            } = &event.event
             else {
                 continue;
             };
@@ -357,12 +350,8 @@ impl Collector {
             let Some(direction) = live.direction_of(sender) else {
                 continue;
             };
-            let deduplicated = live
-                .dedup()
-                .deduplicate(direction.dedup(), *sequence, bytes);
-            let Some(payload) = deduplicated.filter(|payload| !payload.is_empty()) else {
-                continue;
-            };
+            live.note_sources(sources);
+            let payload = bytes;
             let Some(charge) = live.retainable(direction, payload.len(), ceiling) else {
                 continue;
             };
@@ -390,7 +379,7 @@ impl Collector {
                 return;
             };
             let before = live.buffered();
-            let verdict = live.feed(direction, &payload, ceiling, &mut limit_hits);
+            let verdict = live.feed(direction, payload, ceiling, &mut limit_hits);
             let after = live.buffered();
             self.buffered_bytes = self
                 .buffered_bytes

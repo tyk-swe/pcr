@@ -621,7 +621,7 @@ fn capture_field_projection_preserves_rows_across_output_formats() {
     }).collect();
     assert_eq!(
         aggregate["schema"],
-        packetcraftr_core::security::OUTPUT_SCHEMA
+        packetcraftr_cli::output::contract::OUTPUT_SCHEMA
     );
     assert_eq!(aggregate["status"], "success");
     assert_eq!(
@@ -1782,14 +1782,18 @@ fn scan_diff_reports_changes_and_provenance() {
     let before_path = dir.path().join("before.json");
     let after_path = dir.path().join("after.json");
     let before = json!({
-        "schema": packetcraftr_core::security::OUTPUT_SCHEMA, "command":"scan", "mode":"aggregate", "status":"success",
+        "schema": packetcraftr_cli::output::contract::OUTPUT_SCHEMA,
+        "payload_schema": "packetcraftr.output.scan/v1",
+        "command":"scan", "mode":"aggregate", "status":"success",
         "result":{"method":"tcp_connect", "endpoints":[
             {"address":"192.0.2.1", "port":443, "inference":{"state":"closed", "supporting":[1]}},
             {"address":"192.0.2.2", "port":443, "inference":{"state":"open", "supporting":[2]}}
         ]}
     });
     let after = json!({
-        "schema": packetcraftr_core::security::OUTPUT_SCHEMA, "command":"scan", "mode":"aggregate", "status":"success",
+        "schema": packetcraftr_cli::output::contract::OUTPUT_SCHEMA,
+        "payload_schema": "packetcraftr.output.scan/v1",
+        "command":"scan", "mode":"aggregate", "status":"success",
         "result":{"method":"tcp_connect", "endpoints":[
             {"address":"192.0.2.1", "port":443, "inference":{"state":"open", "supporting":[3]}}
         ]}
@@ -1862,7 +1866,7 @@ fn scan_diff_rejects_invalid_input() {
         &path,
         format!(
             r#"{{"schema":"{}","command":"scan","mode":"aggregate","status":"failure"}}"#,
-            packetcraftr_core::security::OUTPUT_SCHEMA
+            packetcraftr_cli::output::contract::OUTPUT_SCHEMA
         ),
     )
     .unwrap();
@@ -1891,7 +1895,8 @@ mod differential {
             })
         };
         serde_json::to_vec(&json!({
-            "schema": packetcraftr_core::security::OUTPUT_SCHEMA,
+            "schema": packetcraftr_cli::output::contract::OUTPUT_SCHEMA,
+            "payload_schema": "packetcraftr.output.differential/v1",
             "command": "differential",
             "mode": "aggregate",
             "status": "success",
@@ -1978,22 +1983,23 @@ mod differential {
         for (field, replacement) in [
             (
                 "schema",
-                json!(packetcraftr_core::security::AMBIGUOUS_OUTPUT_SCHEMA),
+                json!(packetcraftr_cli::output::contract::AMBIGUOUS_OUTPUT_SCHEMA),
             ),
             ("schema", json!("unsupported-schema")),
             ("command", json!("scan")),
             ("mode", json!("stream")),
             ("status", json!("error")),
+            ("payload_schema", json!("packetcraftr.output.scan/v1")),
         ] {
             let mut value = original.clone();
             value[field] = replacement;
             let output = join(&serde_json::to_vec(&value).unwrap(), b"");
             super::assert_error(&output, "cli.error");
-            if value[field] == packetcraftr_core::security::AMBIGUOUS_OUTPUT_SCHEMA {
+            if value[field] == packetcraftr_cli::output::contract::AMBIGUOUS_OUTPUT_SCHEMA {
                 assert!(super::stdout(&output).contains("regenerate"));
             }
         }
-        for field in ["schema", "command", "mode", "status"] {
+        for field in ["schema", "payload_schema", "command", "mode", "status"] {
             let mut value = original.clone();
             value.as_object_mut().unwrap().remove(field);
             super::assert_error(

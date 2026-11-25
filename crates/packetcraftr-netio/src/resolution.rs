@@ -6,7 +6,7 @@
 
 use crate::{
     resources::NativeSnapshot,
-    workers::{self, Blocked, Pool},
+    workers::{self, Admission, Blocked, Pool},
 };
 use packetcraftr_core::{
     budget::Deadline,
@@ -19,8 +19,9 @@ use std::{
 
 /// Nested lookup allocation; the process-wide native root must also admit work.
 pub const MAX_PENDING_LOOKUPS: usize = 4;
-static LOOKUPS: LazyLock<Arc<Pool>> = LazyLock::new(|| Arc::new(Pool::new(MAX_PENDING_LOOKUPS)));
-fn lookups() -> &'static Arc<Pool> {
+static LOOKUPS: LazyLock<Arc<Admission>> =
+    LazyLock::new(|| Arc::new(Admission::new(MAX_PENDING_LOOKUPS, MAX_PENDING_LOOKUPS)));
+fn lookups() -> &'static Arc<Admission> {
     &LOOKUPS
 }
 
@@ -32,11 +33,7 @@ pub fn snapshot() -> NativeSnapshot {
 fn failure(message: impl Into<String>) -> BoundaryError {
     BoundaryError::new(
         message,
-        Classification::new(
-            packetcraftr_core::error::Code::IoHostnameResolution,
-            Kind::Io,
-            None,
-        ),
+        Classification::new(crate::code::IoHostnameResolution, Kind::Io, None),
         Vec::new(),
     )
 }
@@ -50,11 +47,7 @@ fn failure_with_source(
         .collect();
     BoundaryError::with_source(
         message,
-        Classification::new(
-            packetcraftr_core::error::Code::IoHostnameResolution,
-            Kind::Io,
-            None,
-        ),
+        Classification::new(crate::code::IoHostnameResolution, Kind::Io, None),
         causes,
         error,
     )
@@ -68,20 +61,20 @@ pub fn blocking_lookup(
     deadline: &Deadline,
     lookup: impl FnOnce() -> Result<Vec<IpAddr>, BoundaryError> + Send + 'static,
 ) -> Result<Vec<IpAddr>, BoundaryError> {
-    blocking_lookup_on(deadline, lookup, lookups(), workers::shared())
+    blocking_lookup_on(deadline, lookup, lookups(), workers::control())
 }
 
 pub(crate) fn blocking_lookup_on(
     deadline: &Deadline,
     lookup: impl FnOnce() -> Result<Vec<IpAddr>, BoundaryError> + Send + 'static,
-    lookup_pool: &Arc<Pool>,
+    lookup_pool: &Arc<Admission>,
     root: &Arc<Pool>,
 ) -> Result<Vec<IpAddr>, BoundaryError> {
     let wait = deadline.detach().map_err(BoundaryError::from_error)?;
-    let lookup_permit = lookup_pool
+    let lookup_lease = lookup_pool
         .admit()
         .map_err(|error| failure_with_source("hostname lookup admission refused", error))?;
-    let retained_lookup = lookup_permit.retention_marker();
+    let retained_lookup = lookup_lease.retention_marker();
     let permit = root
         .admit()
         .map_err(|error| failure_with_source("native hostname lookup admission refused", error))?;
@@ -92,7 +85,7 @@ pub(crate) fn blocking_lookup_on(
                 execution.enforce().map_err(BoundaryError::from_error)?;
                 lookup()
             });
-            drop(lookup_permit);
+            drop(lookup_lease);
             result
         })
         .map_err(|error| match wait.enforce() {
@@ -128,11 +121,7 @@ pub fn system(
         let resolved = (hostname.as_str(), 0).to_socket_addrs().map_err(|error| {
             BoundaryError::with_source(
                 "system hostname lookup failed",
-                Classification::new(
-                    packetcraftr_core::error::Code::IoHostnameResolution,
-                    Kind::Io,
-                    None,
-                ),
+                Classification::new(crate::code::IoHostnameResolution, Kind::Io, None),
                 Vec::new(),
                 error,
             )
@@ -155,11 +144,7 @@ fn retain_addresses(
         if addresses.len() >= limit {
             return Err(BoundaryError::new(
                 format!("hostname {hostname} exceeds the {limit}-address limit"),
-                Classification::new(
-                    packetcraftr_core::error::Code::IoHostnameAddressLimit,
-                    Kind::Io,
-                    None,
-                ),
+                Classification::new(crate::code::IoHostnameAddressLimit, Kind::Io, None),
                 Vec::new(),
             ));
         }

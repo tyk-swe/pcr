@@ -1,7 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 use super::limit;
-use crate::error::FromFailure as _;
 use crate::{
     clock::Clock,
     engine::preparation::{Admitted, AdmittedCost, Admitting, AuthorizedRoute, RetainedAdmission},
@@ -126,16 +125,7 @@ pub(super) fn plan_with_limit<'c, P: PacketProviders, K: Clock>(
     }
     let mut interfaces = Vec::with_capacity(source_capacity);
     let mut admitted_probes = Vec::with_capacity(planned.len());
-    let mut operation = executor.operation.clone();
-    operation
-        .spent
-        .checked_add_assign(&options.preceding)
-        .map_err(|error| {
-            BoundaryError::from_error(crate::scan::Error::from_failure(
-                0,
-                crate::error::Failure::StatsOverflow(error),
-            ))
-        })?;
+    let operation = executor.operation.clone();
     let mut admission = client
         .admitting_in(&executor.send, packet_limit as u64, preparation, &operation)
         .map_err(BoundaryError::from_error)?;

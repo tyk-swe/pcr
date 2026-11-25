@@ -53,7 +53,6 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
     {
         let setup = WorkflowSetup::new(self, operation);
         let publish = publisher(
-            &operation.runtime,
             sink,
             |error| Error::from_failure(0_u64, crate::error::Failure::DurationLimit(error)),
             |source| Error::Output { source },

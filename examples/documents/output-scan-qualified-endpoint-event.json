@@ -1,8 +1,9 @@
 {
-  "schema": "packetcraftr.output/v22",
+  "schema": "packetcraftr.output/v23",
+  "payload_schema": "packetcraftr.output.scan/v1",
   "command": "scan",
   "mode": "stream",
-  "sequence": 2,
+  "seq": 2,
   "status": "success",
   "result": {
     "endpoint": {

@@ -1,5 +1,6 @@
 {
-  "schema": "packetcraftr.output/v22",
+  "schema": "packetcraftr.output/v23",
+  "payload_schema": "packetcraftr.output.audit-http/v1",
   "command": "audit-http",
   "mode": "aggregate",
   "status": "success",

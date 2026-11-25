@@ -36,7 +36,7 @@ pub(super) fn run(
     );
     match format {
         Format::Ndjson => {
-            let emit = crate::commands::execution::emitter(invocation, emit_event);
+            let emit = crate::commands::execution::emitter(invocation, emit_event)?;
             let mut report = client
                 .scan_connect_with_followups(request, emit)
                 .map_err(super::followup_error)?;
@@ -56,9 +56,9 @@ pub(super) fn run(
             emit_streamed(streamed, stream)
         }
         format => {
-            let collector = connect::Collector::default();
+            let mut collector = connect::Collector::default();
             let report = client
-                .scan_connect_with_followups(request, collector.clone())
+                .scan_connect_with_followups(request, &mut collector)
                 .map_err(super::followup_error)?;
             let mut aggregate = collector
                 .finish(report.scan)

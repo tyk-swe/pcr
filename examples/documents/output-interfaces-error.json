@@ -1,8 +1,8 @@
 {
-  "schema": "packetcraftr.output/v22",
+  "schema": "packetcraftr.output/v23",
   "command": "interfaces",
   "mode": "stream",
-  "sequence": 0,
+  "seq": 0,
   "status": "error",
   "error": {
     "code": "cli.output_format",

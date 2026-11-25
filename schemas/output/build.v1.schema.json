@@ -1,0 +1,184 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:packetcraftr:output:build:v1",
+  "title": "PacketcraftR build output payload v1",
+  "description": "Success payload contract for the build command. The stable envelope is validated separately.",
+  "allOf": [
+    {
+      "type": "object",
+      "required": [
+        "command",
+        "payload_schema"
+      ],
+      "properties": {
+        "command": {
+          "const": "build"
+        },
+        "payload_schema": {
+          "const": "packetcraftr.output.build/v1"
+        }
+      }
+    },
+    {
+      "oneOf": [
+        {
+          "allOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/aggregateSuccessEnvelope"
+            },
+            {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/buildSuccess"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/streamSuccessEnvelope"
+            },
+            {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/buildStreamSuccess"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "$defs": {
+    "buildResult": {
+      "type": "object",
+      "required": [
+        "bytes_hex",
+        "length",
+        "packet",
+        "layout",
+        "requires_live_opt_in"
+      ],
+      "properties": {
+        "bytes_hex": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/hexBytes"
+        },
+        "length": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "packet": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/packetDocument"
+        },
+        "layout": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/packetLayout"
+        },
+        "requires_live_opt_in": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": true
+    },
+    "buildStreamSuccess": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "build"
+        }
+      },
+      "required": [
+        "command",
+        "result"
+      ],
+      "oneOf": [
+        {
+          "properties": {
+            "event": {
+              "const": "packet"
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "packet_index",
+                "bytes_hex",
+                "length",
+                "packet",
+                "layout",
+                "requires_live_opt_in"
+              ],
+              "properties": {
+                "bytes_hex": {
+                  "$ref": "urn:packetcraftr:output:common:v1#/$defs/hexBytes"
+                },
+                "length": {
+                  "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+                },
+                "packet": {
+                  "$ref": "urn:packetcraftr:output:common:v1#/$defs/packetDocument"
+                },
+                "layout": {
+                  "$ref": "urn:packetcraftr:output:common:v1#/$defs/packetLayout"
+                },
+                "requires_live_opt_in": {
+                  "type": "boolean"
+                },
+                "packet_index": {
+                  "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "complete"
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "packets_built",
+                "bytes_built"
+              ],
+              "properties": {
+                "packets_built": {
+                  "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+                },
+                "bytes_built": {
+                  "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        }
+      ]
+    },
+    "buildSuccess": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "build"
+        },
+        "result": {
+          "$ref": "#/$defs/buildResult"
+        }
+      },
+      "required": [
+        "command",
+        "result"
+      ]
+    }
+  }
+}

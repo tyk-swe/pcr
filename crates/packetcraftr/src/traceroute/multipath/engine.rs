@@ -60,7 +60,6 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
         let operation = Operation::new(self, request.trace.limits.max_duration);
         let setup = WorkflowSetup::new(self, &operation);
         let emit = publisher(
-            &operation.runtime,
             sink,
             |error| Error::from_failure(0, Failure::DurationLimit(error)),
             |source| Error::Output { source },
@@ -211,11 +210,7 @@ fn nonce() -> Result<u64, Error> {
             sequence: 0,
             source: BoundaryError::new(
                 error.to_string(),
-                Classification::new(
-                    packetcraftr_core::error::Code::IoTracerouteEntropy,
-                    Kind::Io,
-                    None,
-                ),
+                Classification::new(crate::code::IoTracerouteEntropy, Kind::Io, None),
                 Vec::new(),
             ),
         })?;

@@ -4,27 +4,15 @@
 use packetcraftr_core::budget::{Deadline, DeadlineExceeded};
 use packetcraftr_core::error::BoundaryError;
 
-use crate::runtime::{self, Runtime, Worker};
+use crate::runtime::{Runtime, Worker};
 
-/// Where publication executes. Cooperative sinks must return promptly; checks
-/// surround their callback, but cannot preempt synchronous work inside it.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Delivery {
-    #[default]
-    Isolated,
-    Cooperative,
-}
-
-/// Any `FnMut(E) -> Result<A, BoundaryError>` closure that is `Send + 'static`
-/// is a sink.
-pub trait Sink<E>: Send + 'static {
-    type Ack: Send + 'static;
+/// A progressive event consumer. Sinks run in the caller unless explicitly
+/// wrapped in [`Isolated`], so borrowed state can be passed with `&mut`.
+pub trait Sink<E> {
+    type Ack;
 
     fn publish(&mut self, event: E) -> Result<Self::Ack, BoundaryError>;
 
-    /// Publication with the operation's effective control. The default keeps
-    /// existing callback semantics; cooperative adapters may carry this control
-    /// into their own bounded waits. Synchronous callbacks cannot be preempted.
     fn publish_controlled(
         &mut self,
         event: E,
@@ -32,46 +20,90 @@ pub trait Sink<E>: Send + 'static {
     ) -> Result<Self::Ack, BoundaryError> {
         self.publish(event)
     }
+}
 
-    /// Arbitrary callbacks retain the isolated, acknowledged worker default.
-    fn delivery(&self) -> Delivery {
-        Delivery::Isolated
+impl<E, S> Sink<E> for &mut S
+where
+    S: Sink<E> + ?Sized,
+{
+    type Ack = S::Ack;
+
+    fn publish(&mut self, event: E) -> Result<Self::Ack, BoundaryError> {
+        (**self).publish(event)
+    }
+
+    fn publish_controlled(
+        &mut self,
+        event: E,
+        control: &Deadline,
+    ) -> Result<Self::Ack, BoundaryError> {
+        (**self).publish_controlled(event, control)
     }
 }
 
-impl<E, A, F> Sink<E> for F
+/// Worker-thread isolation for a blocking sink. This is the boundary that
+/// requires owned, sendable state; unwrapped sinks remain cooperative.
+pub struct Isolated<E, A = ()> {
+    worker: Worker<(E, Deadline), A>,
+}
+
+impl<E, A> Isolated<E, A> {
+    pub fn new<Emit>(runtime: &Runtime, emit: Emit) -> Result<Self, BoundaryError>
+    where
+        Emit: FnMut((E, Deadline)) -> Result<A, BoundaryError> + Send + 'static,
+        E: Send + 'static,
+        A: Send + 'static,
+    {
+        Ok(Self {
+            worker: Worker::new_in(runtime, emit)?,
+        })
+    }
+
+    pub fn from_sink<S>(runtime: &Runtime, mut sink: S) -> Result<Self, BoundaryError>
+    where
+        S: Sink<E, Ack = A> + Send + 'static,
+        E: Send + 'static,
+        A: Send + 'static,
+    {
+        Self::new(runtime, move |(event, control): (E, Deadline)| {
+            sink.publish_controlled(event, &control)
+        })
+    }
+}
+
+impl<E, A> Sink<E> for Isolated<E, A>
 where
-    F: FnMut(E) -> Result<A, BoundaryError> + Send + 'static,
+    E: Send + 'static,
     A: Send + 'static,
 {
     type Ack = A;
 
     fn publish(&mut self, event: E) -> Result<A, BoundaryError> {
-        self(event)
+        self.publish_controlled(event, &Deadline::new(std::time::Duration::MAX))
+    }
+
+    fn publish_controlled(&mut self, event: E, control: &Deadline) -> Result<A, BoundaryError> {
+        self.worker
+            .emit((event, control.clone()), control)
+            .map_err(|error| match error {
+                crate::runtime::Error::Deadline(error) => BoundaryError::from_error(error),
+                crate::runtime::Error::Output(error) => error,
+            })
     }
 }
 
-/// Preserve an existing sink's declared delivery while adding bounded tracking
-/// or changing its event type. Acknowledgements retain their original meaning.
-pub(crate) fn forwarding<E, A, F>(delivery: Delivery, callback: F) -> impl Sink<E, Ack = A>
+pub fn forwarding<E, A, F>(callback: F) -> impl Sink<E, Ack = A>
 where
-    E: 'static,
-    A: Send + 'static,
-    F: FnMut(E, Option<&Deadline>) -> Result<A, BoundaryError> + Send + 'static,
+    F: FnMut(E, Option<&Deadline>) -> Result<A, BoundaryError>,
 {
     struct Forward<F> {
-        delivery: Delivery,
         callback: F,
     }
     impl<E, A, F> Sink<E> for Forward<F>
     where
-        A: Send + 'static,
-        F: FnMut(E, Option<&Deadline>) -> Result<A, BoundaryError> + Send + 'static,
+        F: FnMut(E, Option<&Deadline>) -> Result<A, BoundaryError>,
     {
         type Ack = A;
-        fn delivery(&self) -> Delivery {
-            self.delivery
-        }
         fn publish(&mut self, event: E) -> Result<A, BoundaryError> {
             (self.callback)(event, None)
         }
@@ -79,54 +111,45 @@ where
             (self.callback)(event, Some(control))
         }
     }
-    Forward { delivery, callback }
+    Forward { callback }
 }
 
 pub(crate) fn publisher<E, S, X>(
-    runtime: &Runtime,
-    sink: S,
+    mut sink: S,
     on_deadline: impl Fn(DeadlineExceeded) -> X,
     on_output: impl Fn(BoundaryError) -> X,
 ) -> Result<impl FnMut(E, &Deadline) -> Result<S::Ack, X>, X>
 where
-    E: Send + 'static,
     S: Sink<E>,
 {
-    enum Publisher<E, S: Sink<E>> {
-        Cooperative(S),
-        Isolated(Worker<(E, Deadline), S::Ack>),
-    }
-    let mut publisher = match sink.delivery() {
-        Delivery::Cooperative => Publisher::Cooperative(sink),
-        Delivery::Isolated => {
-            let mut sink = sink;
-            Publisher::Isolated(
-                Worker::new_in(runtime, move |(event, control): (E, Deadline)| {
-                    sink.publish_controlled(event, &control)
-                })
-                .map_err(&on_output)?,
-            )
-        }
-    };
     Ok(move |event, deadline: &Deadline| {
-        let result = (|| {
-            let deadline = deadline.detach().map_err(runtime::Error::from)?;
-            match &mut publisher {
-                Publisher::Isolated(worker) => worker.emit((event, deadline.clone()), &deadline),
-                Publisher::Cooperative(sink) => (|| {
-                    deadline.enforce().map_err(runtime::Error::from)?;
-                    let result = sink
-                        .publish_controlled(event, &deadline)
-                        .map_err(runtime::Error::Output);
-                    deadline.enforce().map_err(runtime::Error::from)?;
-                    result
-                })(),
+        fn interrupted<X>(
+            source: packetcraftr_core::budget::Interrupted,
+            on_deadline: &impl Fn(DeadlineExceeded) -> X,
+            on_output: &impl Fn(BoundaryError) -> X,
+        ) -> X {
+            match source {
+                packetcraftr_core::budget::Interrupted::Cancelled(cancelled) => {
+                    on_output(BoundaryError::from_error(cancelled))
+                }
+                packetcraftr_core::budget::Interrupted::Exceeded(expired) => on_deadline(expired),
+                other => on_output(BoundaryError::from_error(other)),
             }
-        })();
-        match result {
-            Ok(ack) => Ok(ack),
-            Err(runtime::Error::Deadline(error)) => Err(on_deadline(error)),
-            Err(runtime::Error::Output(source)) => Err(on_output(source)),
+        }
+        if let Err(source) = deadline.enforce() {
+            return Err(interrupted(source, &on_deadline, &on_output));
+        }
+        match sink.publish_controlled(event, deadline) {
+            Ok(ack) => match deadline.enforce() {
+                Ok(()) => Ok(ack),
+                Err(source) => Err(interrupted(source, &on_deadline, &on_output)),
+            },
+            Err(error) => {
+                if let Err(source) = deadline.enforce() {
+                    return Err(interrupted(source, &on_deadline, &on_output));
+                }
+                Err(on_output(error))
+            }
         }
     })
 }

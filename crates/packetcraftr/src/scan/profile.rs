@@ -57,11 +57,7 @@ pub enum Error {
 impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
-            Self::Invalid(_) => Classification::new(
-                packetcraftr_core::error::Code::CliUdpProfile,
-                Kind::Usage,
-                None,
-            ),
+            Self::Invalid(_) => Classification::new(crate::code::CliUdpProfile, Kind::Usage, None),
             Self::Document(source) => source.classification(),
             Self::PortCount { .. }
             | Self::Storage

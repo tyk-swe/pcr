@@ -34,17 +34,13 @@ pub struct Report {
 
 /// Collects a scan's follow-up events, then joins them with the
 /// [`Report`] into an [`Aggregate`].
-#[derive(Clone, Default)]
+#[derive(Default)]
 pub struct Collector {
     scan: scan::Collector,
     trace: hosts::Collector,
 }
 
 impl Sink<Event> for Collector {
-    fn delivery(&self) -> crate::Delivery {
-        crate::Delivery::Cooperative
-    }
-
     type Ack = ();
 
     fn publish(&mut self, event: Event) -> Result<(), BoundaryError> {
@@ -59,13 +55,13 @@ impl Collector {
     pub fn finish(self, report: Report) -> Result<Aggregate, Error> {
         let Report {
             scan,
+            endpoints,
             trace,
             reverse_dns,
             stats,
-            ..
         } = report;
         Ok(Aggregate {
-            scan: self.scan.finish(scan)?,
+            scan: self.scan.finish_with_inferences(scan, endpoints)?,
             trace: trace.map(|trace| self.trace.finish(trace)).transpose()?,
             reverse_dns,
             stats,

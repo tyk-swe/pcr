@@ -52,13 +52,23 @@ pub struct ExecutorThreadSnapshot {
 /// Their sum never exceeds `capacity`, even after all resource grants end.
 #[must_use]
 pub fn executor_thread_snapshot() -> ExecutorThreadSnapshot {
-    crate::workers::shared().thread_snapshot()
+    let shared = crate::workers::shared().thread_snapshot();
+    let control = crate::workers::control().thread_snapshot();
+    ExecutorThreadSnapshot {
+        capacity: shared.capacity.saturating_add(control.capacity),
+        busy: shared.busy.saturating_add(control.busy),
+        idle: shared.idle.saturating_add(control.idle),
+        retiring: shared.retiring.saturating_add(control.retiring),
+    }
 }
 
 /// Inspect aggregate root ownership without starting workers or performing I/O.
 #[must_use]
 pub fn native_snapshot() -> NativeSnapshot {
-    crate::workers::shared().snapshot()
+    combine_snapshots(
+        crate::workers::shared().snapshot(),
+        crate::workers::control().snapshot(),
+    )
 }
 
 /// Inspect TCP jobs and established sockets; `capacity` is their data allocation.
@@ -71,7 +81,24 @@ pub fn tcp_connect_snapshot() -> NativeSnapshot {
 /// connection job completes. Resident native services remain executing work.
 #[must_use]
 pub fn execution_snapshot() -> NativeSnapshot {
-    crate::workers::shared().execution_snapshot()
+    combine_snapshots(
+        crate::workers::shared().execution_snapshot(),
+        crate::workers::control().execution_snapshot(),
+    )
+}
+
+fn combine_snapshots(shared: NativeSnapshot, control: NativeSnapshot) -> NativeSnapshot {
+    NativeSnapshot {
+        supported: shared.supported && control.supported,
+        capacity: shared.capacity.saturating_add(control.capacity),
+        active: shared.active.saturating_add(control.active),
+        rejected_admissions: shared
+            .rejected_admissions
+            .saturating_add(control.rejected_admissions),
+        cleanup_retaining_capacity: shared
+            .cleanup_retaining_capacity
+            .saturating_add(control.cleanup_retaining_capacity),
+    }
 }
 
 /// Inspect established TCP sockets, including outcomes not yet claimed by their

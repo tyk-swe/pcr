@@ -48,7 +48,7 @@ impl<P: PacketProviders, K: Clock> Executor<Batch<Probe>> for ClientExecutor<'_,
                 .map_err(|source| {
                     BoundaryError::with_source(
                         "the operation's neighbor statistics overflowed",
-                        Classification::new(packetcraftr_core::error::Code::InternalTracerouteEvidence,
+                        Classification::new(crate::code::InternalTracerouteEvidence,
                             Kind::Internal,
                             Some(
                                 "treat the trace as incomplete because executor evidence was inconsistent",

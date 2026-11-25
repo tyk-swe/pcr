@@ -78,7 +78,8 @@
     },
     "sources": []
   },
-  "schema": "packetcraftr.output/v22",
-  "sequence": 4,
+  "schema": "packetcraftr.output/v23",
+  "payload_schema": "packetcraftr.output.audit-http/v1",
+  "seq": 4,
   "status": "success"
 }

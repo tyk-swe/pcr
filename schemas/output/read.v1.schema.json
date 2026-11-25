@@ -1,0 +1,135 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:packetcraftr:output:read:v1",
+  "title": "PacketcraftR read output payload v1",
+  "description": "Success payload contract for the read command. The stable envelope is validated separately.",
+  "allOf": [
+    {
+      "type": "object",
+      "required": [
+        "command",
+        "payload_schema"
+      ],
+      "properties": {
+        "command": {
+          "const": "read"
+        },
+        "payload_schema": {
+          "const": "packetcraftr.output.read/v1"
+        }
+      }
+    },
+    {
+      "oneOf": [
+        {
+          "allOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/aggregateSuccessEnvelope"
+            },
+            {
+              "oneOf": [
+                {
+                  "$ref": "urn:packetcraftr:output:common:v1#/$defs/projectionAggregateSuccess"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/streamSuccessEnvelope"
+            },
+            {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/readSuccess"
+                },
+                {
+                  "$ref": "urn:packetcraftr:output:common:v1#/$defs/projectionStreamSuccess"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "$defs": {
+    "readSuccess": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "read"
+        }
+      },
+      "required": [
+        "command",
+        "result"
+      ],
+      "oneOf": [
+        {
+          "properties": {
+            "event": {
+              "const": "frame"
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "source_frame",
+                "frame"
+              ],
+              "properties": {
+                "source_frame": {
+                  "$ref": "urn:packetcraftr:output:common:v1#/$defs/sourceFrame"
+                },
+                "frame": {
+                  "$ref": "urn:packetcraftr:output:common:v1#/$defs/frame"
+                },
+                "decoded": {
+                  "$ref": "urn:packetcraftr:output:common:v1#/$defs/decodedStack"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "complete"
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "frames_read",
+                "frames_matched",
+                "captured_bytes_read"
+              ],
+              "properties": {
+                "frames_read": {
+                  "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+                },
+                "frames_matched": {
+                  "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+                },
+                "captured_bytes_read": {
+                  "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        }
+      ]
+    }
+  }
+}

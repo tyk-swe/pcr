@@ -9,7 +9,7 @@ use packetcraftr_core::budget::Deadline;
 use crate::Stats;
 use crate::client::admission::resolve_selected;
 use crate::clock::{Clock, SystemClock};
-use crate::dns::tcp::{Category as TcpCategory, Error as TcpError};
+use crate::dns::tcp::{Category as TcpCategory, Error as TcpError, Phase as TcpPhase};
 use crate::engine::execution::Receipt;
 use crate::evidence::ExecutionPermit;
 use crate::exchange::WorkflowExecutor;
@@ -176,6 +176,31 @@ struct TcpAttempt {
     stats: Stats,
 }
 
+fn tcp_units(error: &TcpError) -> u64 {
+    use TcpError::*;
+    match error {
+        Timeout { phase, .. } | ConfigureTimeout { phase, .. } | Cancelled { phase, .. } => {
+            match phase {
+                TcpPhase::Connect => 1,
+                TcpPhase::Write | TcpPhase::ReadPrefix | TcpPhase::ReadMessage => 2,
+            }
+        }
+        Connect { .. } => 1,
+        Write { .. }
+        | Read { .. }
+        | IncompletePrefix { .. }
+        | ZeroLength
+        | MessageTooLarge { .. }
+        | IncompleteMessage { .. } => 2,
+        Unsupported { .. }
+        | InvalidTimeout { .. }
+        | EmptyQuery
+        | QueryTooLarge { .. }
+        | InvalidMessageLimit { .. }
+        | DeadlineOverflow { .. } => 0,
+    }
+}
+
 impl TcpAttempt {
     fn execute<P: TcpProviders, K: Clock>(
         executor: &mut WorkflowExecutor<'_, P, K>,
@@ -185,6 +210,10 @@ impl TcpAttempt {
         let started = SystemClock.now();
         let result = executor.query_tcp(query);
         let boundary_elapsed = started.elapsed();
+        let units = match &result {
+            Ok(_) => 2,
+            Err(error) => tcp_units(error),
+        };
         let (permit, elapsed, bytes_written) = match &result {
             Ok(evidence) => (
                 evidence.permit,
@@ -197,6 +226,10 @@ impl TcpAttempt {
                 error.query_bytes_written(framed_query_bytes),
             ),
         };
+        executor
+            .operation
+            .spend
+            .record_traffic(units, u64::try_from(bytes_written).unwrap_or(u64::MAX));
         Self {
             result,
             permit,

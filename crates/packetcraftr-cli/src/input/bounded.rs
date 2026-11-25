@@ -118,7 +118,7 @@ impl InputKind {
 pub(crate) fn missing_input_error(kind: InputKind) -> CliError {
     CliError::from_classification(
         Classification::new(
-            packetcraftr_core::error::Code::CliInputSource,
+            crate::code::CliInputSource,
             Kind::Usage,
             Some(kind.remediation()),
         ),

@@ -52,31 +52,35 @@ impl<P: TargetProviders + TcpProviders, K: Clock> Client<P, K> {
         );
         let started = self.now();
         let mut deadline = operation.deadline(self, request.limits.max_duration);
-        let mut publish =
-            crate::engine::execution::publisher(&operation.runtime, sink, Error::from, |source| {
-                Error::Output { source }
-            })?;
+        let mut publish = crate::engine::execution::publisher(sink, Error::from, |source| {
+            Error::Output { source }
+        })?;
         run(
-            &request,
-            &mut admission,
-            &Arc::new(TcpOf(Arc::clone(&self.providers))),
-            &self.clock,
-            &mut deadline,
-            started,
+            Context {
+                request: &request,
+                authorizer: &mut admission,
+                provider: &Arc::new(TcpOf(Arc::clone(&self.providers))),
+                clock: &self.clock,
+                deadline: &mut deadline,
+                started,
+                spend: operation.spend.clone(),
+            },
             |probe, deadline| publish(Event::Probe(probe), deadline),
         )
     }
 }
 
-pub(super) fn run<Q, A, C, F>(
-    request: &Request,
-    authorizer: &mut A,
-    provider: &Arc<Q>,
-    clock: &C,
-    deadline: &mut Deadline,
+pub(super) struct Context<'a, Q, A, C> {
+    request: &'a Request,
+    authorizer: &'a mut A,
+    provider: &'a Arc<Q>,
+    clock: &'a C,
+    deadline: &'a mut Deadline,
     started: Instant,
-    mut emit: F,
-) -> Result<Report, Error>
+    spend: crate::engine::operation::SpendLedger,
+}
+
+pub(super) fn run<Q, A, C, F>(context: Context<'_, Q, A, C>, mut emit: F) -> Result<Report, Error>
 where
     Q: Provider + 'static,
     Q::Stream: 'static,
@@ -84,6 +88,15 @@ where
     C: Clock,
     F: FnMut(ProbeEvidence, &Deadline) -> Result<(), Error>,
 {
+    let Context {
+        request,
+        authorizer,
+        provider,
+        clock,
+        deadline,
+        started,
+        spend,
+    } = context;
     enforce_deadline::<Error>(deadline)?;
     let (targets, planned) = planned(
         request,
@@ -99,6 +112,7 @@ where
         budget: &budget,
         clock,
         deadline,
+        spend,
     };
     let mut controller = request.adaptive.map(|config| {
         super::super::adaptive::Controller::new(config, request.timeout, request.max_in_flight)
@@ -248,11 +262,12 @@ where
     C: Clock,
     F: FnMut(ProbeEvidence, &Deadline) -> Result<(), Error>,
 {
-    let (request, provider, budget, clock) = (
+    let (request, provider, budget, clock, spend) = (
         connector.request,
         connector.provider,
         connector.budget,
         connector.clock,
+        connector.spend.clone(),
     );
     let authorizer = &mut *connector.authorizer;
     let deadline = &mut *connector.deadline;
@@ -360,6 +375,7 @@ where
                     }
                     Err(source) => return Err(execution(sequence, source)),
                 };
+            spend.record_traffic(1, 0);
             controller.admitted(&mut work, selection);
             controller.commit_attempt(&mut work, selection, admitted);
             active.push(Active {

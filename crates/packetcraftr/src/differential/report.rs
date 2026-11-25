@@ -9,7 +9,6 @@ use packetcraftr_core::frame::Frame;
 use serde::{Deserialize, Serialize};
 
 use super::catalog::catalog;
-use crate::engine::execution::Shared;
 use crate::{Sink, Stats};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -134,18 +133,14 @@ pub fn rows_for(attempts: &[AttemptEvidence]) -> Vec<Row> {
         .collect()
 }
 
-#[derive(Clone, Default)]
-pub struct Collector(Shared<Vec<Event>>);
+#[derive(Default)]
+pub struct Collector(Vec<Event>);
 
 impl Sink<Event> for Collector {
-    fn delivery(&self) -> crate::Delivery {
-        crate::Delivery::Cooperative
-    }
-
     type Ack = ();
 
     fn publish(&mut self, event: Event) -> Result<(), BoundaryError> {
-        self.0.update(|events| events.push(event));
+        self.0.push(event);
         Ok(())
     }
 }
@@ -155,7 +150,7 @@ impl Collector {
     pub fn finish(self, report: Report) -> Aggregate {
         let mut attempts = Vec::new();
         let mut diagnostics = Vec::new();
-        for event in self.0.take() {
+        for event in self.0 {
             match event {
                 Event::Attempt(attempt) => attempts.push(attempt),
                 Event::Diagnostic(diagnostic) => diagnostics.push(diagnostic),
@@ -201,20 +196,15 @@ pub struct ResponderAggregate {
     pub report: ResponderReport,
 }
 
-#[derive(Clone, Default)]
-pub struct ResponderCollector(Shared<Vec<ReceptionRecord>>);
+#[derive(Default)]
+pub struct ResponderCollector(Vec<ReceptionRecord>);
 
 impl Sink<ResponderEvent> for ResponderCollector {
-    fn delivery(&self) -> crate::Delivery {
-        crate::Delivery::Cooperative
-    }
-
     type Ack = ();
 
     fn publish(&mut self, event: ResponderEvent) -> Result<(), BoundaryError> {
-        self.0.update(|records| match event {
-            ResponderEvent::Received(record) => records.push(record),
-        });
+        let ResponderEvent::Received(record) = event;
+        self.0.push(record);
         Ok(())
     }
 }
@@ -231,7 +221,7 @@ impl ResponderCollector {
     /// The records received so far, for a run that ended without a report.
     #[must_use]
     pub fn into_records(self) -> Vec<ReceptionRecord> {
-        self.0.take()
+        self.0
     }
 }
 

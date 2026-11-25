@@ -3,7 +3,6 @@
 
 use packetcraftr_core::{frame::Frame, fuzz as packet_fuzz};
 
-use crate::engine::execution::Shared;
 use crate::{Sink, Stats};
 use packetcraftr_core::error::BoundaryError;
 
@@ -65,20 +64,15 @@ impl TryFrom<&Aggregate> for packet_fuzz::Totals {
     }
 }
 
-#[derive(Clone, Default)]
-pub struct Collector(Shared<Vec<Trial>>);
+#[derive(Default)]
+pub struct Collector(Vec<Trial>);
 
 impl Sink<Event> for Collector {
-    fn delivery(&self) -> crate::Delivery {
-        crate::Delivery::Cooperative
-    }
-
     type Ack = ();
 
     fn publish(&mut self, event: Event) -> Result<(), BoundaryError> {
-        self.0.update(|trials| match event {
-            Event::Case(trial) => trials.push(trial),
-        });
+        let Event::Case(trial) = event;
+        self.0.push(trial);
         Ok(())
     }
 }
@@ -89,7 +83,7 @@ impl Collector {
         Aggregate {
             seed: report.seed,
             first_case: report.first_case,
-            trials: self.0.take(),
+            trials: self.0,
             campaign: report.campaign,
             stats: report.stats,
         }

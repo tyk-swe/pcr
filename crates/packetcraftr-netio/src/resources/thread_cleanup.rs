@@ -22,7 +22,7 @@ pub struct ThreadCleanup {
 
 struct Inner {
     capacity: usize,
-    active: AtomicUsize,
+    active: Arc<AtomicUsize>,
     service: ReaperService,
     pending: Mutex<Vec<ReapTask>>,
     #[cfg(test)]
@@ -52,7 +52,7 @@ impl ThreadCleanup {
         Ok(Self {
             inner: Arc::new(Inner {
                 capacity,
-                active: AtomicUsize::new(0),
+                active: Arc::new(AtomicUsize::new(0)),
                 service: reaper::retirement_service(capacity).map_err(io::Error::other)?,
                 pending: Mutex::new(Vec::new()),
                 #[cfg(test)]
@@ -77,6 +77,7 @@ impl ThreadCleanup {
             })?;
         Ok(ThreadJoinSlot {
             inner: Arc::clone(&self.inner),
+            guard: SlotGuard(Arc::clone(&self.inner.active)),
         })
     }
 
@@ -87,27 +88,30 @@ impl ThreadCleanup {
     /// A permanently failed cleanup service retains at most `capacity` tasks;
     /// it never releases unfinished thread ownership to make admission succeed.
     pub fn retry_pending(&self) {
-        let mut pending = self
-            .inner
-            .pending
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let tasks = std::mem::take(&mut *pending);
-        for task in tasks {
-            if let Err(task) = self.inner.transfer(task) {
-                pending.push(task);
-            }
-        }
+        self.inner.retry_pending();
     }
 }
 
-impl Drop for ThreadCleanup {
+impl Drop for Inner {
     fn drop(&mut self) {
         self.retry_pending();
     }
 }
 
 impl Inner {
+    fn retry_pending(&self) {
+        let mut pending = self
+            .pending
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let tasks = std::mem::take(&mut *pending);
+        for task in tasks {
+            if let Err(task) = self.transfer(task) {
+                pending.push(task);
+            }
+        }
+    }
+
     fn transfer(&self, task: ReapTask) -> Result<(), ReapTask> {
         #[cfg(test)]
         if self.refuse_next.swap(false, Ordering::Relaxed) {
@@ -121,6 +125,15 @@ impl Inner {
 /// releases only cleanup admission, so failed thread construction rolls back.
 pub struct ThreadJoinSlot {
     inner: Arc<Inner>,
+    guard: SlotGuard,
+}
+
+struct SlotGuard(Arc<AtomicUsize>);
+
+impl Drop for SlotGuard {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
 }
 
 impl ThreadJoinSlot {
@@ -130,7 +143,7 @@ impl ThreadJoinSlot {
     /// when queued; false means ownership remains retained for retry_pending,
     /// the next reservation, or cleanup-owner drop.
     pub fn attach<T: Send + 'static>(self, thread: JoinHandle<()>, owner: T) -> bool {
-        let inner = Arc::clone(&self.inner);
+        let Self { inner, guard } = self;
         let task: ReapTask = Box::new(move || {
             let joined = thread.join();
             if let Err(payload) = joined {
@@ -139,7 +152,7 @@ impl ThreadJoinSlot {
             if let Err(payload) = catch_unwind(AssertUnwindSafe(|| drop(owner))) {
                 crate::workers::discard_panic_payload(payload);
             }
-            drop(self);
+            drop(guard);
         });
         if let Err(task) = inner.transfer(task) {
             let mut pending = inner
@@ -152,12 +165,6 @@ impl ThreadJoinSlot {
         } else {
             true
         }
-    }
-}
-
-impl Drop for ThreadJoinSlot {
-    fn drop(&mut self) {
-        self.inner.active.fetch_sub(1, Ordering::AcqRel);
     }
 }
 

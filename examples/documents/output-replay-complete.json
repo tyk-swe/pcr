@@ -1,9 +1,10 @@
 {
-  "schema": "packetcraftr.output/v22",
+  "schema": "packetcraftr.output/v23",
+  "payload_schema": "packetcraftr.output.replay/v1",
   "command": "replay",
   "mode": "stream",
   "status": "success",
-  "sequence": 1,
+  "seq": 1,
   "result": {
     "source_format": "pcap",
     "timing": "immediate",

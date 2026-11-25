@@ -6,7 +6,7 @@ use std::ops::Range;
 use bytes::Bytes;
 use thiserror::Error;
 
-use crate::analysis::ScopedFlowKey;
+use crate::analysis::{ScopedFlowKey, provenance::SourceSet};
 use crate::error::{Classification, Classified};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -14,9 +14,59 @@ pub struct Segment {
     pub flow: ScopedFlowKey,
     pub sequence: u32,
     pub payload: Bytes,
+    pub sources: Option<SourceSet>,
     pub syn: bool,
     pub fin: bool,
     pub rst: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EvictionReason {
+    Idle,
+    Budget,
+    Reuse,
+    Reset,
+    Flush,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DataSources {
+    Empty,
+    Single(SourceSet),
+    /// Contiguous byte lengths paired with the physical-frame provenance for each span.
+    Spans(Vec<(usize, SourceSet)>),
+}
+
+impl DataSources {
+    pub fn slices(&self, bytes: &Bytes) -> Vec<(Bytes, Option<SourceSet>)> {
+        match self {
+            Self::Empty => vec![(bytes.clone(), None)],
+            Self::Single(sources) => vec![(bytes.clone(), Some(sources.clone()))],
+            Self::Spans(spans) => {
+                let mut start = 0_usize;
+                let mut output = Vec::with_capacity(spans.len());
+                for (length, sources) in spans {
+                    let end = start.saturating_add(*length).min(bytes.len());
+                    if end > start {
+                        output.push((bytes.slice(start..end), Some(sources.clone())));
+                    }
+                    start = end;
+                }
+                if start < bytes.len() {
+                    output.push((bytes.slice(start..), None));
+                }
+                output
+            }
+        }
+    }
+
+    pub fn sets(&self) -> Vec<&SourceSet> {
+        match self {
+            Self::Empty => Vec::new(),
+            Self::Single(sources) => vec![sources],
+            Self::Spans(spans) => spans.iter().map(|(_, sources)| sources).collect(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -25,6 +75,7 @@ pub enum Event {
         flow: ScopedFlowKey,
         sequence: u32,
         bytes: Bytes,
+        sources: DataSources,
     },
     Retransmission {
         flow: ScopedFlowKey,
@@ -46,6 +97,7 @@ pub enum Event {
     Evicted {
         flow: ScopedFlowKey,
         pending_bytes: usize,
+        reason: EvictionReason,
     },
 }
 

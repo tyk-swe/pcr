@@ -6,7 +6,6 @@
 mod adapter;
 pub mod application;
 mod conversation_index;
-pub(crate) mod dedup;
 pub mod dns;
 mod error;
 pub mod expert;
@@ -34,7 +33,7 @@ pub use error::{Constraint, Error};
 pub use pipeline::{
     ClockReport, Conversation, DerivedDatagram, FramePipeline, FrameRecord, IpCounters,
     IpDatagramOutcome, IpEvent, IpEventRecord, IpFamilyCounters, IpReassemblyReport, Limits,
-    Options, Plan, Summary, TcpView, UdpView, run, run_with_ip_events,
+    Options, Plan, Summary, TcpEventRecord, TcpView, UdpView, run, run_with_ip_events,
 };
 pub use session::{Collector, CollectorNeeds, Outcome, Pass, Session, SessionOptions};
 pub use stream::{Endpoint, FlowKey, ScopedFlowKey, StreamRef, StreamTransport};

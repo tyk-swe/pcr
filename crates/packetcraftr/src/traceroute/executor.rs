@@ -16,7 +16,7 @@ use super::Probe;
 use super::evidence::classify_response;
 
 const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
-    packetcraftr_core::error::Code::CliTracerouteExecutor,
+    crate::code::CliTracerouteExecutor,
     "use homogeneous bounded hop batches and retain at least one response per probe",
 );
 

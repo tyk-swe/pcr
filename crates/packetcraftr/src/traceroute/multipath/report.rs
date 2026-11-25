@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::traceroute::{Error, ResponseKind, Termination};
-use crate::{Sink, Stats, engine::execution::Shared};
+use crate::{Sink, Stats};
 use packetcraftr_core::{diagnostic::Diagnostic, error::BoundaryError, frame::Frame};
 use serde::Serialize;
 use std::{
@@ -187,8 +187,8 @@ pub struct Aggregate {
     pub diagnostics: Vec<Diagnostic>,
 }
 
-#[derive(Clone, Default)]
-pub struct Collector(Shared<Collected>);
+#[derive(Default)]
+pub struct Collector(Collected);
 
 #[derive(Default)]
 struct Collected {
@@ -202,11 +202,9 @@ struct Collected {
 
 impl Sink<Event> for Collector {
     type Ack = ();
-    fn delivery(&self) -> crate::Delivery {
-        crate::Delivery::Cooperative
-    }
     fn publish(&mut self, event: Event) -> Result<(), BoundaryError> {
-        self.0.update(|state| match event {
+        let state = &mut self.0;
+        match event {
             Event::Probe(probe) => {
                 state.incoherent |= state
                     .probes
@@ -219,14 +217,14 @@ impl Sink<Event> for Collector {
             Event::Flow(flow) => state.flows.push(flow),
             Event::FlowComplete(completion) => state.completions.push(completion),
             Event::Topology(_) => {}
-        });
+        }
         Ok(())
     }
 }
 
 impl Collector {
     pub fn finish(self, report: Report) -> Result<Aggregate, Error> {
-        let state = self.0.take();
+        let state = self.0;
         if state.incoherent
             || state.probes.len() != report.summary.probes_sent
             || state.flows != report.flows

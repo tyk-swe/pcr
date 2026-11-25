@@ -116,7 +116,8 @@
       }
     ]
   },
-  "schema": "packetcraftr.output/v22",
-  "sequence": 1,
+  "schema": "packetcraftr.output/v23",
+  "payload_schema": "packetcraftr.output.scan-diff/v1",
+  "seq": 1,
   "status": "success"
 }

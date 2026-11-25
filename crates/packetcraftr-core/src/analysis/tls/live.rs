@@ -10,7 +10,6 @@ use bytes::{Buf as _, BytesMut};
 
 use crate::analysis::Endpoint;
 use crate::analysis::ScopedFlowKey;
-use crate::analysis::dedup::{Deduplicator, PeerDirection};
 use crate::protocol::application::tls::{
     CONTENT_TYPE_ALERT, CONTENT_TYPE_APPLICATION_DATA, CONTENT_TYPE_CHANGE_CIPHER_SPEC,
     CONTENT_TYPE_HANDSHAKE, ClientHello, Handshake, Outcome, Record, ServerHello, parse_handshake,
@@ -100,15 +99,6 @@ impl Side {
             Self::Reverse => Self::First,
         }
     }
-
-    /// The deduplicator's view of this direction, which stays bound to the
-    /// captured direction across a role swap.
-    pub(super) fn dedup(self) -> PeerDirection {
-        match self {
-            Self::First => PeerDirection::ClientToServer,
-            Self::Reverse => PeerDirection::ServerToClient,
-        }
-    }
 }
 
 /// One conversation whose handshake is still being assembled.
@@ -123,7 +113,6 @@ pub(super) struct Live {
     /// Which captured direction turned out to be the client. It starts as
     /// [`Side::First`], and [`Side::Reverse`] marks the one permitted swap.
     client_side: Side,
-    dedup: Deduplicator,
     first_direction: DirectionState,
     reverse_direction: DirectionState,
     /// First frame that delivered handshake bytes, set on that delivery.
@@ -137,6 +126,7 @@ pub(super) struct Live {
     hello_retry: bool,
     alerts: Vec<Alert>,
     alerts_dropped: u64,
+    source_frames: Vec<u64>,
 }
 
 impl Live {
@@ -150,7 +140,6 @@ impl Live {
             scope,
             first_flow,
             client_side: Side::First,
-            dedup: Deduplicator::default(),
             first_direction: DirectionState::default(),
             reverse_direction: DirectionState::default(),
             first_frame: None,
@@ -163,6 +152,7 @@ impl Live {
             hello_retry: false,
             alerts: Vec::new(),
             alerts_dropped: 0,
+            source_frames: Vec::new(),
         }
     }
 
@@ -211,16 +201,8 @@ impl Live {
         }
     }
 
-    pub(super) fn first_flow(&self) -> &ScopedFlowKey {
-        &self.first_flow
-    }
-
     pub(super) fn last_frame(&self) -> u64 {
         self.last_frame
-    }
-
-    pub(super) fn dedup(&mut self) -> &mut Deduplicator {
-        &mut self.dedup
     }
 
     /// The captured direction a delivery belongs to, or `None` when the flow
@@ -239,6 +221,17 @@ impl Live {
     /// what a completed hello is timestamped with.
     pub(super) fn note_frame(&mut self, time: Option<SystemTime>) {
         self.frame_time = time;
+    }
+
+    pub(super) fn note_sources(&mut self, sources: &crate::analysis::reassembly::tcp::DataSources) {
+        for set in sources.sets() {
+            for frame in set.frames() {
+                if self.source_frames.len() >= 64 || self.source_frames.contains(&frame.number) {
+                    continue;
+                }
+                self.source_frames.push(frame.number);
+            }
+        }
     }
 
     pub(super) fn note_delivery(&mut self, number: u64) {
@@ -597,6 +590,7 @@ impl Live {
             hello_retry: self.hello_retry,
             alerts: self.alerts,
             alerts_dropped: self.alerts_dropped,
+            source_frames: self.source_frames,
             status,
             reason,
         }

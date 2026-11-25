@@ -101,7 +101,7 @@ fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<()
     let Prepared { request, client } = prepare_live(invocation, send, template, draft)?;
     match format {
         Format::Ndjson => {
-            let emit = crate::commands::execution::emitter(invocation, rendering::emit_event);
+            let emit = crate::commands::execution::emitter(invocation, rendering::emit_event)?;
             let summary = client
                 .exchange(request.clone(), emit)
                 .map_err(CliError::classified)?;
@@ -110,9 +110,9 @@ fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<()
         }
         _ => {
             let report = {
-                let collector = packetcraftr::exchange::Collector::default();
+                let mut collector = packetcraftr::exchange::Collector::default();
                 let report = client
-                    .exchange(request.clone(), collector.clone())
+                    .exchange(request.clone(), &mut collector)
                     .map_err(CliError::classified)?;
                 collector.finish(report).map_err(CliError::classified)?
             };
@@ -199,7 +199,7 @@ mod tests {
         let error = run(&invocation, arguments).unwrap_err();
         assert_eq!(
             error.classification.code,
-            packetcraftr_core::error::Code::CliExchangeLimit
+            packetcraftr::Error::CliExchangeLimit
         );
     }
 }

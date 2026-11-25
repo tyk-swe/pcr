@@ -1,5 +1,6 @@
 {
-  "schema": "packetcraftr.output/v22",
+  "schema": "packetcraftr.output/v23",
+  "payload_schema": "packetcraftr.output.fragment/v1",
   "command": "fragment",
   "mode": "aggregate",
   "status": "success",

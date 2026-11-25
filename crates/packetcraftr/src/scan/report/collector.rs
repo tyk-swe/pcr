@@ -8,7 +8,6 @@ use packetcraftr_core::error::BoundaryError;
 use packetcraftr_core::frame::Frame;
 
 use crate::Sink;
-use crate::engine::execution::Shared;
 use crate::probe::{Transport, index_or_push};
 use crate::scan::{self, Coverage, Error, Measurement, Stage, inference};
 
@@ -16,8 +15,8 @@ use super::model::{
     Aggregate, Classification, Endpoint, Event, ProbeEvidence, Report, Unattributed,
 };
 
-#[derive(Clone, Default)]
-pub struct Collector(Shared<Collected>);
+#[derive(Default)]
+pub struct Collector(Collected);
 
 /// Endpoint identity: the probed endpoint and interface on one address never merge.
 pub(in crate::scan) type EndpointKey = (
@@ -48,14 +47,10 @@ struct Collected {
 }
 
 impl Sink<Event> for Collector {
-    fn delivery(&self) -> crate::Delivery {
-        crate::Delivery::Cooperative
-    }
-
     type Ack = ();
 
     fn publish(&mut self, event: Event) -> Result<(), BoundaryError> {
-        self.0.update(|collected| collected.observe(event));
+        self.0.observe(event);
         Ok(())
     }
 }
@@ -154,6 +149,25 @@ impl Collected {
 
 impl Collector {
     pub fn finish(self, report: Report) -> Result<Aggregate, Error> {
+        self.finish_inner(report, None)
+    }
+
+    /// Finishes with endpoint ordering and inferences already computed from
+    /// the same event stream, after checking that they describe the collected
+    /// probes.
+    pub fn finish_with_inferences(
+        self,
+        report: Report,
+        inferred: Vec<Endpoint>,
+    ) -> Result<Aggregate, Error> {
+        self.finish_inner(report, Some(inferred))
+    }
+
+    fn finish_inner(
+        self,
+        report: Report,
+        inferred: Option<Vec<Endpoint>>,
+    ) -> Result<Aggregate, Error> {
         let Collected {
             mut discovery,
             mut endpoints,
@@ -162,7 +176,7 @@ impl Collector {
             unattributed,
             diagnostics,
             ..
-        } = self.0.take();
+        } = self.0;
         if probes != report.rtt.sent {
             return Err(Error::IncoherentEvents {
                 message: format!(
@@ -171,20 +185,60 @@ impl Collector {
                 ),
             });
         }
-        for endpoint in &mut endpoints {
-            endpoint.probes.sort_by_key(|probe| probe.sequence);
-            endpoint.inference = inference::raw(
-                endpoint.endpoint.transport(),
-                endpoint.probes.iter().map(|probe| inference::Attempt {
-                    sequence: probe.sequence,
-                    measurement: probe.measurement,
-                    tcp_scan: probe.tcp_scan,
-                    sctp_scan: probe.sctp_scan,
-                    tcp_window: probe.tcp_window,
-                }),
-            );
-        }
-        endpoints.sort_by_key(|endpoint| endpoint.probes.first().map(|probe| probe.sequence));
+        let endpoints = match inferred {
+            Some(inferred) => {
+                for endpoint in &mut endpoints {
+                    endpoint.probes.sort_by_key(|probe| probe.sequence);
+                }
+                endpoints
+                    .sort_by_key(|endpoint| endpoint.probes.first().map(|probe| probe.sequence));
+                let coherent = endpoints.len() == inferred.len()
+                    && endpoints
+                        .iter()
+                        .zip(&inferred)
+                        .all(|(collected, inferred)| {
+                            collected.address == inferred.address
+                                && collected.scope == inferred.scope
+                                && collected.endpoint == inferred.endpoint
+                                && collected.probes.len() == inferred.probes.len()
+                                && collected.probes.iter().zip(&inferred.probes).all(
+                                    |(collected, inferred)| collected.sequence == inferred.sequence,
+                                )
+                        });
+                if !coherent {
+                    return Err(Error::IncoherentEvents {
+                        message: "scan endpoint inferences do not match the collected events"
+                            .into(),
+                    });
+                }
+                inferred
+                    .into_iter()
+                    .zip(endpoints)
+                    .map(|(mut inferred, collected)| {
+                        inferred.probes = collected.probes;
+                        inferred
+                    })
+                    .collect()
+            }
+            None => {
+                for endpoint in &mut endpoints {
+                    endpoint.probes.sort_by_key(|probe| probe.sequence);
+                    endpoint.inference = inference::raw(
+                        endpoint.endpoint.transport(),
+                        endpoint.probes.iter().map(|probe| inference::Attempt {
+                            sequence: probe.sequence,
+                            measurement: probe.measurement,
+                            tcp_scan: probe.tcp_scan,
+                            sctp_scan: probe.sctp_scan,
+                            tcp_window: probe.tcp_window,
+                        }),
+                    );
+                }
+                endpoints
+                    .sort_by_key(|endpoint| endpoint.probes.first().map(|probe| probe.sequence));
+                endpoints
+            }
+        };
         discovery.sort_by_key(|probe| probe.sequence);
         scan::discovery::check_probes(&report.hosts, discovery.iter().map(|probe| probe.sequence))?;
         Ok(Aggregate {
@@ -202,5 +256,100 @@ impl Collector {
             rtt: report.rtt,
             scheduling: report.scheduling,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::{IpAddr, Ipv4Addr};
+    use std::time::{Duration, SystemTime};
+
+    use packetcraftr_core::frame::{Frame, LinkType};
+
+    use super::*;
+    use crate::probe::{self, Reply, Status};
+    use crate::{Sink, Stats};
+
+    fn evidence(response: Option<Frame>, sequence: u64, port: u16) -> ProbeEvidence {
+        ProbeEvidence {
+            measurement: scan::Measurement::Response(Reply::TcpSynAck),
+            sequence,
+            stage: Stage::Scan,
+            address: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
+            scope: None,
+            endpoint: probe::Endpoint::Tcp { port },
+            tcp_scan: Some(scan::TcpScan::Syn),
+            sctp_scan: None,
+            attempt: 1,
+            status: Status::Response,
+            classification: Classification::Open,
+            reply: Some(Reply::TcpSynAck),
+            responder: Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1))),
+            sent_at: SystemTime::UNIX_EPOCH,
+            received_at: Some(SystemTime::UNIX_EPOCH),
+            latency: Some(Duration::from_millis(1)),
+            response,
+            reason: "syn-ack".to_owned(),
+            application: None,
+            tcp_window: Some(4096),
+        }
+    }
+
+    #[test]
+    fn inferences_reuse_collected_reply_frames() {
+        let frame = Frame::new(None, LinkType(1), &b"reply"[..]).unwrap();
+        let later_frame = Frame::new(None, LinkType(1), &b"later"[..]).unwrap();
+        let mut collector = Collector::default();
+        for (probe, target) in [
+            (evidence(Some(later_frame.clone()), 20, 81), "192.0.2.1"),
+            (evidence(Some(frame.clone()), 7, 80), "192.0.2.1"),
+        ] {
+            collector
+                .publish(Event::Probe {
+                    target: target.into(),
+                    probe,
+                })
+                .unwrap();
+        }
+        let inferred = [(7, 80), (20, 81)]
+            .into_iter()
+            .map(|(sequence, port)| {
+                let stripped = evidence(None, sequence, port);
+                Endpoint {
+                    address: stripped.address,
+                    scope: stripped.scope.clone(),
+                    endpoint: stripped.endpoint,
+                    classification: stripped.classification,
+                    port_hint: None,
+                    inference: None,
+                    probes: vec![stripped],
+                }
+            })
+            .collect();
+        let report = Report {
+            planned_duration: Duration::ZERO,
+            target: "192.0.2.1".to_owned(),
+            resolved_addresses: vec![IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1))],
+            hosts: Vec::new(),
+            counts: Default::default(),
+            retained_evidence_bytes: 0,
+            stats: Stats::default(),
+            rtt: crate::scan::Rtt {
+                sent: 2,
+                ..Default::default()
+            },
+            scheduling: Default::default(),
+        };
+
+        let aggregate = collector.finish_with_inferences(report, inferred).unwrap();
+
+        assert_eq!(
+            aggregate.endpoints[0].probes[0].response.as_ref(),
+            Some(&frame)
+        );
+        assert_eq!(
+            aggregate.endpoints[1].probes[0].response.as_ref(),
+            Some(&later_frame)
+        );
     }
 }

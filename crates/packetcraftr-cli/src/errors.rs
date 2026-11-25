@@ -62,7 +62,7 @@ impl CliError {
     pub(crate) fn stdout(operation: &str, source: &std::io::Error) -> Self {
         Self::from_classification(
             Classification::new(
-                packetcraftr_core::error::Code::IoStdout,
+                crate::code::IoStdout,
                 Kind::Io,
                 Some("restore the stdout consumer or choose a writable output destination"),
             ),
@@ -167,10 +167,10 @@ impl From<output::contract::Error> for CliError {
 const fn fallback_code(kind: Kind) -> packetcraftr_core::error::Code {
     match kind {
         Kind::Usage => packetcraftr_core::error::Code::CliError,
-        Kind::Packet => packetcraftr_core::error::Code::PacketError,
-        Kind::Capability => packetcraftr_core::error::Code::CapabilityUnavailable,
-        Kind::Io => packetcraftr_core::error::Code::IoRuntime,
-        Kind::Policy => packetcraftr_core::error::Code::PolicyDenied,
+        Kind::Packet => crate::code::PacketError,
+        Kind::Capability => crate::code::CapabilityUnavailable,
+        Kind::Io => crate::code::IoRuntime,
+        Kind::Policy => crate::code::PolicyDenied,
         Kind::Internal => packetcraftr_core::error::Code::InternalError,
     }
 }
@@ -215,11 +215,8 @@ mod tests {
 
     #[test]
     fn secondary_failure_preserves_primary_details() {
-        let classification = Classification::new(
-            packetcraftr_core::error::Code::PacketTest,
-            Kind::Packet,
-            Some("repair input"),
-        );
+        let classification =
+            Classification::new(crate::code::PacketTest, Kind::Packet, Some("repair input"));
         let capture = output::capture::Snapshot {
             summary: output::capture::Summary {
                 requested_interfaces: Vec::new(),

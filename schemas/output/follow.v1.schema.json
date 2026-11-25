@@ -1,0 +1,306 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:packetcraftr:output:follow:v1",
+  "title": "PacketcraftR follow output payload v1",
+  "description": "Success payload contract for the follow command. The stable envelope is validated separately.",
+  "allOf": [
+    {
+      "type": "object",
+      "required": [
+        "command",
+        "payload_schema"
+      ],
+      "properties": {
+        "command": {
+          "const": "follow"
+        },
+        "payload_schema": {
+          "const": "packetcraftr.output.follow/v1"
+        }
+      }
+    },
+    {
+      "oneOf": [
+        {
+          "allOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/aggregateSuccessEnvelope"
+            },
+            {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/followSuccess"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/streamSuccessEnvelope"
+            },
+            {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/followStreamSuccess"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "$defs": {
+    "followChunk": {
+      "type": "object",
+      "required": [
+        "direction",
+        "frame",
+        "bytes_hex"
+      ],
+      "properties": {
+        "direction": {
+          "enum": [
+            "client",
+            "server"
+          ]
+        },
+        "frame": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "bytes_hex": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/hexBytes"
+        },
+        "direction_generation": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": true
+    },
+    "followEndpoint": {
+      "type": "object",
+      "required": [
+        "address",
+        "port"
+      ],
+      "properties": {
+        "address": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/ipAddress"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        }
+      },
+      "additionalProperties": true
+    },
+    "followResult": {
+      "type": "object",
+      "required": [
+        "transport",
+        "stream",
+        "frames",
+        "client_bytes",
+        "server_bytes",
+        "undelivered_bytes",
+        "chunks",
+        "ip_reassembly"
+      ],
+      "properties": {
+        "transport": {
+          "enum": [
+            "tcp",
+            "udp"
+          ]
+        },
+        "stream": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "client": {
+          "$ref": "#/$defs/followEndpoint"
+        },
+        "server": {
+          "$ref": "#/$defs/followEndpoint"
+        },
+        "frames": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "client_bytes": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "server_bytes": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "undelivered_bytes": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "chunks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/followChunk"
+          }
+        },
+        "ip_reassembly": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/ipReassemblyReport"
+        },
+        "clock": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/captureClock"
+        },
+        "written": {
+          "description": "Direction payload files `follow --write` published, in deterministic publish order; absent when none were written.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/followWrittenFile"
+          }
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/captureScope"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "dependentRequired": {
+        "client": [
+          "server"
+        ],
+        "server": [
+          "client"
+        ]
+      },
+      "additionalProperties": true
+    },
+    "followStreamSuccess": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "follow"
+        }
+      },
+      "required": [
+        "command",
+        "result"
+      ],
+      "oneOf": [
+        {
+          "properties": {
+            "event": {
+              "const": "chunk"
+            },
+            "result": {
+              "$ref": "#/$defs/followChunk"
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "complete"
+            },
+            "result": {
+              "$ref": "#/$defs/followResult"
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "ip_overlap_resolved"
+            },
+            "result": {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/ipOverlapResolvedEvent"
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "ip_datagram_completed"
+            },
+            "result": {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/ipDatagramCompletedEvent"
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "ip_datagram_incomplete"
+            },
+            "result": {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/ipDatagramIncompleteEvent"
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        }
+      ]
+    },
+    "followSuccess": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "follow"
+        },
+        "result": {
+          "$ref": "#/$defs/followResult"
+        }
+      },
+      "required": [
+        "command",
+        "result"
+      ]
+    },
+    "followWrittenFile": {
+      "type": "object",
+      "description": "One direction payload file `follow --write` published.",
+      "required": [
+        "direction",
+        "path",
+        "bytes"
+      ],
+      "properties": {
+        "direction": {
+          "enum": [
+            "client",
+            "server"
+          ]
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bytes": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

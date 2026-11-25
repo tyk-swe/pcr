@@ -1,5 +1,6 @@
 {
-  "schema": "packetcraftr.output/v22",
+  "schema": "packetcraftr.output/v23",
+  "payload_schema": "packetcraftr.output.beacons/v1",
   "command": "beacons",
   "mode": "aggregate",
   "status": "success",

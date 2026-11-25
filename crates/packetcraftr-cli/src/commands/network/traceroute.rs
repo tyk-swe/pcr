@@ -120,7 +120,7 @@ pub(super) fn run(
     }
     match format {
         Format::Ndjson => {
-            let emit = crate::commands::execution::emitter(invocation, rendering::emit_event);
+            let emit = crate::commands::execution::emitter(invocation, rendering::emit_event)?;
             let summary = client
                 .traceroute(request.clone(), emit)
                 .map_err(CliError::classified)?;
@@ -129,9 +129,9 @@ pub(super) fn run(
         }
         _ => {
             let report = {
-                let collector = packetcraftr::traceroute::Collector::default();
+                let mut collector = packetcraftr::traceroute::Collector::default();
                 let report = client
-                    .traceroute(request.clone(), collector.clone())
+                    .traceroute(request.clone(), &mut collector)
                     .map_err(CliError::classified)?;
                 collector.finish(report).map_err(CliError::classified)?
             };
@@ -273,7 +273,7 @@ mod tests {
         let error = prepare_request(&args, invalid_limits).unwrap_err();
         assert_eq!(
             error.classification.code,
-            packetcraftr_core::error::Code::CliExchangeLimit
+            packetcraftr::Error::CliExchangeLimit
         );
         assert!(error.message.contains("timeout"));
 

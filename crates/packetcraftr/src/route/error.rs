@@ -128,36 +128,36 @@ impl Classified for Error {
             Self::InterfaceDiscovery(error) => error.classification(),
             Self::Interrupted(source) => source.classification(),
             Self::AmbiguousInterface { .. } => Classification::new(
-                packetcraftr_core::error::Code::IoAmbiguousInterface,
+                crate::code::IoAmbiguousInterface,
                 Kind::Io,
                 Some("select a name or index matching exactly one interface"),
             ),
             Self::UnknownInterface { .. } => Classification::new(
-                packetcraftr_core::error::Code::IoDevice,
+                packetcraftr_netio::Error::IoDevice,
                 Kind::Io,
                 Some("select an existing, enabled interface that supports the requested link mode"),
             ),
             Self::UnresolvedInterface { .. } => Classification::new(
-                packetcraftr_core::error::Code::InternalUnresolvedInterface,
+                crate::code::InternalUnresolvedInterface,
                 Kind::Internal,
                 Some("plan through a client, which resolves the interface selector first"),
             ),
             Self::MissingLayer2Interface => Classification::new(
-                packetcraftr_core::error::Code::CliInterfaceRequired,
+                crate::code::CliInterfaceRequired,
                 Kind::Usage,
                 Some("select an explicit interface for a destination-free Layer 2 packet"),
             ),
             Self::InterfaceLookupUnsupported { .. }
             | Self::Layer2Unsupported
             | Self::Layer3Unsupported => Classification::new(
-                packetcraftr_core::error::Code::CapabilityLinkMode,
+                crate::code::CapabilityLinkMode,
                 Kind::Capability,
                 Some(
                     "select a provider and interface that support the explicitly requested link mode",
                 ),
             ),
             Self::OfflineOnlyLinkHeader { .. } => Classification::new(
-                packetcraftr_core::error::Code::PacketOfflineLinkHeader,
+                crate::code::PacketOfflineLinkHeader,
                 Kind::Packet,
                 Some("replace the capture-only header with a live Ethernet or raw-IP packet root"),
             ),
@@ -169,7 +169,7 @@ impl Classified for Error {
             | Self::InvalidSegmentRouting { .. }
             | Self::InvalidSourceRouting { .. }
             | Self::InvalidNeighborVlan { .. } => Classification::new(
-                packetcraftr_core::error::Code::PacketPlan,
+                crate::code::PacketPlan,
                 Kind::Packet,
                 Some(
                     "correct the packet destination, address family, or link-layer intent before planning again",
@@ -183,7 +183,7 @@ impl Classified for Error {
             | Self::MissingSourceMac { .. }
             | Self::PreferredSourceNotSelected { .. }
             | Self::MissingPacketSource => Classification::new(
-                packetcraftr_core::error::Code::InternalRouteContract,
+                crate::code::InternalRouteContract,
                 Kind::Internal,
                 Some(
                     "do not transmit with the inconsistent route result; inspect or replace the route provider",

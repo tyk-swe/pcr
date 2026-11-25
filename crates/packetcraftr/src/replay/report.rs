@@ -8,7 +8,6 @@ use packetcraftr_netio::interface::Id as InterfaceId;
 use serde::Serialize;
 
 use crate::Sink;
-use crate::engine::execution::Shared;
 use packetcraftr_core::error::BoundaryError;
 
 use super::error::Error;
@@ -41,27 +40,22 @@ pub struct Aggregate {
     pub report: Report,
 }
 
-#[derive(Clone, Default)]
-pub struct Collector(Shared<Vec<FrameEvidence>>);
+#[derive(Default)]
+pub struct Collector(Vec<FrameEvidence>);
 
 impl Sink<Event> for Collector {
-    fn delivery(&self) -> crate::Delivery {
-        crate::Delivery::Cooperative
-    }
-
     type Ack = ();
 
     fn publish(&mut self, event: Event) -> Result<(), BoundaryError> {
-        self.0.update(|frames| match event {
-            Event::Frame(frame) => frames.push(frame),
-        });
+        let Event::Frame(frame) = event;
+        self.0.push(frame);
         Ok(())
     }
 }
 
 impl Collector {
     pub fn finish(self, report: Report) -> Result<Aggregate, Error> {
-        let frames = self.0.take();
+        let frames = self.0;
         if u64::try_from(frames.len()).unwrap_or(u64::MAX) != report.frames_transmitted {
             return Err(Error::IncoherentEvents {
                 message: "frame events disagree with the transmitted frame count".to_owned(),

@@ -252,7 +252,7 @@ fn validate_output(args: &Args, format: Format) -> Result<Compression, CliError>
     if args.tree.tree && !args.dissect {
         return Err(CliError::from_classification(
             packetcraftr_core::error::Classification::new(
-                packetcraftr_core::error::Code::CliTreeRequiresDissect,
+                crate::code::CliTreeRequiresDissect,
                 Kind::Usage,
                 Some("add --dissect to show each frame's layers as a tree"),
             ),
@@ -265,7 +265,7 @@ fn validate_output(args: &Args, format: Format) -> Result<Compression, CliError>
     {
         return Err(CliError::from_classification(
             packetcraftr_core::error::Classification::new(
-                packetcraftr_core::error::Code::CliCaptureDecodeFormat,
+                crate::code::CliCaptureDecodeFormat,
                 Kind::Usage,
                 Some("use --output text or --output ndjson for decoded frame output"),
             ),
@@ -338,7 +338,8 @@ fn drive<P: packetcraftr::CaptureProviders>(
     let sink = {
         let invocation = invocation.clone();
         let destinations = Arc::clone(&destinations);
-        move |event| {
+        let runtime = invocation.output_writer_runtime();
+        packetcraftr::Isolated::new(&runtime, move |(event, _)| {
             let mut destinations = lock(&destinations);
             match event {
                 Event::Started { sources } => {
@@ -357,7 +358,8 @@ fn drive<P: packetcraftr::CaptureProviders>(
                     frame,
                 ),
             }
-        }
+        })
+        .map_err(CliError::classified)?
     };
     let result = client.capture(request, sink);
     let (report, error) = match result {

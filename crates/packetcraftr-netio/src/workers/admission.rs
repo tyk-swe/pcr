@@ -4,15 +4,15 @@
 //! Root, TCP data, execution, and socket accounting for admitted native work.
 
 use std::sync::{
-    Arc,
+    Arc, Mutex,
     atomic::{AtomicU8, Ordering},
 };
 
-use super::{Pool, State, lock};
+use super::{Pool, lock};
 use crate::resources::NativeSnapshot;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Class {
+pub(super) enum Class {
     #[cfg_attr(not(native_route), allow(dead_code))]
     Native,
     TcpConnect,
@@ -25,10 +25,18 @@ pub(crate) struct Exhausted {
 }
 
 #[derive(Clone, Copy, Default)]
-pub(super) struct Counters {
+struct Counters {
     active: usize,
     rejected: usize,
     retained: usize,
+}
+
+#[derive(Default)]
+struct State {
+    all: Counters,
+    tcp: Counters,
+    execution: Counters,
+    sockets: Counters,
 }
 
 impl State {
@@ -38,7 +46,22 @@ impl State {
     }
 }
 
-impl Pool {
+/// Bounded admission accounting without executor threads or dispatch state.
+pub(crate) struct Admission {
+    capacity: usize,
+    data_capacity: usize,
+    state: Mutex<State>,
+}
+
+impl Admission {
+    pub(crate) fn new(capacity: usize, data_capacity: usize) -> Self {
+        Self {
+            capacity,
+            data_capacity,
+            state: Mutex::new(State::default()),
+        }
+    }
+
     pub(crate) fn snapshot(&self) -> NativeSnapshot {
         Self::sample(self.capacity, lock(&self.state).all)
     }
@@ -65,15 +88,11 @@ impl Pool {
         }
     }
 
-    pub(crate) fn admit(self: &Arc<Self>) -> Result<Permit, Exhausted> {
+    pub(crate) fn admit(self: &Arc<Self>) -> Result<RootLease, Exhausted> {
         self.admit_class(Class::Native)
     }
 
-    pub(crate) fn admit_connect(self: &Arc<Self>) -> Result<ConnectPermit, Exhausted> {
-        self.admit_class(Class::TcpConnect).map(ConnectPermit)
-    }
-
-    fn admit_class(self: &Arc<Self>, class: Class) -> Result<Permit, Exhausted> {
+    pub(super) fn admit_class(self: &Arc<Self>, class: Class) -> Result<RootLease, Exhausted> {
         let mut state = lock(&self.state);
         let refused = state.all.active >= self.capacity
             || (class == Class::TcpConnect && state.tcp.active >= self.data_capacity);
@@ -95,28 +114,26 @@ impl Pool {
             });
         }
         state.execution.active += 1;
-        Ok(Permit {
-            root: RootLease(Arc::new(Grant {
-                marker: RetentionMarker {
-                    pool: Arc::clone(self),
-                    class,
-                    phase: Arc::new(AtomicU8::new(EXECUTING)),
-                },
-            })),
-        })
+        Ok(RootLease(Arc::new(Grant {
+            marker: RetentionMarker {
+                admission: Arc::clone(self),
+                class,
+                phase: Arc::new(AtomicU8::new(EXECUTING)),
+            },
+        })))
     }
 
-    pub(super) fn finish_admission(&self, permit: RootLease) {
+    pub(super) fn finish_admission(&self, lease: RootLease) {
         let mut state = lock(&self.state);
-        permit.0.marker.finish_execution(&mut state);
-        if let Some(grant) = Arc::into_inner(permit.0) {
+        lease.0.marker.finish_execution(&mut state);
+        if let Some(grant) = Arc::into_inner(lease.0) {
             grant.marker.release(&mut state);
         }
     }
 }
 
-// Bit flags; every transition occurs under the pool state lock. A connect may
-// briefly own both execution and its socket, but holds its root/data charge once.
+// Bit flags; every transition occurs under the admission state lock. A connect
+// may briefly own both execution and its socket, but holds its root/data charge once.
 const EXECUTING: u8 = 1;
 const SOCKET: u8 = 2;
 const RETAINED: u8 = 4;
@@ -125,6 +142,7 @@ const RELEASED: u8 = 8;
 /// One admitted execution, consumed when its only job is dispatched.
 pub(crate) struct Permit {
     pub(super) root: RootLease,
+    pub(super) pool: Arc<Pool>,
 }
 
 /// One admitted TCP connection attempt, consumed when its only job is dispatched.
@@ -148,14 +166,14 @@ struct Grant {
 
 #[derive(Clone)]
 pub(crate) struct RetentionMarker {
-    pool: Arc<Pool>,
+    admission: Arc<Admission>,
     class: Class,
     phase: Arc<AtomicU8>,
 }
 
 impl RetentionMarker {
     pub(crate) fn mark_retained(&self) {
-        let mut state = lock(&self.pool.state);
+        let mut state = lock(&self.admission.state);
         let phase = self.phase.load(Ordering::Relaxed);
         if phase & (RETAINED | RELEASED) == 0 {
             self.phase.store(phase | RETAINED, Ordering::Relaxed);
@@ -205,9 +223,9 @@ impl RetentionMarker {
 
 impl Drop for Grant {
     fn drop(&mut self) {
-        // `Pool::finish_admission` releases under its own lock; the phase is final then.
+        // `Admission::finish_admission` releases under its own lock; the phase is final then.
         if self.marker.phase.load(Ordering::Relaxed) != RELEASED {
-            let mut state = lock(&self.marker.pool.state);
+            let mut state = lock(&self.marker.admission.state);
             self.marker.release(&mut state);
         }
     }
@@ -218,7 +236,7 @@ impl SocketReservation {
     /// slot. The worker keeps execution admission until its job actually ends.
     pub(crate) fn into_socket(self) -> SocketPermit {
         let marker = &self.0.0.marker;
-        let mut state = lock(&marker.pool.state);
+        let mut state = lock(&marker.admission.state);
         let phase = marker.phase.load(Ordering::Relaxed);
         marker.phase.store(phase | SOCKET, Ordering::Relaxed);
         state.sockets.active += 1;
@@ -246,13 +264,54 @@ impl Permit {
     }
 
     pub(super) fn pool(&self) -> &Arc<Pool> {
-        &self.root.0.marker.pool
+        &self.pool
     }
 }
 
 impl ConnectPermit {
+    pub(super) fn new(permit: Permit) -> Self {
+        Self(permit)
+    }
+
     pub(super) fn into_parts(self) -> (Permit, SocketReservation) {
         let reservation = SocketReservation(self.0.lease());
         (self.0, reservation)
+    }
+}
+
+impl Pool {
+    pub(crate) fn snapshot(&self) -> NativeSnapshot {
+        self.admission.snapshot()
+    }
+
+    pub(crate) fn tcp_snapshot(&self) -> NativeSnapshot {
+        self.admission.tcp_snapshot()
+    }
+
+    pub(crate) fn execution_snapshot(&self) -> NativeSnapshot {
+        self.admission.execution_snapshot()
+    }
+
+    pub(crate) fn socket_snapshot(&self) -> NativeSnapshot {
+        self.admission.socket_snapshot()
+    }
+
+    pub(crate) fn admit(self: &Arc<Self>) -> Result<Permit, Exhausted> {
+        self.admit_class(Class::Native)
+    }
+
+    pub(crate) fn admit_connect(self: &Arc<Self>) -> Result<ConnectPermit, Exhausted> {
+        self.admit_class(Class::TcpConnect).map(ConnectPermit::new)
+    }
+
+    fn admit_class(self: &Arc<Self>, class: Class) -> Result<Permit, Exhausted> {
+        Ok(Permit {
+            root: self.admission.admit_class(class)?,
+            pool: Arc::clone(self),
+        })
+    }
+
+    pub(super) fn finish_admission(&self, permit: RootLease) {
+        self.admission.finish_admission(permit);
     }
 }

@@ -199,29 +199,29 @@ impl Classified for Error {
         match self.category() {
             Category::Cancelled => Cancelled.classification(),
             Category::Request => Classification::new(
-                packetcraftr_core::error::Code::InternalDnsTcpRequest,
+                crate::code::InternalDnsTcpRequest,
                 Kind::Internal,
                 Some("submit a non-empty bounded DNS query with a finite remaining timeout"),
             ),
             Category::Unsupported => Classification::new(
-                packetcraftr_core::error::Code::CapabilityDnsTcp,
+                crate::code::CapabilityDnsTcp,
                 Kind::Capability,
                 Some(
                     "enable native DNS-over-TCP or provide a TCP-capable executor, and remove incompatible packet-route overrides",
                 ),
             ),
             Category::Timeout => Classification::new(
-                packetcraftr_core::error::Code::IoDnsTcpTimeout,
+                crate::code::IoDnsTcpTimeout,
                 Kind::Io,
                 Some("retry within the finite DNS attempt budget or increase its timeout"),
             ),
             Category::Network => Classification::new(
-                packetcraftr_core::error::Code::IoDnsTcp,
+                crate::code::IoDnsTcp,
                 Kind::Io,
                 Some("inspect the authorized DNS server TCP endpoint and retry"),
             ),
             Category::Framing => Classification::new(
-                packetcraftr_core::error::Code::PacketDnsTcpFrame,
+                crate::code::PacketDnsTcpFrame,
                 Kind::Packet,
                 Some("treat the incomplete or oversized DNS-over-TCP response as invalid"),
             ),

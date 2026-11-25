@@ -1,8 +1,9 @@
 {
-  "schema": "packetcraftr.output/v22",
+  "schema": "packetcraftr.output/v23",
+  "payload_schema": "packetcraftr.output.verify-forwarding/v1",
   "command": "verify-forwarding",
   "mode": "stream",
-  "sequence": 0,
+  "seq": 0,
   "event": "complete",
   "status": "success",
   "result": {

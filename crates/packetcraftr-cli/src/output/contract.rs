@@ -3,12 +3,81 @@
 
 use std::fmt;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use packetcraftr_core::error::{Classification, Classified, Kind};
 
 /// Current output contract identifier.
-pub const SCHEMA: &str = packetcraftr_core::security::OUTPUT_SCHEMA;
+pub const OUTPUT_SCHEMA: &str = "packetcraftr.output/v23";
+/// Releases 0.3.0 to 0.5.0-beta.2 and later unreleased builds each emitted this
+/// identifier with a different schema, so no single schema can validate it.
+pub const AMBIGUOUS_OUTPUT_SCHEMA: &str = "packetcraftr.output/v1";
+pub const SCHEMA: &str = OUTPUT_SCHEMA;
+
+pub(crate) fn payload_schema(command: &str) -> String {
+    format!("packetcraftr.output.{command}/v1")
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub(crate) struct DiagnosticProjection {
+    #[serde(default)]
+    pub(crate) code: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct AggregateEnvelope<T> {
+    schema: String,
+    pub(crate) command: String,
+    mode: String,
+    status: String,
+    #[serde(default)]
+    pub(crate) payload_schema: Option<String>,
+    #[serde(default)]
+    pub(crate) diagnostics: Vec<DiagnosticProjection>,
+    pub(crate) result: T,
+}
+
+impl<T> AggregateEnvelope<T> {
+    pub(crate) fn diagnostic_codes(&self) -> Vec<String> {
+        self.diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.code.clone())
+            .collect()
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum AggregateInputError {
+    #[error("invalid aggregate JSON: {0}")]
+    Json(#[from] serde_json::Error),
+    #[error(
+        "{AMBIGUOUS_OUTPUT_SCHEMA} is ambiguous across releases, so regenerate the input with this release, which emits {OUTPUT_SCHEMA}"
+    )]
+    AmbiguousSchema,
+    #[error("input must be successful aggregate {OUTPUT_SCHEMA} JSON from an allowed command")]
+    InvalidEnvelope,
+}
+
+pub(crate) fn aggregate_input<T: DeserializeOwned>(
+    bytes: &[u8],
+    allowed_commands: &[&str],
+) -> Result<AggregateEnvelope<T>, AggregateInputError> {
+    let envelope: AggregateEnvelope<T> = serde_json::from_slice(bytes)?;
+    if envelope.schema == AMBIGUOUS_OUTPUT_SCHEMA {
+        return Err(AggregateInputError::AmbiguousSchema);
+    }
+    let payload_matches =
+        envelope.payload_schema.as_deref() == Some(payload_schema(&envelope.command).as_str());
+    if envelope.schema != OUTPUT_SCHEMA
+        || envelope.status != "success"
+        || envelope.mode != "aggregate"
+        || !allowed_commands.contains(&envelope.command.as_str())
+        || !payload_matches
+    {
+        return Err(AggregateInputError::InvalidEnvelope);
+    }
+    Ok(envelope)
+}
 
 pub use crate::commands::Command;
 
@@ -110,22 +179,22 @@ impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
             Self::UnsupportedFormat { .. } => Classification::new(
-                packetcraftr_core::error::Code::CliOutputFormat,
+                crate::code::CliOutputFormat,
                 Kind::Usage,
                 Some("choose one of the formats listed for this command"),
             ),
             Self::TimestampOutOfRange => Classification::new(
-                packetcraftr_core::error::Code::PacketTimestampRange,
+                crate::code::PacketTimestampRange,
                 Kind::Packet,
                 Some("use a capture whose timestamp fits signed 64-bit Unix seconds"),
             ),
             Self::InvalidSourceFrame => Classification::new(
-                packetcraftr_core::error::Code::InternalSourceFrame,
+                crate::code::InternalSourceFrame,
                 Kind::Internal,
                 Some("use the one-based source position assigned while reading or capturing"),
             ),
             Self::IncoherentFuzzEvents(_) => Classification::new(
-                packetcraftr_core::error::Code::InternalFuzzEventCoherence,
+                crate::code::InternalFuzzEventCoherence,
                 Kind::Internal,
                 Some("collect cases from exactly one complete campaign in publication order"),
             ),

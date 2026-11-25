@@ -1,0 +1,211 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:packetcraftr:output:interfaces:v1",
+  "title": "PacketcraftR interfaces output payload v1",
+  "description": "Success payload contract for the interfaces command. The stable envelope is validated separately.",
+  "allOf": [
+    {
+      "type": "object",
+      "required": [
+        "command",
+        "payload_schema"
+      ],
+      "properties": {
+        "command": {
+          "const": "interfaces"
+        },
+        "payload_schema": {
+          "const": "packetcraftr.output.interfaces/v1"
+        }
+      }
+    },
+    {
+      "oneOf": [
+        {
+          "allOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/aggregateSuccessEnvelope"
+            },
+            {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/interfacesSuccess"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "$defs": {
+    "interface": {
+      "type": "object",
+      "required": [
+        "name",
+        "index",
+        "addresses",
+        "flags",
+        "capability",
+        "link_type"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "description": {
+          "type": "string"
+        },
+        "mac": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{2}(?::[0-9a-f]{2}){5}$"
+        },
+        "addresses": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "flags": {
+          "type": "object",
+          "required": [
+            "up",
+            "broadcast",
+            "loopback",
+            "point_to_point",
+            "multicast"
+          ],
+          "properties": {
+            "up": {
+              "type": "boolean"
+            },
+            "broadcast": {
+              "type": "boolean"
+            },
+            "loopback": {
+              "type": "boolean"
+            },
+            "point_to_point": {
+              "type": "boolean"
+            },
+            "multicast": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": true
+        },
+        "mtu": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "capability": {
+          "type": "string",
+          "enum": [
+            "layer2",
+            "layer3",
+            "layer2_and3"
+          ]
+        },
+        "link_type": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "timestamp_types": {
+          "description": "Packet timestamp types the capture backend advertises for this interface, present only when timestamp-type discovery was requested and a backend answered. A null source marks a clock domain the capture-time contract cannot represent; such types are discoverable but not selectable.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/timestampType"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "interfacesResult": {
+      "type": "object",
+      "required": [
+        "interfaces"
+      ],
+      "properties": {
+        "interfaces": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/interface"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "interfacesSuccess": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "interfaces"
+        },
+        "result": {
+          "$ref": "#/$defs/interfacesResult"
+        }
+      },
+      "required": [
+        "command",
+        "result"
+      ]
+    },
+    "timestampType": {
+      "type": "object",
+      "required": [
+        "value",
+        "name",
+        "description",
+        "source"
+      ],
+      "properties": {
+        "value": {
+          "description": "The backend's numeric timestamp-type value.",
+          "type": "integer",
+          "minimum": -2147483648,
+          "maximum": 2147483647
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source": {
+          "anyOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/timestampSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -31,20 +31,24 @@ fn prepare(
 }
 
 fn writing(
+    invocation: &crate::invocation::Invocation,
     write: impl Fn(&packetcraftr::send::SentFrame) -> Result<(), CliError> + Send + 'static,
-) -> impl packetcraftr::Sink<packetcraftr::send::Event, Ack = ()> {
-    move |packetcraftr::send::Event::Sent(frame): packetcraftr::send::Event| {
+) -> Result<packetcraftr::Isolated<packetcraftr::send::Event>, CliError> {
+    let runtime = invocation.output_writer_runtime();
+    packetcraftr::Isolated::new(&runtime, move |(event, _)| {
+        let packetcraftr::send::Event::Sent(frame) = event;
         write(&frame).map_err(CliError::into_boundary_error)
-    }
+    })
+    .map_err(CliError::classified)
 }
 
 fn collect(
     prepared: Prepared<packetcraftr::send::Request>,
 ) -> Result<packetcraftr::send::Aggregate, CliError> {
-    let collector = packetcraftr::send::Collector::default();
+    let mut collector = packetcraftr::send::Collector::default();
     let report = prepared
         .client
-        .send(prepared.request, collector.clone())
+        .send(prepared.request, &mut collector)
         .map_err(CliError::classified)?;
     collector.finish(report).map_err(CliError::classified)
 }
@@ -94,7 +98,7 @@ fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<()
                 .client
                 .send(
                     prepared.request,
-                    writing({
+                    writing(invocation, {
                         let invocation = invocation.clone();
                         move |frame| {
                             let invocation = &invocation;
@@ -135,7 +139,7 @@ fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<()
                             }
                             Ok(())
                         }
-                    }),
+                    })?,
                 )
                 .map_err(CliError::classified)?;
             if report.stats.packets_completed > 1 {
@@ -168,7 +172,9 @@ fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<()
             .client
             .send(
                 prepared.request,
-                writing(|frame| write_hex_line(frame.packet.wire_bytes())),
+                writing(invocation, |frame| {
+                    write_hex_line(frame.packet.wire_bytes())
+                })?,
             )
             .map_err(CliError::classified)
             .map(|_| ()),
@@ -176,7 +182,7 @@ fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<()
             .client
             .send(
                 prepared.request,
-                writing(|frame| write_raw(frame.packet.wire_bytes())),
+                writing(invocation, |frame| write_raw(frame.packet.wire_bytes()))?,
             )
             .map_err(CliError::classified)
             .map(|_| ()),
@@ -254,7 +260,7 @@ mod tests {
             arguments.repeat = repeat;
             arguments.rate = rate;
             let error = prepare(&invocation, arguments).err().unwrap();
-            assert_eq!(error.classification.code, core::error::Code::CliSendLimit);
+            assert_eq!(error.classification.code, packetcraftr::Error::CliSendLimit);
         }
     }
 }

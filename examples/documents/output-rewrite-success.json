@@ -1,5 +1,6 @@
 {
-  "schema": "packetcraftr.output/v22",
+  "schema": "packetcraftr.output/v23",
+  "payload_schema": "packetcraftr.output.rewrite/v1",
   "command": "rewrite",
   "mode": "aggregate",
   "status": "success",

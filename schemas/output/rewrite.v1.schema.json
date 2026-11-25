@@ -1,0 +1,196 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:packetcraftr:output:rewrite:v1",
+  "title": "PacketcraftR rewrite output payload v1",
+  "description": "Success payload contract for the rewrite command. The stable envelope is validated separately.",
+  "allOf": [
+    {
+      "type": "object",
+      "required": [
+        "command",
+        "payload_schema"
+      ],
+      "properties": {
+        "command": {
+          "const": "rewrite"
+        },
+        "payload_schema": {
+          "const": "packetcraftr.output.rewrite/v1"
+        }
+      }
+    },
+    {
+      "oneOf": [
+        {
+          "allOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/aggregateSuccessEnvelope"
+            },
+            {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/rewriteSuccess"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "urn:packetcraftr:output:common:v1#/$defs/streamSuccessEnvelope"
+            },
+            {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/rewriteStreamSuccess"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "$defs": {
+    "rewriteChange": {
+      "type": "object",
+      "description": "One applied field-edit byte-range change attributed to its source frame and ordered rule.",
+      "required": [
+        "frame",
+        "rule",
+        "field",
+        "layer",
+        "range",
+        "old",
+        "new",
+        "origin"
+      ],
+      "properties": {
+        "frame": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/sourceFrame"
+        },
+        "rule": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "field": {
+          "type": "string",
+          "description": "Canonical <protocol>#<occurrence>.<field> path of the changed field."
+        },
+        "layer": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "range": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/byteRange"
+        },
+        "old": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "new": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "origin": {
+          "type": "string",
+          "enum": [
+            "requested",
+            "derived"
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "rewriteResult": {
+      "type": "object",
+      "required": [
+        "path",
+        "rule_matches",
+        "frames_read",
+        "frames_changed",
+        "captured_bytes_read",
+        "captured_bytes_written",
+        "interfaces",
+        "source_metadata_records"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "rule_matches": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {
+            "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+          }
+        },
+        "frames_read": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "frames_changed": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "captured_bytes_read": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "captured_bytes_written": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "interfaces": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "source_metadata_records": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        },
+        "dry_run": {
+          "type": "boolean",
+          "description": "Present and true when --dry-run reported without publishing the destination."
+        },
+        "changes": {
+          "type": "array",
+          "maxItems": 4096,
+          "items": {
+            "$ref": "#/$defs/rewriteChange"
+          }
+        },
+        "changes_omitted": {
+          "$ref": "urn:packetcraftr:output:common:v1#/$defs/uint64"
+        }
+      },
+      "additionalProperties": true
+    },
+    "rewriteStreamSuccess": {
+      "type": "object",
+      "required": [
+        "command",
+        "event",
+        "result"
+      ],
+      "properties": {
+        "command": {
+          "const": "rewrite"
+        },
+        "event": {
+          "const": "complete"
+        },
+        "result": {
+          "$ref": "#/$defs/rewriteResult"
+        }
+      }
+    },
+    "rewriteSuccess": {
+      "type": "object",
+      "required": [
+        "command",
+        "result"
+      ],
+      "properties": {
+        "command": {
+          "const": "rewrite"
+        },
+        "result": {
+          "$ref": "#/$defs/rewriteResult"
+        }
+      }
+    }
+  }
+}

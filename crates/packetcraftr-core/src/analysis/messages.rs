@@ -6,7 +6,7 @@
 
 use super::{
     FrameRecord, ScopedFlowKey, Summary as RunSummary,
-    application::{self, Error, Limits, Retained, TcpSources},
+    application::{self, Error, Limits, Retained, TcpStreamFilter},
     provenance::{Accumulator, SourceSet},
     scope::Definition,
     session::{self, CollectorNeeds},
@@ -114,7 +114,7 @@ pub struct Collector {
     limits: Limits,
     registry: Arc<Registry>,
     selected: BTreeSet<BuiltinProtocol>,
-    tcp: TcpSources,
+    tcp: TcpStreamFilter,
     connections: BTreeMap<u64, Connection>,
     directions: BTreeMap<ScopedFlowKey, Direction>,
     stopped: BTreeMap<ScopedFlowKey, (u64, u64)>,
@@ -160,7 +160,7 @@ impl Collector {
             limits,
             registry,
             selected,
-            tcp: TcpSources::new(ports, limits),
+            tcp: TcpStreamFilter::new(ports, limits),
             connections: BTreeMap::new(),
             directions: BTreeMap::new(),
             stopped: BTreeMap::new(),
@@ -179,7 +179,7 @@ impl Collector {
         if let Some(tcp) = record.tcp
             && tcp.header.flags & crate::protocol::transport::Tcp::SYN != 0
             && let Some(conversation) = tcp.conversation
-            && let Some(generation) = self.tcp.generation(conversation.index)
+            && let Some(generation) = tcp.generation
             && self
                 .connections
                 .get(&conversation.index)

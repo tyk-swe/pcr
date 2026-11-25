@@ -5,7 +5,7 @@
 
 use super::{
     FrameRecord, ScopedFlowKey, Summary as RunSummary,
-    application::{self, Error, Limits, Retained, TcpSources},
+    application::{self, Error, Limits, Retained, TcpStreamFilter},
     provenance::{Accumulator, SourceSet},
     scope::Definition,
     session::{self, CollectorNeeds},
@@ -109,7 +109,7 @@ type RequestKey = (Connection, ScopedFlowKey);
 pub struct Collector {
     limits: Limits,
     max_body_bytes: u64,
-    tcp: TcpSources,
+    tcp: TcpStreamFilter,
     directions: BTreeMap<ScopedFlowKey, Direction>,
     requests: BTreeMap<RequestKey, VecDeque<Pending>>,
     upgraded: BTreeSet<Connection>,
@@ -134,7 +134,7 @@ impl Collector {
         Ok(Self {
             limits,
             max_body_bytes,
-            tcp: TcpSources::new(ports, limits),
+            tcp: TcpStreamFilter::new(ports, limits),
             directions: BTreeMap::new(),
             requests: BTreeMap::new(),
             upgraded: BTreeSet::new(),

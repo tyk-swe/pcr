@@ -122,6 +122,7 @@ def generated_inventory(root: Path) -> Inventory:
     discovered = frozenset(
         path for tree in DERIVED_TREES for path in _tree_files(root, tree)
     ) | frozenset(path.relative_to(root).as_posix() for path in (root / 'schemas').glob('*.json'))
+    discovered |= frozenset(_tree_files(root, 'schemas/output'))
     if (root / '.git').exists():
         checkout_paths = os.fsdecode(subprocess.check_output(
             ['git', 'ls-files', '-z', '--cached', '--others', '--exclude-standard', '--',

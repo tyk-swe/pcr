@@ -11,7 +11,7 @@
 //!
 //! | Layer | Modules |
 //! | --- | --- |
-//! | 1. Primitives | `deadline`, `entropy`, `link`, `bounded` |
+//! | 1. Primitives | `deadline`, `entropy`, `link`, `bounded`, `code` |
 //! | 2. Infrastructure | `unsupported`, `resources`, `workers` |
 //! | 3. Provider contracts | `error`, `native`, `interface`, `route`, `capture`, `transmit`, `tcp`, `udp`, `tls`, `resolution` |
 //! | 4. Native backends | `platform` |
@@ -30,6 +30,7 @@
 pub mod bounded;
 #[forbid(unsafe_code)]
 pub mod capture;
+mod code;
 #[forbid(unsafe_code)]
 pub mod deadline;
 #[forbid(unsafe_code)]

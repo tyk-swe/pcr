@@ -102,11 +102,7 @@ mod tests {
             (Coordinate::CaseIndex(0), "case index 0"),
         ] {
             let error = CliError::from_classification(
-                Classification::new(
-                    packetcraftr_core::error::Code::PacketTest,
-                    Kind::Packet,
-                    Some("repair\tinput"),
-                ),
+                Classification::new(crate::code::PacketTest, Kind::Packet, Some("repair\tinput")),
                 "bad\ninput\u{1b}",
                 vec!["cause\r\u{202e}".into()],
             )

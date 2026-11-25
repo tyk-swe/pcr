@@ -40,7 +40,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::{
     FrameRecord, ScopedFlowKey, Summary as RunSummary,
-    application::{self, TcpSources},
+    application::{self, TcpStreamFilter},
     scope::Definition,
     session::{self, CollectorNeeds},
 };
@@ -83,7 +83,7 @@ impl Resources {
 
 pub struct Collector {
     resources: Resources,
-    tcp: TcpSources,
+    tcp: TcpStreamFilter,
     // Boxed to keep B-tree nodes small; connection state is large.
     connections: BTreeMap<ConnectionKey, Box<ConnectionState>>,
     flow_index: BTreeMap<ScopedFlowKey, ConnectionKey>,
@@ -106,7 +106,7 @@ impl Collector {
                 limits,
                 budget: Budget::new(application),
             },
-            tcp: TcpSources::new(ports, application),
+            tcp: TcpStreamFilter::new(ports, application),
             connections: BTreeMap::new(),
             flow_index: BTreeMap::new(),
             connection_flows: BTreeMap::new(),

@@ -56,9 +56,7 @@ impl<P: PacketProviders + TargetProviders + TcpProviders, K: Clock> Client<P, K>
     {
         let setup = WorkflowSetup::new(self, operation);
         let mut workflow = setup.start(self, request.limits.max_duration);
-        let publish = publisher(&operation.runtime, sink, Error::from, |source| {
-            Error::Output { source }
-        })?;
+        let publish = publisher(sink, Error::from, |source| Error::Output { source })?;
         run(
             &request,
             &mut workflow,
@@ -118,9 +116,7 @@ impl<P: PacketProviders + TargetProviders + TcpProviders, K: Clock> Client<P, K>
     {
         let setup = WorkflowSetup::new(self, operation);
         let mut workflow = setup.start(self, prepared.max_duration());
-        let publish = publisher(&operation.runtime, sink, Error::from, |source| {
-            Error::Output { source }
-        })?;
+        let publish = publisher(sink, Error::from, |source| Error::Output { source })?;
         let first = prepared.first();
         let OperationWorkflow {
             authorizer: admission,

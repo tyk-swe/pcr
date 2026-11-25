@@ -10,7 +10,7 @@ use super::materialize::{
 #[cfg(test)]
 use super::work;
 use super::{Error, route};
-use crate::evidence::SentPacket;
+use crate::{engine::operation::SpendLedger, evidence::SentPacket};
 use bytes::Bytes;
 use packetcraftr_core::{
     build::{self, Builder, BuiltPacket},
@@ -22,6 +22,7 @@ use packetcraftr_netio::{Error as LiveIoError, transmit};
 pub(crate) struct PreparedPacket {
     pub(super) built: BuiltPacket,
     pub(super) route: route::Materialized,
+    pub(super) spend: SpendLedger,
 }
 
 impl PreparedPacket {
@@ -48,6 +49,7 @@ impl PreparedPacket {
             check()?;
             io.send(frame)?
         };
+        self.spend.record_packet(report.bytes_sent());
         Ok(SentPacket::try_new(self.built, self.route, report)?)
     }
 }

@@ -262,19 +262,14 @@ fn interrupted_neighbor_preserves_request_statistics() {
     let Err(error) = result else {
         panic!("interrupted neighbor discovery unexpectedly succeeded");
     };
-    let Error::NeighborSpent(spent) = error else {
-        panic!("expected sent-request evidence on the preparation failure");
-    };
-    assert_eq!(spent.stats.packets_attempted, 1);
-    assert_eq!(spent.stats.packets_completed, 1);
+    assert!(matches!(error, Error::Plan(route::Error::Neighbor(_))));
+    let spent = operation.spend.neighbor_snapshot();
+    assert_eq!(spent.packets_attempted, 1);
+    assert_eq!(spent.packets_completed, 1);
     assert_eq!(
-        spent.stats.bytes,
+        spent.bytes,
         crate::neighbor::request_frame(&request).unwrap().len() as u64
     );
-    assert!(matches!(
-        spent.error,
-        Error::Plan(route::Error::Neighbor(_))
-    ));
 }
 
 #[test]
@@ -522,8 +517,16 @@ fn borrowed_materialization_shares_admission_budget() {
         "refusal cannot fork or reset spending"
     );
 
+    assert!(
+        client
+            .admitting_in(&options, 1, &deadline, &operation)
+            .and_then(|mut foreign| foreign.admit_on(packet(64), &route).map(|_| ()))
+            .is_err()
+    );
+    let foreign_operation = Execution::new(&client, Duration::from_secs(10));
+    let foreign_deadline = foreign_operation.deadline(&client, Duration::from_secs(10));
     let mut other = client
-        .admitting_in(&options, 1, &deadline, &operation)
+        .admitting_in(&options, 1, &foreign_deadline, &foreign_operation)
         .unwrap();
     let (foreign_cost, foreign_preview) = other
         .admit_retained_on(packet(64), &route)

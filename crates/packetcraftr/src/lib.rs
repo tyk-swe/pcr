@@ -88,7 +88,7 @@ pub mod traceroute;
 pub use client::Client;
 pub use engine::execution::{Delivery, Sink};
 pub use engine::stats::{Stats, StatsOverflow};
-pub use error::{Error, NeighborSpent};
+pub use error::Error;
 pub use providers::{
     CaptureProviders, PacketProviders, ProviderSet, SystemProviders, TargetProviders, TcpProviders,
     TransmitProviders, TransmitSet, UdpProviders,

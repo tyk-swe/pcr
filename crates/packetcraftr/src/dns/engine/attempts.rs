@@ -14,7 +14,6 @@ use packetcraftr_core::error::BoundaryError;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::registry::Registry;
 
-use crate::Stats;
 use crate::client::admission::{FamilyGate, resolve_selected};
 use crate::clock::Clock;
 use crate::engine::execution::Context;
@@ -57,29 +56,6 @@ struct ProbeAttempt {
     execution: ExchangeEvidence,
     timeout: Duration,
     attempt_deadline: Deadline,
-}
-
-/// The neighbor requests a failed query's route sent, which the error its
-/// exchange returned carries.
-fn spent_on_neighbors(error: &BoundaryError) -> Option<Stats> {
-    let mut cause: Option<&(dyn std::error::Error + 'static)> = Some(error);
-    std::iter::from_fn(|| {
-        let current = cause?;
-        cause = current.source();
-        Some(current)
-    })
-    .find_map(|cause| {
-        // Transparent wrappers forward their sources, so the carrier is found
-        // as the error a chain link holds rather than as a link of its own.
-        let error = match cause.downcast_ref::<crate::exchange::Error>() {
-            Some(crate::exchange::Error::Preparation(error)) => error,
-            _ => cause.downcast_ref::<crate::Error>()?,
-        };
-        match error {
-            crate::Error::NeighborSpent(spent) => Some(spent.stats.clone()),
-            _ => None,
-        }
-    })
 }
 
 impl<A, P, C, F> Retries<'_, '_, A, P, C, F>
@@ -247,7 +223,7 @@ where
         // The attempt window is shared with a TCP fallback, which gets only what the exchange left.
         let mut attempt_deadline = Deadline::new(self.request.timeout);
         let started = self.execution.now();
-        let mut spent = None;
+        let neighbors_before = self.executor.operation.spend.neighbor_snapshot();
         let stepped = self.execution.step(
             u64::from(probe.attempt),
             self.request.timeout,
@@ -259,9 +235,6 @@ where
                     limits,
                     permit: grant.permit,
                 });
-                // Read before the step can replace the error with the
-                // deadline's or the cancellation's.
-                spent = execution.as_ref().err().and_then(spent_on_neighbors);
                 execution
             },
             |_, execution, grant, _| {
@@ -271,9 +244,12 @@ where
         let (execution, grant) = match stepped {
             Ok(stepped) => stepped,
             Err(error) => {
-                // A failed query still spent its route's neighbor requests
-                // and their wait.
-                if let Some(mut neighbor) = spent {
+                let mut neighbor = self
+                    .executor
+                    .operation
+                    .spend
+                    .neighbor_since(&neighbors_before);
+                if neighbor.packets_attempted > 0 {
                     neighbor.elapsed = self.execution.now().saturating_duration_since(started);
                     self.execution
                         .account(u64::from(probe.attempt), &neighbor)?;

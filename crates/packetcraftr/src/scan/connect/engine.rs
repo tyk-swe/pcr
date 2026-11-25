@@ -63,6 +63,7 @@ impl<P: TargetProviders + TcpProviders, K: Clock> Client<P, K> {
             &self.clock,
             &mut deadline,
             started,
+            operation.spend.clone(),
             |probe, deadline| publish(Event::Probe(probe), deadline),
         )
     }
@@ -75,6 +76,7 @@ pub(super) fn run<Q, A, C, F>(
     clock: &C,
     deadline: &mut Deadline,
     started: Instant,
+    spend: crate::engine::operation::SpendLedger,
     mut emit: F,
 ) -> Result<Report, Error>
 where
@@ -99,6 +101,7 @@ where
         budget: &budget,
         clock,
         deadline,
+        spend,
     };
     let mut controller = request.adaptive.map(|config| {
         super::super::adaptive::Controller::new(config, request.timeout, request.max_in_flight)
@@ -248,11 +251,12 @@ where
     C: Clock,
     F: FnMut(ProbeEvidence, &Deadline) -> Result<(), Error>,
 {
-    let (request, provider, budget, clock) = (
+    let (request, provider, budget, clock, spend) = (
         connector.request,
         connector.provider,
         connector.budget,
         connector.clock,
+        connector.spend.clone(),
     );
     let authorizer = &mut *connector.authorizer;
     let deadline = &mut *connector.deadline;
@@ -360,6 +364,7 @@ where
                     }
                     Err(source) => return Err(execution(sequence, source)),
                 };
+            spend.record_traffic(1, 0);
             controller.admitted(&mut work, selection);
             controller.commit_attempt(&mut work, selection, admitted);
             active.push(Active {

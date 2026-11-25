@@ -307,13 +307,6 @@ impl Lookup {
             .and_then(|report| collector.finish(report))
         {
             Ok(aggregate) => {
-                operation
-                    .spent
-                    .checked_add_assign(&aggregate.stats)
-                    .map_err(|source| {
-                        let _ = source;
-                        dns::Error::StatisticsOverflow { attempt: 1 }
-                    })?;
                 let sent = last_batch_send(&aggregate.questions, &aggregate.stats, client.now());
                 Ok((
                     aggregate

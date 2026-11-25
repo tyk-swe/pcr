@@ -12,6 +12,7 @@ use super::{
     TransmitProviders, changed_preparation, route,
 };
 use crate::{engine::mtu::validate_mtu, engine::operation::NeighborMode};
+use packetcraftr_core::build::BuiltPacket;
 use std::sync::Arc;
 
 impl<P: TransmitProviders, K: Clock> Stages<'_, P, K> {
@@ -88,13 +89,15 @@ impl<P: TransmitProviders, K: Clock> Stages<'_, P, K> {
             Ok(route) => route,
             Err(error) => {
                 let spent = unanswered(&error, request.as_ref());
+                self.operation.spend.record_neighbors(&spent);
                 let error = self.check().err().unwrap_or_else(|| error.into());
-                return Err(error.after_neighbor_requests(spent));
+                return Err(error);
             }
         };
         // Whatever fails after the route's requests went out still reports
         // them.
         let spent = route.neighbor_stats()?;
+        self.operation.spend.record_neighbors(&spent);
         let built = (|| {
             if spent.packets_attempted > 0 {
                 self.pace_neighbor_request(self.client.now().saturating_duration_since(began))?;
@@ -108,10 +111,13 @@ impl<P: TransmitProviders, K: Clock> Stages<'_, P, K> {
             )?;
             self.check()?;
             self.authorize_built(&built, &route.plan)?;
-            Ok(built)
-        })()
-        .map_err(|error: Error| error.after_neighbor_requests(spent))?;
-        Ok(PreparedPacket { built, route })
+            Ok::<BuiltPacket, Error>(built)
+        })()?;
+        Ok(PreparedPacket {
+            built,
+            route,
+            spend: self.operation.spend.clone(),
+        })
     }
 }
 

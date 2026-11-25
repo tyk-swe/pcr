@@ -105,10 +105,7 @@ impl<P: PacketProviders, K: Clock> Native<'_, P, K> {
             return Err(FAULT.internal("neighbor evidence was truncated"));
         }
         let stats = resolution.stats(self.client.now().saturating_duration_since(started));
-        self.operation
-            .spent
-            .checked_add_assign(&stats)
-            .map_err(failure)?;
+        self.operation.spend.record_neighbors(&stats);
         Ok(Preparation {
             stats,
             captured: resolution.captured,
@@ -141,10 +138,6 @@ impl<P: PacketProviders, K: Clock> Executor<Batch<PlannedProbe>> for Native<'_, 
             &mut |_, sent, response| classify(client.registry(), probe, sent, response).is_some(),
             None,
         )?;
-        self.operation
-            .spent
-            .checked_add_assign(&aggregate.aggregate.stats)
-            .map_err(failure)?;
         Ok(batch.evidence(aggregate))
     }
 }

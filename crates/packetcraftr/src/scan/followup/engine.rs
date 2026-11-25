@@ -103,7 +103,6 @@ where
         let mut stats = scan_report.stats.clone();
         let mut trace_report = None;
         let mut trace_sent = None;
-        operation = operation.with_spent(stats.clone());
         if let Some(stage) = &stage {
             let mut trace_operation = operation.isolated();
             if let Some(runtime) = trace.as_ref().and_then(|trace| trace.runtime.clone()) {
@@ -130,7 +129,6 @@ where
         }
         // The lookups' sends, bytes, and time count in this scan's reported
         // statistics, and run in the allowance the scan and trace left over.
-        operation = operation.with_spent(stats.clone());
         let reverse_dns = names(
             lookup.as_ref(),
             self,

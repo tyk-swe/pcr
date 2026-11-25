@@ -3,7 +3,7 @@
 
 //! Private state shared by the stages of one live operation.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use packetcraftr_core::{budget::Deadline, registry::Registry};
@@ -70,10 +70,105 @@ impl<A, C: Clock> WorkflowSetup<A, C> {
     }
 }
 
+#[derive(Clone, Debug, Default)]
+pub(crate) struct SpendLedger(Arc<Mutex<SpendState>>);
+
+#[derive(Clone, Debug, Default)]
+struct SpendState {
+    total_packets: u64,
+    total_bytes: u64,
+    neighbors: Stats,
+}
+
+impl SpendLedger {
+    pub(crate) fn record_packet(&self, bytes: usize) {
+        self.record_traffic(1, bytes as u64);
+    }
+
+    pub(crate) fn record_traffic(&self, packets: u64, bytes: u64) {
+        let mut state = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.total_packets = state.total_packets.saturating_add(packets);
+        state.total_bytes = state.total_bytes.saturating_add(bytes);
+    }
+
+    pub(crate) fn record_neighbors(&self, stats: &Stats) {
+        let mut state = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.total_packets = state.total_packets.saturating_add(stats.packets_attempted);
+        state.total_bytes = state.total_bytes.saturating_add(stats.bytes);
+        if state.neighbors.checked_add_assign(stats).is_err() {
+            state.neighbors.packets_attempted = u64::MAX;
+            state.neighbors.bytes = u64::MAX;
+        }
+    }
+
+    pub(crate) fn neighbor_snapshot(&self) -> Stats {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .neighbors
+            .clone()
+    }
+
+    pub(crate) fn neighbor_since(&self, before: &Stats) -> Stats {
+        let current = self.neighbor_snapshot();
+        let capture = packetcraftr_netio::capture::Stats {
+            received_frames: current
+                .capture
+                .received_frames
+                .saturating_sub(before.capture.received_frames),
+            received_bytes: current
+                .capture
+                .received_bytes
+                .saturating_sub(before.capture.received_bytes),
+            dropped_frames: current
+                .capture
+                .dropped_frames
+                .saturating_sub(before.capture.dropped_frames),
+            dropped_bytes: current
+                .capture
+                .dropped_bytes
+                .saturating_sub(before.capture.dropped_bytes),
+            overflow_events: current
+                .capture
+                .overflow_events
+                .saturating_sub(before.capture.overflow_events),
+            receiver_dropped_frames: current
+                .capture
+                .receiver_dropped_frames
+                .saturating_sub(before.capture.receiver_dropped_frames),
+        };
+        Stats {
+            packets_attempted: current
+                .packets_attempted
+                .saturating_sub(before.packets_attempted),
+            packets_completed: current
+                .packets_completed
+                .saturating_sub(before.packets_completed),
+            bytes: current.bytes.saturating_sub(before.bytes),
+            elapsed: current.elapsed.saturating_sub(before.elapsed),
+            capture,
+        }
+    }
+
+    fn totals(&self) -> (u64, u64) {
+        let state = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        (state.total_packets, state.total_bytes)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct Operation {
     pub(crate) deadline: Arc<Deadline>,
-    pub(crate) spent: Stats,
+    pub(crate) spend: SpendLedger,
     pub(crate) neighbor_mode: NeighborMode,
     pub(crate) neighbor_pause: Duration,
     pub(crate) neighbors: neighbor::State,
@@ -88,7 +183,7 @@ impl Operation {
     pub(crate) fn new<P, K: Clock>(client: &Client<P, K>, limit: Duration) -> Self {
         Self {
             deadline: Arc::new(client.deadline(limit)),
-            spent: Stats::default(),
+            spend: SpendLedger::default(),
             neighbor_mode: NeighborMode::Ordinary,
             neighbor_pause: Duration::ZERO,
             neighbors: client.neighbors.clone(),
@@ -112,17 +207,12 @@ impl Operation {
         remaining.max_packets_per_operation = remaining
             .max_packets_per_operation
             .min(self.packet_limit)
-            .saturating_sub(self.spent.packets_attempted);
+            .saturating_sub(self.spend.totals().0);
         remaining.max_bytes_per_operation = remaining
             .max_bytes_per_operation
             .min(self.byte_limit)
-            .saturating_sub(self.spent.bytes);
+            .saturating_sub(self.spend.totals().1);
         remaining
-    }
-
-    pub(crate) fn with_spent(mut self, spent: Stats) -> Self {
-        self.spent = spent;
-        self
     }
 
     pub(crate) fn with_neighbors(mut self, neighbors: neighbor::State) -> Self {

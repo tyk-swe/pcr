@@ -8,7 +8,6 @@ mod reply_history;
 
 pub(crate) use contract::{
     NextHopResolution, PipelineBatch, PipelineEvent, PipelineFeed, PipelineOptions, PipelinePoll,
-    Pipelined,
 };
 pub(super) use pipeline::AdaptiveAdmission;
 pub(super) use pipeline::limit;
@@ -53,7 +52,7 @@ pub(crate) struct ClientExecutor<'c, P, K> {
     send: crate::send::Options,
     collection: crate::exchange::Collection,
     neighbors: NeighborBounds,
-    /// The route [`Pipelined::requests_neighbor`] last found, which the
+    /// The route [`Self::requests_neighbor`] last found, which the
     /// resolution after it reuses instead of routing the target again.
     routed: Option<(IpAddr, Option<interface::Id>, bool, Pending)>,
     /// The targets a neighbor request was already sent for, explicitly or
@@ -422,8 +421,8 @@ impl<P: PacketProviders, K: Clock> Executor<Batch<Probe>> for ClientExecutor<'_,
     }
 }
 
-impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
-    fn execute_stream(
+impl<P: PacketProviders, K: Clock> ClientExecutor<'_, P, K> {
+    pub(crate) fn execute_stream(
         &mut self,
         options: PipelineOptions,
         admission: &AdaptiveAdmission,
@@ -435,7 +434,7 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
         })
     }
 
-    fn execute_pipeline(
+    pub(crate) fn execute_pipeline(
         &mut self,
         batches: &[Batch<Probe>],
         options: PipelineOptions,
@@ -446,7 +445,7 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
         })
     }
 
-    fn admit_pipeline(
+    pub(crate) fn admit_pipeline(
         &mut self,
         batches: &[Batch<Probe>],
         options: &PipelineOptions,
@@ -454,7 +453,7 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
         pipeline::admit(&self.exchange()?, batches, options)
     }
 
-    fn admit_adaptive_pipeline(
+    pub(crate) fn admit_adaptive_pipeline(
         &mut self,
         batches: &[Batch<Probe>],
         options: &PipelineOptions,
@@ -463,7 +462,7 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
         pipeline::admit_adaptive(&self.exchange()?, batches, options, summary)
     }
 
-    fn resolve_neighbor(
+    pub(crate) fn resolve_neighbor(
         &mut self,
         target: &SelectedAddress,
         timeout: Duration,
@@ -522,7 +521,7 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
         Ok((neighbor, exchange.stats))
     }
 
-    fn resolve_next_hop(
+    pub(crate) fn resolve_next_hop(
         &mut self,
         target: &SelectedAddress,
         deadline: &Deadline,
@@ -562,7 +561,7 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
         })
     }
 
-    fn requests_neighbor(
+    pub(crate) fn requests_neighbor(
         &mut self,
         target: &SelectedAddress,
         explicit: bool,
@@ -591,7 +590,7 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
             .is_none())
     }
 
-    fn resolves_neighbors(&mut self, resolves: bool) {
+    pub(crate) fn resolves_neighbors(&mut self, resolves: bool) {
         self.neighbors.resolves &= resolves;
     }
 }

@@ -198,19 +198,15 @@ impl Default for Limits {
 impl Limits {
     pub fn validate(&self) -> Result<(), Error> {
         self.message.validate()?;
-        self.evidence
-            .validate(|field, value, reason| Error::InvalidLimit {
+        self.evidence.validate_with_duration(
+            self.max_duration,
+            |field, value, reason| Error::InvalidLimit {
                 field,
                 value,
                 reason,
-            })?;
-        if duration_violation(self.max_duration, MAX_WAIT) {
-            return Err(Error::InvalidDuration {
-                value: self.max_duration,
-                maximum: MAX_WAIT,
-            });
-        }
-        Ok(())
+            },
+            |value, maximum| Error::InvalidDuration { value, maximum },
+        )
     }
 }
 

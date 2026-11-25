@@ -70,35 +70,28 @@ impl Classified for Error {
     }
 }
 
-impl crate::error::FromFailure for Error {
-    fn from_failure(sequence: u64, failure: crate::error::Failure) -> Self {
-        match failure {
-            crate::error::Failure::InvalidLimit {
-                field,
-                value,
-                reason,
-            } => Self::Invalid(format!("{field}={value}: {reason}")),
-            crate::error::Failure::Authorization(source) => Self::Authorization(source),
-            crate::error::Failure::DurationLimit(source) => source.into(),
-            crate::error::Failure::Interrupted(source) => source.into(),
-            crate::error::Failure::Clock(source) => Self::Execution {
-                sequence,
-                source: BoundaryError::with_source(
-                    "OS probe clock failed",
-                    Classification::new(crate::code::IoIdentifyOsClock, Kind::Io, None),
-                    Vec::new(),
-                    std::io::Error::other(source),
-                ),
-            },
-            crate::error::Failure::Execution(source) => Self::Execution { sequence, source },
-            crate::error::Failure::InvalidEvidence(source) => Self::Evidence {
-                sequence,
-                message: crate::probe::Workflow::Os.describe_evidence(&source),
-            },
-            crate::error::Failure::StatsOverflow(_) => Self::Evidence {
-                sequence,
-                message: "statistics overflow".into(),
-            },
-        }
-    }
-}
+crate::error::impl_from_failure!(
+    Error,
+    sequence,
+    invalid_limit: |field, value, reason| Self::Invalid(format!("{field}={value}: {reason}")),
+    duration_limit: |source| source.into(),
+    interrupted: |source| source.into(),
+    clock: |source| Self::Execution {
+        sequence,
+        source: BoundaryError::with_source(
+            "OS probe clock failed",
+            Classification::new(crate::code::IoIdentifyOsClock, Kind::Io, None),
+            Vec::new(),
+            std::io::Error::other(source),
+        ),
+    },
+    execution: |source| Self::Execution { sequence, source },
+    invalid_evidence: |source| Self::Evidence {
+        sequence,
+        message: crate::probe::Workflow::Os.describe_evidence(&source),
+    },
+    stats_overflow: |_source| Self::Evidence {
+        sequence,
+        message: "statistics overflow".into(),
+    },
+);

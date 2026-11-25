@@ -25,17 +25,6 @@ use crate::target::ResolveTarget;
 use crate::{Client, Sink};
 
 impl<P: TargetProviders + TcpProviders, K: Clock> Client<P, K> {
-    /// Scans the request's targets and ports with kernel TCP connects
-    /// through the client's TCP provider, keeping at most `max_in_flight`
-    /// attempts pending at once.
-    pub fn scan_connect<S>(&self, request: Request, sink: S) -> Result<Report, Error>
-    where
-        S: Sink<Event, Ack = ()>,
-    {
-        let operation = crate::engine::operation::Operation::new(self, request.limits.max_duration);
-        self.scan_connect_in(request, sink, &operation)
-    }
-
     pub(crate) fn scan_connect_in<S>(
         &self,
         request: Request,

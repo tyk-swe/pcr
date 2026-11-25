@@ -11,10 +11,11 @@ use crate::target::SelectedAddress;
 use super::Prober;
 use crate::probe::Stage;
 use crate::probe::{self, enforce_deadline};
+use crate::providers::PacketProviders;
 use crate::scan::Error;
 use crate::scan::error::duration_limit;
 use crate::scan::evidence::ProbeClassifier;
-use crate::scan::executor::{PipelineEvent, PipelineOptions, Pipelined};
+use crate::scan::executor::{ClientExecutor, PipelineEvent, PipelineOptions};
 use crate::scan::plan::packet::sent_probe_matches;
 use crate::scan::plan::{build_batches, probe_count};
 use crate::scan::{Event, Probe, Request};
@@ -58,16 +59,16 @@ impl StagePlan<'_> {
     }
 }
 
-pub(super) fn execute<E, C, F>(
-    prober: &mut Prober<'_, E, C>,
+pub(super) fn execute<P, K, F>(
+    prober: &mut Prober<'_, '_, P, K>,
     evidence: &mut BatchEvidence<ProbeClassifier<'_>, F, Error>,
     plan: &StagePlan<'_>,
     preceding: &crate::Stats,
     peak: &mut usize,
 ) -> Result<crate::Stats, Error>
 where
-    E: Pipelined,
-    C: Clock,
+    P: PacketProviders,
+    K: Clock,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
     let request = prober.request;
@@ -114,9 +115,9 @@ pub(super) fn add_stats(
 /// Rejects a pipelined stage over its preparation limit without sending
 /// anything: first by its batch descriptions, before they are built, then
 /// by the pipeline's own admission of its probes.
-pub(super) fn admit_pipelined<E: Pipelined>(
+pub(super) fn admit_pipelined<P: PacketProviders, K: Clock>(
     request: &Request,
-    executor: &mut E,
+    executor: &mut ClientExecutor<'_, P, K>,
     deadline: &Deadline,
     plan: &StagePlan<'_>,
 ) -> Result<(), Error> {
@@ -193,16 +194,17 @@ pub(super) struct PipelineOutcome {
     pub(super) peak_pending: usize,
 }
 
-fn drive_pipeline<E, F>(
+fn drive_pipeline<P, K, F>(
     request: &Request,
-    executor: &mut E,
+    executor: &mut ClientExecutor<'_, P, K>,
     evidence: &mut BatchEvidence<ProbeClassifier<'_>, F, Error>,
     deadline: &Deadline,
     batches: &[Batch<Probe>],
     preceding: crate::Stats,
 ) -> Result<PipelineOutcome, Error>
 where
-    E: Pipelined,
+    P: PacketProviders,
+    K: Clock,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
     let mut completed = vec![false; batches.len()];
@@ -317,16 +319,17 @@ where
     result.map_err(packetcraftr_core::error::BoundaryError::from_error)
 }
 
-pub(super) fn run_pipelined<E, F>(
+pub(super) fn run_pipelined<P, K, F>(
     request: &Request,
-    executor: &mut E,
+    executor: &mut ClientExecutor<'_, P, K>,
     evidence: &mut BatchEvidence<ProbeClassifier<'_>, F, Error>,
     deadline: &Deadline,
     plan: &StagePlan<'_>,
     preceding: crate::Stats,
 ) -> Result<(crate::Stats, usize), Error>
 where
-    E: Pipelined,
+    P: PacketProviders,
+    K: Clock,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
     let batches: Vec<_> = plan.batches(request).collect();

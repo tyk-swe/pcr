@@ -6,7 +6,7 @@ use crate::{
     Client,
     clock::Clock,
     policy::{Operation, SocketLimits, SocketOperation},
-    providers::TcpProviders,
+    providers::{AuthorizedTcp, TcpProviders},
 };
 use packetcraftr_core::{
     budget::Deadline,
@@ -200,23 +200,6 @@ fn reauthorize_peer(
     }
 }
 type Connection<P> = tcp::Connection<<<P as TcpProviders>::Tcp as tcp::Provider>::Stream>;
-struct Authorized<P> {
-    providers: Arc<P>,
-    policy: Arc<crate::policy::Policy>,
-}
-impl<P: TcpProviders> tcp::Provider for Authorized<P> {
-    type Stream = <P::Tcp as tcp::Provider>::Stream;
-    fn connect(
-        &self,
-        endpoint: SocketAddr,
-        deadline: &Deadline,
-    ) -> Result<Self::Stream, tcp::Error> {
-        self.policy
-            .authorize_destination(endpoint.ip())
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::PermissionDenied, e))?;
-        self.providers.tcp().connect(endpoint, deadline)
-    }
-}
 fn tls_report(
     connection: &ConnectionOptions,
     options: &TlsOptions,
@@ -301,7 +284,7 @@ impl<P: TcpProviders, K: Clock> Client<P, K> {
         self.policy.validate()?;
         admit(&self.policy, request.endpoint, limits)?;
         deadline.enforce()?;
-        let provider = Arc::new(Authorized {
+        let provider = Arc::new(AuthorizedTcp {
             providers: Arc::clone(&self.providers),
             policy: Arc::clone(&self.policy),
         });

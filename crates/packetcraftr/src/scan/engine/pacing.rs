@@ -33,7 +33,7 @@ impl Owed {
     }
 }
 
-impl<E, C: Clock> Prober<'_, E, C> {
+impl<P, K: Clock> Prober<'_, '_, P, K> {
     /// Waits out the rate for the transmissions owed since the last wait,
     /// just before the next one is sent. Time already spent since the last
     /// of them began, such as its wait for a reply, counts toward the pause.

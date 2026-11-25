@@ -228,44 +228,29 @@ impl fmt::Display for EvidenceFault {
     }
 }
 
-impl crate::error::FromFailure for Error {
-    fn from_failure(step: u64, failure: crate::error::Failure) -> Self {
-        match failure {
-            crate::error::Failure::InvalidLimit {
-                field,
-                value,
-                reason,
-            } => Self::InvalidLimit {
-                field,
-                value,
-                reason,
-            },
-            crate::error::Failure::Authorization(source) => Self::Authorization(source),
-            crate::error::Failure::DurationLimit(source) => Self::from(source),
-            crate::error::Failure::Interrupted(source) => Self::from(source),
-            crate::error::Failure::Clock(source) => {
-                let attempt = step as u32;
-
-                Self::Clock { attempt, source }
-            }
-            crate::error::Failure::Execution(source) => {
-                let attempt = step as u32;
-
-                Self::Execution { attempt, source }
-            }
-            crate::error::Failure::InvalidEvidence(source) => {
-                let attempt = step as u32;
-
-                Self::InvalidEvidence {
-                    attempt,
-                    fault: EvidenceFault::Exchange(source),
-                }
-            }
-            crate::error::Failure::StatsOverflow(_) => {
-                let attempt = step as u32;
-
-                Self::StatisticsOverflow { attempt }
-            }
-        }
-    }
-}
+crate::error::impl_from_failure!(
+    Error,
+    step,
+    invalid_limit: |field, value, reason| Self::InvalidLimit {
+        field,
+        value,
+        reason,
+    },
+    duration_limit: |source| Self::from(source),
+    interrupted: |source| Self::from(source),
+    clock: |source| Self::Clock {
+        attempt: step as u32,
+        source,
+    },
+    execution: |source| Self::Execution {
+        attempt: step as u32,
+        source,
+    },
+    invalid_evidence: |source| Self::InvalidEvidence {
+        attempt: step as u32,
+        fault: EvidenceFault::Exchange(source),
+    },
+    stats_overflow: |_source| Self::StatisticsOverflow {
+        attempt: step as u32,
+    },
+);

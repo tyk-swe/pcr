@@ -111,67 +111,36 @@ impl Classified for Error {
     }
 }
 
-impl crate::error::FromFailure for Error {
-    fn from_failure(step: u64, failure: crate::error::Failure) -> Self {
-        match failure {
-            crate::error::Failure::InvalidLimit {
-                field,
-                value,
-                reason,
-            } => Self::InvalidLimit {
-                field,
-                value,
-                reason,
-            },
-            crate::error::Failure::Authorization(source) => Self::Authorization(source),
-            crate::error::Failure::DurationLimit(source) => {
-                let _step = step;
-
-                source.into()
-            }
-            crate::error::Failure::Interrupted(source) => {
-                let _step = step;
-
-                source.into()
-            }
-            crate::error::Failure::Clock(_source) => {
-                let _step = step;
-
-                BoundaryError::internal_execution(
-                    "target planning never waits on a clock",
-                    crate::code::InternalTargetPlan,
-                    "report the unexpected selection path",
-                )
-                .into()
-            }
-            crate::error::Failure::Execution(source) => {
-                let _step = step;
-
-                Self::Authorization(source)
-            }
-            crate::error::Failure::InvalidEvidence(_source) => {
-                let _step = step;
-
-                BoundaryError::internal_execution(
-                    "target planning produces no evidence",
-                    crate::code::InternalTargetPlan,
-                    "report the unexpected selection path",
-                )
-                .into()
-            }
-            crate::error::Failure::StatsOverflow(_source) => {
-                let _step = step;
-
-                BoundaryError::internal_execution(
-                    "target planning accumulates no statistics",
-                    crate::code::InternalTargetPlan,
-                    "report the unexpected selection path",
-                )
-                .into()
-            }
-        }
-    }
-}
+crate::error::impl_from_failure!(
+    Error,
+    _step,
+    invalid_limit: |field, value, reason| Self::InvalidLimit {
+        field,
+        value,
+        reason,
+    },
+    duration_limit: |source| source.into(),
+    interrupted: |source| source.into(),
+    clock: |_source| BoundaryError::internal_execution(
+        "target planning never waits on a clock",
+        crate::code::InternalTargetPlan,
+        "report the unexpected selection path",
+    )
+    .into(),
+    execution: |source| Self::Authorization(source),
+    invalid_evidence: |_source| BoundaryError::internal_execution(
+        "target planning produces no evidence",
+        crate::code::InternalTargetPlan,
+        "report the unexpected selection path",
+    )
+    .into(),
+    stats_overflow: |_source| BoundaryError::internal_execution(
+        "target planning accumulates no statistics",
+        crate::code::InternalTargetPlan,
+        "report the unexpected selection path",
+    )
+    .into(),
+);
 
 impl From<BoundaryError> for Error {
     fn from(source: BoundaryError) -> Self {

@@ -10,14 +10,10 @@ use std::time::Duration;
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::error::BoundaryError;
 
-use super::AdaptiveAdmission;
 use crate::Stats;
-use crate::engine::execution::Executor;
 use crate::evidence::SentPacket;
 use crate::probe::{Batch, Evidence};
 use crate::scan::Probe;
-use crate::scan::discovery::Neighbor;
-use crate::target::SelectedAddress;
 
 #[derive(Clone, Debug)]
 pub(crate) struct PipelineOptions {
@@ -84,75 +80,6 @@ pub(crate) trait PipelineFeed {
         now: std::time::Instant,
     ) -> Result<PipelinePoll, BoundaryError>;
     fn event(&mut self, event: PipelineEvent) -> Result<(), BoundaryError>;
-}
-
-pub(crate) trait Pipelined: Executor<Batch<Probe>> {
-    fn execute_stream(
-        &mut self,
-        options: PipelineOptions,
-        admission: &AdaptiveAdmission,
-        attempts: usize,
-        feed: &mut dyn PipelineFeed,
-    ) -> Result<Stats, BoundaryError>;
-
-    fn execute_pipeline(
-        &mut self,
-        batches: &[Batch<Probe>],
-        options: PipelineOptions,
-        emit: &mut dyn FnMut(PipelineEvent) -> Result<(), BoundaryError>,
-    ) -> Result<Stats, BoundaryError>;
-
-    /// Admits a pipelined stage's probes as [`Self::execute_pipeline`]
-    /// would, sending nothing, so its preparation limit fails before any
-    /// traffic.
-    fn admit_pipeline(
-        &mut self,
-        batches: &[Batch<Probe>],
-        options: &PipelineOptions,
-    ) -> Result<(), BoundaryError>;
-
-    fn admit_adaptive_pipeline(
-        &mut self,
-        batches: &[Batch<Probe>],
-        options: &PipelineOptions,
-        summary: &mut AdaptiveAdmission,
-    ) -> Result<(), BoundaryError>;
-
-    /// Sends at most one ARP or NDP request for `target` and reports what
-    /// it learned with the exchange's statistics. A routed target's next hop
-    /// is never sent a request.
-    fn resolve_neighbor(
-        &mut self,
-        target: &SelectedAddress,
-        timeout: Duration,
-        deadline: &Deadline,
-    ) -> Result<(Neighbor, Stats), BoundaryError>;
-
-    /// Resolves the neighbor `target`'s probes send their frames to, its own
-    /// or its gateway's, unless the operation already knows it, and reports
-    /// the request's statistics. A stage resolves its targets before any
-    /// probe arms a capture, so each probe's materialization finds the
-    /// answer cached.
-    fn resolve_next_hop(
-        &mut self,
-        target: &SelectedAddress,
-        deadline: &Deadline,
-    ) -> Result<NextHopResolution, BoundaryError>;
-
-    /// Whether resolving `target`'s neighbor, explicitly as discovery does or
-    /// for its probes, would send a request, so the engine waits out a pause
-    /// owed by an earlier transmission only before one.
-    fn requests_neighbor(
-        &mut self,
-        target: &SelectedAddress,
-        explicit: bool,
-        deadline: &Deadline,
-    ) -> Result<bool, BoundaryError>;
-
-    /// Learns whether any probe of the operation resolves a link-layer
-    /// neighbor, before the first resolution or exchange. Bounds that could
-    /// not hold a reply then never apply to a resolver no probe uses.
-    fn resolves_neighbors(&mut self, resolves: bool);
 }
 
 /// What resolving a target's next hop found.

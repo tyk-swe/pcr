@@ -36,7 +36,7 @@ use super::adaptive::{Ceilings, Controller};
 use super::discovery::Sweep;
 use super::error::duration_limit;
 use super::evidence::ProbeClassifier;
-use super::executor::{AdaptiveAdmission, ClientExecutor, Pipelined};
+use super::executor::{AdaptiveAdmission, ClientExecutor};
 use super::plan::probe_count;
 use super::report::RttAccumulator;
 use super::{ClassificationCounts, Event, Report, Request, Scheduling};
@@ -88,10 +88,10 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
 /// What sends one raw scan's probes and neighbor requests: the request, its
 /// executor, the operation's clock and deadline, and the rate pause its
 /// transmissions still owe.
-struct Prober<'a, E, C> {
+struct Prober<'a, 'c, P, K> {
     request: &'a Request,
-    executor: &'a mut E,
-    clock: &'a mut C,
+    executor: &'a mut ClientExecutor<'c, P, K>,
+    clock: &'a mut K,
     deadline: &'a mut Deadline,
     /// Transmissions whose rate pause is still owed, waited out just before
     /// the next one so the operation's last transmission leaves no pause.
@@ -156,16 +156,16 @@ impl Scheduler {
         Some(adaptive.controller.host_remaining(host, now))
     }
 
-    fn execute_stage<E, C, F>(
+    fn execute_stage<P, K, F>(
         &mut self,
-        prober: &mut Prober<'_, E, C>,
+        prober: &mut Prober<'_, '_, P, K>,
         evidence: &mut BatchEvidence<ProbeClassifier<'_>, F, Error>,
         plan: &StagePlan<'_>,
         preceding: &crate::Stats,
     ) -> Result<crate::Stats, Error>
     where
-        E: Pipelined,
-        C: Clock,
+        P: PacketProviders,
+        K: Clock,
         F: FnMut(Event, &Deadline) -> Result<(), Error>,
     {
         match self {
@@ -203,16 +203,16 @@ impl Scheduler {
     }
 }
 
-pub(crate) fn run<A, E, C, F>(
+pub(crate) fn run<A, P, K, F>(
     request: &Request,
-    workflow: &mut Workflow<A, C>,
-    executor: &mut E,
+    workflow: &mut Workflow<A, K>,
+    executor: &mut ClientExecutor<'_, P, K>,
     mut emit: F,
 ) -> Result<Report, Error>
 where
     A: Authorizer + ResolveTarget,
-    E: Pipelined,
-    C: Clock,
+    P: PacketProviders,
+    K: Clock,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
     let Workflow {

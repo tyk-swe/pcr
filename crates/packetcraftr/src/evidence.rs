@@ -64,6 +64,23 @@ impl Limits {
             invalid,
         )
     }
+
+    pub(crate) fn validate_with_duration<E>(
+        &self,
+        max_duration: std::time::Duration,
+        invalid_limit: impl Fn(&'static str, u64, String) -> E,
+        invalid_duration: impl Fn(std::time::Duration, std::time::Duration) -> E,
+    ) -> Result<(), E> {
+        self.validate(invalid_limit)?;
+        if crate::deadline::duration_violation(max_duration, packetcraftr_netio::deadline::MAX_WAIT)
+        {
+            return Err(invalid_duration(
+                max_duration,
+                packetcraftr_netio::deadline::MAX_WAIT,
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// Preserves flat field-order Serde representation for workflow `Limits`

@@ -9,13 +9,13 @@ use super::construction::PreparedPacket;
 use super::work;
 use super::{
     Clock, Deadline, Error, Packet, PacketProviders, Policy, RebuildError, Stages,
-    TransmitProviders, changed_preparation, route,
+    changed_preparation, route,
 };
 use crate::{engine::mtu::validate_mtu, engine::operation::NeighborMode};
 use packetcraftr_core::build::BuiltPacket;
 use std::sync::Arc;
 
-impl<P: TransmitProviders, K: Clock> Stages<'_, P, K> {
+impl<P: PacketProviders, K: Clock> Stages<'_, P, K> {
     /// Spaces a packet from the neighbor request its route just sent, within
     /// the preparation deadline.
     fn pace_neighbor_request(&self, spent: std::time::Duration) -> Result<(), Error> {
@@ -204,7 +204,7 @@ impl<P: PacketProviders, K: Clock> Stages<'_, P, K> {
             packet,
             Some(expected.destination),
             options,
-            self.client.providers.route_provider(),
+            self.client.providers.route(),
             &route::ResolvedInterface::default(),
         )?;
         if fresh.decision.interface != expected.plan.decision.interface {

@@ -70,22 +70,6 @@ impl<P: PacketProviders + TargetProviders + TcpProviders, K: Clock> Client<P, K>
         )
     }
 
-    /// The traffic limits `questions` need together, for a workflow that
-    /// splits more questions than one batch takes across batches to
-    /// authorize once, as one operation, before the first; each batch still
-    /// authorizes its own. The limits include every request this client's
-    /// neighbor resolver may send before each UDP packet on a link-layer
-    /// route.
-    pub fn dns_limits<Q>(
-        &self,
-        questions: impl IntoIterator<Item = Q>,
-    ) -> Result<DnsOperation, Error>
-    where
-        Q: std::borrow::Borrow<Request>,
-    {
-        self.dns_limits_with(questions, u64::from(self.neighbors.max_attempts()))
-    }
-
     pub(crate) fn dns_limits_with<Q: std::borrow::Borrow<Request>>(
         &self,
         questions: impl IntoIterator<Item = Q>,

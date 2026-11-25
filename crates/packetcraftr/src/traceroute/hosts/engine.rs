@@ -28,17 +28,6 @@ use crate::traceroute::{Error, MAX_PROBE_BYTES, Probe, WORKFLOW};
 use crate::{Client, Sink, Stats};
 
 impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
-    /// Traces every authorized host of the request under one finite plan and
-    /// publishes each probe's final outcome, each host's record, each retained
-    /// undecoded frame, and each diagnostic to `sink`.
-    pub fn trace_hosts<S>(&self, request: Request, sink: S) -> Result<Report, Error>
-    where
-        S: Sink<Event, Ack = ()>,
-    {
-        let operation = crate::engine::operation::Operation::new(self, request.limits.max_duration);
-        self.trace_hosts_in(request, sink, &operation)
-    }
-
     pub(crate) fn trace_hosts_in<S>(
         &self,
         request: Request,

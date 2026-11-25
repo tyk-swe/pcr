@@ -4,7 +4,7 @@
 use packetcraftr_netio::{capture, deadline::MAX_WAIT};
 
 use crate::clock::Clock;
-use crate::providers::{PacketProviders, TransmitProviders};
+use crate::providers::PacketProviders;
 use crate::{Client, Sink, Stats};
 use packetcraftr_core::error::BoundaryError;
 
@@ -33,28 +33,6 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
     {
         self.send_prepared_in(request, sink, operation, |stream, packet| {
             stream.prepare(packet)
-        })
-    }
-}
-
-impl<P: TransmitProviders, K: Clock> Client<P, K> {
-    /// Sends numeric IP packets in explicit Layer 3 mode, requiring no capture
-    /// provider. All route, MTU, policy, final-wire and cumulative budget checks
-    /// are shared with `send`; this operation cannot perform neighbor discovery.
-    pub fn send_layer3<S>(&self, mut request: Request, sink: S) -> Result<Report, Error>
-    where
-        S: Sink<Event, Ack = ()>,
-    {
-        if request.send.plan.link_mode == packetcraftr_netio::link::Mode::Layer2 {
-            return Err(super::request::invalid(
-                "link_mode",
-                "send_layer3 requires Layer 3 mode",
-            ));
-        }
-        request.send.plan.link_mode = packetcraftr_netio::link::Mode::Layer3;
-        let operation = crate::engine::operation::Operation::new(self, std::time::Duration::MAX);
-        self.send_prepared_in(request, sink, &operation, |stream, packet| {
-            stream.prepare_layer3(packet)
         })
     }
 

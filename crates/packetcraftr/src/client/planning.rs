@@ -10,7 +10,7 @@ use packetcraftr_core::packet::Packet;
 use crate::Client;
 use crate::Error;
 use crate::clock::Clock;
-use crate::providers::TransmitProviders;
+use crate::providers::PacketProviders;
 use crate::route::{Error as RouteError, Interface, Options, Plan, plan as plan_route};
 
 /// Where a passive route lookup looks, and the deadline it runs under.
@@ -21,7 +21,7 @@ pub(crate) struct RouteLookup<'a, R> {
     pub(crate) deadline: &'a Deadline,
 }
 
-impl<P: TransmitProviders, K: Clock> Client<P, K> {
+impl<P: PacketProviders, K: Clock> Client<P, K> {
     /// Passive dry planning: route, source, and interface lookup only.
     pub fn plan(
         &self,
@@ -35,7 +35,7 @@ impl<P: TransmitProviders, K: Clock> Client<P, K> {
             destination,
             options,
             RouteLookup {
-                routes: self.providers.route_provider(),
+                routes: self.providers.route(),
                 interfaces: &self.interfaces,
                 deadline,
             },
@@ -115,7 +115,7 @@ impl<P: TransmitProviders, K: Clock> Client<P, K> {
         else {
             return Ok(Cow::Borrowed(options));
         };
-        let id = interfaces.resolve(selector, self.providers.interface_provider(), deadline)?;
+        let id = interfaces.resolve(selector, self.providers.interface(), deadline)?;
         Ok(Cow::Owned(Options {
             interface: Some(id.into()),
             ..options.clone()

@@ -13,7 +13,7 @@ use packetcraftr_netio::{bounded, tcp, tls, udp};
 
 use super::{Endpoint, Error, IoOutcome, TlsEvidence, TlsSettings, Transport};
 use crate::policy::{Operation, Policy, SocketLimits, SocketOperation};
-use crate::providers::{TcpProviders, UdpProviders};
+use crate::providers::{AuthorizedTcp, TcpProviders, UdpProviders};
 
 pub(super) struct Reply {
     pub bytes: Vec<u8>,
@@ -109,28 +109,6 @@ fn tls_outcome(source: &tls::Error) -> IoOutcome {
         tls::Error::Io(source) if bounded::timed_out(source) => IoOutcome::TimedOut,
         tls::Error::WireLimit { .. } | tls::Error::StepLimit { .. } => IoOutcome::Truncated,
         _ => IoOutcome::Failed,
-    }
-}
-
-/// This wrapper performs authorization in the connect worker immediately
-/// before the provider call, including when it waited in the worker queue.
-struct AuthorizedTcp<P> {
-    providers: Arc<P>,
-    policy: Arc<Policy>,
-}
-
-impl<P: TcpProviders> tcp::Provider for AuthorizedTcp<P> {
-    type Stream = <P::Tcp as tcp::Provider>::Stream;
-
-    fn connect(
-        &self,
-        endpoint: SocketAddr,
-        deadline: &Deadline,
-    ) -> Result<Self::Stream, tcp::Error> {
-        self.policy
-            .authorize_destination(endpoint.ip())
-            .map_err(|source| std::io::Error::new(std::io::ErrorKind::PermissionDenied, source))?;
-        self.providers.tcp().connect(endpoint, deadline)
     }
 }
 

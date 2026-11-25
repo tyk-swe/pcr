@@ -6,7 +6,6 @@ use std::net::Ipv4Addr;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use packetcraftr::Sink as _;
 use packetcraftr::differential as lib;
 
 use crate::command_options::{Bounded as _, MaxDurationArgs};
@@ -164,24 +163,15 @@ fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<()
 
     let format = invocation.format;
     let stream = &invocation.output;
-    let collector = lib::ResponderCollector::default();
+    let mut collector = lib::ResponderCollector::default();
 
     let outcome = match format {
         Format::Ndjson => {
-            let recording = collector.clone();
-            let emit = crate::commands::execution::emitter(
-                invocation,
-                move |event: lib::ResponderEvent, stream| {
-                    recording
-                        .clone()
-                        .publish(event.clone())
-                        .map_err(CliError::classified)?;
-                    rendering::emit_responder_event(event, stream)
-                },
-            );
+            let emit =
+                crate::commands::execution::emitter(invocation, rendering::emit_responder_event);
             lib::respond(request, emit)
         }
-        Format::Text | Format::Json => lib::respond(request, collector.clone()),
+        Format::Text | Format::Json => lib::respond(request, &mut collector),
         other => other.unreachable(),
     };
 

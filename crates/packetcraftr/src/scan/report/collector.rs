@@ -8,7 +8,6 @@ use packetcraftr_core::error::BoundaryError;
 use packetcraftr_core::frame::Frame;
 
 use crate::Sink;
-use crate::engine::execution::Shared;
 use crate::probe::{Transport, index_or_push};
 use crate::scan::{self, Coverage, Error, Measurement, Stage, inference};
 
@@ -16,8 +15,8 @@ use super::model::{
     Aggregate, Classification, Endpoint, Event, ProbeEvidence, Report, Unattributed,
 };
 
-#[derive(Clone, Default)]
-pub struct Collector(Shared<Collected>);
+#[derive(Default)]
+pub struct Collector(Collected);
 
 /// Endpoint identity: the probed endpoint and interface on one address never merge.
 pub(in crate::scan) type EndpointKey = (
@@ -48,17 +47,15 @@ struct Collected {
 }
 
 impl Sink<Event> for Collector {
-    fn delivery(&self) -> crate::Delivery {
-        crate::Delivery::Cooperative
-    }
-
     type Ack = ();
 
     fn publish(&mut self, event: Event) -> Result<(), BoundaryError> {
-        self.0.update(|collected| collected.observe(event));
+        self.0.observe(event);
         Ok(())
     }
 }
+
+crate::engine::execution::forward_sink!(Collector, Event);
 
 impl Collected {
     fn qualify(&mut self, qualification: scan::Qualification) {
@@ -162,7 +159,7 @@ impl Collector {
             unattributed,
             diagnostics,
             ..
-        } = self.0.take();
+        } = self.0;
         if probes != report.rtt.sent {
             return Err(Error::IncoherentEvents {
                 message: format!(

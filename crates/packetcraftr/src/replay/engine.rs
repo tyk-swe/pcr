@@ -38,10 +38,7 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
         request.validate()?;
         let deadline = self.deadline(request.options.limits.max_duration);
         enforce_deadline(&deadline, 0)?;
-        let mut publish =
-            execution::publisher(&self.runtime, sink, BoundaryError::from_error, |source| {
-                source
-            })
+        let mut publish = execution::publisher(sink, BoundaryError::from_error, |source| source)
             .map_err(|source| publication_error(0, &deadline, source))?;
         let mut admission = FrameAdmission::new(
             &self.policy,

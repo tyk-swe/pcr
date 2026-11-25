@@ -60,7 +60,6 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
         let operation = Operation::new(self, request.trace.limits.max_duration);
         let setup = WorkflowSetup::new(self, &operation);
         let emit = publisher(
-            &operation.runtime,
             sink,
             |error| Error::from_failure(0, Failure::DurationLimit(error)),
             |source| Error::Output { source },

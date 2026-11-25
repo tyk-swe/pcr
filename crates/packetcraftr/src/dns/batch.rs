@@ -9,7 +9,7 @@ use packetcraftr_core::registry::Registry;
 
 use crate::client::admission::approve_operation;
 use crate::clock::Clock;
-use crate::engine::execution::{Context, Shared};
+use crate::engine::execution::Context;
 use crate::exchange::WorkflowExecutor;
 use crate::policy::{Authorizer, DnsOperation, LimitOverflow, Operation, WireLimits};
 use crate::providers::{PacketProviders, TcpProviders};
@@ -280,34 +280,32 @@ pub struct Aggregate {
     pub stats: Stats,
 }
 
-#[derive(Clone, Default)]
-pub struct Collector(Shared<Vec<(usize, Observed)>>);
+#[derive(Default)]
+pub struct Collector(Vec<(usize, Observed)>);
 
 impl Sink<Event> for Collector {
-    fn delivery(&self) -> crate::Delivery {
-        crate::Delivery::Cooperative
-    }
-
     type Ack = ();
 
     fn publish(&mut self, event: Event) -> Result<(), BoundaryError> {
-        self.0.update(|questions| match questions.last_mut() {
+        match self.0.last_mut() {
             Some((question, observed)) if *question == event.question => {
                 observed.observe(event.event);
             }
             _ => {
                 let mut observed = Observed::default();
                 observed.observe(event.event);
-                questions.push((event.question, observed));
+                self.0.push((event.question, observed));
             }
-        });
+        }
         Ok(())
     }
 }
 
+crate::engine::execution::forward_sink!(Collector, Event);
+
 impl Collector {
     pub fn finish(self, report: Report) -> Result<Aggregate, Error> {
-        let mut observed = self.0.take().into_iter().peekable();
+        let mut observed = self.0.into_iter().peekable();
         let Report {
             server,
             server_port,

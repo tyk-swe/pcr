@@ -5,7 +5,7 @@ use crate::{
     errors::CliError,
     invocation::{Invocation, StreamEncoder},
 };
-use packetcraftr::{Delivery, Sink};
+use packetcraftr::Sink;
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::error::BoundaryError;
 use std::{sync::Arc, time::Duration};
@@ -19,16 +19,12 @@ pub(crate) fn emitter<E: 'static>(
     struct Emitter<F> {
         invocation: Invocation,
         publish: F,
-        delivery: Delivery,
     }
     impl<E, F> Sink<E> for Emitter<F>
     where
         F: FnMut(E, &StreamEncoder) -> Result<(), CliError> + Send + 'static,
     {
         type Ack = ();
-        fn delivery(&self) -> Delivery {
-            self.delivery
-        }
         fn publish(&mut self, event: E) -> Result<(), BoundaryError> {
             self.publish_controlled(event, &Deadline::new(Duration::MAX))
         }
@@ -63,17 +59,9 @@ pub(crate) fn emitter<E: 'static>(
             Ok(())
         }
     }
-    let delivery = if invocation.format == crate::output::contract::Format::Ndjson
-        && invocation.output.isolates_writes()
-    {
-        Delivery::Cooperative
-    } else {
-        Delivery::Isolated
-    };
     Emitter {
         invocation: invocation.clone(),
         publish,
-        delivery,
     }
 }
 

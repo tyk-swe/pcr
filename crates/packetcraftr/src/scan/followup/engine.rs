@@ -1,11 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::sync::{Arc, Mutex, PoisonError};
-
-use packetcraftr_core::budget::Deadline;
-use packetcraftr_core::error::BoundaryError;
-
 use crate::clock::Clock;
 use crate::providers::{PacketProviders, TargetProviders, TcpProviders};
 use crate::scan::{self, connect};
@@ -51,24 +46,17 @@ where
             operation = crate::scan::NeighborBounds::authorize(&scan, operation)?;
         }
         let started = self.now();
-        let delivery = sink.delivery();
-        let sink = Arc::new(Mutex::new(sink));
+        let mut sink = sink;
         // Events stream as they settle; the tracker keeps each attempt
         // without its frame, for the endpoint inferences.
-        let tracker = scan::Collector::default();
-        let mut tracked = tracker.clone();
+        let mut tracker = scan::Collector::default();
         // The tracker strips matched response frames, so the scan's retained
         // evidence is counted as events publish.
-        let retained = Arc::new(Mutex::new(Retained::default()));
-        let observing = Arc::clone(&retained);
-        let scan_sink = Arc::clone(&sink);
+        let mut retained = Retained::default();
         let scan_report = self.scan_in(
             scan,
-            crate::engine::execution::forwarding(delivery, move |event: scan::Event, control| {
-                observing
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .observe(&event);
+            crate::engine::execution::forwarding(|event: scan::Event, control| {
+                retained.observe(&event);
                 match &event {
                     scan::Event::Probe { target, probe } => {
                         let probe = scan::ProbeEvidence {
@@ -76,7 +64,7 @@ where
                             ..probe.clone()
                         };
                         Sink::publish(
-                            &mut tracked,
+                            &mut tracker,
                             scan::Event::Probe {
                                 target: target.clone(),
                                 probe,
@@ -84,11 +72,14 @@ where
                         )?;
                     }
                     scan::Event::Qualification(qualification) => {
-                        Sink::publish(&mut tracked, scan::Event::Qualification(*qualification))?;
+                        Sink::publish(&mut tracker, scan::Event::Qualification(*qualification))?;
                     }
                     _ => {}
                 }
-                publish(&scan_sink, Event::Scan(event), control)
+                match control {
+                    Some(control) => sink.publish_controlled(Event::Scan(event), control),
+                    None => sink.publish(Event::Scan(event)),
+                }
             }),
             &operation,
         )?;
@@ -108,8 +99,6 @@ where
             if let Some(runtime) = trace.as_ref().and_then(|trace| trace.runtime.clone()) {
                 trace_operation = trace_operation.with_runtime(runtime);
             }
-            let retained = *retained.lock().unwrap_or_else(PoisonError::into_inner);
-            let trace_sink = Arc::clone(&sink);
             let streamed = stage.stream(
                 self,
                 &trace_operation,
@@ -119,8 +108,9 @@ where
                     started,
                     last_sent: scan_sent,
                 },
-                crate::engine::execution::forwarding(delivery, move |event, control| {
-                    publish(&trace_sink, Event::Trace(event), control)
+                crate::engine::execution::forwarding(|event, control| match control {
+                    Some(control) => sink.publish_controlled(Event::Trace(event), control),
+                    None => sink.publish(Event::Trace(event)),
                 }),
             )?;
             stats.checked_add_assign(&streamed.report.stats)?;
@@ -184,21 +174,16 @@ where
         let started = self.now();
         // Probe events stream as they settle; the tracker keeps only what
         // each endpoint's inference needs.
-        let tracker = connect::Collector::default();
-        let mut tracked = tracker.clone();
-        let delivery = sink.delivery();
+        let mut tracker = connect::Collector::default();
         let report = self.scan_connect_in(
             scan,
-            crate::engine::execution::forwarding(
-                delivery,
-                move |event: connect::Event, control| {
-                    Sink::publish(&mut tracked, event.clone())?;
-                    match control {
-                        Some(control) => sink.publish_controlled(event, control),
-                        None => sink.publish(event),
-                    }
-                },
-            ),
+            crate::engine::execution::forwarding(|event: connect::Event, control| {
+                Sink::publish(&mut tracker, event.clone())?;
+                match control {
+                    Some(control) => sink.publish_controlled(event, control),
+                    None => sink.publish(event),
+                }
+            }),
             &operation,
         )?;
         let aggregate = tracker.finish(report.clone())?;
@@ -221,17 +206,5 @@ where
             endpoints: aggregate.endpoints,
             reverse_dns,
         })
-    }
-}
-
-fn publish<S: Sink<Event, Ack = ()>>(
-    sink: &Mutex<S>,
-    event: Event,
-    control: Option<&Deadline>,
-) -> Result<(), BoundaryError> {
-    let mut sink = sink.lock().unwrap_or_else(PoisonError::into_inner);
-    match control {
-        Some(control) => sink.publish_controlled(event, control),
-        None => sink.publish(event),
     }
 }

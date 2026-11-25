@@ -41,10 +41,10 @@ fn writing(
 fn collect(
     prepared: Prepared<packetcraftr::send::Request>,
 ) -> Result<packetcraftr::send::Aggregate, CliError> {
-    let collector = packetcraftr::send::Collector::default();
+    let mut collector = packetcraftr::send::Collector::default();
     let report = prepared
         .client
-        .send(prepared.request, collector.clone())
+        .send(prepared.request, &mut collector)
         .map_err(CliError::classified)?;
     collector.finish(report).map_err(CliError::classified)
 }

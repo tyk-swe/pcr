@@ -86,7 +86,7 @@ pub mod target;
 pub mod traceroute;
 
 pub use client::Client;
-pub use engine::execution::{Delivery, Sink};
+pub use engine::execution::{Isolated, Sink};
 pub use engine::stats::{Stats, StatsOverflow};
 pub use error::Error;
 pub use providers::{

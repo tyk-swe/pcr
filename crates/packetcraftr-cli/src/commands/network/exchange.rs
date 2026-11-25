@@ -110,9 +110,9 @@ fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<()
         }
         _ => {
             let report = {
-                let collector = packetcraftr::exchange::Collector::default();
+                let mut collector = packetcraftr::exchange::Collector::default();
                 let report = client
-                    .exchange(request.clone(), collector.clone())
+                    .exchange(request.clone(), &mut collector)
                     .map_err(CliError::classified)?;
                 collector.finish(report).map_err(CliError::classified)?
             };

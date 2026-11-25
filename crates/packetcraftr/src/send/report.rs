@@ -1,7 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::engine::execution::Shared;
 use crate::{Sink, Stats};
 use packetcraftr_core::error::BoundaryError;
 
@@ -20,27 +19,24 @@ pub struct Aggregate {
     pub stats: Stats,
 }
 
-#[derive(Clone, Default)]
-pub struct Collector(Shared<Vec<SentFrame>>);
+#[derive(Default)]
+pub struct Collector(Vec<SentFrame>);
 
 impl Sink<Event> for Collector {
-    fn delivery(&self) -> crate::Delivery {
-        crate::Delivery::Cooperative
-    }
-
     type Ack = ();
 
     fn publish(&mut self, event: Event) -> Result<(), BoundaryError> {
-        self.0.update(|sent| match event {
-            Event::Sent(frame) => sent.push(frame),
-        });
+        let Event::Sent(frame) = event;
+        self.0.push(frame);
         Ok(())
     }
 }
 
+crate::engine::execution::forward_sink!(Collector, Event);
+
 impl Collector {
     pub fn finish(self, report: Report) -> Result<Aggregate, Error> {
-        let sent = self.0.take();
+        let sent = self.0;
         super::evidence::validate(&sent, &report)?;
         Ok(Aggregate {
             sent,

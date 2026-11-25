@@ -10,7 +10,6 @@ use std::time::{Duration, SystemTime};
 use serde::Serialize;
 
 use crate::Sink;
-use crate::engine::execution::Shared;
 use crate::probe::index_or_push;
 use packetcraftr_core::error::BoundaryError;
 
@@ -117,27 +116,24 @@ pub struct Aggregate {
     pub endpoints: Vec<Endpoint>,
 }
 
-#[derive(Clone, Default)]
-pub struct Collector(Shared<Vec<ProbeEvidence>>);
+#[derive(Default)]
+pub struct Collector(Vec<ProbeEvidence>);
 
 impl Sink<Event> for Collector {
-    fn delivery(&self) -> crate::Delivery {
-        crate::Delivery::Cooperative
-    }
-
     type Ack = ();
 
     fn publish(&mut self, event: Event) -> Result<(), BoundaryError> {
-        self.0.update(|probes| match event {
-            Event::Probe(probe) => probes.push(probe),
-        });
+        let Event::Probe(probe) = event;
+        self.0.push(probe);
         Ok(())
     }
 }
 
+crate::engine::execution::forward_sink!(Collector, Event);
+
 impl Collector {
     pub fn finish(self, report: Report) -> Result<Aggregate, Error> {
-        let mut probes = self.0.take();
+        let mut probes = self.0;
         let collected = u64::try_from(probes.len()).unwrap_or(u64::MAX);
         if collected != report.stats.connections_scheduled {
             return Err(Error::InvalidEvidence {

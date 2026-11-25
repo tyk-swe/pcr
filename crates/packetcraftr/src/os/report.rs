@@ -6,7 +6,7 @@ use std::time::{Duration, SystemTime};
 use packetcraftr_core::{diagnostic::Diagnostic, error::BoundaryError, frame::Frame};
 
 use super::{Error, Match, Observation, Probe};
-use crate::{Sink, Stats, engine::execution::Shared};
+use crate::{Sink, Stats};
 
 #[derive(Clone, Debug)]
 pub struct ProbeEvidence {
@@ -54,24 +54,22 @@ pub struct Aggregate {
     pub events: Vec<Event>,
 }
 
-#[derive(Clone, Default)]
-pub struct Collector(pub(super) Shared<Vec<Event>>);
+#[derive(Default)]
+pub struct Collector(pub(super) Vec<Event>);
 
 impl Sink<Event> for Collector {
-    fn delivery(&self) -> crate::Delivery {
-        crate::Delivery::Cooperative
-    }
-
     type Ack = ();
     fn publish(&mut self, event: Event) -> Result<(), BoundaryError> {
-        self.0.update(|events| events.push(event));
+        self.0.push(event);
         Ok(())
     }
 }
 
+crate::engine::execution::forward_sink!(Collector, Event);
+
 impl Collector {
     pub fn finish(self, report: Report) -> Result<Aggregate, Error> {
-        let events = self.0.take();
+        let events = self.0;
         let count = events
             .iter()
             .filter(|event| matches!(event, Event::Probe(_)))
@@ -93,27 +91,23 @@ impl Collector {
     }
 
     pub(super) fn observations(&self) -> Vec<Observation> {
-        self.0.update(|events| {
-            events
-                .iter()
-                .filter_map(|event| match event {
-                    Event::Probe(probe) => probe.observation.clone(),
-                    Event::Additional { observation, .. } => observation.clone(),
-                    _ => None,
-                })
-                .collect()
-        })
+        self.0
+            .iter()
+            .filter_map(|event| match event {
+                Event::Probe(probe) => probe.observation.clone(),
+                Event::Additional { observation, .. } => observation.clone(),
+                _ => None,
+            })
+            .collect()
     }
 
     pub(super) fn incomplete(&self) -> bool {
-        self.0.update(|events| {
-            events.iter().any(|event| match event {
-                Event::Diagnostic(diagnostic) => {
-                    diagnostic.code.contains("limit") || diagnostic.code.contains("incomplete")
-                }
-                Event::Probe(probe) => probe.latency.is_some() && probe.response.is_none(),
-                _ => false,
-            })
+        self.0.iter().any(|event| match event {
+            Event::Diagnostic(diagnostic) => {
+                diagnostic.code.contains("limit") || diagnostic.code.contains("incomplete")
+            }
+            Event::Probe(probe) => probe.latency.is_some() && probe.response.is_none(),
+            _ => false,
         })
     }
 }

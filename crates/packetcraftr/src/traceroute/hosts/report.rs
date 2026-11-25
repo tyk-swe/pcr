@@ -11,7 +11,6 @@ use packetcraftr_core::frame::Frame;
 
 use super::request::{Reuse, Strategy};
 use super::selection::Observed;
-use crate::engine::execution::Shared;
 use crate::probe::index_or_push;
 use crate::target::ResolvedZone;
 use crate::traceroute::{Error, Hop, ProbeEvidence, Termination};
@@ -148,8 +147,8 @@ pub struct Aggregate {
     pub stats: Stats,
 }
 
-#[derive(Clone, Default)]
-pub struct Collector(Shared<Collected>);
+#[derive(Default)]
+pub struct Collector(Collected);
 
 #[derive(Default)]
 struct Collected {
@@ -167,17 +166,15 @@ struct Hops {
 }
 
 impl Sink<Event> for Collector {
-    fn delivery(&self) -> crate::Delivery {
-        crate::Delivery::Cooperative
-    }
-
     type Ack = ();
 
     fn publish(&mut self, event: Event) -> Result<(), BoundaryError> {
-        self.0.update(|collected| collected.observe(event));
+        self.0.observe(event);
         Ok(())
     }
 }
+
+crate::engine::execution::forward_sink!(Collector, Event);
 
 impl Collected {
     fn observe(&mut self, event: Event) {
@@ -208,7 +205,7 @@ impl Collector {
             hosts,
             undecoded,
             diagnostics,
-        } = self.0.take();
+        } = self.0;
         // Probe events cover the probes; the neighbor requests the routes
         // resolved sent no probe event and are accounted apart.
         let probes_attempted = report

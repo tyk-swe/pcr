@@ -7,7 +7,6 @@ use packetcraftr_core::decode::DecodedPacket;
 use packetcraftr_core::diagnostic::Diagnostic;
 use packetcraftr_core::frame::Frame;
 
-use crate::engine::execution::Shared;
 use crate::{Sink, Stats, evidence::SentPacket};
 use packetcraftr_core::error::BoundaryError;
 
@@ -32,24 +31,22 @@ pub struct Aggregate {
     pub stats: Stats,
 }
 
-#[derive(Clone, Default)]
-pub struct Collector(Shared<Observed>);
+#[derive(Default)]
+pub struct Collector(Observed);
 
 impl Sink<Event> for Collector {
-    fn delivery(&self) -> crate::Delivery {
-        crate::Delivery::Cooperative
-    }
-
     type Ack = ();
 
     fn publish(&mut self, event: Event) -> Result<(), BoundaryError> {
-        self.0.update(|observed| observed.observe(event));
+        self.0.observe(event);
         Ok(())
     }
 }
 
+crate::engine::execution::forward_sink!(Collector, Event);
+
 impl Collector {
     pub fn finish(self, report: Report) -> Result<Aggregate, Error> {
-        self.0.take().finish(report)
+        self.0.finish(report)
     }
 }

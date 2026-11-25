@@ -19,7 +19,7 @@ use packetcraftr_netio::{
 
 use crate::policy::{DestinationConstraint, Policy};
 use crate::providers::{PacketProviders, TargetProviders, TcpProviders};
-use crate::{Client, Delivery, ProviderSet, Sink};
+use crate::{Client, ProviderSet, Sink};
 
 #[derive(Clone)]
 struct Routes(Arc<Mutex<route::Decision>>);
@@ -168,10 +168,6 @@ pub(crate) fn fail_sink<E>(calls: &Arc<AtomicUsize>) -> FailSink<E> {
 
 impl<E: Send + 'static> Sink<E> for FailSink<E> {
     type Ack = ();
-
-    fn delivery(&self) -> Delivery {
-        Delivery::Cooperative
-    }
 
     fn publish(&mut self, _event: E) -> Result<Self::Ack, BoundaryError> {
         self.calls.fetch_add(1, Ordering::Relaxed);

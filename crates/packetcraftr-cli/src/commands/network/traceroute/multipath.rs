@@ -20,9 +20,9 @@ pub(super) fn run<P: PacketProviders + TargetProviders, K: Clock>(
 ) -> Result<(), CliError> {
     request.validate().map_err(CliError::classified)?;
     if format == Format::Json {
-        let collector = library::Collector::default();
+        let mut collector = library::Collector::default();
         let report = client
-            .traceroute_multipath(request, collector.clone())
+            .traceroute_multipath(request, &mut collector)
             .map_err(CliError::classified)?;
         let result = collector.finish(report).map_err(CliError::classified)?;
         return crate::publication::emit_published(

@@ -129,9 +129,9 @@ pub(super) fn run(
         }
         _ => {
             let report = {
-                let collector = packetcraftr::traceroute::Collector::default();
+                let mut collector = packetcraftr::traceroute::Collector::default();
                 let report = client
-                    .traceroute(request.clone(), collector.clone())
+                    .traceroute(request.clone(), &mut collector)
                     .map_err(CliError::classified)?;
                 collector.finish(report).map_err(CliError::classified)?
             };

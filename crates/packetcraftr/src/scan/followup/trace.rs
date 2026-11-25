@@ -250,13 +250,12 @@ impl Stage {
         let latest = Arc::new(Mutex::new(None::<Instant>));
         let observed = Arc::clone(&latest);
         let settled = client.clock.clone();
-        let delivery = emit.delivery();
         let mut emit = emit;
         // The trace runs in the policy allowance the scan left over, not a
         // fresh one.
         let report = client.trace_hosts_in(
             request,
-            crate::engine::execution::forwarding(delivery, move |event: hosts::Event, control| {
+            crate::engine::execution::forwarding(move |event: hosts::Event, control| {
                 // The probe's wall-clock sent_at is evidence, not a pacing
                 // marker: the monotonic marker is when its event settled.
                 if let hosts::Event::Probe(_) = &event {

@@ -188,9 +188,9 @@ impl crate::commands::Spec for Args {
             }
             _ => {
                 let report = {
-                    let collector = library::Collector::default();
+                    let mut collector = library::Collector::default();
                     let report = client
-                        .identify_os(request.clone(), collector.clone())
+                        .identify_os(request.clone(), &mut collector)
                         .map_err(CliError::classified)?;
                     collector.finish(report).map_err(CliError::classified)?
                 };

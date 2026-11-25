@@ -76,7 +76,6 @@ impl<P: TransmitProviders, K: Clock> Client<P, K> {
         let started = self.now();
         let mut stream = self.streaming_in(&request.send, plan.packet_count, operation)?;
         let mut publish = crate::engine::execution::publisher(
-            &operation.runtime,
             sink,
             |deadline| Error::Output {
                 source: BoundaryError::from_error(deadline),

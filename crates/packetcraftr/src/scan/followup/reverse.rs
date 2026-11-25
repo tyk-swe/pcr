@@ -300,10 +300,10 @@ impl Lookup {
                 return ended(batch::QuestionStatus::Failed, Some(error.to_string()));
             }
         };
-        let collector = batch::Collector::default();
+        let mut collector = batch::Collector::default();
         let request = batch::Request { questions };
         match batch::Prepared::new(&request, u64::from(operation.neighbors.max_attempts()))
-            .and_then(|prepared| client.dns_batch_in(prepared, collector.clone(), operation))
+            .and_then(|prepared| client.dns_batch_in(prepared, &mut collector, operation))
             .and_then(|report| collector.finish(report))
         {
             Ok(aggregate) => {

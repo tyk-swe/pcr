@@ -52,10 +52,9 @@ impl<P: TargetProviders + TcpProviders, K: Clock> Client<P, K> {
         );
         let started = self.now();
         let mut deadline = operation.deadline(self, request.limits.max_duration);
-        let mut publish =
-            crate::engine::execution::publisher(&operation.runtime, sink, Error::from, |source| {
-                Error::Output { source }
-            })?;
+        let mut publish = crate::engine::execution::publisher(sink, Error::from, |source| {
+            Error::Output { source }
+        })?;
         run(
             &request,
             &mut admission,

@@ -115,13 +115,13 @@ mod tests {
                 let socket = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).expect("reserve port");
                 socket.local_addr().expect("addr").port()
             };
-            let collector = ResponderCollector::default();
-            let responder_collector = collector.clone();
             let handle = thread::spawn(move || {
+                let mut collector = ResponderCollector::default();
                 let mut request = ResponderRequest::new(Ipv4Addr::LOCALHOST, port, token);
                 request.max_duration = Duration::from_secs(10);
                 request.idle_after_first = Some(Duration::from_millis(300));
-                respond(request, responder_collector)
+                let outcome = respond(request, &mut collector);
+                (outcome, collector)
             });
             let target = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
             let mut reply = None;
@@ -162,18 +162,21 @@ mod tests {
                 }
             }
             if reply.is_some() {
-                started = Some((handle, collector, reply));
+                started = Some((handle, reply));
                 break;
             }
             if handle.is_finished() {
-                if let Ok(Err(error)) = handle.join() {
-                    eprintln!("responder start failed, retrying on a new port: {error}");
-                    continue;
+                match handle.join() {
+                    Ok((Err(error), _)) => {
+                        eprintln!("responder start failed, retrying on a new port: {error}");
+                        continue;
+                    }
+                    Ok((Ok(_), _)) => panic!("responder exited without answering"),
+                    Err(payload) => std::panic::resume_unwind(payload),
                 }
-                panic!("responder exited without answering");
             }
         }
-        let (handle, collector, reply) = started.expect("responder never answered");
+        let (handle, reply) = started.expect("responder never answered");
         let reply = reply.expect("reply parsed");
         assert_eq!(reply.variant_index, 2);
         assert_eq!(reply.attempt_seq, 9);
@@ -182,7 +185,8 @@ mod tests {
             canary::payload_sha256(&payload)
         );
 
-        let report = handle.join().expect("responder thread").expect("responds");
+        let (report, collector) = handle.join().expect("responder thread");
+        let report = report.expect("responds");
         assert!(report.received >= 1, "received {}", report.received);
         assert!(report.ignored >= 1, "ignored {}", report.ignored);
         assert!(report.replies_sent >= 1);

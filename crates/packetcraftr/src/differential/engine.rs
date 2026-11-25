@@ -279,9 +279,7 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
 
         let operation = Operation::new(self, request.max_duration);
         let deadline = operation.deadline(self, request.max_duration);
-        let publish = publisher(&self.runtime, sink, duration_limit, |source| {
-            Error::Output { source }
-        })?;
+        let publish = publisher(sink, duration_limit, |source| Error::Output { source })?;
         let mut runner = ClientRunner {
             client: self,
             operation: &operation,

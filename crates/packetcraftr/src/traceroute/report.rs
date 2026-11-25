@@ -10,7 +10,6 @@ use serde::Serialize;
 use packetcraftr_core::diagnostic::Diagnostic;
 use packetcraftr_core::frame::Frame;
 
-use crate::engine::execution::Shared;
 use crate::probe::{self, Transport, index_or_push};
 use crate::{Sink, Stats};
 use packetcraftr_core::error::BoundaryError;
@@ -144,8 +143,8 @@ pub struct Report {
     pub stats: Stats,
 }
 
-#[derive(Clone, Default)]
-pub struct Collector(Shared<Collected>);
+#[derive(Default)]
+pub struct Collector(Collected);
 
 #[derive(Default)]
 struct Collected {
@@ -157,17 +156,15 @@ struct Collected {
 }
 
 impl Sink<Event> for Collector {
-    fn delivery(&self) -> crate::Delivery {
-        crate::Delivery::Cooperative
-    }
-
     type Ack = ();
 
     fn publish(&mut self, event: Event) -> Result<(), BoundaryError> {
-        self.0.update(|collected| collected.observe(event));
+        self.0.observe(event);
         Ok(())
     }
 }
+
+crate::engine::execution::forward_sink!(Collector, Event);
 
 impl Collected {
     fn observe(&mut self, event: Event) {
@@ -199,7 +196,7 @@ impl Collector {
             undecoded,
             diagnostics,
             ..
-        } = self.0.take();
+        } = self.0;
         if probes != report.stats.packets_attempted {
             return Err(Error::IncoherentEvents {
                 message: format!(

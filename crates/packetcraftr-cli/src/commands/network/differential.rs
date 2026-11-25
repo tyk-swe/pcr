@@ -148,9 +148,9 @@ fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<()
             rendering::render_complete(report, stream)
         }
         Format::Text | Format::Json => {
-            let collector = lib::Collector::default();
+            let mut collector = lib::Collector::default();
             let report = client
-                .differential(request, collector.clone())
+                .differential(request, &mut collector)
                 .map_err(CliError::classified)?;
             let aggregate = collector.finish(report);
             invocation.check()?;

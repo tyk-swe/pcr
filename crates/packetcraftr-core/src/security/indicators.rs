@@ -248,10 +248,6 @@ fn network(s: &str) -> Option<(IpAddr, u8)> {
     Some((ip, prefix))
 }
 impl Indicator {
-    pub fn matches_ip(&self, candidate: IpAddr) -> bool {
-        self.network_key()
-            .is_some_and(|(base, prefix)| prefix_key(candidate, prefix) == base)
-    }
     fn network_key(&self) -> Option<(IpAddr, u8)> {
         match self.kind {
             Kind::Ip => {
@@ -264,7 +260,16 @@ impl Indicator {
             _ => None,
         }
     }
-    pub fn matches_domain(&self, candidate: &str) -> bool {
+}
+
+#[cfg(test)]
+impl Indicator {
+    fn matches_ip(&self, candidate: IpAddr) -> bool {
+        self.network_key()
+            .is_some_and(|(base, prefix)| prefix_key(candidate, prefix) == base)
+    }
+
+    fn matches_domain(&self, candidate: &str) -> bool {
         if !matches!(self.kind, Kind::Domain | Kind::DomainSuffix) {
             return false;
         }

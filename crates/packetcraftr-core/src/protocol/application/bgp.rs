@@ -82,35 +82,51 @@ impl Bgp {
     fn reject_uncarried_fields(&self) -> Result<(), Error> {
         let default = Self::default();
         let fields = [
-            ("version", 1, self.version == default.version),
-            ("my_as", 1, self.my_as == default.my_as),
-            ("hold_time", 1, self.hold_time == default.hold_time),
-            ("identifier", 1, self.identifier == default.identifier),
-            ("parameters", 1, self.parameters == default.parameters),
-            ("withdrawn", 2, self.withdrawn == default.withdrawn),
-            ("attributes", 2, self.attributes == default.attributes),
-            ("nlri", 2, self.nlri == default.nlri),
-            ("error_code", 3, self.error_code == default.error_code),
+            (
+                "version",
+                self.message_type != 1 && self.version != default.version,
+            ),
+            (
+                "my_as",
+                self.message_type != 1 && self.my_as != default.my_as,
+            ),
+            (
+                "hold_time",
+                self.message_type != 1 && self.hold_time != default.hold_time,
+            ),
+            (
+                "identifier",
+                self.message_type != 1 && self.identifier != default.identifier,
+            ),
+            (
+                "parameters",
+                self.message_type != 1 && self.parameters != default.parameters,
+            ),
+            (
+                "withdrawn",
+                self.message_type != 2 && self.withdrawn != default.withdrawn,
+            ),
+            (
+                "attributes",
+                self.message_type != 2 && self.attributes != default.attributes,
+            ),
+            ("nlri", self.message_type != 2 && self.nlri != default.nlri),
+            (
+                "error_code",
+                self.message_type != 3 && self.error_code != default.error_code,
+            ),
             (
                 "error_subcode",
-                3,
-                self.error_subcode == default.error_subcode,
+                self.message_type != 3 && self.error_subcode != default.error_subcode,
             ),
-            ("data", 3, self.data == default.data),
+            ("data", self.message_type != 3 && self.data != default.data),
         ];
-        if let Some((field, ..)) = fields
-            .iter()
-            .find(|(_, carried_by, unchanged)| *carried_by != self.message_type && !unchanged)
-        {
-            return Err(invalid(
-                NAME,
-                format!(
-                    "message type {} does not carry field {field}",
-                    self.message_type
-                ),
-            ));
-        }
-        Ok(())
+        crate::protocol::common::reject_uncarried(NAME, &fields, |field| {
+            format!(
+                "message type {} does not carry field {field}",
+                self.message_type
+            )
+        })
     }
 
     fn encode_wire(&self, c: &EncodeContext<'_>) -> Result<Vec<u8>, Error> {

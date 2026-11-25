@@ -22,9 +22,7 @@ use crate::{
     Error,
     capture::NativeSettings,
     interface::Id as InterfaceId,
-    platform::common::pcap_api::{
-        Diagnostic, check_setting_status, timestamp_precision_value, timestamp_source_value,
-    },
+    platform::common::pcap_api::{Diagnostic, NativeSetting, apply_native_settings},
 };
 
 #[derive(Clone, Copy)]
@@ -128,46 +126,32 @@ pub(in crate::platform) fn open_handle(
         handle.api.pcap_set_immediate_mode,
         1,
     )?;
-    if let Some(buffer_size) = native.buffer_size {
-        let size = c_int::try_from(buffer_size).map_err(|_| Error::InvalidCaptureSetting {
-            field: "buffer_size",
-            message: format!(
-                "exceeds the native maximum of {} bytes",
-                crate::capture::MAX_NATIVE_BUFFER_SIZE
-            ),
-        })?;
-        set_native_option(
-            &handle,
-            interface,
-            "pcap_set_buffer_size",
-            "buffer_size",
-            &buffer_size.to_string(),
-            handle.api.pcap_set_buffer_size,
-            size,
-        )?;
-    }
-    if let Some(source) = native.timestamp_source {
-        set_native_option(
-            &handle,
-            interface,
-            "pcap_set_tstamp_type",
-            "timestamp_source",
-            source.as_str(),
-            handle.api.pcap_set_tstamp_type,
-            timestamp_source_value(source),
-        )?;
-    }
-    if let Some(precision) = native.timestamp_precision {
-        set_native_option(
-            &handle,
-            interface,
-            "pcap_set_tstamp_precision",
-            "timestamp_precision",
-            precision.as_str(),
-            handle.api.pcap_set_tstamp_precision,
-            timestamp_precision_value(precision),
-        )?;
-    }
+    apply_native_settings(
+        "Npcap",
+        interface,
+        native,
+        |setting, value| {
+            let function = match setting {
+                NativeSetting::BufferSize => handle.api.pcap_set_buffer_size,
+                NativeSetting::TimestampSource => handle.api.pcap_set_tstamp_type,
+                NativeSetting::TimestampPrecision => handle.api.pcap_set_tstamp_precision,
+            };
+            let Some(function) = function else {
+                return Err(Error::UnsupportedCaptureSetting {
+                    setting: setting.field(),
+                    interface: interface.name.clone(),
+                    message: format!(
+                        "the loaded Npcap runtime does not export {}",
+                        setting.operation()
+                    )
+                    .into(),
+                });
+            };
+            // SAFETY: function is a pcap_set_* operation with this ABI and the handle is not yet activated.
+            Ok(unsafe { function(handle.raw.as_ptr(), value) })
+        },
+        || handle.error_message(),
+    )?;
     // SAFETY: pre-activation options are complete and this handle was never activated.
     let activation = unsafe { (handle.api.pcap_activate)(handle.raw.as_ptr()) };
     if activation_rejected(activation, promiscuous_mode) {
@@ -203,35 +187,6 @@ fn set_integer_option(
             source: Diagnostic::new(Some(result), handle.error_message()).into_source(),
         })
     }
-}
-
-fn set_native_option(
-    handle: &NpcapHandle,
-    interface: &InterfaceId,
-    operation: &'static str,
-    setting: &'static str,
-    requested: &str,
-    function: Option<PcapSetInteger>,
-    value: c_int,
-) -> Result<(), Error> {
-    let Some(function) = function else {
-        return Err(Error::UnsupportedCaptureSetting {
-            setting,
-            interface: interface.name.clone(),
-            message: format!("the loaded Npcap runtime does not export {operation}").into(),
-        });
-    };
-    // SAFETY: function is a pcap_set_* operation with this ABI and the handle is not yet activated.
-    let status = unsafe { function(handle.raw.as_ptr(), value) };
-    check_setting_status(
-        "Npcap",
-        interface,
-        operation,
-        setting,
-        requested,
-        status,
-        &handle.error_message(),
-    )
 }
 
 pub(in crate::platform) fn reported_precision(handle: &NpcapHandle) -> Option<c_int> {

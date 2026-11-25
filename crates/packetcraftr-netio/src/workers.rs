@@ -24,8 +24,6 @@ use std::{
 
 use packetcraftr_core::budget::Deadline;
 
-use crate::resources::ExecutorThreadSnapshot;
-
 #[cfg(native_route)]
 pub(crate) use admission::Exhausted;
 pub(crate) use admission::{
@@ -132,16 +130,6 @@ impl Pool {
     #[cfg(native_layer2)]
     pub(crate) fn capacity(&self) -> usize {
         self.capacity
-    }
-
-    pub(crate) fn thread_snapshot(&self) -> ExecutorThreadSnapshot {
-        let state = lock(&self.state);
-        ExecutorThreadSnapshot {
-            capacity: self.capacity,
-            busy: state.busy.len(),
-            idle: state.idle.len(),
-            retiring: state.retiring.len() + state.starting,
-        }
     }
 
     fn retirement_reaper(&self) -> Result<reaper::ReaperClient, reaper::ReaperStartError> {

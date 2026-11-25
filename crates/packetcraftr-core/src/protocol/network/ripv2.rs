@@ -44,13 +44,55 @@ crate::reflective_layer! {
 message_codec!(Ripv2Codec, Ripv2, ripv2_schema);
 
 const NAME: &str = crate::protocol::BuiltinProtocol::Ripv2.as_str();
+
+pub(super) fn begin_rip_encode(
+    name: &'static str,
+    command: u8,
+    version: u8,
+    c: &EncodeContext<'_>,
+) -> Result<Writer, Error> {
+    if !matches!(command, 1 | 2) {
+        return Err(invalid(name, "invalid command"));
+    }
+    let mut w = Writer::new(name, c.remaining_packet_bytes);
+    w.put(&[command, version, 0, 0])?;
+    Ok(w)
+}
+
+pub(super) fn parse_rip_wire(
+    name: &'static str,
+    version: u8,
+    b: &Bytes,
+    mut parse_entry: impl FnMut(
+        &[u8],
+    ) -> Result<std::collections::BTreeMap<String, field::Value>, Error>,
+) -> Result<(u8, Records, Vec<crate::layout::FieldLayout>), Error> {
+    let mut r = Reader::new(name, b);
+    r.mark(0, 0..1);
+    r.mark(1, 4..b.len());
+    let command = r.u8()?;
+    if !matches!(command, 1 | 2) {
+        return Err(invalid(name, "invalid command"));
+    }
+    if r.u8()? != version {
+        return Err(unsupported(name, "unsupported version"));
+    }
+    if r.u16()? != 0 {
+        return Err(invalid(name, "reserved header is nonzero"));
+    }
+    let mut routes = Records::default();
+    while r.left() > 0 {
+        if routes.0.len() == MAX_RECORDS {
+            return Err(invalid(name, "too many routes"));
+        }
+        routes.0.push(parse_entry(r.take(20)?)?);
+    }
+    Ok((command, routes, r.take_layouts()))
+}
+
 impl Ripv2 {
     fn encode_wire(&self, c: &EncodeContext<'_>) -> Result<Vec<u8>, Error> {
-        if !matches!(self.command, 1 | 2) {
-            return Err(invalid(NAME, "invalid command"));
-        }
-        let mut w = Writer::new(NAME, c.remaining_packet_bytes);
-        w.put(&[self.command, 2, 0, 0])?;
+        let mut w = begin_rip_encode(NAME, self.command, 2, c)?;
         for r in &self.routes.0 {
             if let Some(field::Value::Bytes(auth)) = r.get("authentication") {
                 if auth.len() != 20 || auth[..2] != [255, 255] {
@@ -85,32 +127,13 @@ impl Ripv2 {
         b: Bytes,
         _: &DecodeContext<'_>,
     ) -> Result<(Self, Vec<crate::layout::FieldLayout>), Error> {
-        let mut r = Reader::new(NAME, &b);
-        r.mark(0, 0..1);
-        r.mark(1, 4..b.len());
-        let command = r.u8()?;
-        if !matches!(command, 1 | 2) {
-            return Err(invalid(NAME, "invalid command"));
-        }
-        if r.u8()? != 2 {
-            return Err(unsupported(NAME, "unsupported version"));
-        }
-        if r.u16()? != 0 {
-            return Err(invalid(NAME, "reserved header is nonzero"));
-        }
-        let mut routes = Records::default();
-        while r.left() > 0 {
-            if routes.0.len() == MAX_RECORDS {
-                return Err(invalid(NAME, "too many routes"));
-            }
-            let p = r.take(20)?;
+        let (command, routes, layouts) = parse_rip_wire(NAME, 2, &b, |p| {
             let family = u16::from_be_bytes([p[0], p[1]]);
             if family == 65535 {
-                routes.0.push(record([(
+                return Ok(record([(
                     "authentication",
                     Bytes::copy_from_slice(p).into(),
                 )]));
-                continue;
             }
             let tag = u16::from_be_bytes([p[2], p[3]]);
             let ip =
@@ -119,15 +142,15 @@ impl Ripv2 {
             if !(1..=16).contains(&metric) {
                 return Err(invalid(NAME, "invalid metric"));
             }
-            routes.0.push(record([
+            Ok(record([
                 ("family", family.into()),
                 ("tag", tag.into()),
                 ("address", ip(4)),
                 ("mask", ip(8)),
                 ("next_hop", ip(12)),
                 ("metric", metric.into()),
-            ]));
-        }
-        Ok((Self { command, routes }, r.take_layouts()))
+            ]))
+        })?;
+        Ok((Self { command, routes }, layouts))
     }
 }

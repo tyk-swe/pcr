@@ -100,6 +100,86 @@ pub(super) fn finish_constructed<M: Message>(
     Ok(())
 }
 
+macro_rules! dhcp_codec {
+    ($codec:ident, $message:ty, $name:ident, |$input:ident| $accept:expr) => {
+        impl super::super::codec::Message for $message {
+            const NAME: &'static str = $name;
+
+            fn decode_wire(wire: bytes::Bytes) -> Result<Self, super::super::Error> {
+                Self::try_from(wire)
+            }
+
+            fn encode_wire(
+                &self,
+                limits: super::super::Limits,
+            ) -> Result<bytes::Bytes, super::super::Error> {
+                self.to_wire_with_limits(limits)
+            }
+
+            fn layout() -> Vec<crate::layout::FieldLayout> {
+                layout()
+            }
+        }
+
+        #[derive(Clone, Copy, Debug, Default)]
+        pub(crate) struct $codec;
+
+        impl crate::codec::Codec for $codec {
+            fn protocol_id(&self) -> &'static crate::layer::Id {
+                &schema().protocol
+            }
+
+            fn schema(&self) -> Option<&'static crate::layer::Schema> {
+                Some(schema())
+            }
+
+            fn new_layer(&self) -> Result<Box<dyn crate::layer::Layer>, crate::codec::Error> {
+                Ok(Box::new(<$message>::default()))
+            }
+
+            fn seed_layer(
+                &self,
+                fields: &[(usize, &crate::field::Value)],
+            ) -> Result<Option<crate::codec::SeededLayer>, crate::codec::Error> {
+                super::super::codec::seed_layer::<$message>(fields)
+            }
+
+            fn finish_constructed(
+                &self,
+                layer: &mut dyn crate::layer::Layer,
+                fields: &[(usize, &crate::field::Value)],
+            ) -> Result<(), crate::codec::Error> {
+                super::super::codec::finish_constructed::<$message>(layer, fields)
+            }
+
+            fn accepts_decoded_protocol(&self, protocol: &crate::layer::Id) -> bool {
+                protocol == self.protocol_id() || protocol == &crate::layer::Raw::ID
+            }
+
+            fn encode(
+                &self,
+                layer: &dyn crate::layer::Layer,
+                payload: &[u8],
+                context: &crate::codec::EncodeContext<'_>,
+            ) -> Result<crate::codec::Encoded, crate::codec::Error> {
+                super::super::codec::encode::<$message>(layer, payload, context)
+            }
+
+            fn decode(
+                &self,
+                $input: bytes::Bytes,
+                _context: &crate::codec::DecodeContext<'_>,
+            ) -> Result<crate::codec::Decoded, crate::codec::Error> {
+                if !($accept) {
+                    return Ok(crate::layer::Raw::decoded($input));
+                }
+                super::super::codec::decode::<$message>($input)
+            }
+        }
+    };
+}
+pub(super) use dhcp_codec;
+
 pub(super) struct Budget {
     pub(super) limits: Limits,
     options: usize,

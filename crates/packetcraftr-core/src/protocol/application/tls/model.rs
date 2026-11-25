@@ -54,13 +54,6 @@ pub struct Record {
     pub body: Bytes,
 }
 
-impl Record {
-    #[must_use]
-    pub fn is_handshake(&self) -> bool {
-        self.content_type == CONTENT_TYPE_HANDSHAKE
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Handshake {
     ClientHello(Box<ClientHello>),

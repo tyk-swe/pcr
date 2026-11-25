@@ -5,7 +5,7 @@ use std::net::IpAddr;
 
 use bytes::Bytes;
 
-use super::validation::{Validated, validate};
+use super::validation::validate;
 use crate::interface::Id as InterfaceId;
 use crate::{Error, transmit::Layer3Frame};
 #[cfg(target_os = "windows")]
@@ -20,20 +20,22 @@ pub(super) struct PreparedRawIp {
 }
 
 pub(super) fn prepare(frame: Layer3Frame<'_>) -> Result<PreparedRawIp, Error> {
-    let Validated {
-        interface,
-        destination,
-        bytes,
-    } = validate(frame, target_restrictions)?;
-    let submission = match destination {
-        IpAddr::V4(_) => ipv4_submission(&bytes)?,
-        IpAddr::V6(_) => bytes.clone(),
+    let validated = validate(frame)?;
+    #[cfg(target_os = "windows")]
+    target_restrictions(
+        &validated.bytes,
+        validated.packet_source,
+        validated.interface_source,
+    )?;
+    let submission = match validated.destination {
+        IpAddr::V4(_) => ipv4_submission(&validated.bytes)?,
+        IpAddr::V6(_) => validated.bytes.clone(),
     };
     Ok(PreparedRawIp {
-        interface,
-        destination,
+        interface: validated.interface,
+        destination: validated.destination,
         submission,
-        wire_bytes: bytes,
+        wire_bytes: validated.bytes,
     })
 }
 
@@ -56,15 +58,6 @@ fn ipv4_submission(bytes: &Bytes) -> Result<Bytes, Error> {
     let flags_and_offset = u16::from_be_bytes([header[6], header[7]]);
     header[6..8].copy_from_slice(&flags_and_offset.to_ne_bytes());
     Ok(Bytes::from(submission))
-}
-
-#[cfg(not(target_os = "windows"))]
-fn target_restrictions(
-    _bytes: &Bytes,
-    _packet_source: IpAddr,
-    _interface_source: IpAddr,
-) -> Result<(), Error> {
-    Ok(())
 }
 
 #[cfg(target_os = "windows")]

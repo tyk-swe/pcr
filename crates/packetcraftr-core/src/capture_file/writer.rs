@@ -241,10 +241,6 @@ impl<W: Write> Writer<W> {
         }
     }
 
-    pub fn size_limit(&self) -> usize {
-        self.max_size
-    }
-
     pub fn stream_limits(&self) -> Limits {
         self.budget.limits()
     }

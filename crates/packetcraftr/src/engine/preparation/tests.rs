@@ -197,7 +197,7 @@ fn streaming_session_respects_policy_and_cancellation() {
     let options = options();
     let mut stream = client.streaming_in(&options, 10, &operation).unwrap();
     for size in [8, 16] {
-        let prepared = stream.prepare_layer3(packet(size)).unwrap();
+        let prepared = stream.prepare(packet(size)).unwrap();
         let expected = prepared.built().bytes.clone();
         let sent = stream.transmit(prepared).unwrap();
         assert_eq!(sent.built().bytes, expected);
@@ -209,8 +209,8 @@ fn streaming_session_respects_policy_and_cancellation() {
         ..Default::default()
     });
     denied.push(Udp::default());
-    assert!(stream.prepare_layer3(denied).is_err());
-    let prepared = stream.prepare_layer3(packet(4)).unwrap();
+    assert!(stream.prepare(denied).is_err());
+    let prepared = stream.prepare(packet(4)).unwrap();
     cancellation.cancel();
     assert!(stream.transmit(prepared).is_err());
     assert_eq!(tx.1.load(Ordering::Relaxed), 1);

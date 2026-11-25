@@ -17,6 +17,7 @@ use packetcraftr_core::error::Source;
 #[cfg(native_layer2)]
 use std::{sync::LazyLock, time::Duration};
 
+use super::lock;
 #[cfg(native_layer2)]
 use super::{Task, Waited, shared};
 
@@ -68,7 +69,7 @@ impl ReaperService {
 }
 
 pub(crate) fn retirement_service(capacity: usize) -> Result<ReaperService, ReaperStartError> {
-    start_reaper(capacity, spawn_reaper_thread)
+    start_reaper(capacity)
 }
 
 pub(crate) type ReapTask = Box<dyn FnOnce() + Send + 'static>;
@@ -93,11 +94,7 @@ pub(crate) fn wait_until_finished(
 impl ReaperClient {
     /// The caller retains ownership on every refusal.
     pub(crate) fn try_transfer(&self, task: ReapTask) -> Result<(), ReapTask> {
-        let sender = self
-            .tasks
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone();
+        let sender = lock(&self.tasks).clone();
         let Some(sender) = sender else {
             return Err(task);
         };
@@ -119,20 +116,14 @@ impl ReaperClient {
 
     #[cfg(native_layer2)]
     fn retain(&self, task: ReapTask) {
-        let mut pending = self
-            .pending
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut pending = lock(&self.pending);
         debug_assert!(pending.len() < self.capacity);
         pending.push_back(task);
     }
 
     fn retry_pending(&self) {
         for _ in 0..self.capacity {
-            let mut pending = self
-                .pending
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut pending = lock(&self.pending);
             let Some(task) = pending.pop_front() else {
                 return;
             };
@@ -149,22 +140,17 @@ impl ReaperClient {
 
 #[cfg(native_layer2)]
 pub(crate) fn shared_reaper() -> Result<ReaperClient, ReaperStartError> {
-    let mut service = SHARED_REAPER
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut service = lock(&SHARED_REAPER);
     if let Some(service) = &*service {
         return Ok(service.client());
     }
-    let initialized = start_reaper(shared().capacity(), spawn_reaper_thread)?;
+    let initialized = start_reaper(shared().capacity())?;
     let client = initialized.client();
     *service = Some(initialized);
     Ok(client)
 }
 
-fn start_reaper(
-    capacity: usize,
-    mut spawn: impl FnMut(SharedReceiver, ReaperClient) -> std::io::Result<JoinHandle<()>>,
-) -> Result<ReaperService, ReaperStartError> {
+fn start_reaper(capacity: usize) -> Result<ReaperService, ReaperStartError> {
     // The channel and threads match pool capacity, so every admitted worker can be reaped.
     let (tasks, receiver) = mpsc::sync_channel(capacity);
     let receiver = Arc::new(Mutex::new(receiver));
@@ -176,7 +162,7 @@ fn start_reaper(
     };
     let mut workers = Vec::with_capacity(capacity);
     for _ in 0..capacity {
-        match spawn(Arc::clone(&receiver), client.clone()) {
+        match spawn_reaper_thread(Arc::clone(&receiver), client.clone()) {
             Ok(worker) => workers.push(worker),
             Err(error) => {
                 close_sender(&tasks);
@@ -208,10 +194,7 @@ fn spawn_reaper_thread(
 fn run_reaper(receiver: SharedReceiver, client: ReaperClient) {
     loop {
         client.retry_pending();
-        let task = receiver
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .recv();
+        let task = lock(&receiver).recv();
         let Ok(task) = task else {
             return;
         };
@@ -222,8 +205,5 @@ fn run_reaper(receiver: SharedReceiver, client: ReaperClient) {
 }
 
 fn close_sender(tasks: &SharedSender) {
-    tasks
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .take();
+    lock(tasks).take();
 }

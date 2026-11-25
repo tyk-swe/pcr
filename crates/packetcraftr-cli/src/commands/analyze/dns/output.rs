@@ -2,18 +2,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::commands::offline_analysis::output::{
-    ScopedFlowKey, StreamTransport, analysis_complete,
+    ScopedFlowKey, StreamIssue, StreamTransport, analysis_complete, sources,
 };
 use crate::output::contract::Error;
 use crate::output::frame::Source;
 use crate::output::hex::compact_hex;
 use crate::output::published_enum;
 use crate::output::stream::StreamRecord;
-use packetcraftr_core::{
-    analysis::{dns, provenance::SourceSet},
-    field,
-    layer::Layer,
-};
+use packetcraftr_core::{analysis::dns, field, layer::Layer};
 use serde::{Serialize, ser::SerializeMap};
 use std::collections::BTreeMap;
 
@@ -51,10 +47,6 @@ impl From<dns::Latency> for Latency {
             negative: value.negative,
         }
     }
-}
-
-fn sources(value: &SourceSet) -> Result<Vec<Source>, Error> {
-    value.frames().iter().map(Source::try_from).collect()
 }
 
 #[derive(Debug)]
@@ -179,13 +171,8 @@ impl StreamRecord for Transaction {
         "dns_transaction"
     }
 }
-#[derive(Debug, Serialize)]
-pub(crate) struct Issue {
-    pub number: u64,
-    pub flow: ScopedFlowKey,
-    pub stream: u64,
-    pub status: Status,
-}
+pub(crate) type Issue = StreamIssue<Status>;
+
 impl From<dns::StreamIssue> for Issue {
     fn from(value: dns::StreamIssue) -> Self {
         Self {

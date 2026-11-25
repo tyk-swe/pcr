@@ -119,52 +119,21 @@ pub(super) fn duration_limit(error: DeadlineExceeded) -> Error {
     }
 }
 
-impl crate::error::FromFailure for Error {
-    fn from_failure(step: u64, failure: crate::error::Failure) -> Self {
-        match failure {
-            crate::error::Failure::InvalidLimit {
-                field,
-                value,
-                reason,
-            } => Self::InvalidLimit {
-                field,
-                value,
-                reason,
-            },
-            crate::error::Failure::Authorization(source) => Self::Authorization(source),
-            crate::error::Failure::DurationLimit(source) => {
-                let _case_index = step;
-
-                duration_limit(source)
-            }
-            crate::error::Failure::Interrupted(source) => {
-                let _case_index = step;
-
-                source.into_error()
-            }
-            crate::error::Failure::Clock(source) => {
-                let case_index = step;
-
-                Self::Clock { case_index, source }
-            }
-            crate::error::Failure::Execution(source) => {
-                let case_index = step;
-
-                Self::Execution { case_index, source }
-            }
-            crate::error::Failure::InvalidEvidence(source) => {
-                let case_index = step;
-
-                Self::InvalidEvidence {
-                    case_index,
-                    message: source.describe("case", "fuzz"),
-                }
-            }
-            crate::error::Failure::StatsOverflow(_source) => {
-                let case_index = step;
-
-                Self::StatisticsOverflow { case_index }
-            }
-        }
-    }
-}
+crate::error::impl_from_failure!(
+    Error,
+    case_index,
+    invalid_limit: |field, value, reason| Self::InvalidLimit {
+        field,
+        value,
+        reason,
+    },
+    duration_limit: |source| duration_limit(source),
+    interrupted: |source| source.into_error(),
+    clock: |source| Self::Clock { case_index, source },
+    execution: |source| Self::Execution { case_index, source },
+    invalid_evidence: |source| Self::InvalidEvidence {
+        case_index,
+        message: source.describe("case", "fuzz"),
+    },
+    stats_overflow: |_source| Self::StatisticsOverflow { case_index },
+);

@@ -132,42 +132,33 @@ impl ModbusTcp {
         let fields = [
             (
                 "address",
-                read_request || write_single || write_multiple,
-                self.address == default.address,
+                !(read_request || write_single || write_multiple)
+                    && self.address != default.address,
             ),
             (
                 "quantity",
-                read_request || write_multiple,
-                self.quantity == default.quantity,
+                !(read_request || write_multiple) && self.quantity != default.quantity,
             ),
-            ("value", write_single, self.value == default.value),
+            ("value", !write_single && self.value != default.value),
             (
                 "exception_code",
-                self.form == PduForm::Exception,
-                self.exception_code == default.exception_code,
+                self.form != PduForm::Exception && self.exception_code != default.exception_code,
             ),
             (
                 "data",
-                self.form == PduForm::Raw
+                !(self.form == PduForm::Raw
                     || self.form == PduForm::Request && write_multiple
-                    || self.form == PduForm::Response && matches!(self.function, 1..=4),
-                self.data == default.data,
+                    || self.form == PduForm::Response && matches!(self.function, 1..=4))
+                    && self.data != default.data,
             ),
         ];
-        if let Some((field, ..)) = fields
-            .iter()
-            .find(|(_, carried, unchanged)| !carried && !unchanged)
-        {
-            return Err(invalid(
-                NAME,
-                format!(
-                    "{field} is not part of {} function {}",
-                    self.form.as_str(),
-                    self.function
-                ),
-            ));
-        }
-        Ok(())
+        crate::protocol::common::reject_uncarried(NAME, &fields, |field| {
+            format!(
+                "{field} is not part of {} function {}",
+                self.form.as_str(),
+                self.function
+            )
+        })
     }
     fn encode_wire(&self, c: &EncodeContext<'_>) -> Result<Vec<u8>, Error> {
         self.validate_fields()?;

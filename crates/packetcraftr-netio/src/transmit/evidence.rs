@@ -63,7 +63,8 @@ pub struct Timing {
 }
 
 impl Timing {
-    pub fn started(self) -> TimeMarker {
+    #[cfg(test)]
+    fn started(self) -> TimeMarker {
         self.started
     }
 
@@ -76,8 +77,8 @@ impl Timing {
         self.started
     }
 
-    /// When the provider returned successful acceptance of the exact bytes.
-    pub fn completed(self) -> TimeMarker {
+    #[cfg(test)]
+    fn completed(self) -> TimeMarker {
         self.completed
     }
 
@@ -98,10 +99,6 @@ impl Submission {
         Self {
             started: TimeMarker::now(),
         }
-    }
-
-    pub fn started(&self) -> TimeMarker {
-        self.started
     }
 
     pub fn complete(self, bytes_sent: usize, wire_bytes: Bytes) -> Report {

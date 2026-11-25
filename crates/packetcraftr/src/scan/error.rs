@@ -218,31 +218,7 @@ impl Classified for Error {
     }
 }
 
-impl crate::error::FromFailure for Error {
-    fn from_failure(sequence: u64, failure: crate::error::Failure) -> Self {
-        match failure {
-            crate::error::Failure::InvalidLimit {
-                field,
-                value,
-                reason,
-            } => Self::InvalidLimit {
-                field,
-                value,
-                reason,
-            },
-            crate::error::Failure::Authorization(source) => Self::Authorization(source),
-            crate::error::Failure::DurationLimit(source) => source.into(),
-            crate::error::Failure::Interrupted(source) => source.into(),
-            crate::error::Failure::Clock(source) => Self::Clock { sequence, source },
-            crate::error::Failure::Execution(source) => Self::Execution { sequence, source },
-            crate::error::Failure::InvalidEvidence(source) => Self::InvalidEvidence {
-                sequence,
-                message: WORKFLOW.describe_evidence(&source),
-            },
-            crate::error::Failure::StatsOverflow(_source) => Self::StatisticsOverflow { sequence },
-        }
-    }
-}
+crate::error::impl_from_failure!(Error, workflow: WORKFLOW);
 
 pub(super) fn duration_limit(sequence: u64, error: DeadlineExceeded) -> Error {
     Error::from_failure(sequence, crate::error::Failure::DurationLimit(error))

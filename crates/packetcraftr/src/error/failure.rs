@@ -27,3 +27,58 @@ pub(crate) enum Failure {
 pub(crate) trait FromFailure: Sized {
     fn from_failure(sequence: u64, failure: Failure) -> Self;
 }
+
+macro_rules! impl_from_failure {
+    (
+        $error:ty,
+        $step:ident,
+        invalid_limit: |$field:ident, $value:ident, $reason:ident| $invalid_limit:expr,
+        duration_limit: |$dur:ident| $duration_limit:expr,
+        interrupted: |$int:ident| $interrupted:expr,
+        clock: |$clock:ident| $clock_arm:expr,
+        execution: |$exec:ident| $exec_arm:expr,
+        invalid_evidence: |$ev:ident| $ev_arm:expr,
+        stats_overflow: |$ovf:ident| $ovf_arm:expr $(,)?
+    ) => {
+        impl $crate::error::FromFailure for $error {
+            fn from_failure($step: u64, failure: $crate::error::Failure) -> Self {
+                match failure {
+                    $crate::error::Failure::InvalidLimit {
+                        field: $field,
+                        value: $value,
+                        reason: $reason,
+                    } => $invalid_limit,
+                    $crate::error::Failure::Authorization(source) => Self::Authorization(source),
+                    $crate::error::Failure::DurationLimit($dur) => $duration_limit,
+                    $crate::error::Failure::Interrupted($int) => $interrupted,
+                    $crate::error::Failure::Clock($clock) => $clock_arm,
+                    $crate::error::Failure::Execution($exec) => $exec_arm,
+                    $crate::error::Failure::InvalidEvidence($ev) => $ev_arm,
+                    $crate::error::Failure::StatsOverflow($ovf) => $ovf_arm,
+                }
+            }
+        }
+    };
+    ($error:ty, workflow: $workflow:expr) => {
+        $crate::error::impl_from_failure!(
+            $error,
+            sequence,
+            invalid_limit: |field, value, reason| Self::InvalidLimit {
+                field,
+                value,
+                reason,
+            },
+            duration_limit: |source| source.into(),
+            interrupted: |source| source.into(),
+            clock: |source| Self::Clock { sequence, source },
+            execution: |source| Self::Execution { sequence, source },
+            invalid_evidence: |source| Self::InvalidEvidence {
+                sequence,
+                message: $workflow.describe_evidence(&source),
+            },
+            stats_overflow: |_source| Self::StatisticsOverflow { sequence },
+        );
+    };
+}
+
+pub(crate) use impl_from_failure;

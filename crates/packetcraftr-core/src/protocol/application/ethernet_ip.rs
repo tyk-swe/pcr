@@ -82,16 +82,12 @@ impl EthernetIp {
             ("items", !cpf && !self.items.0.is_empty()),
             ("data", !opaque && !self.data.is_empty()),
         ];
-        if let Some((field, _)) = fields.into_iter().find(|(_, uncarried)| *uncarried) {
-            return Err(invalid(
-                NAME,
-                format!(
-                    "{field} is not part of command {:#06x} with status {}",
-                    self.command, self.status
-                ),
-            ));
-        }
-        Ok(())
+        crate::protocol::common::reject_uncarried(NAME, &fields, |field| {
+            format!(
+                "{field} is not part of command {:#06x} with status {}",
+                self.command, self.status
+            )
+        })
     }
 
     fn encode_wire(&self, c: &EncodeContext<'_>) -> Result<Vec<u8>, Error> {

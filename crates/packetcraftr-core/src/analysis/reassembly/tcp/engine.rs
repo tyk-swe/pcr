@@ -124,14 +124,6 @@ impl Reassembler {
         })
     }
 
-    pub fn aggregate_bytes(&self) -> usize {
-        self.aggregate_bytes
-    }
-
-    pub fn aggregate_memory_charge(&self) -> usize {
-        self.aggregate_memory_charge
-    }
-
     fn aggregates_without(&self, existing: Option<&TcpFlowState>) -> Result<(usize, usize), Error> {
         let error = || self.limits.aggregate_byte_error();
         let old_retained_bytes = existing.map_or(Some(0), retained_bytes).ok_or_else(error)?;

@@ -8,7 +8,6 @@ mod model;
 pub(crate) mod hpack;
 
 pub use error::{Error, Limit};
-pub use frame::parse_frame;
 pub(crate) use frame::{
     FLAG_ACK, FLAG_END_HEADERS, FLAG_END_STREAM, HEADER_LEN, TYPE_CONTINUATION, TYPE_PRIORITY,
     TYPE_SETTINGS, declared_length, parse_frame_for_analysis,

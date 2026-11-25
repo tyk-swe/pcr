@@ -1,7 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::commands::offline_analysis::output::{ScopedFlowKey, analysis_complete};
+use crate::commands::offline_analysis::output::{
+    ScopedFlowKey, StreamIssue, analysis_complete, sources,
+};
 use crate::output::published_enum;
 
 use crate::output::contract::Error;
@@ -154,12 +156,7 @@ impl TryFrom<analysis::Message> for Message {
             body_bytes: value.body_bytes,
             trailers: value.trailers.into_iter().map(Into::into).collect(),
             error: value.error.map(|error| error.to_string()),
-            sources: value
-                .sources
-                .frames()
-                .iter()
-                .map(Source::try_from)
-                .collect::<Result<_, _>>()?,
+            sources: sources(&value.sources)?,
         })
     }
 }
@@ -168,13 +165,7 @@ impl StreamRecord for Message {
         "http_message"
     }
 }
-#[derive(Debug, Serialize)]
-pub(crate) struct Issue {
-    pub number: u64,
-    pub flow: ScopedFlowKey,
-    pub stream: u64,
-    pub status: Status,
-}
+pub(crate) type Issue = StreamIssue<Status>;
 impl From<analysis::Issue> for Issue {
     fn from(value: analysis::Issue) -> Self {
         Self {

@@ -203,6 +203,29 @@ pub(crate) fn normalize_ports(
     .into())
 }
 
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct StreamIssue<S> {
+    pub number: u64,
+    pub flow: ScopedFlowKey,
+    pub stream: u64,
+    pub status: S,
+}
+
+pub(crate) fn drain_batches<T, E>(
+    items: impl IntoIterator<Item = T>,
+    check: &mut impl FnMut() -> Result<(), Error>,
+    emit: &mut impl FnMut(Vec<E>) -> Result<(), Error>,
+    mut handle: impl FnMut(T, &mut Vec<E>) -> Result<(), Error>,
+) -> Result<(), Error> {
+    for item in items {
+        check()?;
+        let mut output = Vec::new();
+        handle(item, &mut output)?;
+        emit(output)?;
+    }
+    Ok(())
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct Delivery {
     pub flow: ScopedFlowKey,

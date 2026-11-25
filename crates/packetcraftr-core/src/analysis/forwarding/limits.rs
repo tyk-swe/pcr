@@ -6,10 +6,9 @@ use std::io::{self, Write};
 
 use super::report::{AmbiguousGroup, Evidence, Match, UnkeyedObservation, Violation};
 
-/// Every value is honored as given, so [`validate`](Self::validate) has
-/// nothing to refuse: zero `max_details` or `max_detail_bytes` retains no
-/// details, and zero `max_scratch_bytes` refuses any comparison that needs
-/// scratch space.
+/// Every value is honored as given: zero `max_details` or `max_detail_bytes`
+/// retains no details, and zero `max_scratch_bytes` refuses any comparison that
+/// needs scratch space.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Limits {
     pub max_details: usize,
@@ -24,12 +23,6 @@ impl Default for Limits {
             max_detail_bytes: 4 * 1024 * 1024,
             max_scratch_bytes: 128 * 1024 * 1024,
         }
-    }
-}
-
-impl Limits {
-    pub const fn validate(&self) -> Result<(), super::Error> {
-        Ok(())
     }
 }
 

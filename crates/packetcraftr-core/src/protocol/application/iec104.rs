@@ -116,16 +116,12 @@ impl Iec104 {
             ),
             ("objects", !information && self.objects != default.objects),
         ];
-        if let Some((field, _)) = fields.into_iter().find(|(_, uncarried)| *uncarried) {
-            return Err(invalid(
-                NAME,
-                format!(
-                    "{field} is not part of frame type {}",
-                    self.frame_type.as_str()
-                ),
-            ));
-        }
-        Ok(())
+        crate::protocol::common::reject_uncarried(NAME, &fields, |field| {
+            format!(
+                "{field} is not part of frame type {}",
+                self.frame_type.as_str()
+            )
+        })
     }
 
     fn encode_wire(&self, c: &EncodeContext<'_>) -> Result<Vec<u8>, Error> {

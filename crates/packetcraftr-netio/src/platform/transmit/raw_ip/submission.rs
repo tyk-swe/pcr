@@ -36,40 +36,6 @@ pub(in crate::platform) struct RawSocketError {
     pub(in crate::platform) source: io::Error,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum RawSocketOption {
-    Ipv4HeaderIncluded,
-    Ipv4Broadcast,
-    Ipv6HeaderIncluded,
-}
-
-impl RawSocketOption {
-    fn operation(self) -> &'static str {
-        match self {
-            Self::Ipv4HeaderIncluded => "enabling IPv4 header inclusion",
-            Self::Ipv4Broadcast => "enabling IPv4 broadcast permission",
-            Self::Ipv6HeaderIncluded => "enabling IPv6 header inclusion",
-        }
-    }
-}
-
-fn configure_socket_options(
-    destination: IpAddr,
-    mut apply: impl FnMut(RawSocketOption) -> io::Result<()>,
-) -> Result<(), RawSocketError> {
-    let options: &[RawSocketOption] = match destination {
-        IpAddr::V4(_) => &[
-            RawSocketOption::Ipv4HeaderIncluded,
-            RawSocketOption::Ipv4Broadcast,
-        ],
-        IpAddr::V6(_) => &[RawSocketOption::Ipv6HeaderIncluded],
-    };
-    for option in options {
-        apply(*option).map_err(|source| raw_error(option.operation(), source))?;
-    }
-    Ok(())
-}
-
 fn configured_socket(packet: &PreparedRawIp) -> Result<Socket, RawSocketError> {
     let domain = match packet.destination {
         IpAddr::V4(_) => Domain::IPV4,
@@ -77,11 +43,21 @@ fn configured_socket(packet: &PreparedRawIp) -> Result<Socket, RawSocketError> {
     };
     let socket = Socket::new(domain, Type::RAW, Some(Protocol::from(IPPROTO_RAW)))
         .map_err(|source| raw_error("opening a raw IP socket", source))?;
-    configure_socket_options(packet.destination, |option| match option {
-        RawSocketOption::Ipv4HeaderIncluded => socket.set_header_included_v4(true),
-        RawSocketOption::Ipv4Broadcast => socket.set_broadcast(true),
-        RawSocketOption::Ipv6HeaderIncluded => socket.set_header_included_v6(true),
-    })?;
+    match packet.destination {
+        IpAddr::V4(_) => {
+            socket
+                .set_header_included_v4(true)
+                .map_err(|source| raw_error("enabling IPv4 header inclusion", source))?;
+            socket
+                .set_broadcast(true)
+                .map_err(|source| raw_error("enabling IPv4 broadcast permission", source))?;
+        }
+        IpAddr::V6(_) => {
+            socket
+                .set_header_included_v6(true)
+                .map_err(|source| raw_error("enabling IPv6 header inclusion", source))?;
+        }
+    }
 
     Ok(socket)
 }

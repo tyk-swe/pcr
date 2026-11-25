@@ -46,13 +46,7 @@ pub struct Message {
     pub error: Option<http::Error>,
     pub sources: SourceSet,
 }
-#[derive(Clone, Debug, Serialize)]
-pub struct Issue {
-    pub number: u64,
-    pub flow: ScopedFlowKey,
-    pub stream: u64,
-    pub status: Status,
-}
+pub type Issue = application::StreamIssue<Status>;
 #[derive(Clone, Debug)]
 pub enum Event {
     Message(Box<Message>),
@@ -162,25 +156,25 @@ impl Collector {
         mut emit: impl FnMut(Vec<Event>) -> Result<(), Error>,
     ) -> Result<Summary, Error> {
         check()?;
-        for event in self
+        let trailing = self
             .tcp
-            .trailing(&run.trailing_tcp_events, run.frames_read)?
-        {
-            check()?;
-            let mut output = Vec::new();
+            .trailing(&run.trailing_tcp_events, run.frames_read)?;
+        application::drain_batches(trailing, &mut check, &mut emit, |event, output| {
             if let application::Event::Evicted { flow, .. } = event {
-                self.stop(&flow, Status::Incomplete, false, &mut output)?;
+                self.stop(&flow, Status::Incomplete, false, output)
             } else {
-                self.event(event, run.frames_read, &mut output)?;
+                self.event(event, run.frames_read, output)
             }
-            emit(output)?;
-        }
-        for (flow, mut direction) in std::mem::take(&mut self.directions) {
-            check()?;
-            let mut output = Vec::new();
-            self.flush(&flow, &mut direction, Status::Incomplete, None, &mut output)?;
-            emit(output)?;
-        }
+        })?;
+        let directions = std::mem::take(&mut self.directions);
+        application::drain_batches(
+            directions,
+            &mut check,
+            &mut emit,
+            |(flow, mut direction), output| {
+                self.flush(&flow, &mut direction, Status::Incomplete, None, output)
+            },
+        )?;
         for queue in self.requests.values() {
             check()?;
             self.summary.requests_without_final_response += queue.len() as u64;

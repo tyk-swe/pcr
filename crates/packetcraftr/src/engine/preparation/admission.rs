@@ -6,8 +6,7 @@
 #[cfg(test)]
 use super::work;
 use super::{
-    Clock, Error, Packet, PacketProviders, Policy, PreparedPacket, RebuildError, Stages,
-    TransmitProviders, route,
+    Clock, Error, Packet, PacketProviders, Policy, PreparedPacket, RebuildError, Stages, route,
 };
 use crate::{
     client::planning::RouteLookup,
@@ -220,7 +219,7 @@ impl<'c, P: PacketProviders, K: Clock> Admitting<'c, P, K> {
             packet,
             Some(destination),
             options,
-            TransmitProviders::route_provider(self.stages.client.providers.as_ref()),
+            self.stages.client.providers.route(),
         )?;
         if let Some(expected) = interface
             && plan.decision.interface != *expected
@@ -304,7 +303,7 @@ impl<P: PacketProviders, K: Clock> Discovery<'_, P, K> {
     }
 }
 
-impl<P: TransmitProviders, K: Clock> Stages<'_, P, K> {
+impl<P: PacketProviders, K: Clock> Stages<'_, P, K> {
     fn plan<R: RouteProvider>(
         &self,
         packet: &Packet,

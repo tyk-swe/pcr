@@ -227,31 +227,35 @@ impl Collector {
         mut emit: impl FnMut(Vec<Event>) -> Result<(), Error>,
     ) -> Result<Summary, Error> {
         check()?;
-        for event in self
+        let trailing = self
             .tcp
-            .trailing(&run.trailing_tcp_events, run.frames_read)?
-        {
-            check()?;
-            let mut events = Vec::new();
+            .trailing(&run.trailing_tcp_events, run.frames_read)?;
+        application::drain_batches(trailing, &mut check, &mut emit, |event, events| {
             if let application::Event::Evicted { flow, .. } = event {
-                self.stop(flow, Status::Incomplete, &mut events)?;
+                self.stop(flow, Status::Incomplete, events)
             } else {
-                self.tcp_event(event, run.frames_read, &mut events)?;
+                self.tcp_event(event, run.frames_read, events)
             }
-            emit(events)?;
-        }
-        for (flow, mut direction) in std::mem::take(&mut self.directions) {
-            check()?;
-            let mut events = Vec::new();
-            self.flush(&flow, &mut direction, Status::Incomplete, &mut events)?;
-            emit(events)?;
-        }
-        for transaction in self.transactions.finish(&mut check)? {
-            check()?;
-            let mut events = Vec::new();
-            self.transaction(transaction, &mut events);
-            emit(events)?;
-        }
+        })?;
+        let directions = std::mem::take(&mut self.directions);
+        application::drain_batches(
+            directions,
+            &mut check,
+            &mut emit,
+            |(flow, mut direction), events| {
+                self.flush(&flow, &mut direction, Status::Incomplete, events)
+            },
+        )?;
+        let transactions = self.transactions.finish(&mut check)?;
+        application::drain_batches(
+            transactions,
+            &mut check,
+            &mut emit,
+            |transaction, events| {
+                self.transaction(transaction, events);
+                Ok(())
+            },
+        )?;
         check()?;
         Ok(self.summary)
     }

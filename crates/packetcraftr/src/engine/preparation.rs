@@ -38,7 +38,7 @@ use crate::clock::Clock;
 use crate::deadline::ensure_preparation_deadline;
 use crate::engine::operation::Operation as Execution;
 use crate::policy::Policy;
-use crate::providers::{PacketProviders, TransmitProviders};
+use crate::providers::PacketProviders;
 pub(crate) use crate::route;
 use crate::send::options::Options;
 use crate::{Client, Error};
@@ -53,7 +53,7 @@ struct Stages<'c, P, K> {
     admission: Arc<()>,
 }
 
-impl<'c, P: TransmitProviders, K: Clock> Stages<'c, P, K> {
+impl<'c, P: PacketProviders, K: Clock> Stages<'c, P, K> {
     fn new(
         client: &'c Client<P, K>,
         options: &'c Options,
@@ -149,7 +149,7 @@ impl From<Error> for RebuildError {
     }
 }
 
-impl<P: TransmitProviders, K: Clock> Client<P, K> {
+impl<P: PacketProviders, K: Clock> Client<P, K> {
     pub(crate) fn admitting_in<'c>(
         &'c self,
         options: &'c Options,
@@ -168,7 +168,7 @@ impl<P: TransmitProviders, K: Clock> Client<P, K> {
         operation: &Execution,
     ) -> Result<Streaming<'c, P, K>, Error> {
         let (stages, budget) = self.open_stages(options, packets, None, operation)?;
-        let transmitter = self.providers.transmit_provider().session();
+        let transmitter = self.providers.transmit().session();
         Ok(Streaming {
             stages,
             budget,

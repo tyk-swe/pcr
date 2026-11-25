@@ -44,8 +44,6 @@ pub const MAX_SOURCES: usize = 1024;
 const ADDRESS_LENGTH: usize = 4;
 /// The query body before its sources: group, flags, QQIC and source count.
 const QUERY_LENGTH: usize = 8;
-/// The report body before its records: reserved and record count.
-const REPORT_LENGTH: usize = 4;
 const RECORD_LENGTH: usize = 8;
 /// Auxiliary data is sized in 32-bit words.
 pub(crate) const AUX_UNIT: usize = 4;
@@ -79,7 +77,7 @@ pub enum Error {
 /// The source-list wire codec shared with MLD. Expands where `Error`, `ADDRESS_LENGTH`,
 /// `MAX_SOURCES` and `AUX_UNIT` are in scope.
 macro_rules! source_list_codec {
-    ($address:ty, $record:ty) => {
+    ($address:ty, $record:ident) => {
         fn truncated(expected: usize, actual: usize) -> Error {
             Error::Truncated { expected, actual }
         }
@@ -140,6 +138,55 @@ macro_rules! source_list_codec {
                 .map(|chunk| address(chunk))
                 .collect::<Vec<_>>();
             Ok((sources, rest))
+        }
+
+        fn decode_report_records(body: &[u8]) -> Result<(u16, Vec<$record>, &[u8]), Error> {
+            const REPORT_HEADER_LENGTH: usize = 4;
+            let Some((fixed, mut rest)) = body.split_first_chunk::<REPORT_HEADER_LENGTH>() else {
+                return Err(truncated(REPORT_HEADER_LENGTH, body.len()));
+            };
+            let count = usize::from(u16::from_be_bytes([fixed[2], fixed[3]]));
+            if count > MAX_RECORDS {
+                return Err(limit("record", count, MAX_RECORDS));
+            }
+            let minimum = count.saturating_mul(RECORD_LENGTH);
+            if rest.len() < minimum {
+                return Err(truncated(
+                    REPORT_HEADER_LENGTH.saturating_add(minimum),
+                    body.len(),
+                ));
+            }
+            let mut records = Vec::with_capacity(count);
+            for _ in 0..count {
+                let Some((header, after)) = rest.split_first_chunk::<RECORD_LENGTH>() else {
+                    return Err(truncated(RECORD_LENGTH, rest.len()));
+                };
+                let aux_length = usize::from(header[1]) * AUX_UNIT;
+                let sources = usize::from(u16::from_be_bytes([header[2], header[3]]));
+                let (sources, after) = read_sources_prefix(after, sources)?;
+                let Some((aux_data, after)) = after.split_at_checked(aux_length) else {
+                    return Err(truncated(aux_length, after.len()));
+                };
+                records.push($record {
+                    record_type: header[0],
+                    group: address(&header[4..]),
+                    sources,
+                    aux_data: Bytes::copy_from_slice(aux_data),
+                });
+                rest = after;
+            }
+            Ok((u16::from_be_bytes([fixed[0], fixed[1]]), records, rest))
+        }
+
+        fn encode_report_records(reserved: u16, records: &[$record]) -> Result<Vec<u8>, Error> {
+            let count = checked_count("record", records.len(), MAX_RECORDS)?;
+            let mut body = Vec::with_capacity(4);
+            body.extend_from_slice(&reserved.to_be_bytes());
+            body.extend_from_slice(&count.to_be_bytes());
+            for record in records {
+                push_record(&mut body, record)?;
+            }
+            Ok(body)
         }
     };
 }
@@ -239,58 +286,21 @@ impl Report {
                 igmp_type: igmp.igmp_type,
             });
         }
-        let Some((fixed, mut rest)) = igmp.body.split_first_chunk::<REPORT_LENGTH>() else {
-            return Err(truncated(REPORT_LENGTH, igmp.body.len()));
-        };
-        let count = usize::from(u16::from_be_bytes([fixed[2], fixed[3]]));
-        if count > MAX_RECORDS {
-            return Err(limit("record", count, MAX_RECORDS));
-        }
-        // each record needs at least its fixed header, so this bounds the
-        // allocation by the bytes actually present
-        let minimum = count.saturating_mul(RECORD_LENGTH);
-        if rest.len() < minimum {
-            return Err(truncated(
-                REPORT_LENGTH.saturating_add(minimum),
-                igmp.body.len(),
-            ));
-        }
-        let mut records = Vec::with_capacity(count);
-        for _ in 0..count {
-            let Some((header, after)) = rest.split_first_chunk::<RECORD_LENGTH>() else {
-                return Err(truncated(RECORD_LENGTH, rest.len()));
-            };
-            let aux_length = usize::from(header[1]) * AUX_UNIT;
-            let sources = usize::from(u16::from_be_bytes([header[2], header[3]]));
-            let (sources, after) = read_sources_prefix(after, sources)?;
-            let Some((aux_data, after)) = after.split_at_checked(aux_length) else {
-                return Err(truncated(aux_length, after.len()));
-            };
-            records.push(GroupRecord {
-                record_type: header[0],
-                group: address(&header[4..]),
-                sources,
-                aux_data: Bytes::copy_from_slice(aux_data),
-            });
-            rest = after;
-        }
+        let (reserved2, records, rest) = decode_report_records(&igmp.body)?;
         no_trailing(rest)?;
         Ok(Self {
             reserved: igmp.code,
-            reserved2: u16::from_be_bytes([fixed[0], fixed[1]]),
+            reserved2,
             records,
         })
     }
 
     pub fn to_igmp(&self) -> Result<Igmp, Error> {
-        let count = checked_count("record", self.records.len(), MAX_RECORDS)?;
-        let mut body = Vec::with_capacity(REPORT_LENGTH);
-        body.extend_from_slice(&self.reserved2.to_be_bytes());
-        body.extend_from_slice(&count.to_be_bytes());
-        for record in &self.records {
-            push_record(&mut body, record)?;
-        }
-        Ok(igmp(V3_MEMBERSHIP_REPORT, self.reserved, body))
+        Ok(igmp(
+            V3_MEMBERSHIP_REPORT,
+            self.reserved,
+            encode_report_records(self.reserved2, &self.records)?,
+        ))
     }
 }
 

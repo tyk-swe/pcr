@@ -5,7 +5,7 @@
 
 use super::admission::Budget;
 use super::construction::PreparedPacket;
-use super::{Clock, Error, Packet, PacketProviders, Stages, TransmitProviders, route};
+use super::{Clock, Error, Packet, PacketProviders, Stages};
 use crate::evidence::SentPacket;
 
 pub(crate) struct Streaming<'c, P, K> {
@@ -14,42 +14,21 @@ pub(crate) struct Streaming<'c, P, K> {
     pub(super) transmitter: Box<dyn packetcraftr_netio::transmit::Provider + 'c>,
 }
 
-impl<P: TransmitProviders, K: Clock> Streaming<'_, P, K> {
+impl<P: PacketProviders, K: Clock> Streaming<'_, P, K> {
     pub(crate) fn check(&self) -> Result<(), Error> {
         self.stages.check()
     }
 
-    pub(crate) fn prepare_layer3(&mut self, packet: Packet) -> Result<PreparedPacket, Error> {
-        let admitted = self.stages.admit(
-            &mut self.budget,
-            packet,
-            self.stages.client.providers.route_provider(),
-        )?;
-        self.stages.materialize_using(admitted, |plan, _| {
-            if plan.mode != packetcraftr_netio::link::Mode::Layer3
-                || plan.needs_neighbor_resolution()
-            {
-                return Err(route::Error::Layer3Unsupported);
-            }
-            Ok(route::Materialized {
-                plan,
-                neighbor_resolution: None,
-            })
-        })
-    }
-
-    pub(crate) fn transmit(&self, packet: PreparedPacket) -> Result<SentPacket, Error> {
-        packet.transmit(self.transmitter.as_ref(), || self.stages.check())
-    }
-}
-
-impl<P: PacketProviders, K: Clock> Streaming<'_, P, K> {
     pub(crate) fn prepare(&mut self, packet: Packet) -> Result<PreparedPacket, Error> {
         let admitted = self.stages.admit(
             &mut self.budget,
             packet,
-            TransmitProviders::route_provider(self.stages.client.providers.as_ref()),
+            self.stages.client.providers.route(),
         )?;
         self.stages.materialize(admitted)
+    }
+
+    pub(crate) fn transmit(&self, packet: PreparedPacket) -> Result<SentPacket, Error> {
+        packet.transmit(self.transmitter.as_ref(), || self.stages.check())
     }
 }

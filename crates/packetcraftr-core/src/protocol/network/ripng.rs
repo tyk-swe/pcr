@@ -5,10 +5,8 @@
 
 use crate::codec::{DecodeContext, EncodeContext, Error};
 use crate::field;
-use crate::protocol::common::{invalid, unsupported};
-use crate::protocol::message::{
-    MAX_RECORDS, Reader, Records, Writer, message_codec, number, record,
-};
+use crate::protocol::common::invalid;
+use crate::protocol::message::{Records, message_codec, number, record};
 use bytes::Bytes;
 
 use crate::protocol::common::structured::member;
@@ -43,11 +41,7 @@ message_codec!(RipngCodec, Ripng, ripng_schema);
 const NAME: &str = crate::protocol::BuiltinProtocol::Ripng.as_str();
 impl Ripng {
     fn encode_wire(&self, c: &EncodeContext<'_>) -> Result<Vec<u8>, Error> {
-        if !matches!(self.command, 1 | 2) {
-            return Err(invalid(NAME, "invalid command"));
-        }
-        let mut w = Writer::new(NAME, c.remaining_packet_bytes);
-        w.put(&[self.command, 1, 0, 0])?;
+        let mut w = super::ripv2::begin_rip_encode(NAME, self.command, 1, c)?;
         for r in &self.routes.0 {
             let prefix = match r.get("prefix") {
                 Some(field::Value::Ipv6(v)) => v.octets(),
@@ -72,37 +66,19 @@ impl Ripng {
         b: Bytes,
         _: &DecodeContext<'_>,
     ) -> Result<(Self, Vec<crate::layout::FieldLayout>), Error> {
-        let mut r = Reader::new(NAME, &b);
-        r.mark(0, 0..1);
-        r.mark(1, 4..b.len());
-        let command = r.u8()?;
-        if !matches!(command, 1 | 2) {
-            return Err(invalid(NAME, "invalid command"));
-        }
-        if r.u8()? != 1 {
-            return Err(unsupported(NAME, "unsupported version"));
-        }
-        if r.u16()? != 0 {
-            return Err(invalid(NAME, "reserved header is nonzero"));
-        }
-        let mut routes = Records::default();
-        while r.left() > 0 {
-            if routes.0.len() == MAX_RECORDS {
-                return Err(invalid(NAME, "too many routes"));
-            }
-            let p = r.take(20)?;
+        let (command, routes, layouts) = super::ripv2::parse_rip_wire(NAME, 1, &b, |p| {
             let prefix = std::net::Ipv6Addr::from(<[u8; 16]>::try_from(&p[..16]).unwrap());
             let tag = u16::from_be_bytes([p[16], p[17]]);
             if p[18] > 128 || !((1..=16).contains(&p[19]) || p[19] == 255) {
                 return Err(invalid(NAME, "invalid prefix or metric"));
             }
-            routes.0.push(record([
+            Ok(record([
                 ("prefix", field::Value::Ipv6(prefix)),
                 ("tag", tag.into()),
                 ("length", p[18].into()),
                 ("metric", p[19].into()),
-            ]));
-        }
-        Ok((Self { command, routes }, r.take_layouts()))
+            ]))
+        })?;
+        Ok((Self { command, routes }, layouts))
     }
 }

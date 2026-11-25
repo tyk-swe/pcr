@@ -36,24 +36,17 @@ pub(super) fn render_message(
         ),
     )?;
     if presentation.verbose {
-        for header in &message.headers {
-            write_stdout_line(
-                invocation,
-                format_args!("  {}: {}", escaped(&header.name), escaped(&header.value)),
-            )?;
-        }
-    }
-    if presentation.verbose {
-        for trailer in &message.trailers {
-            write_stdout_line(
-                invocation,
-                format_args!(
-                    "  trailer {}: {}",
-                    escaped(&trailer.name),
-                    escaped(&trailer.value)
-                ),
-            )?;
-        }
+        crate::commands::offline_analysis::render_headers_and_trailers(
+            invocation,
+            message
+                .headers
+                .iter()
+                .map(|header| (header.name.as_str(), header.value.as_str())),
+            message
+                .trailers
+                .iter()
+                .map(|trailer| (trailer.name.as_str(), trailer.value.as_str())),
+        )?;
         write_stdout_line(
             invocation,
             format_args!("  header bytes: {}", message.header_wire_hex),
@@ -70,13 +63,7 @@ pub(super) fn render_issue(
     invocation: &crate::invocation::Invocation,
     issue: &wire::Issue,
 ) -> Result<(), CliError> {
-    write_stdout_line(
-        invocation,
-        format_args!(
-            "  TCP stream={} frame={} status={}",
-            issue.stream, issue.number, issue.status,
-        ),
-    )
+    crate::commands::offline_analysis::render_tcp_stream_issue(invocation, issue)
 }
 
 pub(super) fn render_complete(

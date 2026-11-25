@@ -22,6 +22,22 @@ pub(crate) fn emit_json(
     emit_json_to(invocation, value, stdout)
 }
 
+pub(crate) fn write_pretty_json_buffered(
+    writer: impl Write,
+    value: &impl Serialize,
+) -> Result<(), serde_json::Error> {
+    let mut writer = io::BufWriter::with_capacity(64 * 1024, writer);
+    let result = serde_json::to_writer_pretty(&mut writer, value).and_then(|()| {
+        writer
+            .write_all(b"\n")
+            .and_then(|()| writer.flush())
+            .map_err(serde_json::Error::io)
+    });
+    // BufWriter's Drop would retry buffered output after a failed write or flush.
+    let _ = writer.into_parts();
+    result
+}
+
 fn emit_json_to(
     invocation: &crate::invocation::Invocation,
     value: &impl Serialize,
@@ -29,19 +45,7 @@ fn emit_json_to(
 ) -> Result<(), CliError> {
     invocation.check()?;
     invocation.begin_json()?;
-    let mut writer = io::BufWriter::with_capacity(64 * 1024, writer);
-    let result = write_json(&mut writer, value);
-    // BufWriter's Drop would retry buffered output after a failed write or flush.
-    let _ = writer.into_parts();
-    result
-}
-
-fn write_json(writer: &mut impl Write, value: &impl Serialize) -> Result<(), CliError> {
-    serde_json::to_writer_pretty(&mut *writer, value).map_err(json_error)?;
-    writer
-        .write_all(b"\n")
-        .and_then(|()| writer.flush())
-        .map_err(|source| CliError::stdout("write stdout failed", &source))
+    write_pretty_json_buffered(writer, value).map_err(json_error)
 }
 
 fn json_error(source: serde_json::Error) -> CliError {
@@ -181,7 +185,7 @@ mod tests {
         );
         emit_json_to(&invocation.terminal(), &envelope, &mut bytes).unwrap();
         let document: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(document["schema"], output::contract::SCHEMA);
+        assert_eq!(document["schema"], output::contract::OUTPUT_SCHEMA);
         assert_eq!(document["status"], "error");
         assert_eq!(bytes.last(), Some(&b'\n'));
     }
@@ -192,7 +196,7 @@ mod tests {
             &std::fs::read(
                 std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
                     "../../schemas/{}.schema.json",
-                    output::contract::SCHEMA.replace("/v", ".v")
+                    output::contract::OUTPUT_SCHEMA.replace("/v", ".v")
                 )),
             )
             .unwrap(),

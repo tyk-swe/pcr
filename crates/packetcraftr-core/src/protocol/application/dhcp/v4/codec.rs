@@ -5,17 +5,11 @@ use std::net::Ipv4Addr;
 
 use bytes::Bytes;
 
-use super::super::codec::{self as shared, Budget, Message, extend, take, u16_at, u32_at};
+use super::super::codec::{self as shared, Budget, extend, take, u16_at, u32_at};
 use super::super::{Error, Limit, Limits};
 use super::reflection::{layout, schema};
 use super::{Dhcpv4, Kind4, Option4, Value4};
-use crate::{
-    codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
-    field,
-    layer::{Id, Layer, Raw, Schema},
-    layout::FieldLayout,
-    protocol::BuiltinProtocol,
-};
+use crate::protocol::BuiltinProtocol;
 
 const NAME: &str = BuiltinProtocol::Dhcpv4.as_str();
 const MAGIC_COOKIE: &[u8; 4] = b"\x63\x82\x53\x63";
@@ -317,74 +311,5 @@ fn overload(options: &[Option4]) -> Result<u8, Error> {
     })
 }
 
-impl Message for Dhcpv4 {
-    const NAME: &'static str = NAME;
-
-    fn decode_wire(wire: Bytes) -> Result<Self, Error> {
-        Self::try_from(wire)
-    }
-
-    fn encode_wire(&self, limits: Limits) -> Result<Bytes, Error> {
-        self.to_wire_with_limits(limits)
-    }
-
-    fn layout() -> Vec<FieldLayout> {
-        layout()
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct Dhcpv4Codec;
-
-impl Codec for Dhcpv4Codec {
-    fn protocol_id(&self) -> &'static Id {
-        &schema().protocol
-    }
-
-    fn schema(&self) -> Option<&'static Schema> {
-        Some(schema())
-    }
-
-    fn new_layer(&self) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        Ok(Box::new(Dhcpv4::default()))
-    }
-
-    fn seed_layer(
-        &self,
-        fields: &[(usize, &field::Value)],
-    ) -> Result<Option<crate::codec::SeededLayer>, crate::codec::Error> {
-        shared::seed_layer::<Dhcpv4>(fields)
-    }
-
-    fn finish_constructed(
-        &self,
-        layer: &mut dyn Layer,
-        fields: &[(usize, &field::Value)],
-    ) -> Result<(), crate::codec::Error> {
-        shared::finish_constructed::<Dhcpv4>(layer, fields)
-    }
-
-    fn accepts_decoded_protocol(&self, protocol: &Id) -> bool {
-        protocol == self.protocol_id() || protocol == &crate::layer::Raw::ID
-    }
-
-    fn encode(
-        &self,
-        layer: &dyn Layer,
-        payload: &[u8],
-        context: &EncodeContext<'_>,
-    ) -> Result<Encoded, crate::codec::Error> {
-        shared::encode::<Dhcpv4>(layer, payload, context)
-    }
-
-    fn decode(
-        &self,
-        input: Bytes,
-        _context: &DecodeContext<'_>,
-    ) -> Result<Decoded, crate::codec::Error> {
-        if input.get(236..240) != Some(MAGIC_COOKIE.as_slice()) {
-            return Ok(Raw::decoded(input));
-        }
-        shared::decode::<Dhcpv4>(input)
-    }
-}
+shared::dhcp_codec!(Dhcpv4Codec, Dhcpv4, NAME, |input| input.get(236..240)
+    == Some(MAGIC_COOKIE.as_slice()));

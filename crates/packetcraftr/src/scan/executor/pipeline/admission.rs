@@ -29,12 +29,11 @@ pub(in crate::scan) struct AdaptiveAdmission {
     pub(super) summary_bytes: usize,
 }
 
-/// Admits `batches` as [`super::run`] would and keeps nothing, so a stage over its
-/// preparation limit fails before anything is sent.
-pub(in crate::scan::executor) fn admit<P: PacketProviders, K: Clock>(
+fn with_admission_plan<P: PacketProviders, K: Clock>(
     executor: &WorkflowExecutor<'_, P, K>,
     batches: &[Batch<Probe>],
     options: &PipelineOptions,
+    on_plan: impl FnOnce(&[Planned<'_>], &prepare::Plan<'_, P, K>) -> Result<(), BoundaryError>,
 ) -> Result<(), BoundaryError> {
     validate_options(batches, options)?;
     let deadline = executor
@@ -47,7 +46,18 @@ pub(in crate::scan::executor) fn admit<P: PacketProviders, K: Clock>(
         .map(Planned::new)
         .collect::<Result<Vec<_>, _>>()?;
     let preparation = until(executor.client, deadline, &options.control);
-    prepare::plan(executor, &planned, options, deadline, &preparation, false).map(drop)
+    let plan = prepare::plan(executor, &planned, options, deadline, &preparation, false)?;
+    on_plan(&planned, &plan)
+}
+
+/// Admits `batches` as [`super::run`] would and keeps nothing, so a stage over its
+/// preparation limit fails before anything is sent.
+pub(in crate::scan::executor) fn admit<P: PacketProviders, K: Clock>(
+    executor: &WorkflowExecutor<'_, P, K>,
+    batches: &[Batch<Probe>],
+    options: &PipelineOptions,
+) -> Result<(), BoundaryError> {
+    with_admission_plan(executor, batches, options, |_, _| Ok(()))
 }
 
 impl AdaptiveAdmission {
@@ -168,80 +178,69 @@ pub(in crate::scan::executor) fn admit_adaptive<P: PacketProviders, K: Clock>(
     summary: &mut AdaptiveAdmission,
 ) -> Result<(), BoundaryError> {
     summary.source_metadata_bytes = source_metadata::<P>();
-    validate_options(batches, options)?;
-    let deadline = executor
-        .client
-        .now()
-        .checked_add(options.max_duration)
-        .ok_or_else(|| limit("duration", max_wait_secs()))?;
-    let planned = batches
-        .iter()
-        .map(Planned::new)
-        .collect::<Result<Vec<_>, _>>()?;
-    for planned in &planned {
-        summary.max_description_bytes = summary
-            .max_description_bytes
-            .max(prepare::description_charge(planned.probe));
-    }
-    let preparation = until(executor.client, deadline, &options.control);
-    let plan = prepare::plan(executor, &planned, options, deadline, &preparation, false)?;
-    let previous_summary_bytes = summary.retained_bytes();
-    for ((_, scope), route) in &plan.routes {
-        summary.max_route_bytes = summary.max_route_bytes.max(prepare::route_charge(route));
-        summary.max_map_route_bytes = summary.max_map_route_bytes.max(
-            prepare::route_charge(route)
-                .saturating_add(scope.as_ref().map_or(0, |scope| scope.name.capacity())),
-        );
-        summary.max_source_name_bytes = summary
-            .max_source_name_bytes
-            .max(route.interface().name.len());
-    }
-    for probe in &plan.probes {
-        summary.max_probe_bytes = summary.max_probe_bytes.max(probe.memory);
-    }
-    if !summary.many_interfaces {
-        for interface in &plan.interfaces {
-            if !summary.interfaces.contains(interface) {
-                if summary.interfaces.len() == summary.window.min(capture::MAX_SOURCES) {
-                    // More sources than the active allocation: a scalar sentinel
-                    // replaces historical names instead of accumulating a cache.
-                    summary.interfaces.clear();
-                    summary.many_interfaces = true;
-                    break;
+    with_admission_plan(executor, batches, options, |planned, plan| {
+        for planned in planned {
+            summary.max_description_bytes = summary
+                .max_description_bytes
+                .max(prepare::description_charge(planned.probe));
+        }
+        let previous_summary_bytes = summary.retained_bytes();
+        for ((_, scope), route) in &plan.routes {
+            summary.max_route_bytes = summary.max_route_bytes.max(prepare::route_charge(route));
+            summary.max_map_route_bytes = summary.max_map_route_bytes.max(
+                prepare::route_charge(route)
+                    .saturating_add(scope.as_ref().map_or(0, |scope| scope.name.capacity())),
+            );
+            summary.max_source_name_bytes = summary
+                .max_source_name_bytes
+                .max(route.interface().name.len());
+        }
+        for probe in &plan.probes {
+            summary.max_probe_bytes = summary.max_probe_bytes.max(probe.memory);
+        }
+        if !summary.many_interfaces {
+            for interface in &plan.interfaces {
+                if !summary.interfaces.contains(interface) {
+                    if summary.interfaces.len() == summary.window.min(capture::MAX_SOURCES) {
+                        // More sources than the active allocation: a scalar sentinel
+                        // replaces historical names instead of accumulating a cache.
+                        summary.interfaces.clear();
+                        summary.many_interfaces = true;
+                        break;
+                    }
+                    // The caller already reserved the old summary. Charge each
+                    // additional name and the fixed table before copying it while
+                    // this temporary admission plan is still resident.
+                    let capacity_bytes = if summary.interfaces.capacity() == 0 {
+                        summary
+                            .window
+                            .min(capture::MAX_SOURCES)
+                            .saturating_mul(std::mem::size_of::<interface::Id>())
+                    } else {
+                        0
+                    };
+                    let growth = summary
+                        .retained_bytes()
+                        .saturating_sub(previous_summary_bytes)
+                        .saturating_add(capacity_bytes)
+                        .saturating_add(interface.name.len());
+                    if plan
+                        .base_bytes
+                        .saturating_add(summary.max_probe_bytes)
+                        .saturating_add(growth)
+                        > options.max_prepared_bytes
+                    {
+                        return Err(limit("prepared summaries", options.max_prepared_bytes));
+                    }
+                    if summary.interfaces.capacity() == 0 {
+                        summary
+                            .interfaces
+                            .reserve_exact(summary.window.min(capture::MAX_SOURCES));
+                    }
+                    summary.interfaces.push(interface.clone());
                 }
-                // The caller already reserved the old summary. Charge each
-                // additional name and the fixed table before copying it while
-                // this temporary admission plan is still resident.
-                let capacity_bytes = if summary.interfaces.capacity() == 0 {
-                    summary
-                        .window
-                        .min(capture::MAX_SOURCES)
-                        .saturating_mul(std::mem::size_of::<interface::Id>())
-                } else {
-                    0
-                };
-                let growth = summary
-                    .retained_bytes()
-                    .saturating_sub(previous_summary_bytes)
-                    .saturating_add(capacity_bytes)
-                    .saturating_add(interface.name.len());
-                if plan
-                    .base_bytes
-                    .saturating_add(summary.max_probe_bytes)
-                    .saturating_add(growth)
-                    > options.max_prepared_bytes
-                {
-                    return Err(limit("prepared summaries", options.max_prepared_bytes));
-                }
-                if summary.interfaces.capacity() == 0 {
-                    summary
-                        .interfaces
-                        .reserve_exact(summary.window.min(capture::MAX_SOURCES));
-                }
-                summary.interfaces.push(interface.clone());
             }
         }
-    }
-    drop(plan);
-    Ok(())
+        Ok(())
+    })
 }

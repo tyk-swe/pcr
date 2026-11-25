@@ -301,6 +301,21 @@ fn map_connect_error(endpoint: SocketAddr, error: packetcraftr_netio::tcp::Error
     }
 }
 
+fn configure_write_timeout<S: Stream, K: Clock>(
+    stream: &mut S,
+    window: &Window<'_, K>,
+    written: usize,
+) -> Result<(), Error> {
+    let timeout = window.next_wait(Phase::Write, written)?;
+    stream
+        .set_write_timeout(Some(timeout))
+        .map_err(|source| Error::ConfigureTimeout {
+            phase: Phase::Write,
+            transferred: written,
+            source: Source::new(source),
+        })
+}
+
 fn write_exact<S: Stream, K: Clock>(
     stream: &mut S,
     mut bytes: &[u8],
@@ -309,14 +324,7 @@ fn write_exact<S: Stream, K: Clock>(
     written: &mut usize,
 ) -> Result<(), Error> {
     while !bytes.is_empty() {
-        let timeout = window.next_wait(Phase::Write, *written)?;
-        stream
-            .set_write_timeout(Some(timeout))
-            .map_err(|source| Error::ConfigureTimeout {
-                phase: Phase::Write,
-                transferred: *written,
-                source: Source::new(source),
-            })?;
+        configure_write_timeout(stream, window, *written)?;
         match stream.write(bytes) {
             Ok(0) => {
                 return Err(Error::Write {
@@ -352,14 +360,7 @@ fn write_exact<S: Stream, K: Clock>(
         }
     }
     loop {
-        let timeout = window.next_wait(Phase::Write, *written)?;
-        stream
-            .set_write_timeout(Some(timeout))
-            .map_err(|source| Error::ConfigureTimeout {
-                phase: Phase::Write,
-                transferred: *written,
-                source: Source::new(source),
-            })?;
+        configure_write_timeout(stream, window, *written)?;
         match stream.flush() {
             Ok(()) => return Ok(()),
             Err(source) if packetcraftr_netio::bounded::retryable(&source) => {}

@@ -15,9 +15,10 @@ use super::approval::Approved;
 use super::pipelined::{StagePlan, add_stats, pipeline_options, prepared_limit};
 use crate::probe::Stage;
 use crate::probe::{self, enforce_deadline};
+use crate::providers::PacketProviders;
 use crate::scan::Error;
 use crate::scan::evidence::ProbeClassifier;
-use crate::scan::executor::Pipelined;
+use crate::scan::executor::ClientExecutor;
 use crate::scan::plan::probe_count;
 use crate::scan::{Event, Probe, Request};
 
@@ -96,9 +97,9 @@ pub(super) fn check_adaptive_prepared(
     Ok(())
 }
 
-pub(super) fn admit_adaptive<E: Pipelined>(
+pub(super) fn admit_adaptive<P: PacketProviders, K: Clock>(
     request: &Request,
-    executor: &mut E,
+    executor: &mut ClientExecutor<'_, P, K>,
     deadline: &Deadline,
     approved: &Approved,
     reservation: usize,
@@ -179,8 +180,8 @@ pub(super) fn admit_adaptive<E: Pipelined>(
     Ok(summaries)
 }
 
-pub(super) fn execute_adaptive<E, C, F>(
-    prober: &mut Prober<'_, E, C>,
+pub(super) fn execute_adaptive<P, K, F>(
+    prober: &mut Prober<'_, '_, P, K>,
     evidence: &mut BatchEvidence<ProbeClassifier<'_>, F, Error>,
     plan: &StagePlan<'_>,
     preceding: &crate::Stats,
@@ -189,8 +190,8 @@ pub(super) fn execute_adaptive<E, C, F>(
     admission: &crate::scan::executor::AdaptiveAdmission,
 ) -> Result<crate::Stats, Error>
 where
-    E: Pipelined,
-    C: Clock,
+    P: PacketProviders,
+    K: Clock,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
     let request = prober.request;

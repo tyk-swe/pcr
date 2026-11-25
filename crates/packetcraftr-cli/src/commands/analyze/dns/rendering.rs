@@ -67,13 +67,7 @@ pub(super) fn render_issue(
     invocation: &crate::invocation::Invocation,
     issue: &wire::Issue,
 ) -> Result<(), CliError> {
-    write_stdout_line(
-        invocation,
-        format_args!(
-            "  TCP stream={} frame={} status={}",
-            issue.stream, issue.number, issue.status,
-        ),
-    )
+    crate::commands::offline_analysis::render_tcp_stream_issue(invocation, issue)
 }
 
 pub(super) fn render_complete(

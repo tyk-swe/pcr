@@ -12,6 +12,17 @@ use crate::{
 
 use super::errors::{invalid, unsupported};
 
+pub(crate) fn reject_uncarried(
+    protocol: &'static str,
+    fields: &[(&'static str, bool)],
+    reason: impl FnOnce(&'static str) -> String,
+) -> Result<(), crate::codec::Error> {
+    if let Some((field, _)) = fields.iter().find(|(_, uncarried)| *uncarried) {
+        return Err(invalid(protocol, reason(field)));
+    }
+    Ok(())
+}
+
 pub(crate) fn validate_ipv6_routing_child(
     name: &'static str,
     next_header: u8,

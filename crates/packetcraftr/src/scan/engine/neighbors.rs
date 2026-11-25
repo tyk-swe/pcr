@@ -13,9 +13,10 @@ use super::Prober;
 use super::Scheduler;
 use super::pipelined::add_stats;
 use crate::probe::enforce_deadline;
+use crate::providers::PacketProviders;
 use crate::scan::Error;
 use crate::scan::discovery::{self, Composer};
-use crate::scan::executor::Pipelined;
+use crate::scan::executor::ClientExecutor;
 
 /// Marks `host` started and returns `None` when it has already expired.
 fn start_host(
@@ -49,8 +50,8 @@ fn host_deadline(
 ///
 /// Returns the targets a frame can still be sent to: a target whose own
 /// resolution stayed silent accepts nothing, so later stages skip it.
-pub(super) fn discover_neighbors<E: Pipelined, C: Clock>(
-    prober: &mut Prober<'_, E, C>,
+pub(super) fn discover_neighbors<P: PacketProviders, K: Clock>(
+    prober: &mut Prober<'_, '_, P, K>,
     targets: &[SelectedAddress],
     composer: &mut Composer,
     stats: &mut crate::Stats,
@@ -138,8 +139,8 @@ pub(super) fn discover_neighbors<E: Pipelined, C: Clock>(
 }
 
 /// Whether resolving `target`'s neighbor would send a request.
-pub(super) fn requests_neighbor<E: Pipelined>(
-    executor: &mut E,
+pub(super) fn requests_neighbor<P: PacketProviders, K: Clock>(
+    executor: &mut ClientExecutor<'_, P, K>,
     target: &SelectedAddress,
     explicit: bool,
     deadline: &Deadline,
@@ -161,8 +162,8 @@ pub(super) enum ReachOutcome {
 /// Resolves `target`'s next hop before its stage arms any capture, so no
 /// resolution's capture overlaps a probe's and each request joins `stats`.
 /// Returns why the target is unreachable when its next hop stayed silent.
-pub(super) fn reach_next_hop<E: Pipelined, C: Clock>(
-    prober: &mut Prober<'_, E, C>,
+pub(super) fn reach_next_hop<P: PacketProviders, K: Clock>(
+    prober: &mut Prober<'_, '_, P, K>,
     target: &SelectedAddress,
     stats: &mut crate::Stats,
     sequence: u64,

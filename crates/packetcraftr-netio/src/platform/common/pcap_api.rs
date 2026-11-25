@@ -10,8 +10,8 @@ use packetcraftr_core::frame::LinkType;
 use crate::{
     Error,
     capture::{
-        MAX_TIMESTAMP_TYPES, NativeSettings, Realized, RealizedSettings, TimestampPrecision,
-        TimestampSource,
+        MAX_NATIVE_BUFFER_SIZE, MAX_TIMESTAMP_TYPES, NativeSettings, Realized, RealizedSettings,
+        TimestampPrecision, TimestampSource, TimestampType,
     },
     interface::Id as InterfaceId,
 };
@@ -61,7 +61,7 @@ pub(in crate::platform) fn canonical_link_type(datalink: u32) -> LinkType {
     }
 }
 
-pub(in crate::platform) const fn timestamp_source_value(source: TimestampSource) -> c_int {
+const fn timestamp_source_value(source: TimestampSource) -> c_int {
     match source {
         TimestampSource::Host => PCAP_TSTAMP_HOST,
         TimestampSource::HostLowPrec => PCAP_TSTAMP_HOST_LOWPREC,
@@ -70,16 +70,14 @@ pub(in crate::platform) const fn timestamp_source_value(source: TimestampSource)
     }
 }
 
-pub(in crate::platform) const fn timestamp_precision_value(precision: TimestampPrecision) -> c_int {
+const fn timestamp_precision_value(precision: TimestampPrecision) -> c_int {
     match precision {
         TimestampPrecision::Micro => PCAP_TSTAMP_PRECISION_MICRO,
         TimestampPrecision::Nano => PCAP_TSTAMP_PRECISION_NANO,
     }
 }
 
-pub(in crate::platform) const fn timestamp_source_of_value(
-    value: c_int,
-) -> Option<TimestampSource> {
+const fn timestamp_source_of_value(value: c_int) -> Option<TimestampSource> {
     match value {
         PCAP_TSTAMP_HOST => Some(TimestampSource::Host),
         PCAP_TSTAMP_HOST_LOWPREC => Some(TimestampSource::HostLowPrec),
@@ -89,14 +87,90 @@ pub(in crate::platform) const fn timestamp_source_of_value(
     }
 }
 
-pub(in crate::platform) const fn timestamp_precision_of_value(
-    value: c_int,
-) -> Option<TimestampPrecision> {
+const fn timestamp_precision_of_value(value: c_int) -> Option<TimestampPrecision> {
     match value {
         PCAP_TSTAMP_PRECISION_MICRO => Some(TimestampPrecision::Micro),
         PCAP_TSTAMP_PRECISION_NANO => Some(TimestampPrecision::Nano),
         _ => None,
     }
+}
+
+#[derive(Clone, Copy)]
+pub(in crate::platform) enum NativeSetting {
+    BufferSize,
+    TimestampSource,
+    TimestampPrecision,
+}
+
+impl NativeSetting {
+    pub(in crate::platform) const fn operation(self) -> &'static str {
+        match self {
+            Self::BufferSize => "pcap_set_buffer_size",
+            Self::TimestampSource => "pcap_set_tstamp_type",
+            Self::TimestampPrecision => "pcap_set_tstamp_precision",
+        }
+    }
+
+    pub(in crate::platform) const fn field(self) -> &'static str {
+        match self {
+            Self::BufferSize => "buffer_size",
+            Self::TimestampSource => "timestamp_source",
+            Self::TimestampPrecision => "timestamp_precision",
+        }
+    }
+}
+
+pub(in crate::platform) fn apply_native_settings(
+    backend: &str,
+    interface: &InterfaceId,
+    settings: &NativeSettings,
+    mut set: impl FnMut(NativeSetting, c_int) -> Result<c_int, Error>,
+    mut error_message: impl FnMut() -> String,
+) -> Result<(), Error> {
+    if let Some(buffer_size) = settings.buffer_size {
+        let size = c_int::try_from(buffer_size).map_err(|_| Error::InvalidCaptureSetting {
+            field: "buffer_size",
+            message: format!("exceeds the native maximum of {MAX_NATIVE_BUFFER_SIZE} bytes"),
+        })?;
+        let status = set(NativeSetting::BufferSize, size)?;
+        check_setting_status(
+            backend,
+            interface,
+            NativeSetting::BufferSize,
+            &buffer_size.to_string(),
+            status,
+            &mut error_message,
+        )?;
+    }
+    if let Some(source) = settings.timestamp_source {
+        let status = set(
+            NativeSetting::TimestampSource,
+            timestamp_source_value(source),
+        )?;
+        check_setting_status(
+            backend,
+            interface,
+            NativeSetting::TimestampSource,
+            source.as_str(),
+            status,
+            &mut error_message,
+        )?;
+    }
+    if let Some(precision) = settings.timestamp_precision {
+        let status = set(
+            NativeSetting::TimestampPrecision,
+            timestamp_precision_value(precision),
+        )?;
+        check_setting_status(
+            backend,
+            interface,
+            NativeSetting::TimestampPrecision,
+            precision.as_str(),
+            status,
+            &mut error_message,
+        )?;
+    }
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -129,18 +203,19 @@ impl fmt::Display for Diagnostic {
 
 impl std::error::Error for Diagnostic {}
 
-pub(in crate::platform) fn check_setting_status(
+fn check_setting_status(
     backend: &str,
     interface: &InterfaceId,
-    operation: &'static str,
-    setting: &'static str,
+    setting: NativeSetting,
     requested: &str,
     status: c_int,
-    diagnostic: &str,
+    error_message: &mut impl FnMut() -> String,
 ) -> Result<(), Error> {
     if status == 0 {
         return Ok(());
     }
+    let operation = setting.operation();
+    let diagnostic = error_message();
     if matches!(
         status,
         PCAP_WARNING_TSTAMP_TYPE_NOTSUP
@@ -148,7 +223,7 @@ pub(in crate::platform) fn check_setting_status(
             | PCAP_ERROR_TSTAMP_PRECISION_NOTSUP
     ) {
         return Err(Error::UnsupportedCaptureSetting {
-            setting,
+            setting: setting.field(),
             interface: interface.name.clone(),
             message: format!(
                 "{backend} rejected {requested} through {operation} (status {status}): {diagnostic}"
@@ -287,6 +362,22 @@ pub(in crate::platform) fn timestamp_type_list(
     Ok(values)
 }
 
+pub(in crate::platform) fn map_timestamp_types(
+    values: Vec<c_int>,
+    mut name: impl FnMut(c_int) -> Option<String>,
+    mut description: impl FnMut(c_int) -> Option<String>,
+) -> Vec<TimestampType> {
+    values
+        .into_iter()
+        .map(|value| TimestampType {
+            value,
+            name: name(value),
+            description: description(value),
+            source: timestamp_source_of_value(value),
+        })
+        .collect()
+}
+
 /// # Safety
 ///
 /// `raw` is NULL or points to a static NUL-terminated string the pcap runtime owns.
@@ -304,13 +395,13 @@ pub(in crate::platform) unsafe fn tstamp_type_string(raw: *const c_char) -> Opti
 
 // Open and send failures report only error-buffer text, so matching it is the only classifier.
 
-pub(in crate::platform) fn is_missing_device(message: &str) -> bool {
+fn is_missing_device(message: &str) -> bool {
     const PHRASES: [&str; 3] = ["no such device", "not found", "does not exist"];
     let message = message.to_ascii_lowercase();
     PHRASES.iter().any(|phrase| message.contains(phrase))
 }
 
-pub(in crate::platform) fn is_permission_denied(message: &str) -> bool {
+fn is_permission_denied(message: &str) -> bool {
     const PHRASES: [&str; 4] = [
         "permission denied",
         "not permitted",
@@ -319,4 +410,56 @@ pub(in crate::platform) fn is_permission_denied(message: &str) -> bool {
     ];
     let message = message.to_ascii_lowercase();
     PHRASES.iter().any(|phrase| message.contains(phrase))
+}
+
+pub(in crate::platform) fn map_open_error(
+    backend: &str,
+    privilege_hint: &str,
+    interface: &InterfaceId,
+    diagnostic: &str,
+    source: Option<Source>,
+) -> Error {
+    if is_permission_denied(diagnostic) {
+        Error::Privilege {
+            message: format!(
+                "cannot open {} through {backend}; {privilege_hint}",
+                interface.name
+            ),
+            source,
+        }
+    } else if is_missing_device(diagnostic) {
+        Error::Device {
+            interface: interface.name.clone(),
+            message: format!("{backend} could not open this interface"),
+            source,
+        }
+    } else {
+        Error::Capture {
+            message: format!("could not open {} through {backend}", interface.name),
+            source,
+        }
+    }
+}
+
+pub(in crate::platform) fn map_send_error(
+    backend: &str,
+    privilege_hint: &str,
+    interface: &InterfaceId,
+    diagnostic: &str,
+    source: Option<Source>,
+) -> Error {
+    if is_permission_denied(diagnostic) {
+        Error::Privilege {
+            message: format!(
+                "cannot inject on {} through {backend}; {privilege_hint}",
+                interface.name
+            ),
+            source,
+        }
+    } else {
+        Error::Send {
+            message: format!("{backend} injection on {} failed", interface.name),
+            source,
+        }
+    }
 }

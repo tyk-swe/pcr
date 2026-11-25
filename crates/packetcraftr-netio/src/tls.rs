@@ -231,10 +231,7 @@ where
     }
 
     pub fn evidence(&self) -> Evidence {
-        let certificates = self
-            .certificates
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let certificates = crate::workers::lock(&self.certificates);
         Evidence {
             handshake_complete: self.handshake_complete,
             protocol_version: self

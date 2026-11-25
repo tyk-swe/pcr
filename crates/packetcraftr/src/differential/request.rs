@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::net::{Ipv4Addr, SocketAddrV4};
+use std::net::Ipv4Addr;
 use std::time::Duration;
 
 use packetcraftr_netio::deadline::MAX_WAIT;
@@ -114,11 +114,6 @@ impl Request {
             build: Default::default(),
             allow_permissive_live: false,
         }
-    }
-
-    #[must_use]
-    pub fn responder_endpoint(&self) -> SocketAddrV4 {
-        SocketAddrV4::new(self.target, self.responder_port)
     }
 }
 

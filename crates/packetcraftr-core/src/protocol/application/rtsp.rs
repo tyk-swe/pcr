@@ -56,21 +56,23 @@ impl Rtsp {
             channel,
         } = self;
         let default = Self::default();
-        let uncarried = if *interleaved {
-            [
-                ("start_line", *start_line != default.start_line),
-                ("headers", *headers != default.headers),
-            ]
-            .into_iter()
-            .find(|(_, changed)| *changed)
-            .map(|(field, _)| ("interleaved RTSP frames", field))
+        let (mode, fields): (&str, &[(&str, bool)]) = if *interleaved {
+            (
+                "interleaved RTSP frames",
+                &[
+                    ("start_line", *start_line != default.start_line),
+                    ("headers", *headers != default.headers),
+                ],
+            )
         } else {
-            (*channel != default.channel).then_some(("text RTSP messages", "channel"))
+            (
+                "text RTSP messages",
+                &[("channel", *channel != default.channel)],
+            )
         };
-        match uncarried {
-            Some((mode, field)) => Err(invalid(NAME, format!("{mode} do not carry field {field}"))),
-            None => Ok(()),
-        }
+        crate::protocol::common::reject_uncarried(NAME, fields, |field| {
+            format!("{mode} do not carry field {field}")
+        })
     }
     fn encode_wire(&self, c: &EncodeContext<'_>) -> Result<Vec<u8>, Error> {
         self.reject_uncarried_fields()?;

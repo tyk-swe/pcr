@@ -276,12 +276,6 @@ impl<R> Request<R> {
         }
     }
 
-    #[must_use]
-    pub fn with_filter(mut self, filter: FrameSelector) -> Self {
-        self.filter = Some(filter);
-        self
-    }
-
     pub fn validate(&self) -> Result<(), Error> {
         validate(&self.source, &self.options)
     }

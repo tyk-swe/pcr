@@ -23,64 +23,6 @@ pub trait PacketProviders: CaptureProviders {
     fn transmit(&self) -> &Self::Transmit;
 }
 
-/// Passive route/interface lookup and authorized transmission without capture.
-/// Existing packet backends receive this capability automatically.
-pub trait TransmitProviders: Send + Sync + 'static {
-    type Interface: net::interface::Provider + 'static;
-    type Route: net::route::Provider + 'static;
-    type Transmit: net::transmit::Provider + 'static;
-
-    fn interface_provider(&self) -> &Self::Interface;
-    fn route_provider(&self) -> &Self::Route;
-    fn transmit_provider(&self) -> &Self::Transmit;
-}
-
-impl<P: PacketProviders> TransmitProviders for P {
-    type Interface = <P as CaptureProviders>::Interface;
-    type Route = <P as PacketProviders>::Route;
-    type Transmit = <P as PacketProviders>::Transmit;
-
-    fn interface_provider(&self) -> &Self::Interface {
-        CaptureProviders::interface(self)
-    }
-    fn route_provider(&self) -> &Self::Route {
-        PacketProviders::route(self)
-    }
-    fn transmit_provider(&self) -> &Self::Transmit {
-        PacketProviders::transmit(self)
-    }
-}
-
-/// A backend for numeric Layer 3 sends and passive route planning. It carries
-/// no capture or neighbor-discovery capability.
-#[derive(Clone, Copy, Debug)]
-pub struct TransmitSet<R, N, T> {
-    pub route: R,
-    pub interface: N,
-    pub transmit: T,
-}
-
-impl<R, N, T> TransmitProviders for TransmitSet<R, N, T>
-where
-    R: net::route::Provider + 'static,
-    N: net::interface::Provider + 'static,
-    T: net::transmit::Provider + 'static,
-{
-    type Interface = N;
-    type Route = R;
-    type Transmit = T;
-
-    fn interface_provider(&self) -> &N {
-        &self.interface
-    }
-    fn route_provider(&self) -> &R {
-        &self.route
-    }
-    fn transmit_provider(&self) -> &T {
-        &self.transmit
-    }
-}
-
 pub trait TargetProviders: Send + Sync + 'static {
     type Resolver: target::Resolver + 'static;
 
@@ -115,14 +57,6 @@ pub struct ProviderSet<R = (), N = (), C = (), T = (), P = (), H = (), U = ()> {
 }
 
 impl ProviderSet {
-    pub fn transmit<R, N, T>(route: R, interface: N, transmit: T) -> TransmitSet<R, N, T> {
-        TransmitSet {
-            route,
-            interface,
-            transmit,
-        }
-    }
-
     pub fn capture<N, C>(interface: N, capture: C) -> ProviderSet<(), N, C, (), (), ()> {
         ProviderSet {
             route: (),
@@ -166,19 +100,6 @@ impl ProviderSet {
 }
 
 impl<R, N, C, T, P, H, U> ProviderSet<R, N, C, T, P, H, U> {
-    #[must_use]
-    pub fn with_udp<Q>(self, udp: Q) -> ProviderSet<R, N, C, T, P, H, Q> {
-        ProviderSet {
-            route: self.route,
-            interface: self.interface,
-            capture: self.capture,
-            transmit: self.transmit,
-            tcp: self.tcp,
-            resolver: self.resolver,
-            udp,
-        }
-    }
-
     #[must_use]
     pub fn with_resolver<Q>(self, resolver: Q) -> ProviderSet<R, N, C, T, P, Q, U> {
         ProviderSet {
@@ -365,5 +286,25 @@ impl<P: TcpProviders> net::tcp::Provider for TcpOf<P> {
         deadline: &packetcraftr_core::budget::Deadline,
     ) -> Result<Self::Stream, net::tcp::Error> {
         self.0.tcp().connect(endpoint, deadline)
+    }
+}
+
+pub(crate) struct AuthorizedTcp<P> {
+    pub(crate) providers: Arc<P>,
+    pub(crate) policy: Arc<crate::policy::Policy>,
+}
+
+impl<P: TcpProviders> net::tcp::Provider for AuthorizedTcp<P> {
+    type Stream = <P::Tcp as net::tcp::Provider>::Stream;
+
+    fn connect(
+        &self,
+        endpoint: std::net::SocketAddr,
+        deadline: &packetcraftr_core::budget::Deadline,
+    ) -> Result<Self::Stream, net::tcp::Error> {
+        self.policy
+            .authorize_destination(endpoint.ip())
+            .map_err(|source| std::io::Error::new(std::io::ErrorKind::PermissionDenied, source))?;
+        self.providers.tcp().connect(endpoint, deadline)
     }
 }

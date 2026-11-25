@@ -11,7 +11,7 @@ use super::abi::{
 use crate::{
     Error, NativeCapability, Unsupported,
     interface::Id as InterfaceId,
-    platform::common::pcap_api::{Diagnostic, is_missing_device, is_permission_denied},
+    platform::common::pcap_api::{Diagnostic, map_open_error},
 };
 use packetcraftr_core::error::Source;
 
@@ -57,29 +57,14 @@ pub(in crate::platform) fn map_activation_error(
 }
 
 pub(in crate::platform) fn map_open_message(interface: &InterfaceId, diagnostic: String) -> Error {
-    let privilege = is_permission_denied(&diagnostic);
-    let missing = is_missing_device(&diagnostic);
-    let source = Diagnostic::new(None, diagnostic).into_source();
-    if privilege {
-        return Error::Privilege {
-            message: format!(
-                "cannot open {} through Npcap; grant capture privileges or run elevated",
-                interface.name
-            ),
-            source,
-        };
-    }
-    if missing {
-        return Error::Device {
-            interface: interface.name.clone(),
-            message: "Npcap could not open this interface".to_owned(),
-            source,
-        };
-    }
-    Error::Capture {
-        message: format!("could not open {} through Npcap", interface.name),
+    let source = Diagnostic::new(None, diagnostic.clone()).into_source();
+    map_open_error(
+        "Npcap",
+        "grant capture privileges or run elevated",
+        interface,
+        &diagnostic,
         source,
-    }
+    )
 }
 
 pub(in crate::platform) fn interface_conversion_error(

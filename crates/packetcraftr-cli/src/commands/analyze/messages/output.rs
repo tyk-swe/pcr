@@ -1,7 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::commands::offline_analysis::output::{ScopedFlowKey, analysis_complete};
+use crate::commands::offline_analysis::output::{
+    ScopedFlowKey, StreamIssue, analysis_complete, sources,
+};
 
 use crate::output::contract::Error;
 
@@ -56,12 +58,7 @@ impl TryFrom<core::Message> for Message {
                 .as_ref()
                 .map(packetcraftr_core::document::Packet::from_packet),
             error: v.error,
-            sources: v
-                .sources
-                .frames()
-                .iter()
-                .map(Source::try_from)
-                .collect::<Result<_, _>>()?,
+            sources: sources(&v.sources)?,
         })
     }
 }
@@ -70,13 +67,7 @@ impl StreamRecord for Message {
         "protocol_message"
     }
 }
-#[derive(Debug, Serialize)]
-pub(crate) struct Issue {
-    pub number: u64,
-    pub flow: ScopedFlowKey,
-    pub stream: u64,
-    pub status: Status,
-}
+pub(crate) type Issue = StreamIssue<Status>;
 impl From<core::Issue> for Issue {
     fn from(v: core::Issue) -> Self {
         Self {

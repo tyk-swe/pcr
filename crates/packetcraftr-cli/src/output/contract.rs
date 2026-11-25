@@ -12,7 +12,6 @@ pub const OUTPUT_SCHEMA: &str = "packetcraftr.output/v23";
 /// Releases 0.3.0 to 0.5.0-beta.2 and later unreleased builds each emitted this
 /// identifier with a different schema, so no single schema can validate it.
 pub const AMBIGUOUS_OUTPUT_SCHEMA: &str = "packetcraftr.output/v1";
-pub const SCHEMA: &str = OUTPUT_SCHEMA;
 
 pub(crate) fn payload_schema(command: &str) -> String {
     format!("packetcraftr.output.{command}/v1")

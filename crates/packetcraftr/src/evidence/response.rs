@@ -5,7 +5,7 @@
 
 mod selection;
 
+pub use selection::Response;
 pub(crate) use selection::{
-    CandidateKey, MatchedResponse, Passed, ResponseCandidate, ResponseSelector, Selected,
-    candidate_precedes,
+    CandidateKey, Passed, ResponseCandidate, ResponseSelector, Selected, candidate_precedes,
 };

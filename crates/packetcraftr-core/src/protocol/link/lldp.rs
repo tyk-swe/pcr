@@ -64,22 +64,6 @@ reflective_layer! {
     layout pub(crate) fn lldp_layout(tlvs_end: usize, trailing_end: usize);
 }
 
-impl Lldp {
-    /// Yields `(type, value)` for each TLV before the End of LLDPDU TLV, and
-    /// stops at the first TLV that does not fit in `tlvs`.
-    pub fn tlv_iter(&self) -> impl Iterator<Item = (u8, &[u8])> + '_ {
-        let mut cursor = 0_usize;
-        std::iter::from_fn(move || {
-            let (kind, value, next) = read_tlv(&self.tlvs, cursor)?;
-            if kind == TLV_END && value.is_empty() {
-                return None;
-            }
-            cursor = next;
-            Some((kind, value))
-        })
-    }
-}
-
 /// Reads the TLV at `cursor`, returning its type, value, and the offset after
 /// it, or `None` when the header or value does not fit.
 fn read_tlv(chain: &[u8], cursor: usize) -> Option<(u8, &[u8], usize)> {

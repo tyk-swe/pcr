@@ -33,35 +33,6 @@ pub struct NativeSnapshot {
     pub cleanup_retaining_capacity: usize,
 }
 
-/// Native executor thread slots, separately bounded from resource grants.
-/// Counts include owned handles whose exit completed but has not been pruned by
-/// a subsequent dispatch. Cleanup-service threads are separate infrastructure.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[non_exhaustive]
-pub struct ExecutorThreadSnapshot {
-    pub capacity: usize,
-    /// Slots running a job or publishing/destroying its outcome.
-    pub busy: usize,
-    /// Cached reusable executor slots.
-    pub idle: usize,
-    /// Retired slots awaiting actual join and result destruction or pruning.
-    pub retiring: usize,
-}
-
-/// Inspect retained executor slots without starting threads or performing I/O.
-/// Their sum never exceeds `capacity`, even after all resource grants end.
-#[must_use]
-pub fn executor_thread_snapshot() -> ExecutorThreadSnapshot {
-    let shared = crate::workers::shared().thread_snapshot();
-    let control = crate::workers::control().thread_snapshot();
-    ExecutorThreadSnapshot {
-        capacity: shared.capacity.saturating_add(control.capacity),
-        busy: shared.busy.saturating_add(control.busy),
-        idle: shared.idle.saturating_add(control.idle),
-        retiring: shared.retiring.saturating_add(control.retiring),
-    }
-}
-
 /// Inspect aggregate root ownership without starting workers or performing I/O.
 #[must_use]
 pub fn native_snapshot() -> NativeSnapshot {
@@ -77,16 +48,6 @@ pub fn tcp_connect_snapshot() -> NativeSnapshot {
     crate::workers::shared().tcp_snapshot()
 }
 
-/// Inspect executing native jobs, excluding established sockets after the
-/// connection job completes. Resident native services remain executing work.
-#[must_use]
-pub fn execution_snapshot() -> NativeSnapshot {
-    combine_snapshots(
-        crate::workers::shared().execution_snapshot(),
-        crate::workers::control().execution_snapshot(),
-    )
-}
-
 fn combine_snapshots(shared: NativeSnapshot, control: NativeSnapshot) -> NativeSnapshot {
     NativeSnapshot {
         supported: shared.supported && control.supported,
@@ -99,13 +60,6 @@ fn combine_snapshots(shared: NativeSnapshot, control: NativeSnapshot) -> NativeS
             .cleanup_retaining_capacity
             .saturating_add(control.cleanup_retaining_capacity),
     }
-}
-
-/// Inspect established TCP sockets, including outcomes not yet claimed by their
-/// caller. Every socket is also charged once to the aggregate native root.
-#[must_use]
-pub fn socket_snapshot() -> NativeSnapshot {
-    crate::workers::shared().socket_snapshot()
 }
 
 #[cfg(test)]

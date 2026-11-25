@@ -152,15 +152,6 @@ impl Packet {
             .filter_map(|entry| entry.layer.downcast_ref::<T>())
     }
 
-    pub fn iter_of_mut<T: Layer>(&mut self) -> impl DoubleEndedIterator<Item = &mut T> {
-        if self.layers.iter().any(|entry| entry.layer.is::<T>()) {
-            self.invalidate_encoded_payload_lengths();
-        }
-        self.layers
-            .iter_mut()
-            .filter_map(|entry| entry.layer.downcast_mut::<T>())
-    }
-
     /// The value includes trailing padding and is available only for packets
     /// produced by the decoder or builder without subsequent mutable access.
     pub fn encoded_payload_length(&self, index: usize) -> Option<usize> {

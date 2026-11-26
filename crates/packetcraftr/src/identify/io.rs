@@ -7,13 +7,13 @@ use std::sync::Arc;
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::document::service_probes::{self, Probe, Request};
 use packetcraftr_core::error::Source;
-use packetcraftr_netio::tcp::Stream as _;
 use packetcraftr_netio::udp::Provider as _;
 use packetcraftr_netio::{bounded, tcp, tls, udp};
 
 use super::{Endpoint, Error, IoOutcome, TlsEvidence, TlsSettings, Transport};
+use crate::client::tcp::{ConnectError, connect as connect_tcp};
 use crate::policy::{Operation, Policy, SocketLimits, SocketOperation};
-use crate::providers::{AuthorizedTcp, TcpProviders, UdpProviders};
+use crate::providers::{TcpOf, TcpProviders, UdpProviders};
 
 pub(super) struct Reply {
     pub bytes: Vec<u8>,
@@ -178,43 +178,23 @@ fn tcp_exchange<P: TcpProviders>(
         tls,
     } = exchange;
     let endpoint = endpoint.address;
-    policy.authorize_destination(endpoint.ip())?;
-    let connector = Arc::new(AuthorizedTcp {
-        providers: Arc::clone(providers),
-        policy: Arc::clone(policy),
-    });
-    let mut pending = match tcp::start_connect(connector, endpoint, deadline) {
-        Ok(pending) => pending,
-        Err(source) => return Ok(Reply::tcp_failed(source)),
-    };
-    let outcome = match pending.wait(deadline) {
-        Ok(Some(outcome)) => outcome,
-        Ok(None) => {
-            let source = match deadline.check_cancelled() {
-                Ok(()) => tcp::Error::DeadlineExceeded,
-                Err(cancelled) => tcp::Error::Cancelled(cancelled),
-            };
-            return Ok(Reply::tcp_failed(source));
+    let connector = Arc::new(TcpOf(Arc::clone(providers)));
+    let connected = match connect_tcp(connector, Some(policy), endpoint, deadline) {
+        Ok(connected) => connected,
+        Err(ConnectError::Policy(source)) => return Err(Error::Policy(source)),
+        Err(ConnectError::Tcp(source)) => return Ok(Reply::tcp_failed(source)),
+        Err(ConnectError::PeerChanged { .. }) => {
+            return Err(Error::Provider {
+                reason: "TCP connection changed the numeric peer".into(),
+            });
         }
-        Err(source) => return Ok(Reply::tcp_failed(source)),
+        Err(ConnectError::PeerAddr(source) | ConnectError::LocalAddr(source)) => {
+            return Ok(Reply::failed(source));
+        }
     };
-    let mut stream = match outcome.result {
-        Ok(stream) => stream,
-        Err(source) => return Ok(Reply::tcp_failed(source)),
-    };
-    let peer = match stream.peer_addr() {
-        Ok(peer) => peer,
-        Err(source) => return Ok(Reply::failed(source)),
-    };
-    if !bounded::same_peer(endpoint, peer) {
-        return Err(Error::Provider {
-            reason: "TCP connection changed the numeric peer".into(),
-        });
-    }
-    let local = match stream.local_addr() {
-        Ok(local) => local,
-        Err(source) => return Ok(Reply::failed(source)),
-    };
+    let mut stream = connected.stream;
+    let peer = connected.peer;
+    let local = connected.local;
     // No request byte is handed to the stream until the final peer and exact
     // application-byte declaration have both been authorized.
     if !request.is_empty() {

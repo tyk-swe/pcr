@@ -95,9 +95,10 @@ impl<P: PacketProviders, K: Clock> Native<'_, P, K> {
         let resolution = self
             .operation
             .neighbors
-            .over(
+            .over_with_clock(
                 self.client.providers.transmit(),
                 self.client.providers.capture(),
+                &self.client.clock,
             )
             .resolve(&request, deadline)
             .map_err(BoundaryError::from_error)?;

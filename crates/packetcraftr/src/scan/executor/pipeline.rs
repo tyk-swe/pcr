@@ -16,6 +16,7 @@ mod expiry;
 mod prepare;
 use super::{PipelineEvent, PipelineFeed, PipelineOptions};
 use crate::probe::Batch;
+use crate::scan::error::PipelineRunError;
 use crate::scan::{PipelineFailure, Probe};
 use crate::{
     Client, Stats,
@@ -108,8 +109,8 @@ fn until<P: PacketProviders, K: Clock>(
     end: Instant,
     control: &Deadline,
 ) -> Deadline {
-    Deadline::new(end.saturating_duration_since(client.now()))
-        .with_cancellation(client.cancellation.clone())
+    client
+        .deadline(end.saturating_duration_since(client.now()))
         .with_parent(Some(Arc::new(control.clone())))
 }
 fn check<P: PacketProviders, K: Clock>(
@@ -136,7 +137,7 @@ pub(super) fn run<P: PacketProviders, K: Clock>(
     options: PipelineOptions,
     emit: &mut dyn FnMut(PipelineEvent) -> Result<(), BoundaryError>,
     history: &mut super::reply_history::ReplyHistory,
-) -> Result<Stats, BoundaryError> {
+) -> Result<Stats, PipelineRunError> {
     validate_options(batches, &options)?;
     let started = executor.client.now();
     let deadline = started
@@ -389,7 +390,7 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
         check(self.executor.client, self.deadline, &self.options.control)
     }
 
-    fn finish(mut self, result: Result<(), BoundaryError>) -> Result<Stats, BoundaryError> {
+    fn finish(mut self, result: Result<(), BoundaryError>) -> Result<Stats, PipelineRunError> {
         let capture_lifecycle = self.capture;
         let capture = capture_lifecycle.finish(result.is_ok(), &mut |publish, sources| {
             Self::account_capture(&mut self.stats, &mut self.output, publish, sources)
@@ -447,14 +448,14 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
         if stats.checked_add_assign(&self.stats).is_err() {
             stats = self.stats;
         }
-        Err(BoundaryError::from_error(PipelineFailure {
+        Err(PipelineRunError::Failure(Box::new(PipelineFailure {
             source,
             stats,
             pending: self.attempts.pending_evidence(),
             failed_probe: self.failed_probe,
             capture_sources,
             cleanup,
-        }))
+        })))
     }
 }
 

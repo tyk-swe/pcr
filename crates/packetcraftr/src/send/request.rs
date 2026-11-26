@@ -4,7 +4,7 @@
 use packetcraftr_core::template::{DEFAULT_MAX_TEMPLATE_PACKETS, Template};
 
 use super::Error;
-use super::options::Options;
+use super::Options;
 
 #[derive(Clone, Debug)]
 pub struct Request {

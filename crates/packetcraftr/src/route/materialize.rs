@@ -3,6 +3,7 @@
 
 use packetcraftr_core::budget::Deadline;
 
+use crate::clock::Clock;
 use crate::neighbor::{self, Request as NeighborRequest, Resolution as NeighborResolution};
 use packetcraftr_netio::link::Mode;
 use packetcraftr_netio::{capture, transmit};
@@ -10,9 +11,9 @@ use packetcraftr_netio::{capture, transmit};
 use super::error::Error;
 use super::model::Plan;
 
-pub(crate) fn materialize<T: transmit::Provider, C: capture::Provider>(
+pub(crate) fn materialize<T: transmit::Provider, C: capture::Provider, K: Clock>(
     mut plan: Plan,
-    resolver: &neighbor::Active<'_, T, C>,
+    resolver: &neighbor::Active<'_, T, C, K>,
     deadline: &Deadline,
 ) -> Result<Materialized, Error> {
     let mut neighbor_resolution = None;

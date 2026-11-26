@@ -29,7 +29,7 @@ pub(in crate::scan::executor) fn run_stream<P: PacketProviders, K: Clock>(
     attempts: usize,
     feed: &mut dyn PipelineFeed,
     history: &mut crate::scan::executor::reply_history::ReplyHistory,
-) -> Result<Stats, BoundaryError> {
+) -> Result<Stats, crate::scan::error::PipelineRunError> {
     let mut options = options;
     options.max_in_flight = options.max_in_flight.min(admission.window.max(1));
     if admission.many_interfaces {
@@ -73,11 +73,11 @@ pub(in crate::scan::executor) fn run_stream<P: PacketProviders, K: Clock>(
         || attempts == 0
         || attempts > crate::scan::MAX_PROBES
     {
-        return Err(limit("stream attempts", crate::scan::MAX_PROBES));
+        return Err(limit("stream attempts", crate::scan::MAX_PROBES).into());
     }
     for (index, offered) in initial.batches.iter().enumerate() {
         if offered.index != index {
-            return Err(limit("stream attempt identity", crate::scan::MAX_PROBES));
+            return Err(limit("stream attempt identity", crate::scan::MAX_PROBES).into());
         }
         let _ = offered.batch.probe()?;
     }
@@ -116,10 +116,7 @@ pub(in crate::scan::executor) fn run_stream<P: PacketProviders, K: Clock>(
             .iter()
             .any(|probe| probe.memory > admission.max_probe_bytes)
     {
-        return Err(limit(
-            "changed prepared descriptions",
-            options.max_prepared_bytes,
-        ));
+        return Err(limit("changed prepared descriptions", options.max_prepared_bytes).into());
     }
     plan.base_bytes = plan
         .base_bytes
@@ -147,7 +144,7 @@ pub(in crate::scan::executor) fn run_stream<P: PacketProviders, K: Clock>(
         }
     }
     if plan.base_bytes.saturating_add(admission.max_probe_bytes) > options.max_prepared_bytes {
-        return Err(limit("prepared descriptions", options.max_prepared_bytes));
+        return Err(limit("prepared descriptions", options.max_prepared_bytes).into());
     }
     // Eagerly arm a complete source set only within the stage's active data
     // allocation. Larger source sets use bounded, drained capture epochs.

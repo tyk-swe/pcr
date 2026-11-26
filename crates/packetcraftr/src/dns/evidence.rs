@@ -13,7 +13,7 @@ use packetcraftr_core::{
 };
 use packetcraftr_netio::bounded;
 
-use crate::engine::correlation;
+use crate::correlation;
 use crate::engine::execution::validation::{
     validate_aggregate_evidence_limits, validate_capture_statistics_evidence,
     validate_response_frames_and_deadlines, validate_sent_byte_accounting,

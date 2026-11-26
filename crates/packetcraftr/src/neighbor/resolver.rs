@@ -7,7 +7,6 @@ use std::sync::Arc;
 use bytes::Bytes;
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::frame::Frame;
-use packetcraftr_netio::deadline::remaining_before;
 
 use packetcraftr_core::packet::MacAddress;
 use packetcraftr_netio::{
@@ -146,6 +145,15 @@ impl State {
         self.lookup(&NeighborCacheKey::from(request))
     }
 
+    pub(crate) fn cached_with_clock<K: Clock>(
+        &self,
+        request: &Request,
+        clock: &K,
+    ) -> Result<Option<MacAddress>, Error> {
+        validate_request(request)?;
+        self.lookup_with_clock(&NeighborCacheKey::from(request), clock)
+    }
+
     fn lookup(&self, key: &NeighborCacheKey) -> Result<Option<MacAddress>, Error> {
         let Answers::Operation {
             cache: operation,
@@ -170,26 +178,76 @@ impl State {
         Ok(shared)
     }
 
+    fn lookup_with_clock<K: Clock>(
+        &self,
+        key: &NeighborCacheKey,
+        clock: &K,
+    ) -> Result<Option<MacAddress>, Error> {
+        let Answers::Operation {
+            cache: operation,
+            max_entries,
+        } = &self.answers
+        else {
+            return self.cache.get_with_clock(key, || clock.now());
+        };
+        if let Some(mac_address) = operation.get_with_clock(key, || clock.now())? {
+            return Ok(Some(mac_address));
+        }
+        let shared = self.cache.get_with_clock(key, || clock.now())?;
+        if let Some(mac_address) = shared {
+            operation.insert_with_clock(
+                mac_address,
+                key.clone(),
+                &self.options.for_operation(*max_entries),
+                || clock.now(),
+            )?;
+        }
+        Ok(shared)
+    }
+
+    #[cfg(test)]
     fn remember(&self, mac_address: MacAddress, key: NeighborCacheKey) -> Result<(), Error> {
+        self.remember_with_clock(mac_address, key, &SystemClock)
+    }
+
+    fn remember_with_clock<K: Clock>(
+        &self,
+        mac_address: MacAddress,
+        key: NeighborCacheKey,
+        clock: &K,
+    ) -> Result<(), Error> {
         if let Answers::Operation {
             cache: operation,
             max_entries,
         } = &self.answers
         {
-            operation.insert(
+            operation.insert_with_clock(
                 mac_address,
                 key.clone(),
                 &self.options.for_operation(*max_entries),
+                || clock.now(),
             )?;
         }
-        self.cache.insert(mac_address, key, &self.options)
+        self.cache
+            .insert_with_clock(mac_address, key, &self.options, || clock.now())
     }
 
+    #[cfg(test)]
     pub(crate) fn over<'a, T, C>(&'a self, transmit: &'a T, capture: &'a C) -> Active<'a, T, C> {
+        self.over_with_clock(transmit, capture, &SystemClock)
+    }
+
+    pub(crate) fn over_with_clock<'a, T, C, K: Clock>(
+        &'a self,
+        transmit: &'a T,
+        capture: &'a C,
+        clock: &'a K,
+    ) -> Active<'a, T, C, K> {
         Active {
             transmit,
             capture,
             state: self,
+            clock,
         }
     }
 }
@@ -200,16 +258,18 @@ impl Default for State {
     }
 }
 
-pub(crate) struct Active<'a, T, C> {
+pub(crate) struct Active<'a, T, C, K = SystemClock> {
     transmit: &'a T,
     capture: &'a C,
     state: &'a State,
+    clock: &'a K,
 }
 
-impl<T, C> Active<'_, T, C>
+impl<T, C, K> Active<'_, T, C, K>
 where
     T: transmit::Provider,
     C: capture::Provider,
+    K: Clock,
 {
     pub(crate) fn resolve(
         &self,
@@ -218,7 +278,7 @@ where
     ) -> Result<Resolution, Error> {
         validate_request(request)?;
         let cache_key = NeighborCacheKey::from(request);
-        if let Some(mac_address) = self.state.lookup(&cache_key)? {
+        if let Some(mac_address) = self.state.lookup_with_clock(&cache_key, self.clock)? {
             return Ok(Resolution {
                 mac_address,
                 attempts: 0,
@@ -299,7 +359,8 @@ where
                 capture_statistics: statistics,
             });
         };
-        self.state.remember(mac_address, cache_key)?;
+        self.state
+            .remember_with_clock(mac_address, cache_key, self.clock)?;
         Ok(Resolution {
             mac_address,
             attempts: outcome.attempts,
@@ -312,10 +373,11 @@ where
     }
 }
 
-impl<T, C> Active<'_, T, C>
+impl<T, C, K> Active<'_, T, C, K>
 where
     T: transmit::Provider,
     C: capture::Provider,
+    K: Clock,
 {
     fn exchange<S: Session>(
         &self,
@@ -346,7 +408,8 @@ where
             else {
                 break;
             };
-            let attempt_deadline = SystemClock
+            let attempt_deadline = self
+                .clock
                 .now()
                 .checked_add(attempt_budget)
                 .ok_or_else(|| invalid_options("attempt deadline overflowed".to_owned()))?;
@@ -363,9 +426,11 @@ where
             validate_neighbor_send(request, request_bytes, &report)?;
             let freshness_marker = report.timing().freshness_marker().monotonic();
 
-            let wait = Deadline::until(attempt_deadline, cancellation.clone())
-                .with_parent(Some(std::sync::Arc::new(deadline.clone())));
-            while remaining_before(attempt_deadline).is_some() {
+            let clock = self.clock.clone();
+            let wait = Deadline::with_time_source(attempt_budget, move || clock.now())
+                .with_cancellation(cancellation.clone())
+                .with_parent(Some(Arc::new(deadline.clone())));
+            while self.clock.now() < attempt_deadline {
                 if wait.live_remaining().is_err() {
                     break;
                 }

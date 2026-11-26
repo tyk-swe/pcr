@@ -14,52 +14,119 @@ use crate::clock::Clock;
 use crate::providers::PacketProviders;
 use crate::{Client, Sink};
 
-impl<P: PacketProviders, K: Clock> Client<P, K> {
-    /// Exact packet batches with mandatory workflow identity validation.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the matcher, pinned route, and operation are distinct borrows from different owners"
-    )]
-    pub(crate) fn exchange_packets(
-        &self,
+pub(crate) enum ExchangeInput {
+    Step(Step),
+    Packets {
         packets: Vec<Packet>,
-        send: &crate::send::Options,
+        send: crate::send::Options,
         timeout: std::time::Duration,
         collection: super::Collection,
-        operation: &crate::engine::operation::Operation,
-        matcher: &mut WorkflowResponseMatcher<'_>,
-        pinned: &mut Option<crate::route::Plan>,
-    ) -> Result<super::WorkflowEvidence, Error> {
-        let prepared = self.prepare_packet_exchange(
-            packets.len(),
-            || Ok(packets.into_iter().map(Ok)),
-            send,
-            timeout,
-            collection,
+    },
+}
+
+pub(crate) struct WorkflowExchange<'o, 'm, 'md, 's, 'sd, 'p> {
+    pub(crate) input: ExchangeInput,
+    pub(crate) operation: &'o crate::engine::operation::Operation,
+    pub(crate) matcher: Option<&'m mut WorkflowResponseMatcher<'md>>,
+    pub(crate) stop: Option<&'s mut WorkflowStopPredicate<'sd>>,
+    pub(crate) pinned: Option<&'p mut Option<crate::route::Plan>>,
+    pub(crate) authoritative_matcher: bool,
+}
+
+impl<'o> WorkflowExchange<'o, '_, '_, '_, '_, '_> {
+    pub(crate) fn step(step: Step, operation: &'o crate::engine::operation::Operation) -> Self {
+        Self {
+            input: ExchangeInput::Step(step),
             operation,
-            Some(pinned),
-        )?;
-        let mut transaction = self.arm_capture(prepared, operation)?;
-        transaction.captured.authoritative_matcher = true;
-        let response_deadline = transaction.window.ends_at();
-        let mut observed = Observed::default();
-        let (report, unsolicited_ingress, observation_quality) = transaction.execute(
-            self.providers.transmit(),
-            Some(matcher),
-            None,
-            &mut |event| {
-                observed.observe(event);
-                Ok(())
-            },
-        )?;
-        Ok(super::WorkflowEvidence {
-            observation_quality,
-            aggregate: observed.finish(report)?,
-            unsolicited_ingress,
-            response_deadline,
-        })
+            matcher: None,
+            stop: None,
+            pinned: None,
+            authoritative_matcher: false,
+        }
     }
 
+    pub(crate) fn packets(
+        packets: Vec<Packet>,
+        send: crate::send::Options,
+        timeout: std::time::Duration,
+        collection: super::Collection,
+        operation: &'o crate::engine::operation::Operation,
+    ) -> Self {
+        Self {
+            input: ExchangeInput::Packets {
+                packets,
+                send,
+                timeout,
+                collection,
+            },
+            operation,
+            matcher: None,
+            stop: None,
+            pinned: None,
+            authoritative_matcher: false,
+        }
+    }
+}
+
+impl<'o, 'm, 'md, 's, 'sd, 'p> WorkflowExchange<'o, 'm, 'md, 's, 'sd, 'p> {
+    pub(crate) fn with_matcher<'m2, 'md2>(
+        self,
+        matcher: &'m2 mut WorkflowResponseMatcher<'md2>,
+    ) -> WorkflowExchange<'o, 'm2, 'md2, 's, 'sd, 'p> {
+        WorkflowExchange {
+            input: self.input,
+            operation: self.operation,
+            matcher: Some(matcher),
+            stop: self.stop,
+            pinned: self.pinned,
+            authoritative_matcher: self.authoritative_matcher,
+        }
+    }
+
+    pub(crate) fn with_authoritative_matcher<'m2, 'md2>(
+        self,
+        matcher: &'m2 mut WorkflowResponseMatcher<'md2>,
+    ) -> WorkflowExchange<'o, 'm2, 'md2, 's, 'sd, 'p> {
+        WorkflowExchange {
+            input: self.input,
+            operation: self.operation,
+            matcher: Some(matcher),
+            stop: self.stop,
+            pinned: self.pinned,
+            authoritative_matcher: true,
+        }
+    }
+
+    pub(crate) fn with_stop<'s2, 'sd2>(
+        self,
+        stop: Option<&'s2 mut WorkflowStopPredicate<'sd2>>,
+    ) -> WorkflowExchange<'o, 'm, 'md, 's2, 'sd2, 'p> {
+        WorkflowExchange {
+            input: self.input,
+            operation: self.operation,
+            matcher: self.matcher,
+            stop,
+            pinned: self.pinned,
+            authoritative_matcher: self.authoritative_matcher,
+        }
+    }
+
+    pub(crate) fn with_pinned<'p2>(
+        self,
+        pinned: &'p2 mut Option<crate::route::Plan>,
+    ) -> WorkflowExchange<'o, 'm, 'md, 's, 'sd, 'p2> {
+        WorkflowExchange {
+            input: self.input,
+            operation: self.operation,
+            matcher: self.matcher,
+            stop: self.stop,
+            pinned: Some(pinned),
+            authoritative_matcher: self.authoritative_matcher,
+        }
+    }
+}
+
+impl<P: PacketProviders, K: Clock> Client<P, K> {
     /// Runs one capture-ready exchange and publishes each event when final.
     /// The sink's runtime worker and every packet are admitted before neighbor discovery or
     /// capture starts.
@@ -102,25 +169,46 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
             .map(|(report, _, _)| report)
     }
 
-    pub(crate) fn exchange_hooked(
+    pub(crate) fn exchange_workflow(
         &self,
-        step: Step,
-        operation: &crate::engine::operation::Operation,
-        workflow_matcher: Option<&mut WorkflowResponseMatcher<'_>>,
-        stop_predicate: Option<&mut WorkflowStopPredicate<'_>>,
+        exchange: WorkflowExchange<'_, '_, '_, '_, '_, '_>,
     ) -> Result<super::WorkflowEvidence, Error> {
-        let mut observed = Observed::default();
-        let transaction = self.arm_capture(self.prepare_step(step, operation)?, operation)?;
+        let WorkflowExchange {
+            input,
+            operation,
+            matcher,
+            stop,
+            pinned,
+            authoritative_matcher,
+        } = exchange;
+        let prepared = match input {
+            ExchangeInput::Step(step) => self.prepare_step(step, operation)?,
+            ExchangeInput::Packets {
+                packets,
+                send,
+                timeout,
+                collection,
+            } => self.prepare_packet_exchange(
+                packets.len(),
+                || Ok(packets.into_iter().map(Ok)),
+                &send,
+                timeout,
+                collection,
+                operation,
+                pinned,
+            )?,
+        };
+        let mut transaction = self.arm_capture(prepared, operation)?;
+        if authoritative_matcher {
+            transaction.captured.authoritative_matcher = true;
+        }
         let response_deadline = transaction.window.ends_at();
-        let (report, unsolicited_ingress, observation_quality) = transaction.execute(
-            self.providers.transmit(),
-            workflow_matcher,
-            stop_predicate,
-            &mut |event| {
+        let mut observed = Observed::default();
+        let (report, unsolicited_ingress, observation_quality) =
+            transaction.execute(self.providers.transmit(), matcher, stop, &mut |event| {
                 observed.observe(event);
                 Ok(())
-            },
-        )?;
+            })?;
         Ok(super::WorkflowEvidence {
             observation_quality,
             aggregate: observed.finish(report)?,

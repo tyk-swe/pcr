@@ -269,7 +269,7 @@ where
             sent_bytes,
             peak_pending,
         }),
-        Err(source) => Err(Error::PipelineExecution { source }),
+        Err(source) => Err(Error::from(source)),
     }
 }
 

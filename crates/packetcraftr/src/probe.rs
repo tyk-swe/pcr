@@ -2,11 +2,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 mod limits;
-pub(crate) mod model;
 mod reply;
 pub(crate) mod runner;
 
-pub use model::{Endpoint, Stage, Status, Transport};
+pub use crate::model::{Endpoint, Stage, Status, Transport};
 pub use reply::Reply;
 pub(crate) use runner::{Batch, Evidence};
 

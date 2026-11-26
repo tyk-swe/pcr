@@ -11,7 +11,7 @@ use crate::client::admission::approve_operation;
 use crate::clock::Clock;
 use crate::engine::execution::Context;
 use crate::exchange::WorkflowExecutor;
-use crate::policy::{Authorizer, DnsOperation, LimitOverflow, Operation, WireLimits};
+use crate::policy::{Authorizer, LimitOverflow, Operation, TrafficOperation, WireLimits};
 use crate::providers::{PacketProviders, TcpProviders};
 use crate::target::ResolveTarget;
 use crate::{Sink, Stats};
@@ -69,7 +69,7 @@ impl Request {
 pub(crate) fn limits<Q>(
     questions: impl IntoIterator<Item = Q>,
     neighbor_attempts: u64,
-) -> Result<DnsOperation, Error>
+) -> Result<TrafficOperation, Error>
 where
     Q: Borrow<super::Request>,
 {
@@ -87,7 +87,7 @@ where
 fn question_limits(
     question: &super::Request,
     neighbor_attempts: u64,
-) -> Result<DnsOperation, Error> {
+) -> Result<TrafficOperation, Error> {
     let prepared = PreparedOperation::new(question)?;
     with_neighbor_requests(question, prepared.limits, neighbor_attempts)
 }
@@ -98,7 +98,7 @@ fn question_limits(
 pub(crate) struct Prepared<'a> {
     questions: &'a [super::Request],
     operations: Vec<PreparedOperation<'a>>,
-    limits: DnsOperation,
+    limits: TrafficOperation,
     max_duration: Duration,
 }
 
@@ -144,9 +144,9 @@ impl<'a> Prepared<'a> {
 /// packets whose route may resolve a link-layer neighbor.
 fn with_neighbor_requests(
     question: &super::Request,
-    limits: DnsOperation,
+    limits: TrafficOperation,
     attempts: u64,
-) -> Result<DnsOperation, Error> {
+) -> Result<TrafficOperation, Error> {
     let address = match &question.server {
         crate::target::Target::Address(address) => Some(*address),
         _ => None,
@@ -154,21 +154,21 @@ fn with_neighbor_requests(
     let (requests, request_bytes) = crate::neighbor::charge(
         question.route.link_mode,
         address,
-        limits.udp().packets(),
+        limits.wire().packets(),
         attempts,
     )
     .ok_or(LimitOverflow)?;
     if requests == 0 {
         return Ok(limits);
     }
-    let udp = limits.udp();
+    let udp = limits.wire();
     let packets = udp.packets().checked_add(requests).ok_or(LimitOverflow)?;
     let bytes = request_bytes
         .checked_add(udp.wire_bytes())
         .ok_or(LimitOverflow)?;
-    Ok(DnsOperation::new(
+    Ok(TrafficOperation::new(
         WireLimits::new(packets, bytes),
-        limits.tcp(),
+        limits.socket(),
     )?)
 }
 
@@ -367,7 +367,7 @@ where
     } = prepared;
     let mut stop = deadline.enforce().is_err();
     if !stop {
-        approve_operation::<_, Error>(authorizer, Operation::Dns(limits), deadline)?;
+        approve_operation::<_, Error>(authorizer, Operation::Traffic(limits), deadline)?;
     }
     let mut questions = Vec::with_capacity(requests.len());
     let mut stats = Stats::default();

@@ -37,7 +37,7 @@ impl crate::probe::runner::Sequenced for Probe {
 }
 
 pub(super) fn flows(request: &Request, destination: IpAddr, nonce: u64) -> Vec<Flow> {
-    let ephemeral_base = u32::from(crate::engine::correlation::EPHEMERAL_SOURCE_PORT_BASE);
+    let ephemeral_base = u32::from(crate::correlation::EPHEMERAL_SOURCE_PORT_BASE);
     let width = u32::from(u16::MAX) - ephemeral_base + 1 - u32::from(request.flows) + 1;
     let base = request
         .trace
@@ -166,7 +166,7 @@ fn raw(packet: &Packet) -> Option<&[u8]> {
 }
 
 pub(super) fn sent_matches(probe: &Probe, sent: &Packet) -> bool {
-    use crate::engine::correlation::{packet_shape_matches, packet_shape_with_payload_matches};
+    use crate::correlation::{packet_shape_matches, packet_shape_with_payload_matches};
     use packetcraftr_core::protocol::BuiltinProtocol;
     let net = if probe.packet.get::<Ipv4>().is_some() {
         BuiltinProtocol::Ipv4

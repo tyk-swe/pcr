@@ -3,6 +3,7 @@
 
 use thiserror::Error as ThisError;
 
+pub(crate) mod evidence;
 mod failure;
 
 use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};

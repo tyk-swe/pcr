@@ -97,17 +97,19 @@ where
             None => self.collection.clone(),
         };
         self.client
-            .exchange_hooked(
-                Step {
-                    template,
-                    send,
-                    timeout: step.timeout,
-                    max_template_packets: step.max_template_packets,
-                    collection,
-                },
-                self.operation,
-                Some(matches_request),
-                stop_after_response,
+            .exchange_workflow(
+                super::engine::WorkflowExchange::step(
+                    Step {
+                        template,
+                        send,
+                        timeout: step.timeout,
+                        max_template_packets: step.max_template_packets,
+                        collection,
+                    },
+                    self.operation,
+                )
+                .with_matcher(matches_request)
+                .with_stop(stop_after_response),
             )
             .map_err(BoundaryError::from_error)
     }

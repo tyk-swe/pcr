@@ -16,7 +16,7 @@ use super::plan::packet::sent_probe_matches;
 use super::profile;
 use super::report::RttAccumulator;
 use super::{Classification, Event, Probe, ProbeEvidence, Reply, SctpScan, Stage, TcpScan};
-use crate::engine::correlation::Correlation;
+use crate::correlation::Correlation;
 use crate::evidence::SentPacket;
 use crate::probe;
 use crate::probe::Transport;
@@ -38,7 +38,7 @@ pub fn classify_response(
     request: &Packet,
     response: &DecodedPacket,
 ) -> Option<CorrelatedResponse> {
-    let observation = crate::engine::correlation::observe(registry, transport, request, response)?;
+    let observation = crate::correlation::observe(registry, transport, request, response)?;
     let classification = match observation.correlation {
         Correlation::TcpReset
         | Correlation::SctpAbort

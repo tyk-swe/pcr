@@ -20,6 +20,7 @@ mod workflow;
 pub(crate) use accumulator::{
     Accumulator, ProcessContext, ProcessOutcome, WorkflowResponseMatcher, WorkflowStopPredicate,
 };
+pub(crate) use engine::WorkflowExchange;
 pub use error::Error;
 pub use evidence::{Event, Response};
 pub(crate) use evidence::{Observed, WorkflowEvidence};

@@ -106,6 +106,11 @@ where
         self.clock.now()
     }
 
+    pub(crate) fn child_deadline(&self, limit: Duration) -> Deadline {
+        let clock = self.clock.clone();
+        Deadline::with_time_source(limit, move || clock.now())
+    }
+
     pub(crate) fn into_stats(self) -> Stats {
         self.stats
     }

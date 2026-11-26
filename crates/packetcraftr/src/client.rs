@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 
 pub(crate) mod admission;
 pub(crate) mod planning;
+pub(crate) mod tcp;
 #[cfg(test)]
 mod tests;
 

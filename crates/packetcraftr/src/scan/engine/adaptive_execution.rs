@@ -231,7 +231,7 @@ where
     let result = prober
         .executor
         .execute_stream(options, admission, attempts, &mut feed)
-        .map_err(|source| Error::PipelineExecution { source })?;
+        .map_err(Error::from)?;
     if !feed.settled()
         || result.packets_attempted != feed.confirmed.packets_attempted
         || result.packets_completed != feed.confirmed.packets_completed

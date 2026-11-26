@@ -7,13 +7,12 @@
 mod engine;
 mod error;
 mod evidence;
-pub(crate) mod options;
 mod plan;
 mod report;
 mod request;
 
+pub use crate::engine::options::Options;
 pub use error::Error;
 pub use evidence::{Event, SentFrame};
-pub use options::Options;
 pub use report::{Aggregate, Collector, Report};
 pub use request::{Parameters, Request};

@@ -1,7 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-pub(crate) mod error;
 pub(crate) mod limits;
 pub(crate) mod response;
 pub(crate) mod retention;
@@ -130,7 +129,7 @@ macro_rules! limits_serde {
         }
     };
 }
-pub use error::Error;
+pub use crate::error::evidence::Error;
 pub(crate) use limits_serde;
 pub(crate) use retention::{RetentionBudget, RetentionError};
 

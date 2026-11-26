@@ -11,7 +11,7 @@ use packetcraftr_core::packet::Packet;
 use super::{Error, Policy, authorize_permissive_live};
 
 /// Declared packet and wire-byte maxima. Every pair, including zero for no
-/// traffic, is a legal declaration. [`DnsOperation::new`] rejects an aggregate
+/// traffic, is a legal declaration. [`TrafficOperation::new`] rejects an aggregate
 /// that overflows with [`LimitOverflow`], and [`Policy::authorize`] enforces
 /// the policy ceilings.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -42,7 +42,7 @@ impl WireLimits {
 
 /// Declared connection, message, and application-byte maxima. Every value,
 /// including zero for no traffic, is a legal declaration.
-/// [`SocketOperation::new`] and [`DnsOperation::new`] reject an aggregate that
+/// [`SocketOperation::new`] and [`TrafficOperation::new`] reject an aggregate that
 /// overflows with [`LimitOverflow`], and [`Policy::authorize`] enforces the
 /// policy ceilings and destinations.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -93,10 +93,11 @@ impl packetcraftr_core::error::Classified for LimitOverflow {
     }
 }
 
+/// Combined raw-packet and socket traffic maxima for a single composite operation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct DnsOperation {
-    udp: WireLimits,
-    tcp: SocketLimits,
+pub struct TrafficOperation {
+    wire: WireLimits,
+    socket: SocketLimits,
     limits: WireLimits,
 }
 
@@ -138,37 +139,37 @@ impl<'a> SocketOperation<'a> {
     }
 }
 
-impl DnsOperation {
-    pub fn new(udp: WireLimits, tcp: SocketLimits) -> Result<Self, LimitOverflow> {
-        let packets = udp
+impl TrafficOperation {
+    pub fn new(wire: WireLimits, socket: SocketLimits) -> Result<Self, LimitOverflow> {
+        let packets = wire
             .packets
-            .checked_add(tcp.connections)
-            .and_then(|total| total.checked_add(tcp.messages))
+            .checked_add(socket.connections)
+            .and_then(|total| total.checked_add(socket.messages))
             .ok_or(LimitOverflow)?;
-        let bytes = udp
+        let bytes = wire
             .wire_bytes
-            .checked_add(tcp.application_bytes)
+            .checked_add(socket.application_bytes)
             .ok_or(LimitOverflow)?;
         Ok(Self {
-            udp,
-            tcp,
+            wire,
+            socket,
             limits: WireLimits::new(packets, bytes),
         })
     }
 
     #[must_use]
-    pub const fn udp(&self) -> WireLimits {
-        self.udp
+    pub const fn wire(&self) -> WireLimits {
+        self.wire
     }
 
     #[must_use]
-    pub const fn tcp(&self) -> SocketLimits {
-        self.tcp
+    pub const fn socket(&self) -> SocketLimits {
+        self.socket
     }
 
-    /// Aggregate limits policy authorizes. The packet field counts UDP packets plus TCP
-    /// connection/message traffic units; the byte field counts UDP wire bytes
-    /// plus framed TCP application bytes.
+    /// Aggregate limits policy authorizes. The packet field counts wire packets
+    /// plus socket connection/message traffic units; the byte field counts wire
+    /// bytes plus application bytes.
     #[must_use]
     pub const fn limits(&self) -> WireLimits {
         self.limits
@@ -245,7 +246,7 @@ impl<'a> DeclaredPackets<'a> {
 pub enum Operation<'a> {
     Socket(SocketOperation<'a>),
     Wire(WireLimits),
-    Dns(DnsOperation),
+    Traffic(TrafficOperation),
     Declared(DeclaredPackets<'a>),
 }
 
@@ -255,7 +256,7 @@ impl Operation<'_> {
         match self {
             Self::Socket(socket) => socket.limits(),
             Self::Wire(limits) => *limits,
-            Self::Dns(dns) => dns.limits(),
+            Self::Traffic(traffic) => traffic.limits(),
             Self::Declared(declared) => declared.limits,
         }
     }
@@ -276,7 +277,7 @@ impl Policy {
     pub fn authorize(&self, request: Operation<'_>) -> Result<(), Error> {
         self.validate()?;
         let limits = request.limits();
-        if matches!(request, Operation::Dns(_) | Operation::Socket(_)) {
+        if matches!(request, Operation::Traffic(_) | Operation::Socket(_)) {
             self.authorize_traffic_limits(limits.packets(), limits.wire_bytes())?;
         } else {
             self.authorize_wire_limits(limits.packets(), limits.wire_bytes())?;
@@ -288,7 +289,7 @@ impl Policy {
                 }
                 Ok(())
             }
-            Operation::Wire(_) | Operation::Dns(_) => Ok(()),
+            Operation::Wire(_) | Operation::Traffic(_) => Ok(()),
             Operation::Declared(declared) => {
                 if let PermissiveLive::Required { allowed } = declared.permissive_live() {
                     authorize_permissive_live(self, allowed)?;
@@ -324,8 +325,10 @@ mod tests {
         ))
     }
 
-    fn dns(udp: WireLimits, tcp: SocketLimits) -> Result<(), Error> {
-        ceilings(10, 100).authorize(Operation::Dns(DnsOperation::new(udp, tcp).unwrap()))
+    fn traffic(wire: WireLimits, socket: SocketLimits) -> Result<(), Error> {
+        ceilings(10, 100).authorize(Operation::Traffic(
+            TrafficOperation::new(wire, socket).unwrap(),
+        ))
     }
 
     #[test]
@@ -339,15 +342,15 @@ mod tests {
                 .map(|operation| operation.limits()),
             Ok(WireLimits::new(u64::MAX, u64::MAX))
         );
-        for (udp, tcp) in [
+        for (wire, socket) in [
             (WireLimits::new(u64::MAX, 0), SocketLimits::new(1, 0, 0)),
             (WireLimits::new(u64::MAX - 1, 0), SocketLimits::new(1, 1, 0)),
             (WireLimits::new(0, u64::MAX), SocketLimits::new(0, 0, 1)),
         ] {
-            assert_eq!(DnsOperation::new(udp, tcp), Err(LimitOverflow));
+            assert_eq!(TrafficOperation::new(wire, socket), Err(LimitOverflow));
         }
         assert_eq!(
-            DnsOperation::new(WireLimits::new(u64::MAX - 2, 1), SocketLimits::new(1, 1, 2))
+            TrafficOperation::new(WireLimits::new(u64::MAX - 2, 1), SocketLimits::new(1, 1, 2))
                 .map(|operation| operation.limits()),
             Ok(WireLimits::new(u64::MAX, 3))
         );
@@ -367,8 +370,8 @@ mod tests {
         );
         assert!(
             policy
-                .authorize(Operation::Dns(
-                    DnsOperation::new(WireLimits::new(0, 0), zero).unwrap()
+                .authorize(Operation::Traffic(
+                    TrafficOperation::new(WireLimits::new(0, 0), zero).unwrap()
                 ))
                 .is_ok()
         );
@@ -399,18 +402,18 @@ mod tests {
     }
 
     #[test]
-    fn dns_limits_accept_exact_total() {
-        let tcp = SocketLimits::new(2, 3, 40);
-        assert!(dns(WireLimits::new(5, 60), tcp).is_ok());
+    fn traffic_limits_accept_exact_total() {
+        let socket = SocketLimits::new(2, 3, 40);
+        assert!(traffic(WireLimits::new(5, 60), socket).is_ok());
         assert!(matches!(
-            dns(WireLimits::new(6, 60), tcp),
+            traffic(WireLimits::new(6, 60), socket),
             Err(Error::TrafficUnitLimit {
                 actual: 11,
                 limit: 10
             })
         ));
         assert!(matches!(
-            dns(WireLimits::new(5, 61), tcp),
+            traffic(WireLimits::new(5, 61), socket),
             Err(Error::TrafficByteLimit {
                 actual: 101,
                 limit: 100

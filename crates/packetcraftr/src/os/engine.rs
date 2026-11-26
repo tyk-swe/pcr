@@ -34,17 +34,17 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
         sink: S,
     ) -> Result<Report, Error> {
         request.validate()?;
-        let operation = crate::engine::operation::Operation::new(self, request.limits.max_duration);
-        let setup = WorkflowSetup::with_authorizer(self, &operation, self.admission());
+        let mut operation =
+            crate::engine::operation::Operation::new(self, request.limits.max_duration)
+                .with_neighbors(self.neighbors.for_operation(1))
+                .with_neighbor_mode(crate::engine::operation::NeighborMode::Cached)
+                .with_limits(
+                    request.limits.max_probes as u64,
+                    request.limits.max_probes as u64 * super::MAX_WIRE_BYTES,
+                );
+        let setup = WorkflowSetup::new(self, &operation);
         let mut workflow = setup.start(self, request.limits.max_duration);
         let publish = crate::engine::execution::publisher(sink, Error::Deadline, Error::Output)?;
-        let mut operation = operation
-            .with_neighbors(self.neighbors.for_operation(1))
-            .with_neighbor_mode(crate::engine::operation::NeighborMode::Cached)
-            .with_limits(
-                request.limits.max_probes as u64,
-                request.limits.max_probes as u64 * super::MAX_WIRE_BYTES,
-            );
         let mut executor = Native {
             client: self,
             operation: &mut operation,
@@ -59,9 +59,9 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
     }
 }
 
-pub(super) fn run<A, P, K, C, F>(
+pub(super) fn run<A, P, K, F>(
     request: &Request,
-    workflow: &mut OperationWorkflow<A, C>,
+    workflow: &mut OperationWorkflow<A, K>,
     executor: &mut Native<'_, P, K>,
     mut publish: F,
 ) -> Result<Report, Error>
@@ -69,7 +69,6 @@ where
     A: Authorizer + ResolveTarget,
     P: PacketProviders,
     K: Clock,
-    C: Clock,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
     let OperationWorkflow {
@@ -79,7 +78,6 @@ where
         deadline,
     } = workflow;
     let started = clock.now();
-    request.validate()?;
     deadline.enforce()?;
     let (selected, ()) = admit_operation(
         authorizer,
@@ -108,8 +106,8 @@ where
             source: super::executor::failure(source),
         })?;
     let base_identity = u32::from_be_bytes(entropy[..4].try_into().expect("four entropy bytes"));
-    let source_port = crate::engine::correlation::ephemeral_source_port(
-        crate::engine::correlation::EPHEMERAL_SOURCE_PORT_BASE,
+    let source_port = crate::correlation::ephemeral_source_port(
+        crate::correlation::EPHEMERAL_SOURCE_PORT_BASE,
         u64::from(u16::from_be_bytes(
             entropy[4..6].try_into().expect("two entropy bytes"),
         )),

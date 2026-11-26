@@ -9,9 +9,9 @@
 //!
 //! | Layer | Modules |
 //! | --- | --- |
-//! | 1. Foundation | `code`, `clock`, `deadline`, `data`, `engine::stats`, `engine::correlation`, `probe::model` |
-//! | 2. Environment | `error`, `policy`, `target` (model, resolver, and selection), `route`, `neighbor`, `providers`, `runtime`, `client`, `evidence::error` |
-//! | 3. Engine | `engine`, `evidence`, `send::options` |
+//! | 1. Foundation | `code`, `clock`, `deadline`, `data`, `stats`, `model`, `correlation` |
+//! | 2. Environment | `error`, `policy`, `target` (model, resolver, and selection), `route`, `neighbor`, `providers`, `runtime`, `client` |
+//! | 3. Engine | `engine`, `evidence` |
 //! | 4. Primitives | `send`, `exchange`, `capture`, `probe` |
 //! | 5. Workflows | `dns`, `traceroute`, `os`, `identify`, `replay`, `fuzz`, `audit`, `differential`, `target::plan` |
 //! | 6. Composite | `scan`, which follows up with traces and reverse DNS |
@@ -19,9 +19,9 @@
 //! `client` owns target admission and route planning. `engine` retains private
 //! operation state, packet preparation, and execution plumbing. Workflow
 //! evidence and identity types live with their workflows, including
-//! `exchange::Response` and the DNS identity functions. The value types that the
-//! engine and error layers consume directly (`probe::model`,
-//! `evidence::error`, `send::options`) sit below their consumers and are
+//! `exchange::Response` and the DNS identity functions. Shared value types
+//! consumed by lower layers (`stats`, `model`, `correlation`,
+//! `error::evidence`, `engine::options`) live at their true layer and are
 //! re-exported at the public workflow paths. Hand-offs from scan results to
 //! later workflows live with `scan`, for example
 //! `scan::Aggregate::trace_observations`.
@@ -63,6 +63,7 @@ pub mod capture;
 mod client;
 pub mod clock;
 mod code;
+mod correlation;
 pub(crate) mod data;
 pub mod deadline;
 pub mod differential;
@@ -73,6 +74,7 @@ pub mod evidence;
 pub mod exchange;
 pub mod fuzz;
 pub mod identify;
+mod model;
 pub mod neighbor;
 pub mod os;
 pub mod policy;
@@ -83,14 +85,15 @@ pub mod route;
 pub mod runtime;
 pub mod scan;
 pub mod send;
+mod stats;
 pub mod target;
 pub mod traceroute;
 
 pub use client::Client;
 pub use engine::execution::{Isolated, Sink, forwarding};
-pub use engine::stats::{Stats, StatsOverflow};
 pub use error::Error;
 pub use providers::{
     CaptureProviders, PacketProviders, ProviderSet, SystemProviders, TargetProviders, TcpProviders,
     UdpProviders,
 };
+pub use stats::{Stats, StatsOverflow};

@@ -12,7 +12,7 @@ use packetcraftr_core::protocol::BuiltinProtocol;
 use packetcraftr_core::protocol::semantics;
 
 use super::{Event, Probe, ProbeEvidence, ResponseKind, Termination, UndecodedEvidence};
-use crate::engine::correlation::{self, Correlation};
+use crate::correlation::{self, Correlation};
 use crate::evidence::SentPacket;
 use crate::probe;
 use crate::probe::Transport;

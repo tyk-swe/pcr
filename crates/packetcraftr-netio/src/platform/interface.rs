@@ -17,13 +17,13 @@ use iphelper as backend;
 #[cfg(all(native_route, target_os = "linux"))]
 use netlink as backend;
 
-#[cfg(any(not(native_route), native_send))]
+#[cfg(any(not(native_route), native_layer2))]
 use crate::interface;
-#[cfg(native_send)]
+#[cfg(native_layer2)]
 use crate::interface::Id as InterfaceId;
 #[cfg(not(native_route))]
 use crate::{NativeCapability, Unsupported};
-#[cfg(any(not(native_route), native_send))]
+#[cfg(any(not(native_route), native_layer2))]
 use packetcraftr_core::budget::Deadline;
 
 #[cfg(native_route)]
@@ -44,7 +44,7 @@ pub(crate) fn enumerate(_deadline: &Deadline) -> Result<Vec<interface::Info>, in
     .into())
 }
 
-#[cfg(native_send)]
+#[cfg(native_layer2)]
 pub(crate) fn enumerate_for_identity(
     expected: &InterfaceId,
     deadline: &Deadline,

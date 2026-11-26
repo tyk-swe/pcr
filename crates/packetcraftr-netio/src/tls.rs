@@ -11,7 +11,7 @@
 mod error;
 mod verification;
 mod verifier;
-pub use verification::{Check, TrustStore, Verification, verify};
+pub use verification::{Check, TrustStore, TrustStoreError, Verification, verify};
 mod wire;
 
 use std::cell::Cell;

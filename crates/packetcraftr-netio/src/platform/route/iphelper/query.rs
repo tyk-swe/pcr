@@ -1,11 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#![allow(
-    unsafe_code,
-    reason = "Windows route lookup reads SOCKADDR_INET unions returned by GetBestRoute2"
-)]
-
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use windows::Win32::Foundation::{
@@ -140,6 +135,10 @@ struct BestRoute {
     source: SOCKADDR_INET,
 }
 
+#[expect(
+    unsafe_code,
+    reason = "queries the Windows route table via GetBestRoute2 FFI"
+)]
 fn query_best_route(
     destination: IpAddr,
     preferred_source: Option<IpAddr>,
@@ -223,6 +222,10 @@ fn encode_address(address: IpAddr, scope_id: u32) -> SOCKADDR_INET {
     }
 }
 
+#[expect(
+    unsafe_code,
+    reason = "reads active WinSock SOCKADDR_INET union fields"
+)]
 fn sockaddr_inet_ip(address: &SOCKADDR_INET) -> Option<IpAddr> {
     // SAFETY: the family field is common to every SOCKADDR_INET union member.
     let family = unsafe { address.si_family };

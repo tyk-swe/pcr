@@ -1,11 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#![cfg_attr(
-    target_os = "windows",
-    allow(unsafe_code, reason = "Windows interface options require setsockopt")
-)]
-
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::num::NonZeroU32;
 #[cfg(target_os = "windows")]
@@ -122,6 +117,7 @@ fn bind_interface(socket: &Socket, packet: &PreparedRawIp) -> Result<(), RawSock
 }
 
 #[cfg(target_os = "windows")]
+#[expect(unsafe_code, reason = "Windows interface options require setsockopt")]
 fn bind_interface(socket: &Socket, packet: &PreparedRawIp) -> Result<(), RawSocketError> {
     let (level, option, index) = match packet.destination {
         IpAddr::V4(_) => (

@@ -92,6 +92,24 @@ impl<C: Session> Owned<C> {
         source
     }
 
+    pub(super) fn current_stats(&self) -> Stats {
+        if self.shutdown_attempted {
+            self.source.statistics
+        } else {
+            self.capture.stats()
+        }
+    }
+
+    pub(super) fn current_observation_quality(&self) -> crate::capture::ObservationQuality {
+        if self.shutdown_attempted {
+            self.source.observation_quality
+        } else {
+            self.capture
+                .observation_quality()
+                .with_statistics(self.capture.stats())
+        }
+    }
+
     pub(super) fn wait_ready(&mut self, caller: &Deadline, deadline: Instant) -> Result<(), Error> {
         caller.check_cancelled()?;
         if crate::deadline::remaining_before(deadline).is_none() {

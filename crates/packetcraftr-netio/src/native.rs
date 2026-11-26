@@ -68,9 +68,7 @@ impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
             Self::Cancelled(source) => source.classification(),
-            Self::DeadlineExceeded { operation } => {
-                crate::Error::DeadlineExceeded { operation }.classification()
-            }
+            Self::DeadlineExceeded { .. } => crate::code::deadline_exceeded(),
             Self::Unsupported(unsupported) => unsupported.classification(),
             Self::RouteNotFound { .. } => Classification::new(
                 crate::code::IoRouteNotFound,

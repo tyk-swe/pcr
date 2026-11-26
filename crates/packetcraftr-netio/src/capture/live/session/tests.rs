@@ -7,7 +7,7 @@ use crate::capture::live::{
 };
 use crate::capture::{self, Group, GroupRequest, Provider};
 use crate::interface::Id;
-use crate::workers::{Pool, reaper::shared_reaper};
+use crate::workers::Pool;
 use std::sync::{Condvar, Mutex, atomic::AtomicUsize, mpsc};
 use std::time::{Duration, Instant};
 
@@ -89,7 +89,7 @@ impl Provider for Backend {
             started,
             task,
             lease,
-            shared_reaper().unwrap(),
+            self.pool.reaper().unwrap(),
         ))
     }
 }

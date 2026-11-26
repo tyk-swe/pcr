@@ -7,7 +7,7 @@ use bytes::Bytes;
 use packetcraftr_core::clock::{Clock, SystemClock};
 use packetcraftr_core::error::{Classification, Classified};
 
-use crate::{Error, error::live_io_invariant};
+use crate::{Error, code::live_io_invariant};
 
 /// Which exact-transmission invariant a provider's wire evidence violated.
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]

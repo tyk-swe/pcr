@@ -30,6 +30,7 @@
 pub mod bounded;
 #[forbid(unsafe_code)]
 pub mod capture;
+#[forbid(unsafe_code)]
 mod code;
 #[forbid(unsafe_code)]
 pub mod deadline;

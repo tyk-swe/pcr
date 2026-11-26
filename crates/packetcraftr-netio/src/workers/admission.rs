@@ -9,7 +9,18 @@ use std::sync::{
 };
 
 use super::{Pool, lock};
-use crate::resources::NativeSnapshot;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct NativeSnapshot {
+    /// Always `true`: ordinary TCP connects use the pool in every feature and platform profile.
+    pub supported: bool,
+    pub capacity: usize,
+    pub active: usize,
+    /// Cumulative rejected reservations, saturating at usize::MAX.
+    pub rejected_admissions: usize,
+    pub cleanup_retaining_capacity: usize,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Class {

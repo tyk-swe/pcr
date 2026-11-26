@@ -37,6 +37,21 @@ pub trait Provider: Send + Sync {
     ) -> Result<Option<Decision>, Self::Error> {
         Ok(None)
     }
+
+    /// Passively selects interface-only routes for a surveyed interface list.
+    fn lookup_interfaces(
+        &self,
+        interfaces: Vec<crate::interface::Info>,
+        deadline: &Deadline,
+    ) -> Result<Vec<Decision>, Self::Error> {
+        let mut routes = Vec::with_capacity(interfaces.len());
+        for interface in interfaces {
+            if let Some(decision) = self.lookup_interface(&interface.id, deadline)? {
+                routes.push(decision);
+            }
+        }
+        Ok(routes)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -88,6 +103,15 @@ impl Provider for SystemProvider {
         admit(deadline, "looking up an interface route")?;
         result.map(Some)
     }
+
+    #[cfg(all(native_route, target_os = "linux"))]
+    fn lookup_interfaces(
+        &self,
+        interfaces: Vec<crate::interface::Info>,
+        deadline: &Deadline,
+    ) -> Result<Vec<Decision>, Self::Error> {
+        self.lookup_interface_snapshot(interfaces, deadline)
+    }
 }
 
 fn admit(deadline: &Deadline, operation: &'static str) -> Result<(), Error> {
@@ -110,4 +134,92 @@ fn validate_preferred_source_family(
         });
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{interface, link::Capability};
+    use packetcraftr_core::frame::LinkType;
+    use std::time::Duration;
+
+    fn info(index: u32) -> interface::Info {
+        interface::Info {
+            id: InterfaceId {
+                name: format!("eth{index}"),
+                index,
+            },
+            description: None,
+            mac_address: None,
+            addresses: Vec::new(),
+            flags: interface::Flags::default(),
+            mtu: Some(1500),
+            capability: Capability::Layer3,
+            link_type: LinkType::RAW,
+        }
+    }
+
+    struct StubProvider;
+
+    impl Provider for StubProvider {
+        type Error = Error;
+
+        fn lookup_with_preferences(
+            &self,
+            destination: IpAddr,
+            _: Option<&InterfaceId>,
+            _: Option<IpAddr>,
+            _: &Deadline,
+        ) -> Result<Decision, Self::Error> {
+            Err(Error::RouteNotFound { destination })
+        }
+
+        fn lookup_interface(
+            &self,
+            interface: &InterfaceId,
+            _: &Deadline,
+        ) -> Result<Option<Decision>, Self::Error> {
+            if interface.index == 2 {
+                return Ok(None);
+            }
+            Ok(Some(Decision {
+                interface: interface.clone(),
+                source_mac: None,
+                selected_source: None,
+                preferred_source: None,
+                next_hop: None,
+                selection_reason: SelectionReason::InterfaceOnly,
+                destination_scope: Scope::Unspecified,
+                mtu: 1500,
+                capability: Capability::Layer3,
+                link_type: LinkType::RAW,
+            }))
+        }
+    }
+
+    #[test]
+    fn default_lookup_interfaces_collects_present_decisions_in_order() {
+        let deadline = Deadline::new(Duration::from_secs(5));
+        let routes = StubProvider
+            .lookup_interfaces(vec![info(1), info(2), info(3)], &deadline)
+            .unwrap();
+        let indexes: Vec<u32> = routes.iter().map(|route| route.interface.index).collect();
+        assert_eq!(indexes, vec![1, 3]);
+    }
+
+    #[cfg(all(native_route, target_os = "linux"))]
+    #[test]
+    fn linux_system_provider_lookup_interfaces_uses_snapshot() {
+        let deadline = Deadline::new(Duration::from_secs(5));
+        let routes = SystemProvider
+            .lookup_interfaces(vec![info(1), info(2)], &deadline)
+            .unwrap();
+        let indexes: Vec<u32> = routes.iter().map(|route| route.interface.index).collect();
+        assert_eq!(indexes, vec![1, 2]);
+        assert!(
+            routes
+                .iter()
+                .all(|route| route.selection_reason == SelectionReason::InterfaceOnly)
+        );
+    }
 }

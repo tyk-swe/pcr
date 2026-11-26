@@ -26,6 +26,7 @@ use packetcraftr_core::budget::Deadline;
 
 #[cfg(native_route)]
 pub(crate) use admission::Exhausted;
+pub use admission::NativeSnapshot;
 pub(crate) use admission::{
     Admission, ConnectPermit, Permit, RetentionMarker, RootLease, SocketPermit, SocketReservation,
 };
@@ -36,8 +37,22 @@ pub(crate) use context::{ExecutionContext, current as execution_context};
 pub(crate) use task::Waited;
 pub(crate) use task::{Blocked, Task, discard_panic_payload, unwind_after_cleanup};
 
-pub(crate) const CAPACITY: usize = crate::resources::WORKER_CAPACITY;
-const CONTROL_CAPACITY: usize = 4;
+/// Aggregate native resources and unfinished jobs admitted by the process root.
+pub const CAPACITY: usize = 16;
+pub(crate) const CONTROL_CAPACITY: usize = 4;
+/// TCP jobs and established sockets share this data allocation. The remaining
+/// root slots admit eligible native control work while data is saturated.
+pub const TCP_DATA_CAPACITY: usize = data_capacity(CAPACITY);
+
+pub(crate) const fn data_capacity(capacity: usize) -> usize {
+    let reserve = capacity / 4;
+    let reserve = if reserve == 0 && capacity > 1 {
+        1
+    } else {
+        reserve
+    };
+    capacity.saturating_sub(reserve)
+}
 
 static SHARED: LazyLock<Arc<Pool>> = LazyLock::new(|| Arc::new(Pool::new(CAPACITY)));
 static CONTROL: LazyLock<Arc<Pool>> = LazyLock::new(|| Arc::new(Pool::new(CONTROL_CAPACITY)));
@@ -48,6 +63,32 @@ pub(crate) fn shared() -> &'static Arc<Pool> {
 
 pub(crate) fn control() -> &'static Arc<Pool> {
     &CONTROL
+}
+
+/// Inspect aggregate root ownership without starting workers or performing I/O.
+#[must_use]
+pub fn native_snapshot() -> NativeSnapshot {
+    combine_snapshots(shared().snapshot(), control().snapshot())
+}
+
+/// Inspect TCP jobs and established sockets; `capacity` is their data allocation.
+#[must_use]
+pub fn tcp_connect_snapshot() -> NativeSnapshot {
+    shared().tcp_snapshot()
+}
+
+fn combine_snapshots(shared: NativeSnapshot, control: NativeSnapshot) -> NativeSnapshot {
+    NativeSnapshot {
+        supported: shared.supported && control.supported,
+        capacity: shared.capacity.saturating_add(control.capacity),
+        active: shared.active.saturating_add(control.active),
+        rejected_admissions: shared
+            .rejected_admissions
+            .saturating_add(control.rejected_admissions),
+        cleanup_retaining_capacity: shared
+            .cleanup_retaining_capacity
+            .saturating_add(control.cleanup_retaining_capacity),
+    }
 }
 
 pub(crate) struct Pool {
@@ -117,22 +158,14 @@ impl Pool {
     pub(crate) fn new(capacity: usize) -> Self {
         Self {
             capacity,
-            admission: Arc::new(Admission::new(
-                capacity,
-                crate::resources::data_capacity(capacity),
-            )),
+            admission: Arc::new(Admission::new(capacity, data_capacity(capacity))),
             state: Mutex::new(State::default()),
             changed: Arc::new(Condvar::new()),
             retirement_service: Mutex::new(None),
         }
     }
 
-    #[cfg(native_layer2)]
-    pub(crate) fn capacity(&self) -> usize {
-        self.capacity
-    }
-
-    fn retirement_reaper(&self) -> Result<reaper::ReaperClient, reaper::ReaperStartError> {
+    pub(crate) fn reaper(&self) -> Result<reaper::ReaperClient, reaper::ReaperStartError> {
         let mut service = lock(&self.retirement_service);
         if let Some(service) = &*service {
             return Ok(service.client());
@@ -290,7 +323,7 @@ impl Pool {
             }
             if Self::maintenance_needed(&mut state) {
                 drop(state);
-                let reaper = match self.retirement_reaper() {
+                let reaper = match self.reaper() {
                     Ok(reaper) => reaper,
                     Err(error) => return Err((job, std::io::Error::other(error))),
                 };
@@ -367,7 +400,7 @@ impl Pool {
         }
         Self::retire(&mut state, worker);
         drop(state);
-        if let Ok(reaper) = self.retirement_reaper() {
+        if let Ok(reaper) = self.reaper() {
             let mut state = lock(&self.state);
             self.submit_retiring(&mut state, &reaper);
         }

@@ -10,6 +10,27 @@ use rustls::{
     server::ParsedCertificate,
 };
 
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum TrustStoreError {
+    #[error("CA file must contain 1..1048576 bytes")]
+    InvalidSize,
+    #[error("CA file contains a non-certificate PEM section")]
+    NonCertificateSection,
+    #[error("CA file contains a nested certificate PEM section")]
+    NestedCertificateSection,
+    #[error("CA file contains no certificates")]
+    Empty,
+    #[error("{message}")]
+    InvalidCertificate { message: String },
+}
+
+impl From<TrustStoreError> for String {
+    fn from(error: TrustStoreError) -> Self {
+        error.to_string()
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct TrustStore(RootCertStore);
 impl Default for TrustStore {
@@ -21,9 +42,9 @@ impl Default for TrustStore {
 }
 impl TrustStore {
     /// Replaces the bundled roots. Empty, malformed, oversized, or non-certificate PEM is rejected.
-    pub fn from_pem(bytes: &[u8]) -> Result<Self, String> {
+    pub fn from_pem(bytes: &[u8]) -> Result<Self, TrustStoreError> {
         if bytes.is_empty() || bytes.len() > 1024 * 1024 {
-            return Err("CA file must contain 1..1048576 bytes".into());
+            return Err(TrustStoreError::InvalidSize);
         }
         // Certificate-only iterators skip other PEM sections. Reject them first,
         // including unknown labels, rather than silently accepting a mixed bundle.
@@ -36,11 +57,11 @@ impl TrustStore {
                 || (trimmed.windows(9).any(|window| window == b"-----END ")
                     && trimmed != b"-----END CERTIFICATE-----")
             {
-                return Err("CA file contains a non-certificate PEM section".into());
+                return Err(TrustStoreError::NonCertificateSection);
             }
             match line {
                 b"-----BEGIN CERTIFICATE-----" if certificate_open => {
-                    return Err("CA file contains a nested certificate PEM section".into());
+                    return Err(TrustStoreError::NestedCertificateSection);
                 }
                 b"-----BEGIN CERTIFICATE-----" => certificate_open = true,
                 b"-----END CERTIFICATE-----" => certificate_open = false,
@@ -49,12 +70,17 @@ impl TrustStore {
         }
         let mut roots = RootCertStore::empty();
         for cert in CertificateDer::pem_slice_iter(bytes) {
+            let cert = cert.map_err(|e| TrustStoreError::InvalidCertificate {
+                message: e.to_string(),
+            })?;
             roots
-                .add(cert.map_err(|e| e.to_string())?)
-                .map_err(|e| e.to_string())?;
+                .add(cert)
+                .map_err(|e| TrustStoreError::InvalidCertificate {
+                    message: e.to_string(),
+                })?;
         }
         if roots.is_empty() {
-            return Err("CA file contains no certificates".into());
+            return Err(TrustStoreError::Empty);
         }
         Ok(Self(roots))
     }
@@ -198,15 +224,21 @@ mod tests {
     fn ca_bundles_reject_unrelated_pem() {
         let certificate = include_bytes!("test-ca.pem");
         assert!(TrustStore::from_pem(certificate).is_ok());
+        assert_eq!(
+            TrustStore::from_pem(b"").unwrap_err(),
+            TrustStoreError::InvalidSize
+        );
         for label in ["PRIVATE KEY", "PUBLIC KEY", "UNKNOWN"] {
             let section = format!("-----BEGIN {label}-----\nAQ==\n-----END {label}-----\n");
-            assert!(TrustStore::from_pem(section.as_bytes()).is_err());
+            assert_eq!(
+                TrustStore::from_pem(section.as_bytes()).unwrap_err(),
+                TrustStoreError::NonCertificateSection
+            );
             let mut mixed = certificate.to_vec();
             mixed.extend(section.as_bytes());
-            assert!(
-                TrustStore::from_pem(&mixed)
-                    .unwrap_err()
-                    .contains("non-certificate")
+            assert_eq!(
+                TrustStore::from_pem(&mixed).unwrap_err(),
+                TrustStoreError::NonCertificateSection
             );
         }
     }
@@ -226,6 +258,9 @@ mod tests {
             certificate.as_bytes(),
         ]
         .concat();
-        assert!(TrustStore::from_pem(&nested).is_err());
+        assert_eq!(
+            TrustStore::from_pem(&nested).unwrap_err(),
+            TrustStoreError::NestedCertificateSection
+        );
     }
 }

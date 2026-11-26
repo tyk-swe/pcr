@@ -92,3 +92,29 @@ pub(crate) const PacketTransmissionFrame: packetcraftr_core::error::Code =
     packetcraftr_core::error::Code::new("packet.transmission_frame");
 pub(crate) const PolicyTlsLimit: packetcraftr_core::error::Code =
     packetcraftr_core::error::Code::new("policy.tls_limit");
+
+pub(crate) fn deadline_exceeded() -> packetcraftr_core::error::Classification {
+    packetcraftr_core::error::Classification::new(
+        IoDeadlineExceeded,
+        packetcraftr_core::error::Kind::Io,
+        Some("increase the finite operation timeout or reduce readiness, send, and capture work"),
+    )
+}
+
+pub(crate) fn interface_discovery() -> packetcraftr_core::error::Classification {
+    packetcraftr_core::error::Classification::new(
+        IoInterfaceDiscovery,
+        packetcraftr_core::error::Kind::Io,
+        Some("inspect the operating-system interface state and retry with an available interface"),
+    )
+}
+
+pub(crate) fn live_io_invariant() -> packetcraftr_core::error::Classification {
+    packetcraftr_core::error::Classification::new(
+        InternalLiveIoInvariant,
+        packetcraftr_core::error::Kind::Internal,
+        Some(
+            "report the inconsistent provider result; do not reinterpret it as a successful operation",
+        ),
+    )
+}

@@ -1,11 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#![allow(
-    unsafe_code,
-    reason = "BSD route queries build and parse rt_msghdr buffers through libc"
-)]
-
 use std::mem::{MaybeUninit, offset_of, size_of};
 use std::net::IpAddr;
 use std::ptr;
@@ -134,6 +129,10 @@ fn route_timeout(operation: &'static str) -> route::Error {
     route::Error::DeadlineExceeded { operation }
 }
 
+#[expect(
+    unsafe_code,
+    reason = "builds a libc rt_msghdr routing-socket request buffer"
+)]
 fn build_route_request(
     destination: IpAddr,
     interface_index: Option<u32>,
@@ -231,6 +230,10 @@ fn route_write_error(destination: IpAddr, error: std::io::Error) -> route::Error
     os_error("write RTM_GET", error)
 }
 
+#[expect(
+    unsafe_code,
+    reason = "reads initialized recv bytes and unaligned rt_msghdr header"
+)]
 fn read_route_response(
     socket: &Socket,
     destination: IpAddr,

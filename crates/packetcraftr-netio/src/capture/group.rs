@@ -316,9 +316,9 @@ impl<C: Session> Group<C> {
 
 impl<C: Session> Session for Group<C> {
     fn observation_quality(&self) -> super::ObservationQuality {
-        self.snapshot()
-            .into_iter()
-            .map(|source| source.observation_quality)
+        self.sources
+            .iter()
+            .map(Owned::current_observation_quality)
             .reduce(super::ObservationQuality::combine)
             .unwrap_or_default()
     }
@@ -368,21 +368,19 @@ impl<C: Session> Session for Group<C> {
     }
 
     fn stats(&self) -> Stats {
-        self.snapshot()
-            .iter()
-            .fold(Stats::default(), |total, source| {
-                let value = source.statistics;
-                Stats {
-                    received_frames: total.received_frames.saturating_add(value.received_frames),
-                    received_bytes: total.received_bytes.saturating_add(value.received_bytes),
-                    dropped_frames: total.dropped_frames.saturating_add(value.dropped_frames),
-                    dropped_bytes: total.dropped_bytes.saturating_add(value.dropped_bytes),
-                    overflow_events: total.overflow_events.saturating_add(value.overflow_events),
-                    receiver_dropped_frames: total
-                        .receiver_dropped_frames
-                        .saturating_add(value.receiver_dropped_frames),
-                }
-            })
+        self.sources.iter().fold(Stats::default(), |total, source| {
+            let value = source.current_stats();
+            Stats {
+                received_frames: total.received_frames.saturating_add(value.received_frames),
+                received_bytes: total.received_bytes.saturating_add(value.received_bytes),
+                dropped_frames: total.dropped_frames.saturating_add(value.dropped_frames),
+                dropped_bytes: total.dropped_bytes.saturating_add(value.dropped_bytes),
+                overflow_events: total.overflow_events.saturating_add(value.overflow_events),
+                receiver_dropped_frames: total
+                    .receiver_dropped_frames
+                    .saturating_add(value.receiver_dropped_frames),
+            }
+        })
     }
 }
 

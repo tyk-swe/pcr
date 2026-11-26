@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use packetcraftr_core::budget::{Cancelled, Interrupted};
-use packetcraftr_core::error::{Classification, Classified, Kind, Source};
+use packetcraftr_core::error::{Classification, Classified, Source};
 
 use crate::Unsupported;
 use thiserror::Error as ThisError;
@@ -68,19 +68,9 @@ impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
             Self::Cancelled(cancelled) => cancelled.classification(),
-            Self::DeadlineExceeded { operation } => {
-                crate::Error::DeadlineExceeded { operation }.classification()
-            }
+            Self::DeadlineExceeded { .. } => crate::code::deadline_exceeded(),
             Self::Unsupported(unsupported) => unsupported.classification(),
-            Self::Discovery { .. } => discovery_classification(),
+            Self::Discovery { .. } => crate::code::interface_discovery(),
         }
     }
-}
-
-pub(crate) fn discovery_classification() -> Classification {
-    Classification::new(
-        crate::code::IoInterfaceDiscovery,
-        Kind::Io,
-        Some("inspect the operating-system interface state and retry with an available interface"),
-    )
 }

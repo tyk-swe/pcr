@@ -7,6 +7,7 @@ use std::sync::Arc;
 use packetcraftr_core::build::Builder;
 use packetcraftr_core::codec::Addresses;
 use packetcraftr_core::error::BoundaryError;
+use packetcraftr_core::field::hex::compact_hex;
 use packetcraftr_core::packet::Packet;
 use packetcraftr_core::registry::Registry;
 use sha2::{Digest, Sha256};
@@ -15,7 +16,6 @@ use super::Request;
 use super::canary;
 use super::catalog::{AttemptShape, build_attempt, catalog};
 use super::error::Error;
-use super::report::hex;
 use crate::policy::{DeclaredPackets, Operation, PermissiveLive, Policy, WireLimits};
 
 const ETHERNET_OVERHEAD: u64 = 14;
@@ -67,7 +67,7 @@ fn digest(request: &Request, total_packets: u64, total_wire_bytes: u64) -> Strin
         request
             .spoof_source
             .map_or_else(|| "-".to_owned(), |source| source.to_string()),
-        hex(&request.token),
+        compact_hex(&request.token),
         request.repeats,
         request.payload_len,
         request.timeout.as_millis(),
@@ -75,7 +75,7 @@ fn digest(request: &Request, total_packets: u64, total_wire_bytes: u64) -> Strin
         total_packets,
         total_wire_bytes,
     );
-    hex(&Sha256::digest(canonical.as_bytes()))
+    compact_hex(&Sha256::digest(canonical.as_bytes()))
 }
 
 pub(super) fn prepare(registry: &Arc<Registry>, request: &Request) -> Result<Prepared, Error> {

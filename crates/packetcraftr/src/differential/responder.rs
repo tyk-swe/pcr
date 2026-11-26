@@ -14,7 +14,7 @@ use super::ResponderRequest;
 use super::canary;
 use super::error::Error;
 use super::report::{ReceptionRecord, ResponderEvent, ResponderReport};
-use crate::clock::{Clock, SystemClock};
+use crate::clock::Clock;
 use crate::policy::{Operation, Policy, SocketLimits, SocketOperation};
 use crate::providers::UdpProviders;
 use crate::{Client, Sink};
@@ -62,7 +62,7 @@ fn authorize_responder(policy: &Policy, request: &ResponderRequest) -> Result<()
 fn run_responder<S, C, Q>(
     request: &ResponderRequest,
     socket: &Q,
-    policy: Option<&Policy>,
+    policy: &Policy,
     clock: &C,
     deadline: &Deadline,
     mut sink: S,
@@ -108,11 +108,9 @@ where
             report.ignored += 1;
             continue;
         }
-        if let Some(policy) = policy {
-            policy
-                .authorize_destination(source.ip())
-                .map_err(|source| Error::Authorization(BoundaryError::from_error(source)))?;
-        }
+        policy
+            .authorize_destination(source.ip())
+            .map_err(|source| Error::Authorization(BoundaryError::from_error(source)))?;
         last_received = Some(clock.now());
         report.received += 1;
         let record = ReceptionRecord {
@@ -160,7 +158,7 @@ impl<P: UdpProviders, K: Clock> Client<P, K> {
         run_responder(
             &request,
             &socket,
-            Some(&self.policy),
+            &self.policy,
             &self.clock,
             &deadline,
             sink,
@@ -168,25 +166,21 @@ impl<P: UdpProviders, K: Clock> Client<P, K> {
     }
 }
 
-pub fn respond<S>(request: ResponderRequest, sink: S) -> Result<ResponderReport, Error>
-where
-    S: Sink<ResponderEvent, Ack = ()>,
-{
-    request.validate()?;
-    let socket =
-        UdpSocket::bind(SocketAddr::from((request.bind, request.port))).map_err(io_error)?;
-    socket.set_read_timeout(Some(POLL)).map_err(io_error)?;
-    let deadline =
-        Deadline::new(request.max_duration).with_cancellation(request.cancellation.clone());
-    run_responder(&request, &socket, None, &SystemClock, &deadline, sink)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::clock::SystemClock;
     use crate::differential::{ResponderCollector, generate_token};
     use std::net::Ipv4Addr;
     use std::thread;
+
+    fn test_client() -> Client<impl UdpProviders> {
+        Client::new(
+            packetcraftr_core::protocol::builtin::registry(),
+            Policy::default(),
+            crate::ProviderSet::udp(packetcraftr_netio::udp::SystemProvider),
+        )
+    }
 
     #[test]
     fn responder_answers_only_token_bearing_probes() {
@@ -209,7 +203,7 @@ mod tests {
                 let mut request = ResponderRequest::new(Ipv4Addr::LOCALHOST, port, token);
                 request.max_duration = Duration::from_secs(10);
                 request.idle_after_first = Some(Duration::from_millis(300));
-                let outcome = respond(request, &mut collector);
+                let outcome = test_client().respond_differential(request, &mut collector);
                 (outcome, collector)
             });
             let target = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
@@ -324,7 +318,7 @@ mod tests {
             let mut request = ResponderRequest::new(Ipv4Addr::LOCALHOST, port, token);
             request.max_duration = Duration::from_millis(400);
             request.cancellation = responder_cancellation;
-            respond(
+            test_client().respond_differential(
                 request,
                 crate::forwarding(move |_, _| {
                     entered_tx.send(()).unwrap();
@@ -417,11 +411,7 @@ mod tests {
 
         let token = [0x5a; 16];
         let public_bind = ResponderRequest::new(Ipv4Addr::new(8, 8, 8, 8), 40000, token);
-        let client = Client::new(
-            packetcraftr_core::protocol::builtin::registry(),
-            Policy::default(),
-            crate::ProviderSet::udp(packetcraftr_netio::udp::SystemProvider),
-        );
+        let client = test_client();
         let err = client
             .respond_differential(public_bind, &mut ResponderCollector::default())
             .unwrap_err();
@@ -450,7 +440,7 @@ mod tests {
         let report = run_responder(
             &request,
             &socket,
-            Some(&Policy::default()),
+            &Policy::default(),
             &clock,
             &deadline,
             &mut collector,
@@ -472,7 +462,7 @@ mod tests {
         let err = run_responder(
             &request,
             &public_peer_socket,
-            Some(&Policy::default()),
+            &Policy::default(),
             &clock,
             &deadline,
             &mut ResponderCollector::default(),
@@ -500,7 +490,7 @@ mod tests {
         let err = run_responder(
             &request,
             &failing_socket,
-            Some(&Policy::default()),
+            &Policy::default(),
             &fail_clock,
             &fail_deadline,
             crate::forwarding(move |_, _| {

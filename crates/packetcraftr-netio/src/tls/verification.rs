@@ -25,12 +25,6 @@ pub enum TrustStoreError {
     InvalidCertificate { message: String },
 }
 
-impl From<TrustStoreError> for String {
-    fn from(error: TrustStoreError) -> Self {
-        error.to_string()
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct TrustStore(RootCertStore);
 impl Default for TrustStore {

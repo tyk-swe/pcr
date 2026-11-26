@@ -24,8 +24,8 @@ CEILINGS = {
     "instant_now": 0,
     "system_time_now": 0,
     "getrandom_sites": 0,
-    "downcast_sites": 23,
-    "error_downcast_sites": 12,
+    "downcast_sites": 21,
+    "error_downcast_sites": 9,
     "downcast_outside_allowlist": 0,
     "dynamic_field_sites": 0,
     # Residual polls guard compute/input loops, side-effect commit
@@ -33,7 +33,7 @@ CEILINGS = {
     # encoder would report as an output code instead. The encoder already
     # enforces the same control deadline on every write, and every poll that
     # only duplicated an emit-internal check with an identical error is gone.
-    "manual_cancellation_polls": 73,
+    "manual_cancellation_polls": 61,
     "duplicate_constants": 0,
     "duplicate_wire_codes": 0,
     "public_items_core": 25,
@@ -59,7 +59,6 @@ LAYER_CAST_FILES = (
 # Standard error-chain introspection on boxed errors is a different family
 # from layer identity casts and is counted separately.
 ERROR_CAST_FILES = (
-    "crates/packetcraftr-cli/src/commands/network/scan.rs",
     "crates/packetcraftr-core/src/capture_file/compression.rs",
     "crates/packetcraftr-core/src/capture_file/error.rs",
     "crates/packetcraftr-netio/src/tls/error.rs",

@@ -360,9 +360,9 @@ fn tcp_protocols_accept_split_and_coalesced_frames() {
 
 #[test]
 fn oversized_length_rejected_before_allocation() {
-    let mut framer = Framer::new(crate::codec::Framing::OpcuaTcp, "opcua_tcp");
+    let mut framer = Framer::new(crate::protocol::framing::Framing::OpcuaTcp, "opcua_tcp");
     assert!(framer.progress(b"MSGF\xff\xff\xff\x7f", 1024).is_err());
-    let mut framer = Framer::new(crate::codec::Framing::Resp, "resp");
+    let mut framer = Framer::new(crate::protocol::framing::Framing::Resp, "resp");
     assert!(framer.progress(b"$2147483647\r\n", 1024).is_err());
 }
 

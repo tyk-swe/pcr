@@ -8,10 +8,11 @@ use bytes::Bytes;
 
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
-    diagnostic::{Diagnostic, ICMPV4_CHECKSUM, ICMPV6_CHECKSUM},
+    diagnostic::Diagnostic,
     field::{self, WireValue},
     layer::{Id, Layer, Schema, reflective_layer},
     layout::{ByteRange, FieldLayout},
+    protocol::{ICMPV4_CHECKSUM, ICMPV6_CHECKSUM},
 };
 
 use super::ip_protocol;

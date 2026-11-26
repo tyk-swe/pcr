@@ -788,17 +788,43 @@ mod tests {
         let warnings = record(CONTENT_TYPE_ALERT, &warning_bytes);
         let level = record(CONTENT_TYPE_ALERT, &[FATAL.level]);
         let description = record(CONTENT_TYPE_ALERT, &[FATAL.description]);
-        let bytes = capture(&[
-            (Side::Reverse, &warnings),
-            (Side::Reverse, &level),
-            (Side::Reverse, &description),
+        let alert_budget = warning_bytes.len() + level.len();
+        let pad_total = MAX_DIRECTION_BUFFER - alert_budget;
+        let pad_first = pad_total / 2;
+        let pad_reverse = pad_total - pad_first;
+        let incomplete_handshake = |msg_type: u8, bytes: usize| -> Vec<Vec<u8>> {
+            let declared_len = u32::try_from(bytes).unwrap();
+            let mut payload = Vec::with_capacity(bytes);
+            payload.push(msg_type);
+            payload.extend_from_slice(&declared_len.to_be_bytes()[1..]);
+            payload.resize(bytes, 0);
+            payload
+                .chunks(16_384)
+                .map(|chunk| record(CONTENT_TYPE_HANDSHAKE, chunk))
+                .collect()
+        };
+        let first_pad = incomplete_handshake(1, pad_first);
+        let reverse_pad = incomplete_handshake(2, pad_reverse);
+        let mut deliveries: Vec<(Side, &[u8])> = first_pad
+            .iter()
+            .map(|chunk| (Side::First, chunk.as_slice()))
+            .chain(
+                reverse_pad
+                    .iter()
+                    .map(|chunk| (Side::Reverse, chunk.as_slice())),
+            )
+            .collect();
+        deliveries.extend([
+            (Side::Reverse, warnings.as_slice()),
+            (Side::Reverse, level.as_slice()),
+            (Side::Reverse, description.as_slice()),
         ]);
-        let budget = warning_bytes.len() + level.len();
+        let bytes = capture(&deliveries);
         for (extra, status) in [(0, Status::Gap), (1, Status::Alert)] {
             let (events, summary) = analyze(
                 &bytes,
                 Limits {
-                    max_buffered_bytes: budget + extra,
+                    max_buffered_bytes: MAX_DIRECTION_BUFFER + extra,
                     ..Default::default()
                 },
             );

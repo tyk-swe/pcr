@@ -21,8 +21,13 @@ pub mod transport;
 pub mod tunnel;
 
 pub use catalog::{BuiltinProtocol, MatcherKind, UnknownProtocolName};
-pub use common::{ChecksumAccumulator, checksum_parts};
+pub use common::{
+    CHECKSUM_FAILURE_CODES, ChecksumAccumulator, GRE_CHECKSUM, ICMPV4_CHECKSUM, ICMPV6_CHECKSUM,
+    IGMP_CHECKSUM, IPV4_CHECKSUM, SCTP_CHECKSUM, TCP_CHECKSUM, UDP_CHECKSUM, VRRP_CHECKSUM,
+    checksum_parts,
+};
 pub(crate) use common::{network_from_addresses, transport_checksum_parts};
+pub use framing::Framing;
 
 pub use matcher::{
     IcmpErrorKind, QuotedProbe, QuotedTransport, SctpResponseKind, quoted_icmp_error, quoted_probe,

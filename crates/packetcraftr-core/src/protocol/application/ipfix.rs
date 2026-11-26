@@ -35,7 +35,7 @@ pub struct Ipfix {
     pub observation_domain: u32,
     pub sets: Records,
 }
-crate::reflective_layer! {
+crate::layer::reflective_layer! {
  fn ipfix_schema() => { protocol: crate::protocol::BuiltinProtocol::Ipfix.id(), name: "Ipfix" }
  impl Ipfix {
     "export_time" => { kind: Unsigned, derived: false, required: false, description: "export time", reflect: export_time },

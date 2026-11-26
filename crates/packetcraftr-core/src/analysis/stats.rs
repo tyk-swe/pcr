@@ -10,10 +10,15 @@ use crate::analysis::ScopedFlowKey;
 use crate::analysis::StreamTransport;
 use crate::analysis::conversation_index::CanonicalFlow;
 use crate::analysis::pipeline::{FrameRecord, Summary as RunSummary};
+use crate::analysis::session::{self, Collector as SessionCollector, CollectorNeeds};
 use crate::analysis::{Constraint, Error};
+use crate::budget::Deadline;
+use crate::error::BoundaryError;
 
 mod report;
+mod selection;
 pub use report::{ConversationStat, EndpointStat, IoBucketStat, PortStat, ProtocolStat, Report};
+pub use selection::{Sort, select};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Table {
@@ -355,6 +360,41 @@ fn duration_from_nanos_saturating(nanoseconds: u128) -> Duration {
     Duration::new(seconds, subsecond)
 }
 
+impl SessionCollector for Collector {
+    type Event = std::convert::Infallible;
+    type Summary = Report;
+
+    fn needs(&self) -> CollectorNeeds {
+        let indexed = self.collects(Table::Conversations) || self.collects(Table::Ports);
+        CollectorNeeds {
+            tcp_stream: indexed,
+            udp_stream: indexed,
+            ip_reassembly: true,
+            tcp_events: false,
+            track_sources: false,
+        }
+    }
+
+    fn observe(
+        &mut self,
+        record: &FrameRecord<'_>,
+        _deadline: &Deadline,
+    ) -> Result<Vec<Self::Event>, BoundaryError> {
+        Self::observe(self, record);
+        Ok(Vec::new())
+    }
+
+    fn finish(
+        self,
+        run: &RunSummary,
+        deadline: &Deadline,
+        _event_sink: &mut dyn FnMut(Self::Event) -> Result<(), BoundaryError>,
+    ) -> Result<Report, BoundaryError> {
+        session::check(deadline)?;
+        Ok(Self::finish(self, run))
+    }
+}
+
 fn innermost_network(record: &FrameRecord<'_>) -> Option<(IpAddr, IpAddr)> {
     let mut network = None;
     for layer in record.decoded.packet.iter() {
@@ -363,4 +403,53 @@ fn innermost_network(record: &FrameRecord<'_>) -> Option<(IpAddr, IpAddr)> {
         }
     }
     network
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::analysis::{Session, SessionOptions};
+    use crate::build::Builder;
+    use crate::capture_file::{Format, Reader, Writer};
+    use crate::frame::{Frame, LinkType};
+    use crate::packet::Packet;
+    use crate::protocol::builtin;
+    use crate::protocol::network::Ipv4;
+    use crate::protocol::transport::Udp;
+    use std::io::Cursor;
+    use std::time::UNIX_EPOCH;
+
+    #[test]
+    fn stats_collector_runs_through_analysis_session() {
+        let registry = builtin::registry();
+        let builder = Builder::new(registry.clone());
+        let mut packet = Packet::default();
+        packet
+            .push(Ipv4 {
+                source: "192.0.2.1".parse().unwrap(),
+                destination: "192.0.2.2".parse().unwrap(),
+                ..Default::default()
+            })
+            .push(Udp {
+                source_port: 12345,
+                destination_port: 53,
+                ..Default::default()
+            });
+        let built = builder
+            .build(packet, Default::default(), Default::default())
+            .unwrap();
+        let mut writer = Writer::new(Vec::new(), Format::Pcap, LinkType::IPV4).unwrap();
+        writer
+            .write_frame(&Frame::new(Some(UNIX_EPOCH), LinkType::IPV4, built.bytes).unwrap())
+            .unwrap();
+        let bytes = writer.into_inner();
+        let mut reader = Reader::with_limits(Cursor::new(bytes), Default::default()).unwrap();
+        let collector = Collector::for_table(Duration::from_secs(1), Table::All).unwrap();
+        let outcome = Session::new(registry, SessionOptions::default(), collector)
+            .run(&mut reader, |_| Ok(()), |event| match event {})
+            .unwrap();
+        assert_eq!(outcome.summary.frames, 1);
+        assert_eq!(outcome.summary.conversations.len(), 1);
+        assert_eq!(outcome.summary.ports.len(), 2);
+    }
 }

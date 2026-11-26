@@ -32,7 +32,7 @@ impl Default for Ldap {
         }
     }
 }
-crate::reflective_layer! {
+crate::layer::reflective_layer! {
  fn ldap_schema() => { protocol: crate::protocol::BuiltinProtocol::Ldap.id(), name: "Ldap" }
  impl Ldap {
     "message_id" => { kind: Unsigned, derived: false, required: false, description: "message id", reflect: message_id },

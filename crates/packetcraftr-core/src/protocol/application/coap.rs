@@ -39,7 +39,7 @@ impl Default for Coap {
         }
     }
 }
-crate::reflective_layer! {
+crate::layer::reflective_layer! {
  fn coap_schema() => { protocol: crate::protocol::BuiltinProtocol::Coap.id(), name: "Coap" }
  impl Coap {
     "version" => { kind: Unsigned, derived: false, required: false, description: "version", reflect: version },

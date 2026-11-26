@@ -58,7 +58,7 @@ impl Default for Bgp {
         }
     }
 }
-crate::reflective_layer! {
+crate::layer::reflective_layer! {
  fn bgp_schema() => { protocol: crate::protocol::BuiltinProtocol::Bgp.id(), name: "Bgp" }
  impl Bgp {
     "message_type" => { kind: Unsigned, derived: false, required: false, description: "message type", reflect: message_type },

@@ -117,23 +117,19 @@ pub enum Error {
 impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
-            Self::Jumbogram => Classification::new(
-                crate::error::Code::PacketTransformUnsupported,
-                Kind::Packet,
-                Some("inspect the documented transform boundaries"),
-            ),
             Self::Depth { .. } => Classification::new(
-                crate::error::Code::PolicyTransformLimit,
+                crate::error::Code::PolicyDecodeResourceLimit,
                 Kind::Policy,
-                Some("raise a finite transform limit or reduce the input"),
+                Some("narrow the input or deliberately raise the finite header nesting limit"),
             ),
-            Self::Truncated(_)
+            Self::Jumbogram
+            | Self::Truncated(_)
             | Self::Length(_)
             | Self::UnknownIpVersion(_)
             | Self::IpVersionMismatch { .. } => Classification::new(
-                crate::error::Code::PacketTransformInput,
+                crate::error::Code::PacketDecode,
                 Kind::Packet,
-                Some("supply a complete supported datagram"),
+                Some("supply a complete supported header sequence"),
             ),
         }
     }
@@ -789,5 +785,29 @@ impl Iterator for Ipv6Options<'_> {
             kind,
             range: start..start + length,
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::Code;
+
+    #[test]
+    fn error_classification_is_protocol_neutral() {
+        assert_eq!(
+            Error::Truncated(Header::Ipv4).classification().code,
+            Code::PacketDecode
+        );
+        assert_eq!(Error::Jumbogram.classification().code, Code::PacketDecode);
+        assert_eq!(
+            Error::Depth {
+                header: Header::Vlan,
+                limit: MAX_VLAN_DEPTH,
+            }
+            .classification()
+            .code,
+            Code::PolicyDecodeResourceLimit
+        );
     }
 }

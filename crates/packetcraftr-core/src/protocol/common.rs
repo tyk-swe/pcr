@@ -8,7 +8,11 @@ mod payload;
 pub(crate) mod structured;
 mod validation;
 
-pub use checksum::{ChecksumAccumulator, checksum_parts};
+pub use checksum::{
+    CHECKSUM_FAILURE_CODES, ChecksumAccumulator, GRE_CHECKSUM, ICMPV4_CHECKSUM, ICMPV6_CHECKSUM,
+    IGMP_CHECKSUM, IPV4_CHECKSUM, SCTP_CHECKSUM, TCP_CHECKSUM, UDP_CHECKSUM, VRRP_CHECKSUM,
+    checksum_parts,
+};
 pub(crate) use checksum::{network_from_addresses, transport_checksum_parts};
 pub(crate) use errors::{
     invalid, out_of_range, read_only, rejected, truncated, typed_layer, unsupported, wrong_type,

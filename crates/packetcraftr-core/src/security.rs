@@ -151,7 +151,7 @@ impl Default for Limits {
     }
 }
 impl Limits {
-    pub fn validate(self) -> Result<(), Error> {
+    pub fn validate(&self) -> Result<(), Error> {
         for (field, value, ceiling) in [
             ("max_findings", self.max_findings, 100_000),
             ("max_groups", self.max_groups, 100_000),

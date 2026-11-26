@@ -71,7 +71,7 @@ pub struct Quic {
     pub packet_count: u64,
     pub data: Bytes,
 }
-crate::reflective_layer! {
+crate::layer::reflective_layer! {
     fn quic_schema() => { protocol: crate::protocol::BuiltinProtocol::Quic.id(), name: "Quic" }
     impl Quic {
         "version" => { kind: Unsigned, derived: true, required: false, description: "Wire version, zero for short headers or Version Negotiation", reflect: version },
@@ -95,9 +95,6 @@ impl crate::codec::Codec for QuicCodec {
             crate::protocol::BuiltinProtocol::Quic.id(),
             "packet construction is not supported",
         ))
-    }
-    fn framing(&self) -> crate::codec::Framing {
-        crate::codec::Framing::Datagram
     }
     fn encode(
         &self,

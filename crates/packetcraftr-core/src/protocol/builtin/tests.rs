@@ -289,8 +289,8 @@ fn yaml_packet_document_builds() {
 #[test]
 fn vrrp_v3_checksum_uses_the_enclosing_ip_family() {
     use crate::decode::Dissector;
-    use crate::diagnostic::VRRP_CHECKSUM;
     use crate::frame::{Frame, LinkType};
+    use crate::protocol::VRRP_CHECKSUM;
     use crate::protocol::network::Vrrp;
 
     // RFC 9568 §5.2.8 reference checksums: 0xa80b over VRRP alone for IPv4,

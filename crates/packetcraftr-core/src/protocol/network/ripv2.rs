@@ -34,7 +34,7 @@ impl Default for Ripv2 {
         }
     }
 }
-crate::reflective_layer! {
+crate::layer::reflective_layer! {
  fn ripv2_schema() => { protocol: crate::protocol::BuiltinProtocol::Ripv2.id(), name: "Ripv2" }
  impl Ripv2 {
     "command" => { kind: Unsigned, derived: false, required: false, description: "command", reflect: command },

@@ -70,7 +70,7 @@ impl Default for ModbusTcp {
         }
     }
 }
-crate::reflective_layer! {
+crate::layer::reflective_layer! {
  fn modbustcp_schema() => { protocol: crate::protocol::BuiltinProtocol::ModbusTcp.id(), name: "ModbusTcp" }
  impl ModbusTcp {
     "transaction_id" => { kind: Unsigned, derived: false, required: false, description: "transaction id", reflect: transaction_id },

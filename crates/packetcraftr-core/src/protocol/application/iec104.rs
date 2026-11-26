@@ -66,7 +66,7 @@ impl Default for Iec104 {
         }
     }
 }
-crate::reflective_layer! {
+crate::layer::reflective_layer! {
  fn iec104_schema() => { protocol: crate::protocol::BuiltinProtocol::Iec104.id(), name: "Iec104" }
  impl Iec104 {
     "frame_type" => { kind: Text, derived: false, required: false, description: "i, s or u", get |layer| Some(field::Value::Text(layer.frame_type.as_str().to_owned())), set |layer, value, name| set_frame_type(layer, value, name) },

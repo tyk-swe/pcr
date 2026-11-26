@@ -8,10 +8,11 @@ use bytes::Bytes;
 
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
-    diagnostic::{Diagnostic, VRRP_CHECKSUM},
+    diagnostic::Diagnostic,
     field::{self, WireValue},
     layer::{Id, Layer, Raw, reflective_layer},
     layout::FieldLayout,
+    protocol::VRRP_CHECKSUM,
 };
 
 use super::ip_protocol;

@@ -27,7 +27,7 @@ impl Default for Sip {
         }
     }
 }
-crate::reflective_layer! {
+crate::layer::reflective_layer! {
  fn sip_schema() => { protocol: crate::protocol::BuiltinProtocol::Sip.id(), name: "Sip" }
  impl Sip {
     "start_line" => { kind: Bytes, derived: false, required: false, description: "start line", reflect: start_line },

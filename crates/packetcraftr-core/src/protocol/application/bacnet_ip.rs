@@ -39,7 +39,7 @@ impl Default for BacnetIp {
         }
     }
 }
-crate::reflective_layer! {
+crate::layer::reflective_layer! {
  fn bacnetip_schema() => { protocol: crate::protocol::BuiltinProtocol::BacnetIp.id(), name: "BacnetIp" }
  impl BacnetIp {
     "bvlc_function" => { kind: Unsigned, derived: false, required: false, description: "bvlc function", reflect: bvlc_function },

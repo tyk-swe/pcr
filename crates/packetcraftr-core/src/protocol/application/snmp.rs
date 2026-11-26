@@ -51,7 +51,7 @@ impl Default for Snmp {
         }
     }
 }
-crate::reflective_layer! {
+crate::layer::reflective_layer! {
  fn snmp_schema() => { protocol: crate::protocol::BuiltinProtocol::Snmp.id(), name: "Snmp" }
  impl Snmp {
     "version" => { kind: Unsigned, derived: false, required: false, description: "version", reflect: version },

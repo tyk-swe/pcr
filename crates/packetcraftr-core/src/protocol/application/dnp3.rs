@@ -37,7 +37,7 @@ impl Default for Dnp3 {
         }
     }
 }
-crate::reflective_layer! {
+crate::layer::reflective_layer! {
  fn dnp3_schema() => { protocol: crate::protocol::BuiltinProtocol::Dnp3.id(), name: "Dnp3" }
  impl Dnp3 {
     "control" => { kind: Unsigned, derived: false, required: false, description: "control", reflect: control },

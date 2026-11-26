@@ -32,7 +32,7 @@ impl Default for Stun {
         }
     }
 }
-crate::reflective_layer! {
+crate::layer::reflective_layer! {
  fn stun_schema() => { protocol: crate::protocol::BuiltinProtocol::Stun.id(), name: "Stun" }
  impl Stun {
     "message_type" => { kind: Unsigned, derived: false, required: false, description: "message type", reflect: message_type },

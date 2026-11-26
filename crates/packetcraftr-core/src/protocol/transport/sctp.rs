@@ -7,9 +7,10 @@ use bytes::Bytes;
 
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
-    diagnostic::{Diagnostic, SCTP_CHECKSUM},
+    diagnostic::Diagnostic,
     field::WireValue,
     layer::{Id, Layer, reflective_layer},
+    protocol::SCTP_CHECKSUM,
     registry::Discriminator,
 };
 

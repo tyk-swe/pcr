@@ -5,7 +5,31 @@
 
 use super::BuiltinProtocol;
 use super::common::{invalid, truncated, unsupported};
-use crate::codec::{Error as CodecError, Framing};
+use crate::codec::Error as CodecError;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Framing {
+    #[default]
+    Datagram,
+    Control,
+    Lacp,
+    Mqtt,
+    Amqp,
+    Bgp,
+    Ber,
+    Resp,
+    Sip,
+    Rtsp,
+    Memcached,
+    Ipfix,
+    Radius,
+    Stun,
+    ModbusTcp,
+    Dnp3,
+    EthernetIp,
+    Iec104,
+    OpcuaTcp,
+}
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum Error {

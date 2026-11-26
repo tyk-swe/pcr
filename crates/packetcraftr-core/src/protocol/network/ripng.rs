@@ -29,7 +29,7 @@ impl Default for Ripng {
         }
     }
 }
-crate::reflective_layer! {
+crate::layer::reflective_layer! {
  fn ripng_schema() => { protocol: crate::protocol::BuiltinProtocol::Ripng.id(), name: "Ripng" }
  impl Ripng {
     "command" => { kind: Unsigned, derived: false, required: false, description: "command", reflect: command },

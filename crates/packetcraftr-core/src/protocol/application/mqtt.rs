@@ -55,7 +55,7 @@ impl Default for Mqtt {
         }
     }
 }
-crate::reflective_layer! {
+crate::layer::reflective_layer! {
  fn mqtt_schema() => { protocol: crate::protocol::BuiltinProtocol::Mqtt.id(), name: "Mqtt" }
  impl Mqtt {
     "packet_type" => { kind: Unsigned, derived: false, required: false, description: "MQTT control packet type 1 through 14", reflect: packet_type },

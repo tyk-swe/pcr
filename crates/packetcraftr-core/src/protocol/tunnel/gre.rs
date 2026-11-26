@@ -7,9 +7,10 @@ use bytes::Bytes;
 
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
-    diagnostic::{Diagnostic, GRE_CHECKSUM},
+    diagnostic::Diagnostic,
     field::{self, WireValue},
     layer::{Id, Layer, ReflectiveField, reflect_set, reflective_layer},
+    protocol::GRE_CHECKSUM,
     registry::Discriminator,
 };
 

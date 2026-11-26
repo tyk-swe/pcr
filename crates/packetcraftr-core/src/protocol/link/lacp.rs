@@ -45,7 +45,7 @@ impl Default for Lacp {
         }
     }
 }
-crate::reflective_layer! {
+crate::layer::reflective_layer! {
  fn lacp_schema() => { protocol: crate::protocol::BuiltinProtocol::Lacp.id(), name: "Lacp" }
  impl Lacp {
     "actor_system_priority" => { kind: Unsigned, derived: false, required: false, description: "actor system priority", reflect: actor_system_priority },

@@ -5,7 +5,13 @@ use std::convert::Infallible;
 use std::error::Error;
 use std::time::{Duration, Instant, SystemTime};
 
-use crate::budget::{Deadline, POLL_INTERVAL};
+pub(crate) mod deadline;
+
+use deadline::{Deadline, POLL_INTERVAL};
+
+pub(crate) fn monotonic_now() -> Instant {
+    Instant::now()
+}
 
 /// The client's source of monotonic time and pacing delays.
 /// A fake clock must share the real monotonic base with capture timestamps.

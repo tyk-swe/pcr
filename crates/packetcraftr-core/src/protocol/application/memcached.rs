@@ -35,7 +35,7 @@ impl Default for Memcached {
         }
     }
 }
-crate::reflective_layer! {
+crate::layer::reflective_layer! {
  fn memcached_schema() => { protocol: crate::protocol::BuiltinProtocol::Memcached.id(), name: "Memcached" }
  impl Memcached {
     "magic" => { kind: Unsigned, derived: false, required: false, description: "magic", reflect: magic },

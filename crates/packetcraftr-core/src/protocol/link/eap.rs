@@ -25,7 +25,7 @@ impl Default for Eap {
         }
     }
 }
-crate::reflective_layer! {
+crate::layer::reflective_layer! {
  fn eap_schema() => { protocol: crate::protocol::BuiltinProtocol::Eap.id(), name: "Eap" }
  impl Eap {
     "code" => { kind: Unsigned, derived: false, required: false, description: "code", reflect: code },

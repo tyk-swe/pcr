@@ -387,6 +387,10 @@ impl NpcapHandle {
 }
 
 #[expect(unsafe_code, reason = "creates an Npcap handle via pcap_create FFI")]
+#[expect(
+    clippy::arc_with_non_send_sync,
+    reason = "the Arc only shares lifetime, while NpcapHandle and NpcapBreakLoop carry the scoped Send/Sync impls"
+)]
 pub(in crate::platform) fn create_handle(interface: &InterfaceId) -> Result<NpcapHandle, Error> {
     let api = npcap_api()?;
     let device_name = npcap_device_name(interface)?;

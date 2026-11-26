@@ -53,7 +53,6 @@ impl CaptureOutput {
 
     pub(super) fn write(
         self,
-        invocation: &crate::invocation::Invocation,
         reader: &mut Reader<impl Read>,
         limits: OfflineCaptureLimits,
         selection: Selection<'_>,
@@ -64,7 +63,7 @@ impl CaptureOutput {
                 rewrite_capture(reader, limits.stream_limits(), selection, destination)
             }
             Self::Normalized(format) => {
-                super::normalize::run(invocation, reader, limits, selection, format, destination)
+                super::normalize::run(reader, limits, selection, format, destination).map(drop)
             }
         }
     }

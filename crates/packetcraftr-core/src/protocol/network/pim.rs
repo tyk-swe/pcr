@@ -35,7 +35,7 @@ impl Default for Pim {
         }
     }
 }
-crate::reflective_layer! {
+crate::layer::reflective_layer! {
  fn pim_schema() => { protocol: crate::protocol::BuiltinProtocol::Pim.id(), name: "Pim" }
  impl Pim {
     "message_type" => { kind: Unsigned, derived: false, required: false, description: "message type", reflect: message_type },

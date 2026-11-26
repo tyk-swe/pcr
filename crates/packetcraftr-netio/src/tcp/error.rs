@@ -58,10 +58,7 @@ impl Classified for Error {
                 Some("inspect the socket endpoint query failure"),
             ),
             Self::Cancelled(source) => source.classification(),
-            Self::DeadlineExceeded => crate::Error::DeadlineExceeded {
-                operation: "starting a TCP connection",
-            }
-            .classification(),
+            Self::DeadlineExceeded => crate::code::deadline_exceeded(),
             Self::ExchangeLimit => {
                 Classification::new(crate::code::CliTcpExchangeLimit, Kind::Usage, None)
             }

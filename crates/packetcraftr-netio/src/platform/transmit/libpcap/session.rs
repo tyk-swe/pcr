@@ -1,11 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#![allow(
-    unsafe_code,
-    reason = "the socket address must be checked as a Linux sockaddr_ll"
-)]
-
 use std::mem::size_of;
 
 use crate::Error;
@@ -50,6 +45,10 @@ impl SessionBackend for Backend {
         })
     }
 
+    #[expect(
+        unsafe_code,
+        reason = "the socket address must be checked as a Linux sockaddr_ll"
+    )]
     fn open(&self, frame: &Layer2Frame<'_>) -> Result<Option<Self::Resource>, Error> {
         let capture = super::open(*frame)?;
         crate::platform::interface::verify_identity(&frame.route().decision.interface)?;

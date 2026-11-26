@@ -284,14 +284,17 @@ fn multipath_source_change_prevents_io() {
         .unwrap();
     let mut pinned = Some(prepared.route().plan.clone());
     routes.decision.lock().unwrap().selected_source = Some("10.0.0.3".parse().unwrap());
-    let result = client.exchange_packets(
-        vec![packet(1)],
-        &options,
-        Duration::from_secs(1),
-        crate::exchange::Collection::default(),
-        &operation,
-        &mut |_, _, _| false,
-        &mut pinned,
+    let mut matcher = |_: usize, _: &Packet, _: &packetcraftr_core::decode::DecodedPacket| false;
+    let result = client.exchange_workflow(
+        crate::exchange::WorkflowExchange::packets(
+            vec![packet(1)],
+            options,
+            Duration::from_secs(1),
+            crate::exchange::Collection::default(),
+            &operation,
+        )
+        .with_authoritative_matcher(&mut matcher)
+        .with_pinned(&mut pinned),
     );
     assert!(matches!(
         result,

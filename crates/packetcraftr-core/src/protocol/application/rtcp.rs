@@ -22,7 +22,7 @@ const PACKETS: &[crate::layer::FieldSchema] = &[
 pub struct Rtcp {
     pub packets: Records,
 }
-crate::reflective_layer! {
+crate::layer::reflective_layer! {
  fn rtcp_schema() => { protocol: crate::protocol::BuiltinProtocol::Rtcp.id(), name: "Rtcp" }
  impl Rtcp {
     "packets" => { kind: List, derived: false, required: false, description: "Ordered compound RTCP packets", children: PACKETS, reflect: packets },

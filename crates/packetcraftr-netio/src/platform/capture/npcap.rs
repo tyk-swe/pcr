@@ -1,36 +1,24 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#![allow(
-    unsafe_code,
-    reason = "Npcap capture reads packets through dynamically loaded pcap function pointers"
-)]
+use std::sync::Arc;
 
-use packetcraftr_core::clock::{Clock, SystemClock};
-use std::{
-    ffi::{CString, c_int},
-    ptr::{NonNull, null_mut},
-    sync::Arc,
-};
-
-use crate::platform::common::npcap::{
-    abi::{BpfProgram, PCAP_ERROR, PCAP_ERROR_BREAK, PCAP_NETMASK_UNKNOWN, PcapStatistics},
-    handles::{NpcapHandle, PromiscuousMode, create_handle, open_handle, reported_precision},
+use crate::platform::common::npcap::handles::{
+    NpcapBreakLoop, NpcapHandle, PromiscuousMode, create_handle, open_handle,
 };
 use crate::{
     Error,
     capture::live::{
         CaptureInterrupt, NativeCaptureEvent, NativeCaptureParts, NativeCaptureSource,
-        NativeCaptureStats, NativeCapturedPacket, monotonic_packet_time, system_time,
+        NativeCaptureStats,
     },
     capture::{Limits, Metadata, NativeSettings, TimestampPrecision, TimestampType},
     interface::Id as InterfaceId,
     platform::common::pcap_api::{
-        Diagnostic, canonical_link_type, map_timestamp_types, realize_settings,
-        timestamp_type_list, tstamp_type_string, validate_effective_snapshot_length,
+        Diagnostic, PCAP_NETMASK_UNKNOWN, canonical_link_type, realize_settings,
+        validate_effective_snapshot_length,
     },
 };
-use bytes::Bytes;
 
 pub(crate) fn open_capture(
     interface: &InterfaceId,
@@ -51,17 +39,15 @@ pub(crate) fn open_capture(
     } else {
         PromiscuousMode::Disabled
     };
-    let handle = open_handle(interface, snap_length, promiscuous_mode, native)?;
+    let mut handle = open_handle(interface, snap_length, promiscuous_mode, native)?;
     if let Some(filter) = capture_filter {
-        install_capture_filter(
-            &handle,
+        handle.install_capture_filter(
             interface,
             filter,
             netmask.unwrap_or(PCAP_NETMASK_UNKNOWN),
         )?;
     }
-    // SAFETY: handle is activated and live; pcap_datalink only reads its link-layer type.
-    let datalink = unsafe { (handle.api.pcap_datalink)(handle.raw.as_ptr()) };
+    let datalink = handle.datalink();
     let link_type = u32::try_from(datalink)
         .map(canonical_link_type)
         .map_err(|_| Error::Capture {
@@ -71,8 +57,7 @@ pub(crate) fn open_capture(
             ),
             source: Diagnostic::new(Some(datalink), handle.error_message()).into_source(),
         })?;
-    // SAFETY: handle is activated and live; pcap_snapshot only reads its snapshot length.
-    let reported_snap_length = unsafe { (handle.api.pcap_snapshot)(handle.raw.as_ptr()) };
+    let reported_snap_length = handle.snapshot();
     let snap_length = validate_effective_snapshot_length(
         "Npcap",
         interface,
@@ -80,8 +65,8 @@ pub(crate) fn open_capture(
         reported_snap_length,
     )?;
     let (native, timestamp_precision) =
-        realize_settings("Npcap", interface, native, reported_precision(&handle))?;
-    let interrupt = Arc::new(NpcapInterrupt(Arc::clone(&handle)));
+        realize_settings("Npcap", interface, native, handle.reported_precision())?;
+    let interrupt = Arc::new(NpcapInterrupt(handle.breakloop_handle()));
     Ok(NativeCaptureParts {
         source: Box::new(NpcapCaptureSource {
             handle,
@@ -99,222 +84,31 @@ pub(crate) fn open_capture(
 }
 
 pub(crate) fn timestamp_types(interface: &InterfaceId) -> Result<Vec<TimestampType>, Error> {
-    let handle = create_handle(interface)?;
-    let Some(list_types) = handle.api.pcap_list_tstamp_types else {
-        return Err(Error::UnsupportedCaptureSetting {
-            setting: "timestamp_source",
-            interface: interface.name.clone(),
-            message: "the loaded Npcap runtime does not export pcap_list_tstamp_types".into(),
-        });
-    };
-    // Only pcap_free_tstamp_types releases the list, so a runtime without it would leak.
-    let Some(free) = handle.api.pcap_free_tstamp_types else {
-        return Err(Error::UnsupportedCaptureSetting {
-            setting: "timestamp_source",
-            interface: interface.name.clone(),
-            message: "the loaded Npcap runtime does not export pcap_free_tstamp_types".into(),
-        });
-    };
-    let mut list: *mut c_int = null_mut();
-    // SAFETY: handle is a live unactivated capture; Npcap fills the writable
-    // out-pointer with an allocation pcap_free_tstamp_types owns.
-    let count = unsafe { list_types(handle.raw.as_ptr(), &mut list) };
-    let values = timestamp_type_list(
-        "Npcap",
-        interface,
-        count,
-        || handle.error_message(),
-        // SAFETY: list is the unchanged Npcap allocation, released exactly once.
-        || unsafe { free(list) },
-        // SAFETY: list points to `count` consecutive c_int values Npcap owns.
-        |count| unsafe { std::slice::from_raw_parts(list, count) }.to_vec(),
-    )?;
-    Ok(map_timestamp_types(
-        values,
-        |value| {
-            handle.api.pcap_tstamp_type_val_to_name.and_then(|name| {
-                // SAFETY: `name` returns a static NUL-terminated string or NULL, copied at once.
-                unsafe { tstamp_type_string(name(value)) }
-            })
-        },
-        |value| {
-            handle
-                .api
-                .pcap_tstamp_type_val_to_description
-                .and_then(|describe| {
-                    // SAFETY: same contract as the name lookup.
-                    unsafe { tstamp_type_string(describe(value)) }
-                })
-        },
-    ))
-}
-
-fn install_capture_filter(
-    handle: &NpcapHandle,
-    interface: &InterfaceId,
-    filter: &str,
-    netmask: u32,
-) -> Result<(), Error> {
-    let filter = CString::new(filter).map_err(|_| Error::InvalidCaptureFilter {
-        interface: interface.name.clone(),
-        message: "Npcap BPF expressions cannot contain an interior NUL byte".to_owned(),
-    })?;
-    let mut program = BpfProgram {
-        instruction_count: 0,
-        instructions: null_mut(),
-    };
-    // SAFETY: handle is activated and live, program is a writable SDK-layout output,
-    // filter is NUL-terminated, and the API owner keeps the function pointer loaded.
-    let compile_status = unsafe {
-        (handle.api.pcap_compile)(
-            handle.raw.as_ptr(),
-            &mut program,
-            filter.as_ptr(),
-            1,
-            netmask,
-        )
-    };
-    if compile_status != 0 {
-        let diagnostic = handle.error_message();
-        return Err(Error::InvalidCaptureFilter {
-            interface: interface.name.clone(),
-            message: format!("Npcap compilation failed: {diagnostic}"),
-        });
-    }
-
-    // SAFETY: successful pcap_compile initialized program for this live
-    // handle; the worker has not started, so this is the only handle call.
-    let install_status = unsafe { (handle.api.pcap_setfilter)(handle.raw.as_ptr(), &mut program) };
-    let diagnostic = (install_status != 0).then(|| handle.error_message());
-    // SAFETY: pcap_compile succeeded and this is the single matching
-    // pcap_freecode call, after pcap_setfilter has finished using the program.
-    unsafe { (handle.api.pcap_freecode)(&mut program) };
-
-    if let Some(diagnostic) = diagnostic {
-        return Err(Error::CaptureFilterInstallation {
-            interface: interface.name.clone(),
-            message: format!("Npcap installation failed: {diagnostic}"),
-        });
-    }
-    Ok(())
+    let mut handle = create_handle(interface)?;
+    handle.list_timestamp_types(interface)
 }
 
 struct NpcapCaptureSource {
-    handle: Arc<NpcapHandle>,
+    handle: NpcapHandle,
     snap_length: usize,
     timestamp_precision: TimestampPrecision,
 }
 
 impl NativeCaptureSource for NpcapCaptureSource {
     fn next_event(&mut self) -> Result<NativeCaptureEvent, Error> {
-        let mut header = std::ptr::null_mut();
-        let mut data = std::ptr::null();
-        // SAFETY: header/data are writable out-pointers and the worker is the
-        // sole reader of this live handle.
-        let result = unsafe {
-            (self.handle.api.pcap_next_ex)(self.handle.raw.as_ptr(), &mut header, &mut data)
-        };
-        // Monotonic first makes the paired-clock sampling skew conservative.
-        let observed_at = SystemClock.now();
-        let observed_wall = SystemClock.wall_now();
-        match result {
-            1 => {
-                let header = NonNull::new(header).ok_or_else(|| Error::Capture {
-                    message: "Npcap returned a packet without a header".to_owned(),
-                    source: None,
-                })?;
-                // SAFETY: after a successful pcap_next_ex the header stays valid until the next
-                // handle operation; the fixed-size value is copied immediately.
-                let header = unsafe { *header.as_ptr() };
-                let timestamp = system_time(
-                    header.timestamp.tv_sec as i64,
-                    header.timestamp.tv_usec as i64,
-                    self.timestamp_precision,
-                )?;
-                let received_at = monotonic_packet_time(timestamp, observed_wall, observed_at);
-                let captured_length = header.captured_length as usize;
-                if captured_length > self.snap_length {
-                    return Err(Error::Capture {
-                        message: format!(
-                            "Npcap returned {captured_length} bytes beyond configured snap length {}",
-                            self.snap_length
-                        ),
-                        source: None,
-                    });
-                }
-                if header.original_length < header.captured_length {
-                    return Err(Error::Capture {
-                        message: format!(
-                            "Npcap returned captured length {} above original length {}",
-                            header.captured_length, header.original_length
-                        ),
-                        source: None,
-                    });
-                }
-                let bytes = if captured_length == 0 {
-                    Bytes::new()
-                } else {
-                    if data.is_null() {
-                        return Err(Error::Capture {
-                            message: "Npcap returned packet bytes through a null pointer"
-                                .to_owned(),
-                            source: None,
-                        });
-                    }
-                    // SAFETY: pcap_next_ex guarantees caplen readable bytes
-                    // until the next handle call; Bytes copies them now.
-                    Bytes::copy_from_slice(unsafe {
-                        std::slice::from_raw_parts(data, captured_length)
-                    })
-                };
-                Ok(NativeCaptureEvent::Packet(NativeCapturedPacket {
-                    timestamp,
-                    received_at,
-                    captured_length: header.captured_length,
-                    original_length: header.original_length,
-                    bytes,
-                }))
-            }
-            0 => Ok(NativeCaptureEvent::Timeout),
-            PCAP_ERROR_BREAK => Ok(NativeCaptureEvent::Closed),
-            PCAP_ERROR => Err(Error::Capture {
-                message: "Npcap receive failed".to_owned(),
-                source: Diagnostic::new(Some(PCAP_ERROR), self.handle.error_message())
-                    .into_source(),
-            }),
-            status => Err(Error::Capture {
-                message: "Npcap receive returned an unexpected status".to_owned(),
-                source: Diagnostic::new(Some(status), self.handle.error_message()).into_source(),
-            }),
-        }
+        self.handle
+            .next_packet(self.snap_length, self.timestamp_precision)
     }
 
     fn stats(&mut self) -> Result<NativeCaptureStats, Error> {
-        let mut statistics = PcapStatistics::default();
-        // SAFETY: the SDK-sized output structure is writable and the worker
-        // exclusively operates this live capture handle.
-        let result =
-            unsafe { (self.handle.api.pcap_stats)(self.handle.raw.as_ptr(), &mut statistics) };
-        if result != 0 {
-            return Err(Error::Capture {
-                message: "Npcap statistics failed".to_owned(),
-                source: Diagnostic::new(Some(result), self.handle.error_message()).into_source(),
-            });
-        }
-        Ok(NativeCaptureStats {
-            capture_dropped_frames: statistics.dropped,
-            network_dropped_frames: statistics.network_dropped,
-            interface_dropped_frames: statistics.interface_dropped,
-        })
+        self.handle.stats()
     }
 }
 
-struct NpcapInterrupt(Arc<NpcapHandle>);
+struct NpcapInterrupt(NpcapBreakLoop);
 
 impl CaptureInterrupt for NpcapInterrupt {
     fn interrupt(&self) {
-        // SAFETY: libpcap documents pcap_breakloop as callable from a different
-        // thread; the Arc keeps the handle live for this call.
-        unsafe { (self.0.api.pcap_breakloop)(self.0.raw.as_ptr()) };
+        self.0.breakloop();
     }
 }

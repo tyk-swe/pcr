@@ -63,7 +63,7 @@ impl<P: PacketProviders, K: Clock> Stages<'_, P, K> {
             let cached = self
                 .operation
                 .neighbors
-                .cached(&request)
+                .cached_with_clock(&request, &self.client.clock)
                 .map_err(route::Error::from)?
                 .is_some();
             if !cached && self.operation.neighbor_mode == NeighborMode::Cached {
@@ -124,9 +124,10 @@ impl<P: PacketProviders, K: Clock> Stages<'_, P, K> {
 impl<P: PacketProviders, K: Clock> Stages<'_, P, K> {
     pub(super) fn materialize(&self, admitted: Admitted) -> Result<PreparedPacket, Error> {
         let providers = &self.client.providers;
-        let neighbors = self.operation.neighbors.over(
+        let neighbors = self.operation.neighbors.over_with_clock(
             PacketProviders::transmit(providers.as_ref()),
             providers.capture(),
+            &self.client.clock,
         );
         self.materialize_using(admitted, |plan, deadline| {
             route::materialize(plan, &neighbors, deadline)

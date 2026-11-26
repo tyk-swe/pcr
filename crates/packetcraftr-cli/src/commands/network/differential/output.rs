@@ -49,7 +49,7 @@ impl PlanReport {
     pub(crate) fn from_summary(summary: lib::PlanSummary, token: &[u8; 16], repeats: u32) -> Self {
         Self {
             plan_digest: summary.digest,
-            token: lib::hex(token),
+            token: packetcraftr_core::field::hex::compact_hex(token),
             repeats: u64::from(repeats),
             rows: summary
                 .rows
@@ -108,7 +108,7 @@ impl TryFrom<lib::AttemptEvidence> for Attempt {
             answered: attempt.answered,
             rewritten: attempt.rewritten,
             packets_sent: attempt.packets_sent as u64,
-            payload_sha256: lib::hex(&attempt.payload_sha256),
+            payload_sha256: packetcraftr_core::field::hex::compact_hex(&attempt.payload_sha256),
             reply: attempt.reply.map(Captured::try_from).transpose()?,
         })
     }

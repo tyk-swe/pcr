@@ -6,7 +6,6 @@ pub(in crate::commands) mod output;
 
 use self::arguments::Args;
 use self::output::MAX_REPORTED_CHANGES;
-use crate::command_options::Bounded as _;
 use crate::output::contract::Command;
 use crate::{
     commands::retained::Retained, errors::CliError, filtering, terminal::write_summary_line,
@@ -153,8 +152,7 @@ pub(crate) fn run(invocation: &crate::invocation::Invocation, args: Args) -> Res
             &args.write,
         )?)
     };
-    let deadline = Deadline::new(args.duration.max_duration())
-        .with_cancellation(Some(invocation.control.cancellation.clone()));
+    let deadline = invocation.control.io_control();
     let mut reader = crate::input::open_capture(
         &invocation.control,
         &invocation.output,

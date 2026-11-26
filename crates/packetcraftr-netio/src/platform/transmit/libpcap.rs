@@ -5,8 +5,11 @@ use pcap::Capture;
 
 use crate::{
     Error,
-    platform::common::READ_TIMEOUT_MILLIS,
-    platform::common::libpcap::{map_open_error, map_send_error},
+    platform::common::{
+        READ_TIMEOUT_MILLIS,
+        libpcap::{map_open_error, map_send_error},
+        pcap_api::validate_layer2_length,
+    },
     transmit::{self, Layer2Frame, Submission},
 };
 
@@ -17,12 +20,7 @@ pub(crate) fn send_layer2(frame: Layer2Frame<'_>) -> Result<transmit::Report, Er
 }
 
 fn validate_length(frame: Layer2Frame<'_>) -> Result<(), Error> {
-    i32::try_from(frame.bytes().len()).map_err(|_| Error::InvalidTransmissionFrame {
-        message: format!(
-            "Layer 2 frame length {} exceeds the libpcap signed-length limit",
-            frame.bytes().len()
-        ),
-    })?;
+    validate_layer2_length("libpcap", frame.bytes().len())?;
     Ok(())
 }
 

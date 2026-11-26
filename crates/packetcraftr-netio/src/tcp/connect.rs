@@ -92,7 +92,7 @@ pub(crate) struct Lease {
 
 impl Drop for Lease {
     fn drop(&mut self) {
-        self.state.active.fetch_sub(1, Ordering::Relaxed);
+        self.state.active.fetch_sub(1, Ordering::AcqRel);
     }
 }
 
@@ -112,27 +112,18 @@ impl ConnectBudget {
 
     #[cfg(test)]
     pub(crate) fn active(&self) -> usize {
-        self.state.active.load(Ordering::Relaxed)
+        self.state.active.load(Ordering::Acquire)
     }
 
     fn lease(&self) -> Result<Lease, Error> {
-        let mut active = self.state.active.load(Ordering::Relaxed);
-        loop {
-            if active >= self.state.capacity {
-                return Err(Error::Capacity {
-                    limit: self.state.capacity,
-                });
-            }
-            match self.state.active.compare_exchange_weak(
-                active,
-                active + 1,
-                Ordering::Relaxed,
-                Ordering::Relaxed,
-            ) {
-                Ok(_) => break,
-                Err(actual) => active = actual,
-            }
-        }
+        self.state
+            .active
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |active| {
+                (active < self.state.capacity).then_some(active + 1)
+            })
+            .map_err(|_| Error::Capacity {
+                limit: self.state.capacity,
+            })?;
         Ok(Lease {
             state: Arc::clone(&self.state),
         })

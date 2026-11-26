@@ -3,28 +3,6 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const IPV4_CHECKSUM: &str = "decode.ipv4_checksum";
-pub const TCP_CHECKSUM: &str = "decode.tcp_checksum";
-pub const UDP_CHECKSUM: &str = "decode.udp_checksum";
-pub const SCTP_CHECKSUM: &str = "decode.sctp_checksum";
-pub const ICMPV4_CHECKSUM: &str = "decode.icmpv4_checksum";
-pub const ICMPV6_CHECKSUM: &str = "decode.icmpv6_checksum";
-pub const IGMP_CHECKSUM: &str = "decode.igmp_checksum";
-pub const VRRP_CHECKSUM: &str = "decode.vrrp_checksum";
-pub const GRE_CHECKSUM: &str = "decode.gre_checksum";
-
-pub const CHECKSUM_FAILURE_CODES: &[&str] = &[
-    IPV4_CHECKSUM,
-    TCP_CHECKSUM,
-    UDP_CHECKSUM,
-    SCTP_CHECKSUM,
-    ICMPV4_CHECKSUM,
-    ICMPV6_CHECKSUM,
-    IGMP_CHECKSUM,
-    VRRP_CHECKSUM,
-    GRE_CHECKSUM,
-];
-
 /// Diagnostic weight, ordered from least to most severe.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -83,7 +61,7 @@ impl Diagnostic {
 
     #[must_use]
     pub fn is_checksum_failure(&self) -> bool {
-        CHECKSUM_FAILURE_CODES.contains(&self.code)
+        self.code.starts_with("decode.") && self.code.ends_with("_checksum")
     }
 }
 

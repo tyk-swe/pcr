@@ -221,7 +221,7 @@ where
     fn execute_probe(&mut self, probe: &Probe) -> Result<ProbeAttempt, Error> {
         let limits = self.request.limits;
         // The attempt window is shared with a TCP fallback, which gets only what the exchange left.
-        let mut attempt_deadline = Deadline::new(self.request.timeout);
+        let mut attempt_deadline = self.execution.child_deadline(self.request.timeout);
         let started = self.execution.now();
         let neighbors_before = self.executor.operation.spend.neighbor_snapshot();
         let stepped = self.execution.step(

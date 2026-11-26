@@ -4,20 +4,17 @@
 //! Single-endpoint, ordinary-socket configuration audits. No DNS or target expansion.
 use crate::{
     Client,
+    client::tcp::{ConnectError, connect as connect_tcp},
     clock::Clock,
     policy::{Operation, SocketLimits, SocketOperation},
-    providers::{AuthorizedTcp, TcpProviders},
+    providers::{TcpOf, TcpProviders},
 };
 use packetcraftr_core::{
     budget::Deadline,
     error::{Classification, Classified, Kind},
     security::{self, Finding, Report, Severity},
 };
-use packetcraftr_netio::{
-    bounded,
-    tcp::{self, Stream as _},
-    tls,
-};
+use packetcraftr_netio::{bounded, tcp, tls};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::{net::SocketAddr, sync::Arc, time::Duration};
@@ -284,24 +281,20 @@ impl<P: TcpProviders, K: Clock> Client<P, K> {
         self.policy.validate()?;
         admit(&self.policy, request.endpoint, limits)?;
         deadline.enforce()?;
-        let provider = Arc::new(AuthorizedTcp {
-            providers: Arc::clone(&self.providers),
-            policy: Arc::clone(&self.policy),
-        });
-        let mut pending = tcp::start_connect(provider, request.endpoint, deadline)?;
-        let mut_result = pending
-            .wait(deadline)?
-            .ok_or(tcp::Error::DeadlineExceeded)?;
-        let stream = mut_result.result?;
-        let peer = stream.peer_addr()?;
-        if !bounded::same_peer(peer, request.endpoint) {
-            return Err(Error::Io(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "TCP provider changed the authorized peer",
-            )));
-        }
-        self.policy.authorize_destination(peer.ip())?;
-        Ok((stream, peer))
+        let provider = Arc::new(TcpOf(Arc::clone(&self.providers)));
+        let connected = connect_tcp(provider, Some(&self.policy), request.endpoint, deadline)
+            .map_err(|error| match error {
+                ConnectError::Policy(source) => Error::Policy(source),
+                ConnectError::Tcp(source) => Error::Tcp(source),
+                ConnectError::PeerChanged { .. } => Error::Io(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "TCP provider changed the authorized peer",
+                )),
+                ConnectError::PeerAddr(source) | ConnectError::LocalAddr(source) => {
+                    Error::Io(source)
+                }
+            })?;
+        Ok((connected.stream, connected.peer))
     }
     pub fn audit_tls(&self, request: &TlsRequest) -> Result<Report, Error> {
         let connection = &request.connection;
@@ -387,10 +380,11 @@ impl<P: TcpProviders, K: Clock> Client<P, K> {
             _ => {}
         }
         let head = final_head(&exchange.response)?.ok_or(Error::IncompleteResponse)?;
-        let mut report = security::http::audit(
+        let mut report = security::http::audit_with_method(
             &head,
             &connection.endpoint.to_string(),
             matches!(request.transport, HttpTransport::Tls(_)),
+            Some("HEAD"),
         );
         report
             .measurements

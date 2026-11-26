@@ -49,14 +49,13 @@ fn launch(parsed: Parsed) -> ExitCode {
 }
 
 fn parse_error_exit(context: &Context, error: &clap::Error) -> ExitCode {
+    let stream = match context.command {
+        Some(command) => crate::invocation::StreamEncoder::new(command, std::io::stdout()),
+        None => crate::invocation::StreamEncoder::unattributed(std::io::stdout()),
+    };
     let invocation = &crate::invocation::Invocation::new(
         crate::output::contract::Format::Text,
-        crate::invocation::StreamEncoder::new(
-            context
-                .command
-                .unwrap_or(crate::output::contract::Command::Protocols),
-            std::io::stdout(),
-        ),
+        stream,
         None,
         Default::default(),
         None,

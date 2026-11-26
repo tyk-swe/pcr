@@ -55,7 +55,7 @@ impl Default for Sflow {
         }
     }
 }
-crate::reflective_layer! {
+crate::layer::reflective_layer! {
  fn sflow_schema() => { protocol: crate::protocol::BuiltinProtocol::Sflow.id(), name: "Sflow" }
  impl Sflow {
     "agent_type" => { kind: Unsigned, derived: false, required: false, description: "agent type", reflect: agent_type },

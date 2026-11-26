@@ -42,6 +42,43 @@ impl Limits {
                 });
             }
         }
+        if self.max_buffered_bytes < MAX_DIRECTION_BUFFER {
+            return Err(Error::InvalidLimit {
+                field: "max_buffered_bytes",
+                value: u64::try_from(self.max_buffered_bytes).unwrap_or(u64::MAX),
+                reason: Constraint::AtLeastTlsDirectionBuffer,
+            });
+        }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validate_enforces_direction_buffer_floor() {
+        assert!(Limits::default().validate().is_ok());
+        assert!(
+            Limits {
+                max_buffered_bytes: MAX_DIRECTION_BUFFER,
+                ..Default::default()
+            }
+            .validate()
+            .is_ok()
+        );
+        assert!(matches!(
+            Limits {
+                max_buffered_bytes: MAX_DIRECTION_BUFFER - 1,
+                ..Default::default()
+            }
+            .validate(),
+            Err(Error::InvalidLimit {
+                field: "max_buffered_bytes",
+                reason: Constraint::AtLeastTlsDirectionBuffer,
+                ..
+            })
+        ));
     }
 }

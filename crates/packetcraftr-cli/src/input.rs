@@ -9,9 +9,9 @@ mod recipe;
 mod source;
 
 pub(crate) use bounded::{
-    InputKind, hex_text_limit, missing_input_error, read_bounded_file,
+    InputKind, hex_text_limit, missing_input_error, open_regular_file, read_bounded_file,
     read_bounded_file_allow_empty, read_bounded_json_document, read_document,
-    read_document_allow_empty, read_stdin_bounded,
+    read_document_allow_empty, read_scope, read_stdin_bounded,
 };
 pub(crate) use capture::{open_capture, open_capture_file, open_capture_hashed, snapshot_capture};
 pub(crate) use recipe::{apply_overrides, read_recipe};

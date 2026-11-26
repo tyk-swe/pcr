@@ -1,14 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#![cfg_attr(
-    any(target_os = "linux", target_os = "macos"),
-    allow(
-        unsafe_code,
-        reason = "interface identity resolves through libc if_nametoindex and if_indextoname"
-    )
-)]
-
 use crate::{Error, interface::Id as InterfaceId};
 
 pub(crate) fn verify_interface_identity(expected: &InterfaceId) -> Result<(), Error> {
@@ -22,15 +14,17 @@ pub(crate) fn verify_interface_identity(expected: &InterfaceId) -> Result<(), Er
             current_name(expected.index).as_deref(),
         ))
     }
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    #[cfg(target_os = "windows")]
     {
-        // A send has no deadline to give; this target's enumeration is a synchronous snapshot.
-        let unbounded = packetcraftr_core::budget::Deadline::new(std::time::Duration::MAX);
-        crate::interface::current(expected, &unbounded).map(|_| ())
+        super::iphelper::verify_identity(expected)
     }
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
+#[expect(
+    unsafe_code,
+    reason = "interface index lookup calls libc::if_nametoindex"
+)]
 fn current_index(name: &str) -> Option<u32> {
     let name = std::ffi::CString::new(name).ok()?;
     // SAFETY: `name` owns a NUL-terminated C string that outlives this call.
@@ -39,6 +33,10 @@ fn current_index(name: &str) -> Option<u32> {
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
+#[expect(
+    unsafe_code,
+    reason = "interface name lookup calls libc::if_indextoname and reads its C string"
+)]
 fn current_name(index: u32) -> Option<String> {
     let mut buffer = [0 as std::ffi::c_char; libc::IF_NAMESIZE];
     // SAFETY: `buffer` is writable for exactly the `IF_NAMESIZE` bytes `if_indextoname` requires.

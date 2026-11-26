@@ -37,10 +37,10 @@ use packetcraftr_netio::transmit::Provider as _;
 use crate::clock::Clock;
 use crate::deadline::ensure_preparation_deadline;
 use crate::engine::operation::Operation as Execution;
+use crate::engine::options::Options;
 use crate::policy::Policy;
 use crate::providers::PacketProviders;
 pub(crate) use crate::route;
-use crate::send::options::Options;
 use crate::{Client, Error};
 
 struct Stages<'c, P, K> {

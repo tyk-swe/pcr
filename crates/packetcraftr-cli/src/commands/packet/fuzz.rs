@@ -81,7 +81,7 @@ pub(super) fn run(
     let format = invocation.format;
     let stream = &invocation.output;
     let (mut request, selectors) = prepare_request(&arguments)?;
-    let mut live = prepare_live(&arguments, &request)?;
+    let mut live = prepare_live(invocation, &arguments, &request)?;
     let registry = packetcraftr_core::protocol::builtin::registry();
     let packet = read_recipe(
         &invocation.control,
@@ -140,6 +140,7 @@ fn prepare_request(arguments: &Args) -> Result<(core::fuzz::Request, Vec<Selecto
 }
 
 fn prepare_live(
+    invocation: &crate::invocation::Invocation,
     arguments: &Args,
     request: &core::fuzz::Request,
 ) -> Result<Option<PreparedLive>, CliError> {
@@ -158,9 +159,10 @@ fn prepare_live(
         ..packetcraftr::fuzz::Request::new(request.clone(), core::packet::Packet::default())
     };
     live.validate().map_err(CliError::classified)?;
+    let policy = crate::system::resolve_policy(invocation, arguments.policy.clone())?;
     let workflow = prepare_workflow(
         &arguments.route,
-        arguments.policy.clone().into_policy(),
+        policy,
         arguments.timeout.timeout(),
         queue_limits,
     )?;
@@ -267,44 +269,29 @@ fn execute_live(
         collection: workflow.collection,
         ..request
     };
-    match format {
-        Format::Ndjson => {
-            let emit = crate::commands::execution::emitter(invocation, |event, stream| {
-                let event = output::Event::try_from(event).map_err(CliError::classified)?;
-                Ok(stream.emit_published(Published::new(event, Vec::new()))?)
-            })?;
-            let summary = client
-                .fuzz(request.clone(), emit)
+    crate::commands::execution::run_workflow(
+        invocation,
+        |event, stream| {
+            let event = output::Event::try_from(event).map_err(CliError::classified)?;
+            Ok(stream.emit_published(Published::new(event, Vec::new()))?)
+        },
+        |sink| client.fuzz(request, sink).map_err(CliError::classified),
+        rendering::render_live_complete,
+        |collector: packetcraftr::fuzz::Collector, report| Ok(collector.finish(report)),
+        |report| {
+            let published = crate::output::envelope::Published::<output::Report>::try_from(report)
                 .map_err(CliError::classified)?;
-            invocation.check()?;
-            rendering::render_live_complete(summary, stream)
-        }
-        _ => {
-            let report = {
-                let mut collector = packetcraftr::fuzz::Collector::default();
-                let report = client
-                    .fuzz(request.clone(), &mut collector)
-                    .map_err(CliError::classified)?;
-                collector.finish(report)
-            };
-            invocation.check()?;
             if format == Format::Json {
                 crate::publication::emit_published(
                     invocation,
                     crate::output::contract::Command::Fuzz,
-                    crate::output::envelope::Published::<output::Report>::try_from(report)
-                        .map_err(CliError::classified)?,
+                    published,
                 )
             } else {
-                rendering::render_text(
-                    invocation,
-                    crate::output::envelope::Published::try_from(report)
-                        .map_err(CliError::classified)?,
-                    stream.presentation(),
-                )
+                rendering::render_text(invocation, published, stream.presentation())
             }
-        }
-    }
+        },
+    )
 }
 
 fn publish_offline(

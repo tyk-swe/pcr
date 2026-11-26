@@ -120,8 +120,6 @@ pub(crate) const InternalScanProbeMismatch: packetcraftr_core::error::Code =
     packetcraftr_core::error::Code::new("internal.scan_probe_mismatch");
 pub(crate) const InternalSendEventCoherence: packetcraftr_core::error::Code =
     packetcraftr_core::error::Code::new("internal.send_event_coherence");
-pub(crate) const InternalTargetPlan: packetcraftr_core::error::Code =
-    packetcraftr_core::error::Code::new("internal.target_plan");
 pub(crate) const InternalTracerouteEventCoherence: packetcraftr_core::error::Code =
     packetcraftr_core::error::Code::new("internal.traceroute_event_coherence");
 pub(crate) const InternalTracerouteEvidence: packetcraftr_core::error::Code =

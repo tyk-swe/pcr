@@ -97,6 +97,18 @@ impl ProviderSet {
             udp: (),
         }
     }
+
+    pub fn udp<U>(udp: U) -> ProviderSet<(), (), (), (), (), (), U> {
+        ProviderSet {
+            route: (),
+            interface: (),
+            capture: (),
+            transmit: (),
+            tcp: (),
+            resolver: (),
+            udp,
+        }
+    }
 }
 
 impl<R, N, C, T, P, H, U> ProviderSet<R, N, C, T, P, H, U> {
@@ -123,6 +135,19 @@ impl<R, N, C, T, P, H, U> ProviderSet<R, N, C, T, P, H, U> {
             tcp,
             resolver: self.resolver,
             udp: self.udp,
+        }
+    }
+
+    #[must_use]
+    pub fn with_udp<Q>(self, udp: Q) -> ProviderSet<R, N, C, T, P, H, Q> {
+        ProviderSet {
+            route: self.route,
+            interface: self.interface,
+            capture: self.capture,
+            transmit: self.transmit,
+            tcp: self.tcp,
+            resolver: self.resolver,
+            udp,
         }
     }
 }
@@ -289,22 +314,18 @@ impl<P: TcpProviders> net::tcp::Provider for TcpOf<P> {
     }
 }
 
-pub(crate) struct AuthorizedTcp<P> {
-    pub(crate) providers: Arc<P>,
-    pub(crate) policy: Arc<crate::policy::Policy>,
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-impl<P: TcpProviders> net::tcp::Provider for AuthorizedTcp<P> {
-    type Stream = <P::Tcp as net::tcp::Provider>::Stream;
+    fn assert_udp<P: UdpProviders>(_: &P) {}
 
-    fn connect(
-        &self,
-        endpoint: std::net::SocketAddr,
-        deadline: &packetcraftr_core::budget::Deadline,
-    ) -> Result<Self::Stream, net::tcp::Error> {
-        self.policy
-            .authorize_destination(endpoint.ip())
-            .map_err(|source| std::io::Error::new(std::io::ErrorKind::PermissionDenied, source))?;
-        self.providers.tcp().connect(endpoint, deadline)
+    #[test]
+    fn provider_set_udp_and_with_udp_expose_udp_capability() {
+        let standalone = ProviderSet::udp(net::udp::SystemProvider);
+        assert_udp(&standalone);
+        let layered = ProviderSet::tcp(net::tcp::SystemProvider, crate::target::SystemResolver)
+            .with_udp(net::udp::SystemProvider);
+        assert_udp(&layered);
     }
 }

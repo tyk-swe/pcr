@@ -12,39 +12,6 @@ use crate::field::{self, WireValue, parse_mac};
 /// schema is a `static`, so the `protocol` expression must be a constant
 /// expression (`Id::new("name")`, a `const` item, or a `const fn` call). Field
 /// metadata, including each `children` value, is constant as well.
-///
-/// ```
-/// use packetcraftr_core::field;
-/// use packetcraftr_core::layer::{Id, Layer};
-/// use packetcraftr_core::layout::ByteRange;
-/// use packetcraftr_core::reflective_layer;
-///
-/// #[derive(Clone, Debug, Default)]
-/// struct Beacon {
-///     interval: u16,
-/// }
-///
-/// reflective_layer! {
-///     fn beacon_schema() => { protocol: Id::new("beacon"), name: "Beacon" }
-///     impl Beacon {
-///         "interval" | "period" => {
-///             kind: Unsigned, derived: false, required: true,
-///             description: "Seconds between beacons",
-///             reflect: interval,
-///             layout: (0, 2)
-///         }
-///     }
-///     layout fn beacon_layout();
-/// }
-///
-/// let mut beacon = Beacon::default();
-/// beacon.set_field("period", field::Value::Unsigned(30)).unwrap();
-/// assert_eq!(beacon.field("interval"), Some(field::Value::Unsigned(30)));
-/// // The member is a `u16`, so a wider value is refused and named.
-/// assert!(beacon.set_field("interval", field::Value::Unsigned(70_000)).is_err());
-/// assert_eq!(beacon_layout()[0].range, ByteRange::new(0, 2));
-/// ```
-#[macro_export]
 macro_rules! reflective_layer {
     (
         $schema_vis:vis fn $schema:ident() => {
@@ -84,7 +51,7 @@ macro_rules! reflective_layer {
                             derived: $derived,
                             required: $required,
                             description: $description,
-                            children: $crate::reflective_layer!(@children $($children)?),
+                            children: $crate::layer::reflective_layer!(@children $($children)?),
                         }
                     ),*
                 ],
@@ -105,7 +72,7 @@ macro_rules! reflective_layer {
                 type Getter = fn(&$ty) -> Option<$crate::field::Value>;
                 const GETTERS: &[Getter] = &[
                     $(
-                        |layer| $crate::reflective_layer!(
+                        |layer| $crate::layer::reflective_layer!(
                             @get layer;
                             $(reflect $member)?
                             $(reflect_bounded $bounded_member)?
@@ -124,7 +91,7 @@ macro_rules! reflective_layer {
                 type Setter = fn(&mut $ty, $crate::field::Value) -> Result<(), $crate::field::Error>;
                 const SETTERS: &[Setter] = &[
                     $(
-                        |layer, value| $crate::reflective_layer!(
+                        |layer, value| $crate::layer::reflective_layer!(
                             @set layer, value, $field, $schema;
                             $(reflect $member)?
                             $(reflect_bounded $bounded_member, $maximum)?
@@ -143,7 +110,7 @@ macro_rules! reflective_layer {
 
         }
 
-        $crate::reflective_layer!(@fields_layout
+        $crate::layer::reflective_layer!(@fields_layout
             [$(($field $(, $start, $end)?)),*]
             $(layout $vis fn $layout($($layout_arg: $layout_ty),*);)?
         );
@@ -158,7 +125,7 @@ macro_rules! reflective_layer {
         {
             let candidates: [Option<$crate::layout::ByteRange>; _] = [
                 $(
-                    $crate::reflective_layer!(@layout $field $(, $start, $end)?)
+                    $crate::layer::reflective_layer!(@layout $field $(, $start, $end)?)
                 ),*
             ];
             let mut fields = Vec::with_capacity(candidates.len());

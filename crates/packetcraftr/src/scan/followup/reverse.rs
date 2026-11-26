@@ -264,7 +264,7 @@ impl Lookup {
         }
         operation
             .policy(client.policy())
-            .authorize(crate::policy::Operation::Dns(limits?))
+            .authorize(crate::policy::Operation::Traffic(limits?))
             .map_err(|error| error.to_string())
     }
 

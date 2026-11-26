@@ -100,11 +100,48 @@ fn route_line(route: &crate::output::network::Decision) -> String {
     )
 }
 
-#[cfg(all(test, target_os = "linux", feature = "native-route"))]
+#[cfg(test)]
 mod tests {
     use super::*;
+    use net::route::Provider as _;
     use std::cell::Cell;
+    use std::net::IpAddr;
     use std::time::Duration;
+
+    struct StubRouteProvider;
+
+    impl net::route::Provider for StubRouteProvider {
+        type Error = net::route::Error;
+
+        fn lookup_with_preferences(
+            &self,
+            destination: IpAddr,
+            _: Option<&net::interface::Id>,
+            _: Option<IpAddr>,
+            _: &packetcraftr_core::budget::Deadline,
+        ) -> Result<net::route::Decision, Self::Error> {
+            Err(net::route::Error::RouteNotFound { destination })
+        }
+
+        fn lookup_interface(
+            &self,
+            interface: &net::interface::Id,
+            _: &packetcraftr_core::budget::Deadline,
+        ) -> Result<Option<net::route::Decision>, Self::Error> {
+            Ok(Some(net::route::Decision {
+                interface: interface.clone(),
+                source_mac: None,
+                selected_source: None,
+                preferred_source: None,
+                next_hop: None,
+                selection_reason: net::route::SelectionReason::InterfaceOnly,
+                destination_scope: net::route::Scope::Unspecified,
+                mtu: 1500,
+                capability: net::link::Capability::Layer3,
+                link_type: packetcraftr_core::frame::LinkType::RAW,
+            }))
+        }
+    }
 
     fn interface(index: u32, up: bool) -> net::interface::Info {
         net::interface::Info {
@@ -143,8 +180,8 @@ mod tests {
                     },
                     |interfaces| {
                         conversions.set(conversions.get() + 1);
-                        net::route::SystemProvider
-                            .lookup_interface_snapshot(
+                        StubRouteProvider
+                            .lookup_interfaces(
                                 interfaces,
                                 &packetcraftr_core::budget::Deadline::new(Duration::from_secs(5)),
                             )

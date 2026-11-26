@@ -105,7 +105,7 @@ pub(super) struct Polled {
 #[cfg(unix)]
 impl Polled {
     fn next_wait(&self) -> io::Result<std::time::Duration> {
-        use packetcraftr_netio::deadline::POLL_INTERVAL;
+        use packetcraftr_core::budget::POLL_INTERVAL;
         self.control.check_interrupted().map_err(io::Error::other)?;
         Ok(self
             .control

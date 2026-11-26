@@ -43,14 +43,15 @@ impl PolicyArgs {
     pub(crate) fn resources(&self, settings: &mut Settings<'_>) {
         self.hostname_resolution.resources(settings);
     }
+}
 
-    pub(crate) fn into_policy(self) -> packetcraftr::policy::Policy {
+impl crate::command_options::PolicyOptions for PolicyArgs {
+    fn into_base_policy(self) -> (packetcraftr::policy::Policy, ScopeArgs) {
         let mut policy = packetcraftr::policy::Policy::default();
         self.public_destination.apply_to(&mut policy);
         self.hostname_resolution.apply_to(&mut policy);
         self.destination_allowlist.apply_to(&mut policy);
-        self.scope.apply_to(&mut policy);
-        policy
+        (policy, self.scope)
     }
 }
 
@@ -86,7 +87,8 @@ pub(super) fn run(
     let format = invocation.format;
     let presentation = invocation.output.presentation();
     let Args { route, policy } = arguments;
-    let plan = prepare_plan(invocation, route, policy.into_policy())?;
+    let policy = crate::system::resolve_policy(invocation, policy)?;
+    let plan = prepare_plan(invocation, route, policy)?;
     let route = plan
         .client
         .plan(

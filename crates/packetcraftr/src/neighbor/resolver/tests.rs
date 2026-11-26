@@ -982,3 +982,106 @@ fn single_attempt_resolvers_keep_the_shared_cache_and_pinned_answers() {
     assert_eq!(shared.cached(&neighbor(2)).unwrap(), None);
     assert_eq!(pinned_single.cached(&neighbor(2)).unwrap(), Some(second));
 }
+
+#[test]
+fn active_resolver_honors_injected_virtual_clock_for_attempt_expiry() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    #[derive(Clone)]
+    struct SteppingClock {
+        base: std::time::Instant,
+        millis: Arc<AtomicU64>,
+    }
+
+    impl Clock for SteppingClock {
+        type Error = std::convert::Infallible;
+
+        fn now(&self) -> std::time::Instant {
+            self.base + Duration::from_millis(self.millis.load(Ordering::SeqCst))
+        }
+
+        fn wall_now(&self) -> std::time::SystemTime {
+            SystemClock.wall_now()
+        }
+
+        fn sleep(&self, delay: Duration, _: &Deadline) -> Result<(), Self::Error> {
+            self.millis
+                .fetch_add(delay.as_millis() as u64, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    struct AdvancingCapture(Arc<AtomicU64>);
+    struct AdvancingSession {
+        metadata: capture::Metadata,
+        millis: Arc<AtomicU64>,
+    }
+
+    impl capture::Session for AdvancingSession {
+        fn metadata(&self) -> &capture::Metadata {
+            &self.metadata
+        }
+        fn wait_ready(&mut self, _: &Deadline) -> Result<(), packetcraftr_netio::Error> {
+            Ok(())
+        }
+        fn next_captured_frame(
+            &mut self,
+            _: &Deadline,
+        ) -> Result<Option<capture::Captured>, packetcraftr_netio::Error> {
+            self.millis.fetch_add(60, Ordering::SeqCst);
+            Ok(None)
+        }
+        fn shutdown(&mut self) -> Result<(), packetcraftr_netio::Error> {
+            Ok(())
+        }
+        fn stats(&self) -> capture::Stats {
+            capture::Stats::default()
+        }
+    }
+
+    impl capture::Provider for AdvancingCapture {
+        type Capture = AdvancingSession;
+
+        fn arm_capture(
+            &self,
+            request: &capture::Request,
+            _: &Deadline,
+        ) -> Result<Self::Capture, packetcraftr_netio::Error> {
+            Ok(AdvancingSession {
+                metadata: capture::Metadata {
+                    interface: request.interface.clone(),
+                    link_type: packetcraftr_core::frame::LinkType::ETHERNET,
+                    snap_length: request.settings.limits.snap_length,
+                    native: Default::default(),
+                },
+                millis: Arc::clone(&self.0),
+            })
+        }
+    }
+
+    let millis = Arc::new(AtomicU64::new(0));
+    let clock = SteppingClock {
+        base: SystemClock.now(),
+        millis: Arc::clone(&millis),
+    };
+    let options = Options {
+        max_attempts: 1,
+        attempt_timeout: Duration::from_millis(50),
+        ..Options::default()
+    };
+    let state = State::try_new(options).unwrap();
+    let transmitter = Transmitter(AtomicUsize::new(0));
+    let capture = AdvancingCapture(Arc::clone(&millis));
+    let time = clock.clone();
+    let deadline = Deadline::with_time_source(Duration::from_secs(10), move || time.now());
+    let err = state
+        .over_with_clock(&transmitter, &capture, &clock)
+        .resolve(&neighbor(1), &deadline)
+        .unwrap_err();
+    assert!(
+        matches!(err, Error::NotFound { attempts: 1, .. }),
+        "{err:?}"
+    );
+    assert_eq!(transmitter.0.load(Ordering::SeqCst), 1);
+    assert!(millis.load(Ordering::SeqCst) >= 60);
+}

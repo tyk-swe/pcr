@@ -247,6 +247,12 @@ impl StagedFile {
     /// Publishes into the directory bound at staging, without overwriting
     /// unless staged as a replacement.
     pub(crate) fn persist(self) -> Result<Published, CliError> {
+        self.persist_open().map(|(published, _)| published)
+    }
+
+    /// Publishes into the bound directory and returns the verified handle to
+    /// the published file object.
+    pub(crate) fn persist_open(self) -> Result<(Published, std::fs::File), CliError> {
         // This is the commit boundary. Expiry after a successful publication
         // must not claim that the already-published artifact was unpublished.
         self.invocation.check()?;
@@ -260,10 +266,10 @@ impl StagedFile {
             publication,
             ..
         } = self;
-        staged
+        let file = staged
             .publish(&file_name, publication)
             .map_err(|source| output(publication.action(), &destination, source))?;
-        Ok(Published { destination })
+        Ok((Published { destination }, file))
     }
 
     fn check_replaceable(&self) -> Result<(), CliError> {
@@ -276,6 +282,69 @@ impl StagedFile {
             ))),
         }
     }
+}
+
+/// A bound parent directory for staging multiple files without re-resolving
+/// the directory path across rotations.
+#[derive(Debug)]
+pub(crate) struct OutputDirectory {
+    directory: platform::Directory,
+    path: PathBuf,
+}
+
+impl OutputDirectory {
+    pub(crate) fn open(path: &Path) -> Result<Self, CliError> {
+        let directory =
+            platform::Directory::open(path).map_err(|source| output("open", path, source))?;
+        Ok(Self {
+            directory,
+            path: path.to_owned(),
+        })
+    }
+
+    pub(crate) fn stage(
+        &self,
+        invocation: &crate::invocation::Invocation,
+        name: &OsStr,
+    ) -> Result<StagedFile, CliError> {
+        if file_name(Path::new(name)) != Some(name) {
+            return Err(CliError::from_classification(
+                CLASSIFICATION,
+                "output file requires a single file name",
+                Vec::new(),
+            ));
+        }
+        StagedFile::stage_in(
+            invocation,
+            &self.path.join(name),
+            Publication::NoClobber,
+            || self.directory.duplicate(),
+        )
+    }
+}
+
+/// Syncs every staged file before persisting any, reporting already-published
+/// paths if a later persist fails.
+pub(crate) fn publish_staged<T, R>(
+    staged: Vec<(T, StagedFile)>,
+    mut on_published: impl FnMut(T, Published) -> R,
+    on_error: impl FnOnce(CliError, &[String]) -> CliError,
+) -> Result<Vec<R>, CliError> {
+    for (_, file) in &staged {
+        file.sync()?;
+    }
+    let mut published_paths = Vec::with_capacity(staged.len());
+    let mut results = Vec::with_capacity(staged.len());
+    for (item, file) in staged {
+        match file.persist() {
+            Ok(published) => {
+                published_paths.push(published.destination().display().to_string());
+                results.push(on_published(item, published));
+            }
+            Err(error) => return Err(on_error(error, &published_paths)),
+        }
+    }
+    Ok(results)
 }
 
 /// A file this invocation published.

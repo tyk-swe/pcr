@@ -11,7 +11,7 @@ use packetcraftr_core::protocol::{
 };
 use packetcraftr_core::{packet::Packet, protocol::BuiltinProtocol};
 
-use crate::engine::correlation::{
+use crate::correlation::{
     icmp_identity, nonzero_ipv4_identification, packet_shape_matches,
     packet_shape_with_payload_matches,
 };

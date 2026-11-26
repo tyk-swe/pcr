@@ -1,11 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#![allow(
-    unsafe_code,
-    reason = "Npcap is loaded at runtime and its symbols resolve through unsafe FFI"
-)]
-
 use std::{
     ffi::{OsString, c_char},
     os::windows::ffi::OsStringExt,
@@ -71,6 +66,10 @@ pub(in crate::platform) struct NpcapApi {
 }
 
 impl NpcapApi {
+    #[expect(
+        unsafe_code,
+        reason = "Npcap is loaded at runtime and initialized through FFI"
+    )]
     fn load() -> Result<Self, Error> {
         let path = npcap_library_path()?;
         // SAFETY: the path is obtained from the operating system rather than process environment,
@@ -170,6 +169,10 @@ pub(in crate::platform) fn npcap_api() -> Result<Arc<NpcapApi>, Error> {
     API.clone()
 }
 
+#[expect(
+    unsafe_code,
+    reason = "interface index to Npcap GUID conversion calls Win32 IP Helper FFI"
+)]
 pub(in crate::platform) fn npcap_device_name(interface: &InterfaceId) -> Result<String, Error> {
     let mut luid = NET_LUID_LH::default();
     // SAFETY: luid is writable and the interface index is a plain value.
@@ -211,6 +214,10 @@ fn format_npcap_device(guid: GUID) -> String {
     )
 }
 
+#[expect(
+    unsafe_code,
+    reason = "resolves the Windows system directory via GetSystemWindowsDirectoryW FFI"
+)]
 fn npcap_library_path() -> Result<PathBuf, Error> {
     let mut windows_directory = vec![0_u16; 32_768];
     // SAFETY: the entire mutable UTF-16 buffer is provided to the system API.
@@ -256,6 +263,10 @@ macro_rules! load_optional_symbols {
 }
 use load_optional_symbols;
 
+#[expect(
+    unsafe_code,
+    reason = "resolves dynamically loaded Npcap symbols by ABI signature"
+)]
 unsafe fn load_symbol<T: Copy>(library: &Library, name: &'static [u8]) -> Result<T, Error> {
     // SAFETY: the caller supplies the exact SDK signature associated with this
     // NUL-terminated export name; the Library owner outlives T.

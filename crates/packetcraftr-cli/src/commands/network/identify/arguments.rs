@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use packetcraftr::identify::Limits;
 
-use crate::command_options::{Bounded, IdentificationPolicyArgs};
+use crate::command_options::{Bounded, EndpointPolicyArgs};
 
 mod tls;
 
@@ -112,7 +112,7 @@ pub(crate) struct Args {
     #[arg(long, default_value_t = Limits::default().probe.read_bytes)]
     pub(crate) probe_max_read_bytes: u64,
     #[command(flatten)]
-    pub(crate) policy: IdentificationPolicyArgs,
+    pub(crate) policy: EndpointPolicyArgs,
 }
 
 fn millis(duration: Duration) -> u64 {

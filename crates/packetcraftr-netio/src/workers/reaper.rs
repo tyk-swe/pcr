@@ -15,14 +15,11 @@ use std::{
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::error::Source;
 #[cfg(native_layer2)]
-use std::{sync::LazyLock, time::Duration};
+use std::time::Duration;
 
 use super::lock;
 #[cfg(native_layer2)]
-use super::{Task, Waited, shared};
-
-#[cfg(native_layer2)]
-static SHARED_REAPER: LazyLock<Mutex<Option<ReaperService>>> = LazyLock::new(|| Mutex::new(None));
+use super::{Task, Waited};
 
 type SharedReceiver = Arc<Mutex<mpsc::Receiver<ReapTask>>>;
 type SharedSender = Arc<Mutex<Option<SyncSender<ReapTask>>>>;
@@ -136,18 +133,6 @@ impl ReaperClient {
             }
         }
     }
-}
-
-#[cfg(native_layer2)]
-pub(crate) fn shared_reaper() -> Result<ReaperClient, ReaperStartError> {
-    let mut service = lock(&SHARED_REAPER);
-    if let Some(service) = &*service {
-        return Ok(service.client());
-    }
-    let initialized = start_reaper(shared().capacity())?;
-    let client = initialized.client();
-    *service = Some(initialized);
-    Ok(client)
 }
 
 fn start_reaper(capacity: usize) -> Result<ReaperService, ReaperStartError> {

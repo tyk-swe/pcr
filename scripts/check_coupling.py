@@ -24,8 +24,8 @@ CEILINGS = {
     "instant_now": 0,
     "system_time_now": 0,
     "getrandom_sites": 0,
-    "downcast_sites": 23,
-    "error_downcast_sites": 12,
+    "downcast_sites": 21,
+    "error_downcast_sites": 9,
     "downcast_outside_allowlist": 0,
     "dynamic_field_sites": 0,
     # Residual polls guard compute/input loops, side-effect commit
@@ -33,8 +33,9 @@ CEILINGS = {
     # encoder would report as an output code instead. The encoder already
     # enforces the same control deadline on every write, and every poll that
     # only duplicated an emit-internal check with an identical error is gone.
-    "manual_cancellation_polls": 73,
+    "manual_cancellation_polls": 61,
     "duplicate_constants": 0,
+    "duplicate_wire_codes": 0,
     "public_items_core": 25,
     "public_items_netio": 15,
     "public_items_packetcraftr": 26,
@@ -58,7 +59,6 @@ LAYER_CAST_FILES = (
 # Standard error-chain introspection on boxed errors is a different family
 # from layer identity casts and is counted separately.
 ERROR_CAST_FILES = (
-    "crates/packetcraftr-cli/src/commands/network/scan.rs",
     "crates/packetcraftr-core/src/capture_file/compression.rs",
     "crates/packetcraftr-core/src/capture_file/error.rs",
     "crates/packetcraftr-netio/src/tls/error.rs",
@@ -112,6 +112,22 @@ def duplicate_constants(sources: dict[Path, str]) -> int:
                 continue
             seen.setdefault((name, value), set()).add(path)
     return sum(1 for paths in seen.values() if len(paths) > 1)
+
+
+WIRE_CODE_SOURCE = "crates/packetcraftr-core/src/error/code.rs"
+CODE_NEW_PATTERN = re.compile(r'\bCode::new\(\s*"([^"]+)"\s*,?\s*\)')
+CORE_CODE_NEW_PATTERN = re.compile(r'\b(?:Code|Self)::new\(\s*"([^"]+)"\s*,?\s*\)')
+
+
+def duplicate_wire_codes(root: Path, sources: dict[Path, str]) -> dict[str, list[str]]:
+    """Wire error code literals constructed more than once across the workspace."""
+    seen: dict[str, list[str]] = {}
+    for path, text in sources.items():
+        relative = path.relative_to(root).as_posix()
+        pattern = CORE_CODE_NEW_PATTERN if relative == WIRE_CODE_SOURCE else CODE_NEW_PATTERN
+        for code in pattern.findall(text):
+            seen.setdefault(code, []).append(relative)
+    return {code: sorted(paths) for code, paths in sorted(seen.items()) if len(paths) > 1}
 
 
 PUBLIC_ITEM_PATTERN = re.compile(
@@ -247,6 +263,7 @@ def inventory(root: Path = ROOT) -> dict[str, int]:
             re.M,
         ),
         "duplicate_constants": duplicate_constants(sources),
+        "duplicate_wire_codes": len(duplicate_wire_codes(root, sources)),
         **public_items(root, sources),
     }
 
@@ -263,6 +280,9 @@ def main() -> int:
         print(f"{name:28} {value:>8} {ceiling:>8}")
         if value > ceiling:
             failures.append(f"{name}: {value} exceeds ceiling {ceiling}")
+    if measured["duplicate_wire_codes"] > CEILINGS["duplicate_wire_codes"]:
+        for code, paths in duplicate_wire_codes(ROOT, production_sources()).items():
+            failures.append(f"duplicate wire code {code!r}: {', '.join(paths)}")
     if failures and not args.report:
         for failure in failures:
             print(failure, file=sys.stderr)

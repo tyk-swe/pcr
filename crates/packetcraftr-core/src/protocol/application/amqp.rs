@@ -27,7 +27,7 @@ impl Default for Amqp {
         }
     }
 }
-crate::reflective_layer! {
+crate::layer::reflective_layer! {
  fn amqp_schema() => { protocol: crate::protocol::BuiltinProtocol::Amqp.id(), name: "Amqp" }
  impl Amqp {
     "frame_type" => { kind: Unsigned, derived: false, required: false, description: "frame type", reflect: frame_type },

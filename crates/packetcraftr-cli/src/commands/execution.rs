@@ -101,5 +101,32 @@ where
         .map_err(CliError::classified)
 }
 
+/// Runs a live workflow either streaming events as NDJSON through an isolated
+/// emitter or collecting into `C` for aggregate JSON/text publication.
+pub(crate) fn run_workflow<E, C, S, A>(
+    invocation: &Invocation,
+    emit_event: impl FnMut(E, &StreamEncoder) -> Result<(), CliError> + Send + 'static,
+    execute: impl FnOnce(&mut dyn Sink<E, Ack = ()>) -> Result<S, CliError>,
+    complete_stream: impl FnOnce(S, &StreamEncoder) -> Result<(), CliError>,
+    finish: impl FnOnce(C, S) -> Result<A, CliError>,
+    render_collected: impl FnOnce(A) -> Result<(), CliError>,
+) -> Result<(), CliError>
+where
+    E: Send + 'static,
+    C: Default + Sink<E, Ack = ()>,
+{
+    if invocation.format == crate::output::contract::Format::Ndjson {
+        let mut emit = emitter(invocation, emit_event)?;
+        let summary = execute(&mut emit)?;
+        invocation.check()?;
+        return complete_stream(summary, &invocation.output);
+    }
+    let mut collector = C::default();
+    let summary = execute(&mut collector)?;
+    let aggregate = finish(collector, summary)?;
+    invocation.check()?;
+    render_collected(aggregate)
+}
+
 #[cfg(test)]
 mod tests;

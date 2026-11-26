@@ -30,7 +30,7 @@ const RECORDS: &[crate::layer::FieldSchema] = &[
 pub struct Dtls {
     pub records: Records,
 }
-crate::reflective_layer! {
+crate::layer::reflective_layer! {
  fn dtls_schema() => { protocol: crate::protocol::BuiltinProtocol::Dtls.id(), name: "Dtls" }
  impl Dtls {
     "records" => { kind: List, derived: false, required: false, description: "DTLS records and plaintext handshake fragment envelopes", children: RECORDS, reflect: records },

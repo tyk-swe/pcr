@@ -33,7 +33,7 @@ impl Default for Cdp {
         }
     }
 }
-crate::reflective_layer! {
+crate::layer::reflective_layer! {
  fn cdp_schema() => { protocol: crate::protocol::BuiltinProtocol::Cdp.id(), name: "Cdp" }
  impl Cdp {
     "version" => { kind: Unsigned, derived: false, required: false, description: "version", reflect: version },

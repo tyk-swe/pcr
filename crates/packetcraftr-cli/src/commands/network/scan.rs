@@ -181,18 +181,13 @@ fn scan_error(error: packetcraftr::scan::Error) -> CliError {
     let mut cli =
         CliError::from_classification(error.classification(), error.to_string(), error.causes())
             .with_context(error.context());
-    let mut source: Option<&(dyn std::error::Error + 'static)> = Some(&error);
-    while let Some(error) = source {
-        if let Some(pipeline) = error.downcast_ref::<packetcraftr::scan::PipelineFailure>() {
-            match crate::output::scan_failure::Failure::try_from(pipeline) {
-                Ok(partial) => cli = cli.with_scan(partial),
-                Err(error) => cli
-                    .causes
-                    .push(format!("could not render pending scan evidence: {error}")),
-            }
-            break;
+    if let Some(pipeline) = error.pipeline_failure() {
+        match crate::output::scan_failure::Failure::try_from(pipeline) {
+            Ok(partial) => cli = cli.with_scan(partial),
+            Err(error) => cli
+                .causes
+                .push(format!("could not render pending scan evidence: {error}")),
         }
-        source = error.source();
     }
     cli
 }

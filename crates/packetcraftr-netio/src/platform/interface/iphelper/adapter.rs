@@ -1,11 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#![allow(
-    unsafe_code,
-    reason = "Windows adapter lists are traversed as raw IP_ADAPTER_ADDRESSES pointers"
-)]
-
 use std::{
     mem::{align_of, size_of},
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
@@ -125,6 +120,10 @@ pub(in crate::platform) fn find_windows_adapter(
     })
 }
 
+#[expect(
+    unsafe_code,
+    reason = "traverses bounds-checked IP_ADAPTER_ADDRESSES_LH pointers and C unions"
+)]
 pub(in crate::platform) fn parse_adapters(
     head: *mut IP_ADAPTER_ADDRESSES_LH,
     bounds: BufferBounds,
@@ -208,6 +207,10 @@ pub(in crate::platform) fn parse_adapters(
     })
 }
 
+#[expect(
+    unsafe_code,
+    reason = "traverses bounds-checked IP_ADAPTER_UNICAST_ADDRESS_LH pointers"
+)]
 fn parse_unicast_addresses(
     mut current: *mut IP_ADAPTER_UNICAST_ADDRESS_LH,
     bounds: BufferBounds,
@@ -251,6 +254,10 @@ fn parse_unicast_addresses(
     })
 }
 
+#[expect(
+    unsafe_code,
+    reason = "reads a bounds-checked UTF-16 string from the IP Helper response buffer"
+)]
 fn wide_string(
     value: windows::core::PWSTR,
     bounds: BufferBounds,
@@ -286,6 +293,10 @@ fn wide_string(
         .and_then(|units| String::from_utf16(units).ok()))
 }
 
+#[expect(
+    unsafe_code,
+    reason = "reads bounds-checked WinSock SOCKADDR_IN and SOCKADDR_IN6 structures"
+)]
 fn socket_address_ip(
     address: &windows::Win32::Networking::WinSock::SOCKET_ADDRESS,
     bounds: BufferBounds,

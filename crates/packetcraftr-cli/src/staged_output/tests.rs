@@ -418,3 +418,123 @@ fn abandoned_staging_cleans_up_entries() {
         });
     }
 }
+
+#[test]
+fn persist_open_and_output_directory_keep_bound_directory_and_inode() {
+    use std::io::Seek;
+
+    for &strategy in STRATEGIES {
+        with_strategy(strategy, || {
+            let temporary = tempfile::tempdir().unwrap();
+            let directory = temporary.path().join("out");
+            let moved = temporary.path().join("out.old");
+            std::fs::create_dir(&directory).unwrap();
+            let bound = OutputDirectory::open(&directory).unwrap();
+            replace_directory(&directory, &moved);
+
+            let error = bound
+                .stage(&invocation(), std::ffi::OsStr::new("nested/a.pcap"))
+                .unwrap_err();
+            assert!(error.message.contains("single file name"));
+
+            let mut file = bound
+                .stage(&invocation(), std::ffi::OsStr::new("slot.pcap"))
+                .unwrap();
+            file.as_file_mut().write_all(b"initial").unwrap();
+            let expected = staged_identity(&mut file);
+            let (published, mut handle) = file.persist_open().unwrap();
+            assert_eq!(published.destination(), directory.join("slot.pcap"));
+            assert_eq!(identity(&handle.metadata().unwrap()), expected);
+            handle.set_len(0).unwrap();
+            handle.rewind().unwrap();
+            handle.write_all(b"reused").unwrap();
+            handle.sync_all().unwrap();
+
+            let actual = moved.join("slot.pcap");
+            assert_eq!(std::fs::read(&actual).unwrap(), b"reused");
+            assert_eq!(
+                identity(&std::fs::symlink_metadata(&actual).unwrap()),
+                expected
+            );
+            assert!(entries(&directory).is_empty(), "{strategy:?}");
+        });
+    }
+}
+
+#[test]
+fn publish_staged_syncs_all_before_persisting_and_reports_partial_publication() {
+    let temporary = tempfile::tempdir().unwrap();
+    let first = temporary.path().join("first.bin");
+    let second = temporary.path().join("second.bin");
+
+    let inv_ok = invocation();
+    let inv_cancelled = invocation();
+    let mut f1 = StagedFile::stage(&inv_ok, &first).unwrap();
+    f1.as_file_mut().write_all(b"one").unwrap();
+    let mut f2 = StagedFile::stage(&inv_cancelled, &second).unwrap();
+    f2.as_file_mut().write_all(b"two").unwrap();
+    inv_cancelled.control.cancellation.cancel();
+
+    let mut error_callback_ran = false;
+    let err = publish_staged(
+        vec![("first", f1), ("second", f2)],
+        |label, file| (label, file.destination().to_owned()),
+        |err, _| {
+            error_callback_ran = true;
+            err
+        },
+    )
+    .unwrap_err();
+    assert_eq!(
+        err.classification,
+        inv_cancelled.check().unwrap_err().classification
+    );
+    assert!(
+        !error_callback_ran,
+        "sync failure must abort before persist"
+    );
+    assert!(
+        !first.exists(),
+        "first file must not publish when second fails sync"
+    );
+    assert!(!second.exists());
+
+    let mut f1 = StagedFile::stage(&inv_ok, &first).unwrap();
+    f1.as_file_mut().write_all(b"one").unwrap();
+    let mut f2 = StagedFile::stage(&inv_ok, &second).unwrap();
+    f2.as_file_mut().write_all(b"two").unwrap();
+    let results = publish_staged(
+        vec![("first", f1), ("second", f2)],
+        |label, file| (label, file.destination().to_owned()),
+        |err, _| err,
+    )
+    .unwrap();
+    assert_eq!(
+        results,
+        vec![("first", first.clone()), ("second", second.clone())]
+    );
+    assert_eq!(std::fs::read(&first).unwrap(), b"one");
+    assert_eq!(std::fs::read(&second).unwrap(), b"two");
+
+    let third = temporary.path().join("third.bin");
+    let fourth = temporary.path().join("fourth.bin");
+    let mut f3 = StagedFile::stage(&inv_ok, &third).unwrap();
+    f3.as_file_mut().write_all(b"three").unwrap();
+    let mut f4 = StagedFile::stage(&inv_ok, &fourth).unwrap();
+    f4.as_file_mut().write_all(b"four").unwrap();
+    std::fs::write(&fourth, b"conflict").unwrap();
+
+    let mut reported = Vec::new();
+    let _ = publish_staged(
+        vec![("third", f3), ("fourth", f4)],
+        |_, _| (),
+        |err, published| {
+            reported = published.to_vec();
+            err
+        },
+    )
+    .unwrap_err();
+    assert_eq!(reported, vec![third.display().to_string()]);
+    assert_eq!(std::fs::read(&third).unwrap(), b"three");
+    assert_eq!(std::fs::read(&fourth).unwrap(), b"conflict");
+}

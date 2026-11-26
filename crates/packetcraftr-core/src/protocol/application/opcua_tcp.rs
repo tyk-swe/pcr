@@ -49,7 +49,7 @@ impl Default for OpcuaTcp {
         }
     }
 }
-crate::reflective_layer! {
+crate::layer::reflective_layer! {
  fn opcuatcp_schema() => { protocol: crate::protocol::BuiltinProtocol::OpcuaTcp.id(), name: "OpcuaTcp" }
  impl OpcuaTcp {
     "message_type" => { kind: Bytes, derived: false, required: false, description: "message type", reflect: message_type },

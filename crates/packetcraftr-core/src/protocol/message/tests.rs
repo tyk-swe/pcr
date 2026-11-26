@@ -875,19 +875,22 @@ fn udp_build_respects_registry_bindings() {
 
 #[test]
 fn sip_framing_skips_stream_keepalives() {
-    let mut framer = crate::protocol::framing::Framer::new(crate::codec::Framing::Sip, "sip");
+    let mut framer =
+        crate::protocol::framing::Framer::new(crate::protocol::framing::Framing::Sip, "sip");
     assert_eq!(
         framer
             .progress(b"\r\nOPTIONS sip:service SIP/2.0\r\n", 65536)
             .unwrap(),
         crate::protocol::framing::Progress::Skip(2)
     );
-    let mut framer = crate::protocol::framing::Framer::new(crate::codec::Framing::Sip, "sip");
+    let mut framer =
+        crate::protocol::framing::Framer::new(crate::protocol::framing::Framing::Sip, "sip");
     assert_eq!(
         framer.progress(b"\r", 65536).unwrap(),
         crate::protocol::framing::Progress::Incomplete
     );
-    let mut framer = crate::protocol::framing::Framer::new(crate::codec::Framing::Rtsp, "rtsp");
+    let mut framer =
+        crate::protocol::framing::Framer::new(crate::protocol::framing::Framing::Rtsp, "rtsp");
     assert_ne!(
         framer.progress(b"\r\n", 65536).unwrap(),
         crate::protocol::framing::Progress::Skip(2)
@@ -896,7 +899,8 @@ fn sip_framing_skips_stream_keepalives() {
 
 #[test]
 fn sip_tcp_still_requires_content_length() {
-    let mut framer = crate::protocol::framing::Framer::new(crate::codec::Framing::Sip, "sip");
+    let mut framer =
+        crate::protocol::framing::Framer::new(crate::protocol::framing::Framing::Sip, "sip");
     assert!(
         framer
             .progress(b"OPTIONS sip:service SIP/2.0\r\n\r\n", 65536)
@@ -2750,7 +2754,7 @@ fn resp_framing_matches_decoder_depth() {
         for tag in [":", "$", "*"] {
             let wire = format!("{tag}{number}\r\n");
             assert!(
-                Framer::new(crate::codec::Framing::Resp, "resp")
+                Framer::new(crate::protocol::framing::Framing::Resp, "resp")
                     .progress(wire.as_bytes(), 4096)
                     .is_err(),
                 "{wire:?}"
@@ -2768,21 +2772,21 @@ fn resp_framing_matches_decoder_depth() {
     ] {
         for depth in [15, 16] {
             let wire = format!("{}{leaf}", "*1\r\n".repeat(depth));
-            let framed =
-                Framer::new(crate::codec::Framing::Resp, "resp").progress(wire.as_bytes(), 4096);
+            let framed = Framer::new(crate::protocol::framing::Framing::Resp, "resp")
+                .progress(wire.as_bytes(), 4096);
             assert_eq!(framed.is_ok(), depth == 15, "{leaf:?} at {depth}");
             assert_eq!(decode("resp", wire.as_bytes()).is_ok(), depth == 15);
         }
     }
     let wire = b"$9223372036854775807\r\n";
     assert!(
-        Framer::new(crate::codec::Framing::Resp, "resp")
+        Framer::new(crate::protocol::framing::Framing::Resp, "resp")
             .progress(wire, 4096)
             .is_err()
     );
     for wire in [b"$0\r\n\r\n".as_slice(), b"$3\r\nabc\r\n"] {
         assert_eq!(
-            Framer::new(crate::codec::Framing::Resp, "resp")
+            Framer::new(crate::protocol::framing::Framing::Resp, "resp")
                 .progress(wire, 4096)
                 .unwrap(),
             crate::protocol::framing::Progress::Message(wire.len())

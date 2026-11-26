@@ -1,12 +1,13 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::ffi::{c_char, c_int, c_long, c_uchar, c_uint, c_ushort, c_void};
+use std::ffi::{c_char, c_int, c_long, c_uchar, c_uint, c_void};
+
+use crate::platform::common::pcap_api::BpfProgram;
 
 pub(in crate::platform) const NPCAP_DEPENDENCY: &str = "Npcap 1.88 runtime";
 pub(in crate::platform) const PCAP_ERROR_BUFFER_SIZE: usize = 256;
 pub(in crate::platform) const PCAP_CHAR_ENC_UTF_8: c_uint = 1;
-pub(in crate::platform) const PCAP_NETMASK_UNKNOWN: c_uint = 0xffff_ffff;
 pub(in crate::platform) const SEND_SNAPSHOT_LENGTH: c_int = 65_535;
 
 pub(in crate::platform) const PCAP_WARNING_PROMISC_NOTSUP: c_int = 2;
@@ -45,20 +46,6 @@ pub(in crate::platform) type PcapStats =
 pub(in crate::platform) type PcapBreakLoop = unsafe extern "C" fn(*mut c_void);
 pub(in crate::platform) type PcapGetError = unsafe extern "C" fn(*mut c_void) -> *mut c_char;
 pub(in crate::platform) type PcapClose = unsafe extern "C" fn(*mut c_void);
-
-#[repr(C)]
-pub(in crate::platform) struct BpfInstruction {
-    pub(in crate::platform) code: c_ushort,
-    pub(in crate::platform) jump_true: c_uchar,
-    pub(in crate::platform) jump_false: c_uchar,
-    pub(in crate::platform) value: c_uint,
-}
-
-#[repr(C)]
-pub(in crate::platform) struct BpfProgram {
-    pub(in crate::platform) instruction_count: c_uint,
-    pub(in crate::platform) instructions: *mut BpfInstruction,
-}
 
 #[repr(C)]
 #[derive(Clone, Copy)]

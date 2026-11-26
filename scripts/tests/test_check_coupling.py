@@ -60,6 +60,7 @@ class CheckCouplingTests(unittest.TestCase):
             'fn fixture() {\n'
             '    FieldLayout { name: "field" };\n'
             '    Id::new("foo"); layer.field("x");\n'
+            '    Code::new("fixture.code");\n'
             '    Instant::now(); SystemTime::now(); getrandom();\n'
             '    layer.downcast_ref::<Tcp>(); control.check();\n'
             '}\n'
@@ -149,6 +150,42 @@ class CheckCouplingTests(unittest.TestCase):
         })
         measured = coupling.inventory(root)
         self.assertEqual(measured["duplicate_constants"], 1)
+
+    def test_duplicate_wire_codes_detect_cross_crate_and_intra_file_collisions(self):
+        root = self.workspace({
+            "crates/packetcraftr-core/src/error/code.rs":
+                'impl Code {\n'
+                '    pub const Shared: Self = Self::new("io.shared");\n'
+                '    pub const Unique: Self = Self::new("io.unique");\n'
+                '}\n',
+            "crates/packetcraftr/src/code.rs":
+                'pub(crate) const Shared: Code = packetcraftr_core::error::Code::new("io.shared");\n'
+                'pub(crate) const First: Code = Code::new("cli.twice");\n'
+                'pub(crate) const Second: Code = Code::new(\n'
+                '    "cli.twice",\n'
+                ');\n'
+                '// Code::new("io.unique")\n'
+                '#[cfg(test)]\n'
+                'pub(crate) const TestOnly: Code = Code::new("io.unique");\n',
+            "crates/packetcraftr-cli/src/other.rs":
+                'const A: OtherCode = OtherCode::new("io.unique");\n'
+                'impl Other { const B: Self = Self::new("io.unique"); }\n',
+        })
+        sources = coupling.production_sources(root)
+        self.assertEqual(
+            coupling.duplicate_wire_codes(root, sources),
+            {
+                "cli.twice": [
+                    "crates/packetcraftr/src/code.rs",
+                    "crates/packetcraftr/src/code.rs",
+                ],
+                "io.shared": [
+                    "crates/packetcraftr-core/src/error/code.rs",
+                    "crates/packetcraftr/src/code.rs",
+                ],
+            },
+        )
+        self.assertEqual(coupling.inventory(root)["duplicate_wire_codes"], 2)
 
     def test_cancellation_polls_count_every_receiver_spelling(self):
         root = self.workspace({

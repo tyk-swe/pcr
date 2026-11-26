@@ -12,6 +12,7 @@ mod limits;
 mod link_type;
 mod map;
 mod merge;
+mod normalize;
 mod pcapng;
 mod reader;
 mod record;
@@ -32,6 +33,7 @@ pub use merge::{
     MAX_MERGE_SOURCES, MAX_REORDER_FRAMES, MergeLimits, MergeOrder, MergeReport, MergeSource,
     MergedInterface, merge,
 };
+pub use normalize::{NormalizeOptions, NormalizeReport, normalize};
 pub use reader::Reader;
 pub use record::{CaptureRecord, MetadataBlockKind, PacketBlockKind, RecordKind};
 pub use rewrite::{RewriteReport, SelectionReport, rewrite, select};

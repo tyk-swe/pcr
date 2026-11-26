@@ -12,7 +12,7 @@ use super::{
     ARMING, Limits, Session, admit,
     live::{NativeCaptureParts, NativeCaptureSession, Started},
 };
-use crate::{Error, deadline::POLL_INTERVAL, workers::reaper::shared_reaper};
+use crate::{Error, deadline::POLL_INTERVAL};
 
 pub(super) fn open(
     limits: Limits,
@@ -24,10 +24,12 @@ pub(super) fn open(
         .detach()
         .map_err(|interrupted| Error::interrupted(interrupted, ARMING))?;
     // Both fallible cleanup-service steps happen before any native call.
-    let reaper = shared_reaper().map_err(|error| Error::Capture {
-        message: "native capture cleanup is unavailable".to_owned(),
-        source: Some(Source::new(error)),
-    })?;
+    let reaper = crate::workers::shared()
+        .reaper()
+        .map_err(|error| Error::Capture {
+            message: "native capture cleanup is unavailable".to_owned(),
+            source: Some(Source::new(error)),
+        })?;
     let permit = crate::workers::shared()
         .admit()
         .map_err(|error| Error::Capture {

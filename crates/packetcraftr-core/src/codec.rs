@@ -280,30 +280,6 @@ impl Decoded {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Framing {
-    #[default]
-    Datagram,
-    Control,
-    Lacp,
-    Mqtt,
-    Amqp,
-    Bgp,
-    Ber,
-    Resp,
-    Sip,
-    Rtsp,
-    Memcached,
-    Ipfix,
-    Radius,
-    Stun,
-    ModbusTcp,
-    Dnp3,
-    EthernetIp,
-    Iec104,
-    OpcuaTcp,
-}
-
 pub struct SeededLayer {
     pub layer: Box<dyn Layer>,
     pub consumed: Option<usize>,
@@ -318,10 +294,6 @@ pub trait Codec: Send + Sync + fmt::Debug {
 
     fn accepts_decoded_protocol(&self, protocol: &Id) -> bool {
         protocol == self.protocol_id()
-    }
-
-    fn framing(&self) -> Framing {
-        Framing::Datagram
     }
 
     fn prepare_fields(

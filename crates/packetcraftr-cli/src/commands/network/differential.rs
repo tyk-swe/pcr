@@ -94,9 +94,10 @@ fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<()
             ));
         }
     };
+    let policy = crate::system::resolve_policy(invocation, arguments.policy.clone())?;
     let workflow = prepare_workflow(
         &arguments.route,
-        arguments.policy.clone().into_policy(),
+        policy,
         arguments.timeout.timeout(),
         arguments.limits.clone().into_limits(),
     )?;
@@ -113,7 +114,6 @@ fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<()
 
     let client = workflow.client(invocation, Runtime::Workflow);
     let format = invocation.format;
-    let stream = &invocation.output;
 
     if arguments.plan_only {
         if format == Format::Ndjson {
@@ -138,22 +138,17 @@ fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<()
         };
     }
 
-    match format {
-        Format::Ndjson => {
-            let emit = crate::commands::execution::emitter(invocation, rendering::emit_event)?;
-            let report = client
-                .differential(request, emit)
-                .map_err(CliError::classified)?;
-            invocation.check()?;
-            rendering::render_complete(report, stream)
-        }
-        Format::Text | Format::Json => {
-            let mut collector = lib::Collector::default();
-            let report = client
-                .differential(request, &mut collector)
-                .map_err(CliError::classified)?;
-            let aggregate = collector.finish(report);
-            invocation.check()?;
+    crate::commands::execution::run_workflow(
+        invocation,
+        rendering::emit_event,
+        |sink| {
+            client
+                .differential(request, sink)
+                .map_err(CliError::classified)
+        },
+        rendering::render_complete,
+        |collector: lib::Collector, report| Ok(collector.finish(report)),
+        |aggregate| {
             let published =
                 crate::output::envelope::Published::<output::Report>::try_from(aggregate)
                     .map_err(CliError::classified)?;
@@ -166,7 +161,6 @@ fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<()
                 ),
                 other => other.unreachable(),
             }
-        }
-        other => other.unreachable(),
-    }
+        },
+    )
 }

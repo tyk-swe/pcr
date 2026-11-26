@@ -58,11 +58,14 @@ impl Generate for Args {
                     .collect::<Vec<_>>()
             })
             .map_err(|error| error.message);
-        let scope = self.scope.scope().map(|scope| ScopeLine {
-            label: scope.label.clone(),
-            digest: scope.digest(),
-            allowed: scope.allowed_destinations.len(),
-            denied: scope.denied_destinations.len(),
+        let scope = crate::system::load_scope(invocation, &self.scope)?.map(|scope| {
+            let digest = scope.digest();
+            ScopeLine {
+                label: scope.label,
+                digest,
+                allowed: scope.allowed_destinations.len(),
+                denied: scope.denied_destinations.len(),
+            }
         });
         emit_stdout_document(
             invocation,
@@ -79,10 +82,11 @@ struct Features {
 }
 
 fn build_features() -> Features {
+    use packetcraftr_netio::NativeCapability;
     Features {
-        route: cfg!(feature = "native-route"),
-        layer2: cfg!(feature = "native-layer2"),
-        layer3: cfg!(feature = "native-layer3"),
+        route: NativeCapability::Route.check().is_ok(),
+        layer2: NativeCapability::Transmission(Mode::Layer2).check().is_ok(),
+        layer3: NativeCapability::Transmission(Mode::Layer3).check().is_ok(),
     }
 }
 

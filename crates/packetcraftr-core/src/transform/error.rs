@@ -34,18 +34,19 @@ impl Classified for Error {
         match self {
             Self::Frame(source) => source.classification(),
             Self::Decode(source) => source.classification(),
-            Self::Header(source) => source.classification(),
-            Self::Unsupported(_) => Classification::new(
+            Self::Header(headers::Error::Jumbogram) | Self::Unsupported(_) => Classification::new(
                 crate::error::Code::PacketTransformUnsupported,
                 Kind::Packet,
                 Some("inspect the documented transform boundaries"),
             ),
-            Self::Limit { .. } | Self::LimitRange { .. } => Classification::new(
+            Self::Header(headers::Error::Depth { .. })
+            | Self::Limit { .. }
+            | Self::LimitRange { .. } => Classification::new(
                 crate::error::Code::PolicyTransformLimit,
                 Kind::Policy,
                 Some("raise a finite transform limit or reduce the input"),
             ),
-            Self::Invalid(_) => Classification::new(
+            Self::Header(_) | Self::Invalid(_) => Classification::new(
                 crate::error::Code::PacketTransformInput,
                 Kind::Packet,
                 Some("supply a complete supported datagram"),
@@ -274,3 +275,32 @@ impl Limit {
 }
 
 display_via_as_str!(Limit);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::Code;
+
+    #[test]
+    fn header_errors_preserve_transform_classification() {
+        assert_eq!(
+            Error::from(headers::Error::Jumbogram).classification().code,
+            Code::PacketTransformUnsupported
+        );
+        assert_eq!(
+            Error::from(headers::Error::Depth {
+                header: headers::Header::Vlan,
+                limit: headers::MAX_VLAN_DEPTH,
+            })
+            .classification()
+            .code,
+            Code::PolicyTransformLimit
+        );
+        assert_eq!(
+            Error::from(headers::Error::Truncated(headers::Header::Ipv4))
+                .classification()
+                .code,
+            Code::PacketTransformInput
+        );
+    }
+}

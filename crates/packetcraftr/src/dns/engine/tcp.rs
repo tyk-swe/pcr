@@ -8,7 +8,7 @@ use packetcraftr_core::budget::Deadline;
 
 use crate::Stats;
 use crate::client::admission::resolve_selected;
-use crate::clock::{Clock, SystemClock};
+use crate::clock::Clock;
 use crate::dns::tcp::{Category as TcpCategory, Error as TcpError, Phase as TcpPhase};
 use crate::engine::execution::Receipt;
 use crate::evidence::ExecutionPermit;
@@ -207,9 +207,9 @@ impl TcpAttempt {
         query: &TcpQuery,
         framed_query_bytes: usize,
     ) -> Self {
-        let started = SystemClock.now();
+        let started = executor.client.now();
         let result = executor.query_tcp(query);
-        let boundary_elapsed = started.elapsed();
+        let boundary_elapsed = executor.client.now().saturating_duration_since(started);
         let units = match &result {
             Ok(_) => 2,
             Err(error) => tcp_units(error),

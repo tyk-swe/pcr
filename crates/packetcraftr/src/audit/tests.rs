@@ -500,6 +500,15 @@ fn http_short_writes_preserve_single_request() {
     let (client, observed) = fake_client(&policy, Server::Plain, None);
     let report = client.audit_http(&HttpRequest::new(ENDPOINT)).unwrap();
     assert_eq!(report.measurements["bytes_sent"], json!(REQUEST.len()));
+    let csp = report
+        .findings
+        .iter()
+        .find(|finding| finding.rule_id == "http.csp")
+        .unwrap();
+    assert_eq!(
+        csp.evidence,
+        json!({"response_status": 200, "request_method": "HEAD"})
+    );
     let observed = observed.lock().unwrap();
     assert_eq!(observed.connects, 1);
     assert_eq!(observed.received, REQUEST);

@@ -153,7 +153,7 @@ impl crate::commands::Spec for Args {
                 timeout: Duration::from_millis(self.probe_timeout_ms),
             },
         };
-        let policy = self.policy.into_policy();
+        let policy = crate::system::resolve_policy(invocation, self.policy)?;
         request.validate(&policy).map_err(CliError::classified)?;
         if format == Format::Ndjson {
             publication::validate_ndjson(&request)?;

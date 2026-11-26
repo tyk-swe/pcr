@@ -73,14 +73,16 @@ impl<P: PacketProviders, K: Clock> Runner for ClientRunner<'_, P, K> {
             packet::classify(&operation.registry, self.strategy, sent, received).is_some()
         };
         self.client
-            .exchange_packets(
-                probes.iter().map(|probe| probe.packet.clone()).collect(),
-                &self.send,
-                grant.timeout,
-                self.collection.clone(),
-                &operation,
-                &mut matcher,
-                &mut self.pinned,
+            .exchange_workflow(
+                crate::exchange::WorkflowExchange::packets(
+                    probes.iter().map(|probe| probe.packet.clone()).collect(),
+                    self.send.clone(),
+                    grant.timeout,
+                    self.collection.clone(),
+                    &operation,
+                )
+                .with_authoritative_matcher(&mut matcher)
+                .with_pinned(&mut self.pinned),
             )
             .map(|result| Evidence::from_exchange(grant.permit, result))
             .map_err(BoundaryError::from_error)

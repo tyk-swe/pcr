@@ -6,6 +6,7 @@
 use packetcraftr_core::clock::{Clock, SystemClock};
 use std::time::{Duration, Instant};
 
+#[cfg(any(test, all(native_route, any(target_os = "linux", target_os = "macos"))))]
 use packetcraftr_core::budget::{Deadline, Interrupted};
 
 /// Longest slice an uninterruptible wait should take between checks of a cancellation signal.
@@ -21,7 +22,8 @@ pub fn remaining_before(deadline: Instant) -> Option<Duration> {
         .filter(|remaining| !remaining.is_zero())
 }
 
-pub fn expires_at(deadline: &Deadline) -> Result<Instant, Interrupted> {
+#[cfg(any(test, all(native_route, any(target_os = "linux", target_os = "macos"))))]
+pub(crate) fn expires_at(deadline: &Deadline) -> Result<Instant, Interrupted> {
     let remaining = deadline.live_remaining()?.min(MAX_WAIT);
     let now = SystemClock.now();
     Ok(now.checked_add(remaining).unwrap_or(now))

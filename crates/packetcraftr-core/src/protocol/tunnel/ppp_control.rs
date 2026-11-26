@@ -73,7 +73,7 @@ impl<P: ControlProtocol> Default for PppControl<P> {
 }
 macro_rules! ppp_control_layer {
     ($ty:ident, $marker:ident, $schema:ident, $name:literal, $codec:ident) => {
-        crate::reflective_layer! {
+        crate::layer::reflective_layer! {
          fn $schema() => { protocol: crate::layer::Id::new(<$marker as ControlProtocol>::NAME), name: $name }
          impl $ty {
             "code" => { kind: Unsigned, derived: false, required: false, description: "code", reflect: code },

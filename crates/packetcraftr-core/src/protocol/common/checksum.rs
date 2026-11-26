@@ -7,6 +7,28 @@ use crate::codec::NetworkEnvelope;
 
 use super::errors::invalid;
 
+pub const IPV4_CHECKSUM: &str = "decode.ipv4_checksum";
+pub const TCP_CHECKSUM: &str = "decode.tcp_checksum";
+pub const UDP_CHECKSUM: &str = "decode.udp_checksum";
+pub const SCTP_CHECKSUM: &str = "decode.sctp_checksum";
+pub const ICMPV4_CHECKSUM: &str = "decode.icmpv4_checksum";
+pub const ICMPV6_CHECKSUM: &str = "decode.icmpv6_checksum";
+pub const IGMP_CHECKSUM: &str = "decode.igmp_checksum";
+pub const VRRP_CHECKSUM: &str = "decode.vrrp_checksum";
+pub const GRE_CHECKSUM: &str = "decode.gre_checksum";
+
+pub const CHECKSUM_FAILURE_CODES: &[&str] = &[
+    IPV4_CHECKSUM,
+    TCP_CHECKSUM,
+    UDP_CHECKSUM,
+    SCTP_CHECKSUM,
+    ICMPV4_CHECKSUM,
+    ICMPV6_CHECKSUM,
+    IGMP_CHECKSUM,
+    VRRP_CHECKSUM,
+    GRE_CHECKSUM,
+];
+
 pub fn checksum_parts(parts: &[&[u8]]) -> u16 {
     let mut accumulator = ChecksumAccumulator::default();
     for part in parts {

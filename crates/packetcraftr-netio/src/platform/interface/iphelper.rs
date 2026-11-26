@@ -1,11 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#![allow(
-    unsafe_code,
-    reason = "GetAdaptersAddresses fills a caller-sized buffer through unsafe FFI"
-)]
-
 pub(in crate::platform) mod adapter;
 
 use std::mem::{align_of, size_of};
@@ -45,27 +40,43 @@ pub(crate) fn ipv6_interfaces(
     .map_err(interface::Error::native)
 }
 
-#[cfg(native_send)]
+#[cfg(native_layer2)]
 pub(in crate::platform) fn interfaces_for_identity(
     expected: &interface::Id,
     deadline: &Deadline,
 ) -> Result<Vec<interface::Info>, interface::Error> {
     let index = expected.index;
     on_worker(deadline, "checking Windows interface identity", move |_| {
-        Ok(adapter_snapshots()?
-            .into_iter()
-            .filter_map(|adapter| {
-                if adapter.ipv6_index == index {
-                    adapter.ipv6_interface()
-                } else {
-                    Some(adapter.interface)
-                }
-            })
-            .collect())
+        Ok(snapshots_for_index(adapter_snapshots()?, index))
     })
     .map_err(interface::Error::native)
 }
 
+#[cfg(native_send)]
+pub(super) fn verify_identity(expected: &interface::Id) -> Result<(), crate::Error> {
+    let adapters = adapter_snapshots().map_err(interface::Error::native)?;
+    let interfaces = snapshots_for_index(adapters, expected.index);
+    interface::verify_snapshot_identity(interfaces, expected).map(|_| ())
+}
+
+#[cfg(native_send)]
+fn snapshots_for_index(adapters: Vec<WindowsAdapter>, index: u32) -> Vec<interface::Info> {
+    adapters
+        .into_iter()
+        .filter_map(|adapter| {
+            if adapter.ipv6_index == index {
+                adapter.ipv6_interface()
+            } else {
+                Some(adapter.interface)
+            }
+        })
+        .collect()
+}
+
+#[expect(
+    unsafe_code,
+    reason = "GetAdaptersAddresses fills a caller-sized buffer through unsafe FFI"
+)]
 pub(in crate::platform) fn adapter_snapshots() -> Result<Vec<WindowsAdapter>, native::Error> {
     const FLAGS: GET_ADAPTERS_ADDRESSES_FLAGS = GET_ADAPTERS_ADDRESSES_FLAGS(
         GAA_FLAG_INCLUDE_PREFIX.0

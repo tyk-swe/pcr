@@ -22,7 +22,7 @@ use packetcraftr_core::protocol::{
 use packetcraftr_core::registry::Registry;
 use packetcraftr_core::{build, decode, packet::Packet, protocol::BuiltinProtocol};
 
-use crate::engine::correlation::{
+use crate::correlation::{
     EPHEMERAL_SOURCE_PORT_BASE, ephemeral_source_port, icmp_identity, nonzero_ipv4_identification,
 };
 

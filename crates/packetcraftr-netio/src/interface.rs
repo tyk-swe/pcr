@@ -13,7 +13,6 @@ use packetcraftr_core::packet::MacAddress;
 use super::link::Capability;
 
 pub use error::Error;
-pub(crate) use error::discovery_classification;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize)]
 pub struct Id {
@@ -82,15 +81,20 @@ impl Provider for SystemProvider {
     }
 }
 
-/// Linux and macOS sends verify by name lookup instead, so a build with only
-/// Layer 3 there has no caller.
-#[cfg(native_send)]
-#[cfg_attr(not(native_layer2), allow(dead_code))]
+#[cfg(native_layer2)]
 pub(crate) fn current(expected: &Id, deadline: &Deadline) -> Result<Info, crate::Error> {
     deadline.live_remaining().map_err(Error::interrupted)?;
     let result = super::platform::interface::enumerate_for_identity(expected, deadline);
     deadline.live_remaining().map_err(Error::interrupted)?;
-    let mut interfaces = validate_snapshot(result?)?;
+    verify_snapshot_identity(result?, expected)
+}
+
+#[cfg(any(native_layer2, all(native_send, target_os = "windows")))]
+pub(crate) fn verify_snapshot_identity(
+    interfaces: Vec<Info>,
+    expected: &Id,
+) -> Result<Info, crate::Error> {
+    let mut interfaces = validate_snapshot(interfaces)?;
     if let Some(position) = interfaces
         .iter()
         .position(|interface| interface.id == *expected)

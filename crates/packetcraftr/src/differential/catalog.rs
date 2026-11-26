@@ -111,7 +111,7 @@ pub fn catalog() -> &'static [Variant] {
 }
 
 fn identification(attempt_seq: u32) -> u16 {
-    crate::engine::correlation::nonzero_ipv4_identification(u64::from(attempt_seq))
+    crate::correlation::nonzero_ipv4_identification(u64::from(attempt_seq))
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -176,7 +176,7 @@ fn fragmented(
     let campaign_salt = payload.get(6..14).map_or(0, |bytes| {
         u64::from_be_bytes(bytes.try_into().unwrap_or_default())
     });
-    let fragment_id = crate::engine::correlation::nonzero_ipv4_identification(
+    let fragment_id = crate::correlation::nonzero_ipv4_identification(
         u64::from(attempt_seq) ^ campaign_salt.rotate_left(17),
     );
     let fragment = |offset_units: u16, more: bool, chunk: &[u8]| {

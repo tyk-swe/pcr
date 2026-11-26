@@ -38,6 +38,29 @@ pub(crate) fn runtime(
     instance
 }
 
+pub(crate) fn load_scope(
+    invocation: &crate::invocation::Invocation,
+    scope: &crate::command_options::ScopeArgs,
+) -> Result<Option<packetcraftr::policy::Scope>, crate::errors::CliError> {
+    let Some(path) = scope.path() else {
+        return Ok(None);
+    };
+    let loaded = crate::input::read_scope(&invocation.control, path)?;
+    invocation.apply_scope(&loaded);
+    Ok(Some(loaded))
+}
+
+pub(crate) fn resolve_policy(
+    invocation: &crate::invocation::Invocation,
+    options: impl crate::command_options::PolicyOptions,
+) -> Result<packetcraftr::policy::Policy, crate::errors::CliError> {
+    let (policy, scope) = options.into_base_policy();
+    match load_scope(invocation, &scope)? {
+        Some(scope) => Ok(scope.narrow(&policy)),
+        None => Ok(policy),
+    }
+}
+
 pub(crate) fn client(
     invocation: &crate::invocation::Invocation,
     registry: Arc<core::registry::Registry>,

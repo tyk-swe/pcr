@@ -3,7 +3,7 @@
 
 //! The kind of reply a probe received.
 
-use crate::engine::correlation::Correlation;
+use crate::correlation::Correlation;
 
 /// What a correlated reply was, beside the classification it earned. Port
 /// inference reads this rather than the classification, because one

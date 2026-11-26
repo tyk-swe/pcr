@@ -59,8 +59,9 @@ impl Spec for Assessment {
         {
             return Err(invalid("--html and --bundle must name different files"));
         }
+        let scope = crate::system::load_scope(i, &self.scope)?;
         let mut staged = crate::staged_output::StagedFile::stage(i, &self.html)?;
-        let mut staged_bundle = self
+        let staged_bundle = self
             .bundle
             .as_ref()
             .map(|path| crate::staged_output::StagedFile::stage(i, path))
@@ -117,7 +118,7 @@ impl Spec for Assessment {
                 .measurements
                 .insert("bundle".into(), bundle.display().to_string().into());
         }
-        if let Some(scope) = self.scope.scope() {
+        if let Some(scope) = scope.as_ref() {
             report
                 .measurements
                 .insert("scope_digest".into(), serde_json::json!(scope.digest()));
@@ -137,12 +138,12 @@ impl Spec for Assessment {
             .as_file_mut()
             .write_all(html.as_bytes())
             .map_err(|e| CliError::caused(packetcraftr_core::error::Kind::Io, &e))?;
-        staged.sync()?;
-        if let Some(staged_bundle) = staged_bundle.as_mut() {
+        let mut staged_files = vec![("html", staged)];
+        if let Some(mut staged_bundle) = staged_bundle {
             let bundle = packetcraftr_core::security::bundle::Bundle::new(
                 report.clone(),
-                self.scope
-                    .scope()
+                scope
+                    .as_ref()
                     .map(|scope| packetcraftr_core::security::bundle::ScopeRef {
                         label: scope.label.clone(),
                         digest: scope.digest(),
@@ -167,13 +168,21 @@ impl Spec for Assessment {
                 .as_file_mut()
                 .write_all(&bytes)
                 .map_err(|e| CliError::caused(packetcraftr_core::error::Kind::Io, &e))?;
-            staged_bundle.sync()?;
+            staged_files.push(("bundle", staged_bundle));
         }
-        i.check()?;
-        staged.persist()?;
-        if let Some(staged_bundle) = staged_bundle {
-            staged_bundle.persist()?;
-        }
+        crate::staged_output::publish_staged(
+            staged_files,
+            |_, _| (),
+            |mut error, published| {
+                if !published.is_empty() {
+                    error.causes.push(format!(
+                        "already published report output remains at {}",
+                        published.join(", ")
+                    ));
+                }
+                error
+            },
+        )?;
         publish(i, Command::Assessment, report, self.bounds)
     }
 }

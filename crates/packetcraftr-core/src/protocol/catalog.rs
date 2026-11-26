@@ -196,8 +196,8 @@ macro_rules! define_builtin_protocol {
                 match self { $(Self::$variant => $message),* }
             }
 
-            pub const fn framing(self) -> crate::codec::Framing {
-                match self { $(Self::$variant => crate::codec::Framing::$framing),* }
+            pub const fn framing(self) -> super::framing::Framing {
+                match self { $(Self::$variant => super::framing::Framing::$framing),* }
             }
 
             pub fn register(
@@ -327,7 +327,7 @@ impl BuiltinProtocol {
     pub fn stream_decode(self) -> bool {
         self.is_message_protocol()
             && !self.tcp_ports().is_empty()
-            && self.framing() != crate::codec::Framing::Datagram
+            && self.framing() != super::framing::Framing::Datagram
     }
 
     /// Whether this protocol may be directly selected under a transport.

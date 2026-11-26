@@ -22,7 +22,7 @@ impl Default for Ssdp {
         }
     }
 }
-crate::reflective_layer! {
+crate::layer::reflective_layer! {
  fn ssdp_schema() => { protocol: crate::protocol::BuiltinProtocol::Ssdp.id(), name: "Ssdp" }
  impl Ssdp {
     "start_line" => { kind: Bytes, derived: false, required: false, description: "Verbatim request or response start line", reflect: start_line },

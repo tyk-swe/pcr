@@ -14,7 +14,9 @@ use packetcraftr_core::error::{BoundaryError, Classification, Classified, Coordi
 
 use super::{Family, SelectedAddress, Selection, SelectionError, Specification, Target};
 use crate::Client;
-use crate::client::admission::{DeclaredTargets, FamilyGate, admit_selection, wire_limits};
+use crate::client::admission::{
+    AdmissionError, DeclaredTargets, FamilyGate, FromAdmission, admit_selection, wire_limits,
+};
 use crate::clock::Clock;
 use crate::providers::TargetProviders;
 
@@ -111,36 +113,15 @@ impl Classified for Error {
     }
 }
 
-crate::error::impl_from_failure!(
-    Error,
-    _step,
-    invalid_limit: |field, value, reason| Self::InvalidLimit {
-        field,
-        value,
-        reason,
-    },
-    duration_limit: |source| source.into(),
-    interrupted: |source| source.into(),
-    clock: |_source| BoundaryError::internal_execution(
-        "target planning never waits on a clock",
-        crate::code::InternalTargetPlan,
-        "report the unexpected selection path",
-    )
-    .into(),
-    execution: |source| Self::Authorization(source),
-    invalid_evidence: |_source| BoundaryError::internal_execution(
-        "target planning produces no evidence",
-        crate::code::InternalTargetPlan,
-        "report the unexpected selection path",
-    )
-    .into(),
-    stats_overflow: |_source| BoundaryError::internal_execution(
-        "target planning accumulates no statistics",
-        crate::code::InternalTargetPlan,
-        "report the unexpected selection path",
-    )
-    .into(),
-);
+impl FromAdmission for Error {
+    fn from_admission(error: AdmissionError) -> Self {
+        match error {
+            AdmissionError::Authorization(source) => Self::Authorization(source),
+            AdmissionError::DurationLimit(source) => source.into(),
+            AdmissionError::Interrupted(source) => source.into(),
+        }
+    }
+}
 
 impl From<BoundaryError> for Error {
     fn from(source: BoundaryError) -> Self {

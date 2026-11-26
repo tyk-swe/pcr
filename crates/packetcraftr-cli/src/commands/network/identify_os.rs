@@ -154,9 +154,10 @@ impl crate::commands::Spec for Args {
         request.collection.max_unmatched_frames = self.max_queue_frames;
         request.validate().map_err(CliError::classified)?;
         invocation.check()?;
+        let policy = crate::system::resolve_policy(invocation, self.policy)?;
         let workflow = prepare_workflow(
             &self.route,
-            self.policy.into_policy(),
+            policy,
             request.timeout,
             request.collection.capture,
         )?;
@@ -164,37 +165,34 @@ impl crate::commands::Spec for Args {
         request.route = workflow.route;
         // Preserve explicit evidence ceilings; preparation supplies native decoding options.
         request.collection.decode = workflow.collection.decode;
-        match format {
-            Format::Ndjson => {
-                let emit = crate::commands::execution::emitter(invocation, |event, stream| {
-                    stream
-                        .emit_published(
-                            crate::output::envelope::Published::<output::Event>::try_from(event)
-                                .map_err(CliError::classified)?,
-                        )
-                        .map(|_| ())
-                        .map_err(CliError::from)
-                })?;
-                let summary = client
-                    .identify_os(request.clone(), emit)
-                    .map_err(CliError::classified)?;
-                invocation.check()?;
+        crate::commands::execution::run_workflow(
+            invocation,
+            |event, stream| {
+                stream
+                    .emit_published(
+                        crate::output::envelope::Published::<output::Event>::try_from(event)
+                            .map_err(CliError::classified)?,
+                    )
+                    .map(|_| ())
+                    .map_err(CliError::from)
+            },
+            |sink| {
+                client
+                    .identify_os(request, sink)
+                    .map_err(CliError::classified)
+            },
+            |summary, stream| {
                 stream
                     .complete_published(crate::output::envelope::Published::<output::Event>::from(
                         summary,
                     ))
                     .map(|_| ())
                     .map_err(CliError::from)
-            }
-            _ => {
-                let report = {
-                    let mut collector = library::Collector::default();
-                    let report = client
-                        .identify_os(request.clone(), &mut collector)
-                        .map_err(CliError::classified)?;
-                    collector.finish(report).map_err(CliError::classified)?
-                };
-                invocation.check()?;
+            },
+            |collector: library::Collector, report| {
+                collector.finish(report).map_err(CliError::classified)
+            },
+            |report| {
                 if format == Format::Json {
                     crate::publication::emit_published(
                         invocation,
@@ -205,8 +203,8 @@ impl crate::commands::Spec for Args {
                 } else {
                     render(invocation, report.report, stream.presentation())
                 }
-            }
-        }?;
+            },
+        )?;
         Ok(crate::commands::CommandExit::SUCCESS)
     }
 }

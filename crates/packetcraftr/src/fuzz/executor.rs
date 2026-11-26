@@ -55,7 +55,7 @@ impl<P: PacketProviders, K: Clock> Executor<CaseStep> for WorkflowExecutor<'_, P
     fn execute(&mut self, case: &CaseStep) -> Result<CaseEvidence, BoundaryError> {
         let exchange = self
             .client
-            .exchange_hooked(
+            .exchange_workflow(crate::exchange::WorkflowExchange::step(
                 crate::exchange::Step {
                     template: packetcraftr_core::template::Template::new(case.packet.clone()),
                     send: self.send.clone(),
@@ -64,9 +64,7 @@ impl<P: PacketProviders, K: Clock> Executor<CaseStep> for WorkflowExecutor<'_, P
                     collection: self.collection.clone(),
                 },
                 self.operation,
-                None,
-                None,
-            )
+            ))
             .map_err(BoundaryError::from_error)?;
         let crate::exchange::Aggregate {
             sent,

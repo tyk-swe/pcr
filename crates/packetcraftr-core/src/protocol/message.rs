@@ -239,12 +239,6 @@ macro_rules! message_codec {
             fn new_layer(&self) -> Result<Box<dyn crate::layer::Layer>, crate::codec::Error> {
                 Ok(Box::new($ty::default()))
             }
-            fn framing(&self) -> crate::codec::Framing {
-                crate::protocol::BuiltinProtocol::from_id(*self.protocol_id())
-                    .map_or(crate::codec::Framing::Datagram, |protocol| {
-                        protocol.framing()
-                    })
-            }
             fn accepts_decoded_protocol(&self, p: &crate::layer::Id) -> bool {
                 p == self.protocol_id() || p == &crate::layer::Raw::ID
             }
@@ -287,7 +281,10 @@ macro_rules! message_codec {
                 };
                 let mut diagnostics = Vec::new();
                 let validated = crate::protocol::framing::packet_length(
-                    self.framing(),
+                    crate::protocol::BuiltinProtocol::from_id(*self.protocol_id()).map_or(
+                        crate::protocol::framing::Framing::Datagram,
+                        crate::protocol::BuiltinProtocol::framing,
+                    ),
                     name,
                     &bytes,
                     decoded_context.parent,
@@ -328,7 +325,10 @@ macro_rules! message_codec {
             ) -> Result<crate::codec::Decoded, crate::codec::Error> {
                 let name = $schema().protocol.as_str();
                 let len = match crate::protocol::framing::packet_length(
-                    self.framing(),
+                    crate::protocol::BuiltinProtocol::from_id(*self.protocol_id()).map_or(
+                        crate::protocol::framing::Framing::Datagram,
+                        crate::protocol::BuiltinProtocol::framing,
+                    ),
                     name,
                     &input,
                     context.parent,

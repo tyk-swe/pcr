@@ -55,7 +55,7 @@ impl Default for Ospfv2 {
         }
     }
 }
-crate::reflective_layer! {
+crate::layer::reflective_layer! {
  fn ospfv2_schema() => { protocol: crate::protocol::BuiltinProtocol::Ospfv2.id(), name: "Ospfv2" }
  impl Ospfv2 {
     "packet_type" => { kind: Unsigned, derived: false, required: false, description: "packet type", reflect: packet_type },

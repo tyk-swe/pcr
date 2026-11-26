@@ -133,8 +133,10 @@ impl<'a, P: PacketProviders, K: Clock> CaptureEpoch<'a, P, K> {
             self.drain.remaining -= 1;
             wait = Duration::ZERO;
         }
-        let wait = Deadline::new(wait)
-            .with_cancellation(self.executor.client.cancellation.clone())
+        let wait = self
+            .executor
+            .client
+            .deadline(wait)
             .with_parent(Some(Arc::new(self.control.clone())));
         let captured = self.group.next_captured_frame(&wait);
         self.check()?;

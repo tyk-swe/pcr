@@ -7,7 +7,9 @@
 mod approval;
 mod selection;
 
-pub(crate) use approval::{approve_operation, resolve_selected, wire_limits};
+pub(crate) use approval::{
+    AdmissionError, FromAdmission, approve_operation, resolve_selected, wire_limits,
+};
 pub(crate) use selection::{DeclaredTargets, FamilyGate, admit_operation, admit_selection};
 
 use std::borrow::Cow;

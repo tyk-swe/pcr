@@ -148,14 +148,16 @@ impl<P: PacketProviders, K: Clock> Runner for ClientRunner<'_, P, K> {
         };
         let evidence = self
             .client
-            .exchange_packets(
-                attempt.packets.clone(),
-                &self.send,
-                request.timeout,
-                request.collection.clone(),
-                &step,
-                &mut matcher,
-                &mut self.pinned,
+            .exchange_workflow(
+                crate::exchange::WorkflowExchange::packets(
+                    attempt.packets.clone(),
+                    self.send.clone(),
+                    request.timeout,
+                    request.collection.clone(),
+                    &step,
+                )
+                .with_authoritative_matcher(&mut matcher)
+                .with_pinned(&mut self.pinned),
             )
             .map_err(|source| Error::Execution {
                 attempt: u64::from(attempt_seq),

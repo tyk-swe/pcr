@@ -45,7 +45,7 @@ pub struct Netflowv5 {
     pub sampling: u16,
     pub records: Records,
 }
-crate::reflective_layer! {
+crate::layer::reflective_layer! {
  fn netflowv5_schema() => { protocol: crate::protocol::BuiltinProtocol::Netflowv5.id(), name: "Netflowv5" }
  impl Netflowv5 {
     "uptime" => { kind: Unsigned, derived: false, required: false, description: "uptime", reflect: uptime },

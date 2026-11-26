@@ -104,7 +104,7 @@ impl Inbox {
 
     pub(super) fn next_with_idle(&self, idle: Duration) -> Option<NetlinkRequest> {
         let mut state = lock(&self.state);
-        let expires = SystemClock.now() + idle;
+        let expires = SystemClock.now().checked_add(idle);
         loop {
             if let Some(request) = state.queue.pop_front() {
                 state.active = true;
@@ -114,7 +114,7 @@ impl Inbox {
             if !state.owned {
                 return None;
             }
-            let Some(remaining) = remaining_before(expires) else {
+            let Some(remaining) = expires.and_then(remaining_before) else {
                 // Submission and retirement hold this same lock: a request is
                 // either queued on a reachable worker or returned undelivered.
                 state.serving = false;

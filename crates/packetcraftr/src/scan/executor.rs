@@ -158,19 +158,17 @@ impl<'c, P: PacketProviders, K: Clock> ClientExecutor<'c, P, K> {
         ))
     }
 
-    fn with_reply_history<R>(
+    fn with_reply_history<R, E: From<BoundaryError>>(
         &mut self,
-        run: impl FnOnce(
-            &WorkflowExecutor<'_, P, K>,
-            &mut reply_history::ReplyHistory,
-        ) -> Result<R, BoundaryError>,
-    ) -> Result<R, BoundaryError> {
+        run: impl FnOnce(&WorkflowExecutor<'_, P, K>, &mut reply_history::ReplyHistory) -> Result<R, E>,
+    ) -> Result<R, E> {
         let mut history = std::mem::replace(
             &mut self.reply_history,
             reply_history::ReplyHistory::new(false),
         );
         let result = self
             .exchange()
+            .map_err(E::from)
             .and_then(|executor| run(&executor, &mut history));
         self.reply_history = history;
         result
@@ -304,7 +302,7 @@ impl<'c, P: PacketProviders, K: Clock> ClientExecutor<'c, P, K> {
         let providers = &services.providers;
         let started = services.now();
         let resolved = state
-            .over(providers.transmit(), providers.capture())
+            .over_with_clock(providers.transmit(), providers.capture(), &services.clock)
             .resolve(&request, deadline);
         let elapsed = services.now().saturating_duration_since(started);
         let (attempts, stats, outcome) = match resolved {
@@ -428,7 +426,7 @@ impl<P: PacketProviders, K: Clock> ClientExecutor<'_, P, K> {
         admission: &AdaptiveAdmission,
         attempts: usize,
         feed: &mut dyn PipelineFeed,
-    ) -> Result<Stats, BoundaryError> {
+    ) -> Result<Stats, super::error::PipelineRunError> {
         self.with_reply_history(|executor, history| {
             pipeline::run_stream(executor, options, admission, attempts, feed, history)
         })
@@ -439,7 +437,7 @@ impl<P: PacketProviders, K: Clock> ClientExecutor<'_, P, K> {
         batches: &[Batch<Probe>],
         options: PipelineOptions,
         emit: &mut dyn FnMut(PipelineEvent) -> Result<(), BoundaryError>,
-    ) -> Result<Stats, BoundaryError> {
+    ) -> Result<Stats, super::error::PipelineRunError> {
         self.with_reply_history(|executor, history| {
             pipeline::run(executor, batches, options, emit, history)
         })

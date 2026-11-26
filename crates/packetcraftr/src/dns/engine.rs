@@ -16,7 +16,7 @@ use crate::engine::operation::{Workflow as OperationWorkflow, WorkflowSetup};
 use crate::evidence::retention::EvidenceState;
 use crate::exchange::WorkflowExecutor;
 use crate::policy::Authorizer;
-use crate::policy::{DnsOperation, Operation, WireLimits};
+use crate::policy::{Operation, TrafficOperation, WireLimits};
 use crate::providers::{PacketProviders, TargetProviders, TcpProviders};
 use crate::target::ResolveTarget;
 use crate::{Client, Sink, Stats};
@@ -74,7 +74,7 @@ impl<P: PacketProviders + TargetProviders + TcpProviders, K: Clock> Client<P, K>
         &self,
         questions: impl IntoIterator<Item = Q>,
         neighbor_attempts: u64,
-    ) -> Result<DnsOperation, Error> {
+    ) -> Result<TrafficOperation, Error> {
         batch::limits(questions, neighbor_attempts)
     }
 
@@ -153,7 +153,7 @@ where
     deadline.check_cancelled()?;
     let mut prepared = PreparedOperation::new(request)?;
     // Approved before server resolution, unlike `admit_operation`'s resolve-first order.
-    approve_operation::<_, Error>(authorizer, Operation::Dns(prepared.limits), deadline)?;
+    approve_operation::<_, Error>(authorizer, Operation::Traffic(prepared.limits), deadline)?;
     prepared.execute(authorizer, registry, executor, clock, deadline, emit)?;
     Ok(prepared.report)
 }
@@ -163,7 +163,7 @@ pub(super) struct PreparedOperation<'a> {
     request: &'a Request,
     query: Bytes,
     pub(super) delay: Duration,
-    pub(super) limits: DnsOperation,
+    pub(super) limits: TrafficOperation,
     pub(super) report: Report,
 }
 
@@ -189,7 +189,7 @@ impl<'a> PreparedOperation<'a> {
             request,
             query,
             delay,
-            limits: DnsOperation::new(WireLimits::new(packet_count, maximum_wire_bytes), tcp)?,
+            limits: TrafficOperation::new(WireLimits::new(packet_count, maximum_wire_bytes), tcp)?,
             report: Report {
                 server: request.server.to_string(),
                 server_port: request.server_port,

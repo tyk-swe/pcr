@@ -14,74 +14,166 @@ use crate::target::{Family, SelectionError};
 use packetcraftr_core::error::BoundaryError;
 use packetcraftr_netio::{Error as LiveIoError, capture};
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 #[non_exhaustive]
 pub enum Error {
-    #[error(transparent)]
     TargetSelection(SelectionError),
-    #[error(transparent)]
-    Cancelled(#[from] Cancelled),
-    #[error("invalid scan limit {field}={value}: {reason}")]
+    Cancelled(Cancelled),
     InvalidLimit {
         field: &'static str,
         value: u64,
         reason: String,
     },
-    #[error("invalid scan ports: {message}")]
-    InvalidPort { message: String },
-    #[error("invalid host discovery: {message}")]
-    InvalidDiscovery { message: String },
-    #[error("scan timeout {value:?} is invalid; maximum is {maximum:?}")]
-    InvalidTimeout { value: Duration, maximum: Duration },
-    #[error("scan duration {value:?} is invalid; maximum is {maximum:?}")]
-    InvalidDuration { value: Duration, maximum: Duration },
-    #[error("TCP connect uses kernel route and source selection")]
+    InvalidPort {
+        message: String,
+    },
+    InvalidDiscovery {
+        message: String,
+    },
+    InvalidTimeout {
+        value: Duration,
+        maximum: Duration,
+    },
+    InvalidDuration {
+        value: Duration,
+        maximum: Duration,
+    },
     UnsupportedTcpRoute,
-    #[error("the {method} scan method cannot send {probe} probes")]
     MethodProbe {
         method: &'static str,
         probe: &'static str,
     },
-    #[error("scan authorization failed")]
-    Authorization(#[source] BoundaryError),
-    #[error("resolved target has no {family} address selected for this scan")]
-    Family { family: &'static str },
-    #[error("scan worst-case duration {actual:?} exceeds the configured limit of {limit:?}")]
-    DurationLimit { actual: Duration, limit: Duration },
-    #[error("resolving the neighbor of {address} failed")]
+    Authorization(BoundaryError),
+    Family {
+        family: &'static str,
+    },
+    DurationLimit {
+        actual: Duration,
+        limit: Duration,
+    },
     Neighbor {
         address: std::net::IpAddr,
-        #[source]
         source: BoundaryError,
     },
-    #[error("scan pipeline execution failed")]
     PipelineExecution {
-        #[source]
         source: BoundaryError,
     },
-    #[error("scan execution failed at probe {sequence}")]
+    PipelineFailure(Box<PipelineFailure>),
     Execution {
         sequence: u64,
-        #[source]
         source: BoundaryError,
     },
-    #[error("scan rate clock failed before probe {sequence}")]
     Clock {
         sequence: u64,
-        #[source]
         source: Box<dyn std::error::Error + Send + Sync>,
     },
-    #[error("scan executor returned invalid evidence at probe {sequence}: {message}")]
-    InvalidEvidence { sequence: u64, message: String },
-    #[error("scan statistic accounting overflowed at probe {sequence}")]
-    StatisticsOverflow { sequence: u64 },
-    #[error("scan progressive output failed")]
+    InvalidEvidence {
+        sequence: u64,
+        message: String,
+    },
+    StatisticsOverflow {
+        sequence: u64,
+    },
     Output {
-        #[source]
         source: BoundaryError,
     },
-    #[error("scan events are incoherent: {message}")]
-    IncoherentEvents { message: String },
+    IncoherentEvents {
+        message: String,
+    },
+}
+
+impl From<Cancelled> for Error {
+    fn from(source: Cancelled) -> Self {
+        Self::Cancelled(source)
+    }
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::TargetSelection(source) => source.fmt(f),
+            Self::Cancelled(source) => source.fmt(f),
+            Self::InvalidLimit {
+                field,
+                value,
+                reason,
+            } => write!(f, "invalid scan limit {field}={value}: {reason}"),
+            Self::InvalidPort { message } => write!(f, "invalid scan ports: {message}"),
+            Self::InvalidDiscovery { message } => write!(f, "invalid host discovery: {message}"),
+            Self::InvalidTimeout { value, maximum } => {
+                write!(
+                    f,
+                    "scan timeout {value:?} is invalid; maximum is {maximum:?}"
+                )
+            }
+            Self::InvalidDuration { value, maximum } => {
+                write!(
+                    f,
+                    "scan duration {value:?} is invalid; maximum is {maximum:?}"
+                )
+            }
+            Self::UnsupportedTcpRoute => {
+                f.write_str("TCP connect uses kernel route and source selection")
+            }
+            Self::MethodProbe { method, probe } => {
+                write!(f, "the {method} scan method cannot send {probe} probes")
+            }
+            Self::Authorization(_) => f.write_str("scan authorization failed"),
+            Self::Family { family } => {
+                write!(
+                    f,
+                    "resolved target has no {family} address selected for this scan"
+                )
+            }
+            Self::DurationLimit { actual, limit } => write!(
+                f,
+                "scan worst-case duration {actual:?} exceeds the configured limit of {limit:?}"
+            ),
+            Self::Neighbor { address, .. } => {
+                write!(f, "resolving the neighbor of {address} failed")
+            }
+            Self::PipelineExecution { .. } | Self::PipelineFailure(_) => {
+                f.write_str("scan pipeline execution failed")
+            }
+            Self::Execution { sequence, .. } => {
+                write!(f, "scan execution failed at probe {sequence}")
+            }
+            Self::Clock { sequence, .. } => {
+                write!(f, "scan rate clock failed before probe {sequence}")
+            }
+            Self::InvalidEvidence { sequence, message } => write!(
+                f,
+                "scan executor returned invalid evidence at probe {sequence}: {message}"
+            ),
+            Self::StatisticsOverflow { sequence } => {
+                write!(
+                    f,
+                    "scan statistic accounting overflowed at probe {sequence}"
+                )
+            }
+            Self::Output { .. } => f.write_str("scan progressive output failed"),
+            Self::IncoherentEvents { message } => {
+                write!(f, "scan events are incoherent: {message}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::TargetSelection(source) => source.source(),
+            Self::Cancelled(source) => source.source(),
+            Self::Authorization(source)
+            | Self::Neighbor { source, .. }
+            | Self::PipelineExecution { source }
+            | Self::Execution { source, .. }
+            | Self::Output { source } => Some(source),
+            Self::PipelineFailure(failure) => Some(failure.as_ref()),
+            Self::Clock { source, .. } => Some(source.as_ref()),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -115,12 +207,83 @@ impl Classified for PipelineFailure {
     }
 }
 
+#[derive(Debug)]
+pub(crate) enum PipelineRunError {
+    Setup(BoundaryError),
+    Failure(Box<PipelineFailure>),
+}
+
+impl From<BoundaryError> for PipelineRunError {
+    fn from(source: BoundaryError) -> Self {
+        Self::Setup(source)
+    }
+}
+
+impl std::fmt::Display for PipelineRunError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Setup(source) => source.fmt(f),
+            Self::Failure(failure) => failure.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for PipelineRunError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Setup(source) => source.source(),
+            Self::Failure(failure) => Some(failure.as_ref()),
+        }
+    }
+}
+
+impl Classified for PipelineRunError {
+    fn classification(&self) -> Classification {
+        match self {
+            Self::Setup(source) => source.classification(),
+            Self::Failure(failure) => failure.classification(),
+        }
+    }
+
+    fn context(&self) -> Option<Coordinate> {
+        match self {
+            Self::Setup(source) => source.context(),
+            Self::Failure(failure) => failure.context(),
+        }
+    }
+
+    fn causes(&self) -> Vec<String> {
+        match self {
+            Self::Setup(source) => source.as_causes(),
+            Self::Failure(failure) => failure.causes(),
+        }
+    }
+}
+
+impl From<PipelineRunError> for Error {
+    fn from(error: PipelineRunError) -> Self {
+        match error {
+            PipelineRunError::Setup(source) => Self::PipelineExecution { source },
+            PipelineRunError::Failure(failure) => Self::PipelineFailure(failure),
+        }
+    }
+}
+
 packetcraftr_core::deadline_error_conversions!(Error);
 
 impl Error {
     pub(super) fn family(family: Family) -> Self {
         Self::Family {
             family: family.label(),
+        }
+    }
+
+    /// Returns retained partial pipeline evidence when a pipelined scan failed mid-run.
+    #[must_use]
+    pub fn pipeline_failure(&self) -> Option<&PipelineFailure> {
+        match self {
+            Self::PipelineFailure(failure) => Some(failure),
+            _ => None,
         }
     }
 }
@@ -162,6 +325,7 @@ impl Classified for Error {
             | Self::PipelineExecution { source }
             | Self::Execution { source, .. }
             | Self::Output { source } => source.classification(),
+            Self::PipelineFailure(failure) => failure.classification(),
             Self::Family { .. } => Classification::new(
                 crate::code::PacketTargetAddressFamily,
                 Kind::Packet,
@@ -198,6 +362,7 @@ impl Classified for Error {
             | Self::Neighbor { source, .. }
             | Self::Output { source }
             | Self::PipelineExecution { source } => source.context(),
+            Self::PipelineFailure(failure) => failure.context(),
             Self::Execution { sequence, .. }
             | Self::Clock { sequence, .. }
             | Self::InvalidEvidence { sequence, .. }
@@ -213,6 +378,7 @@ impl Classified for Error {
             | Self::PipelineExecution { source }
             | Self::Execution { source, .. }
             | Self::Output { source } => source.as_causes(),
+            Self::PipelineFailure(failure) => failure.causes(),
             _ => packetcraftr_core::error::source_chain(self),
         }
     }
@@ -222,4 +388,33 @@ crate::error::impl_from_failure!(Error, workflow: WORKFLOW);
 
 pub(super) fn duration_limit(sequence: u64, error: DeadlineExceeded) -> Error {
     Error::from_failure(sequence, crate::error::Failure::DurationLimit(error))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pipeline_failure_accessor_returns_typed_partial_evidence() {
+        let failure = PipelineFailure {
+            source: BoundaryError::from_error(Error::UnsupportedTcpRoute),
+            stats: crate::Stats::default(),
+            pending: Vec::new(),
+            failed_probe: None,
+            capture_sources: Vec::new(),
+            cleanup: None,
+        };
+        let error = Error::from(PipelineRunError::Failure(Box::new(failure)));
+        assert!(error.pipeline_failure().is_some());
+        assert!(
+            std::error::Error::source(&error)
+                .and_then(|source| source.downcast_ref::<PipelineFailure>())
+                .is_some()
+        );
+        assert_eq!(
+            error.classification().code,
+            crate::code::CapabilityScanTcpRoute
+        );
+        assert!(Error::UnsupportedTcpRoute.pipeline_failure().is_none());
+    }
 }

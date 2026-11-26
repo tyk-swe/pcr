@@ -47,7 +47,7 @@ impl Default for EthernetIp {
         }
     }
 }
-crate::reflective_layer! {
+crate::layer::reflective_layer! {
  fn ethernetip_schema() => { protocol: crate::protocol::BuiltinProtocol::EthernetIp.id(), name: "EthernetIp" }
  impl EthernetIp {
     "command" => { kind: Unsigned, derived: false, required: false, description: "command", reflect: command },

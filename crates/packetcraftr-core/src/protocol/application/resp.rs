@@ -25,7 +25,7 @@ impl Default for Resp {
         }
     }
 }
-crate::reflective_layer! {
+crate::layer::reflective_layer! {
  fn resp_schema() => { protocol: crate::protocol::BuiltinProtocol::Resp.id(), name: "Resp" }
  impl Resp {
     "value" => { kind: Object, derived: false, required: false, description: "RESP2 value with kind and typed content", children: RESP_FIELDS, reflect: value },

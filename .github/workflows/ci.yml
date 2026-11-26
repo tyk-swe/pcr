@@ -389,7 +389,8 @@ jobs:
           case "${{ matrix.gate }}" in
             budget)
               score_gate -p packetcraftr-core \
-                -f crates/packetcraftr-core/src/budget.rs ;;
+                -f crates/packetcraftr-core/src/budget.rs \
+                -f crates/packetcraftr-core/src/clock/deadline.rs ;;
             policy)
               score_gate -p packetcraftr \
                 -f 'crates/packetcraftr/src/policy/**' -- --lib ;;

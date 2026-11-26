@@ -5,7 +5,7 @@ mod output;
 mod rendering;
 mod write;
 
-use crate::command_options::{AnalysisStages, Bounded as _};
+use crate::command_options::AnalysisStages;
 use crate::publication::emit_published;
 use crate::terminal::write_stdout_line;
 use crate::{
@@ -21,7 +21,6 @@ use crate::{
 use arguments::Args;
 use packetcraftr_core::{
     analysis::{self, quic},
-    budget::Deadline,
     error::{BoundaryError, Kind},
 };
 
@@ -95,7 +94,7 @@ fn run(args: Args, invocation: &Invocation) -> Result<(), CliError> {
         commands::offline_analysis::prepare(args.limits, args.filter.as_deref(), &args.decode)?;
     let mut collector = quic::Collector::new(limits).map_err(CliError::classified)?;
     let mut state = rendering::State::new(&args, invocation)?;
-    let mut secrets = keylog::Input::open(args.keylog.as_deref())?;
+    let mut secrets = keylog::Input::open(&invocation.control, args.keylog.as_deref())?;
     secrets.poll(&mut collector, invocation, args.path.is_some())?;
     let encoder = &invocation.output;
     let (run, capture, collector, secrets, state) = if let Some(path) = &args.path {
@@ -141,13 +140,7 @@ fn finish(
     let result = (|| {
         let encoder = &invocation.output;
         secrets.poll(&mut collector, invocation, true)?;
-        let owned_deadline;
-        let deadline = if let Some(deadline) = &invocation.control.deadline {
-            deadline.as_ref()
-        } else {
-            owned_deadline = Deadline::new(args.limits.max_duration());
-            &owned_deadline
-        };
+        let deadline = invocation.control.io_control();
         let input_incomplete = run.input_incomplete()
             || capture.as_ref().is_some_and(|capture| {
                 !capture.summary.capture_statistics_complete
@@ -162,7 +155,7 @@ fn finish(
             state.mark_capture_incomplete();
         }
         let engine = collector
-            .finish(deadline, |event| {
+            .finish(&deadline, |event| {
                 state
                     .event(event, args, invocation, encoder)
                     .map_err(CliError::into_boundary_error)

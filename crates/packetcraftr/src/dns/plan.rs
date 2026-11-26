@@ -13,9 +13,9 @@ use packetcraftr_core::protocol::{
 };
 use packetcraftr_core::{layer::Raw, packet::Packet};
 
-use crate::engine::correlation::nonzero_ipv4_identification;
+use crate::correlation::nonzero_ipv4_identification;
 use crate::engine::execution::rate_delay;
-use crate::policy::{DnsOperation, LimitOverflow, SocketLimits, WireLimits};
+use crate::policy::{LimitOverflow, SocketLimits, TrafficOperation, WireLimits};
 
 use super::error::Error;
 use super::request::QueryType;
@@ -31,31 +31,31 @@ pub(super) struct OperationLimits {
 }
 
 pub(super) fn batch_limits(
-    mut operations: impl Iterator<Item = DnsOperation>,
-) -> Result<DnsOperation, Error> {
+    mut operations: impl Iterator<Item = TrafficOperation>,
+) -> Result<TrafficOperation, Error> {
     operations.try_fold(
-        DnsOperation::new(WireLimits::new(0, 0), SocketLimits::new(0, 0, 0))?,
+        TrafficOperation::new(WireLimits::new(0, 0), SocketLimits::new(0, 0, 0))?,
         |total, operation| {
-            let udp = total.udp();
-            let tcp = total.tcp();
-            Ok(DnsOperation::new(
+            let udp = total.wire();
+            let tcp = total.socket();
+            Ok(TrafficOperation::new(
                 WireLimits::new(
                     udp.packets()
-                        .checked_add(operation.udp().packets())
+                        .checked_add(operation.wire().packets())
                         .ok_or(LimitOverflow)?,
                     udp.wire_bytes()
-                        .checked_add(operation.udp().wire_bytes())
+                        .checked_add(operation.wire().wire_bytes())
                         .ok_or(LimitOverflow)?,
                 ),
                 SocketLimits::new(
                     tcp.connections()
-                        .checked_add(operation.tcp().connections())
+                        .checked_add(operation.socket().connections())
                         .ok_or(LimitOverflow)?,
                     tcp.messages()
-                        .checked_add(operation.tcp().messages())
+                        .checked_add(operation.socket().messages())
                         .ok_or(LimitOverflow)?,
                     tcp.application_bytes()
-                        .checked_add(operation.tcp().application_bytes())
+                        .checked_add(operation.socket().application_bytes())
                         .ok_or(LimitOverflow)?,
                 ),
             )?)
@@ -206,7 +206,7 @@ pub(super) fn udp_dissects_as_dns(source_port: u16, destination_port: u16) -> bo
 
 /// A retried query must not give an off-path spoofer a second chance at the same tuple.
 pub(super) fn rotated_source_port(base: u16, attempt: u32) -> u16 {
-    crate::engine::correlation::ephemeral_source_port(base, u64::from(attempt.saturating_sub(1)))
+    crate::correlation::ephemeral_source_port(base, u64::from(attempt.saturating_sub(1)))
 }
 
 #[cfg(test)]
@@ -221,7 +221,7 @@ mod tests {
         let batched = batch_limits(
             [udp, udp]
                 .into_iter()
-                .map(|udp| DnsOperation::new(udp, tcp).unwrap()),
+                .map(|udp| TrafficOperation::new(udp, tcp).unwrap()),
         )
         .unwrap();
         assert_eq!(batched.limits(), WireLimits::new(12, 100));
@@ -231,14 +231,14 @@ mod tests {
             max_bytes_per_operation: 100,
             ..Policy::default()
         };
-        assert!(exact.authorize(Operation::Dns(batched)).is_ok());
+        assert!(exact.authorize(Operation::Traffic(batched)).is_ok());
         let under_units = Policy {
             max_packets_per_operation: 11,
             max_bytes_per_operation: 100,
             ..Policy::default()
         };
         assert!(matches!(
-            under_units.authorize(Operation::Dns(batched)),
+            under_units.authorize(Operation::Traffic(batched)),
             Err(PolicyError::TrafficUnitLimit {
                 actual: 12,
                 limit: 11
@@ -250,7 +250,7 @@ mod tests {
             ..Policy::default()
         };
         assert!(matches!(
-            under_bytes.authorize(Operation::Dns(batched)),
+            under_bytes.authorize(Operation::Traffic(batched)),
             Err(PolicyError::TrafficByteLimit {
                 actual: 100,
                 limit: 99

@@ -1,21 +1,15 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#![allow(
-    unsafe_code,
-    reason = "capture settings the pcap crate discards require direct libpcap FFI calls"
-)]
-
 mod bpf;
 
 use packetcraftr_core::clock::{Clock, SystemClock};
 use std::{
-    ffi::{CStr, c_char, c_int, c_void},
+    ffi::{c_int, c_void},
     ptr::null_mut,
     sync::Arc,
 };
 
-use bytes::Bytes;
 use pcap::{Active, Capture, Error as PcapError};
 
 use self::bpf::install_capture_filter;
@@ -23,36 +17,29 @@ use crate::{
     Error, NativeCapability, Unsupported,
     capture::live::{
         CaptureInterrupt, NativeCaptureEvent, NativeCaptureParts, NativeCaptureSource,
-        NativeCaptureStats, NativeCapturedPacket, monotonic_packet_time, system_time,
+        NativeCaptureStats,
     },
     capture::{Limits, Metadata, NativeSettings, TimestampPrecision, TimestampType},
     interface::Id as InterfaceId,
     platform::common::READ_TIMEOUT_MILLIS,
-    platform::common::libpcap::map_open_error,
+    platform::common::libpcap::{
+        map_open_error, pcap_error_message, pcap_free_tstamp_types, pcap_get_tstamp_precision,
+        pcap_list_tstamp_types, pcap_set_buffer_size, pcap_set_tstamp_precision,
+        pcap_set_tstamp_type, pcap_snapshot, pcap_tstamp_type_val_to_description,
+        pcap_tstamp_type_val_to_name,
+    },
     platform::common::pcap_api::{
-        NativeSetting, apply_native_settings, canonical_link_type, map_timestamp_types,
-        realize_settings, timestamp_type_list, tstamp_type_string,
-        validate_effective_snapshot_length,
+        NativeSetting, PCAP_NETMASK_UNKNOWN, RawPacketHeader, apply_native_settings,
+        canonical_link_type, map_timestamp_types, realize_settings, timestamp_type_list,
+        tstamp_type_string, validate_captured_packet, validate_effective_snapshot_length,
     },
 };
 use packetcraftr_core::error::Source;
-const PCAP_NETMASK_UNKNOWN: u32 = u32::MAX;
 
-// The pcap crate's pcap_set_* bindings discard the status, so these call libpcap directly.
-#[link(name = "pcap")]
-unsafe extern "C" {
-    fn pcap_snapshot(handle: *mut c_void) -> c_int;
-    fn pcap_set_buffer_size(handle: *mut c_void, size: c_int) -> c_int;
-    fn pcap_set_tstamp_type(handle: *mut c_void, ttype: c_int) -> c_int;
-    fn pcap_set_tstamp_precision(handle: *mut c_void, precision: c_int) -> c_int;
-    fn pcap_get_tstamp_precision(handle: *mut c_void) -> c_int;
-    fn pcap_list_tstamp_types(handle: *mut c_void, types: *mut *mut c_int) -> c_int;
-    fn pcap_free_tstamp_types(types: *mut c_int);
-    fn pcap_tstamp_type_val_to_name(ttype: c_int) -> *const c_char;
-    fn pcap_tstamp_type_val_to_description(ttype: c_int) -> *const c_char;
-    fn pcap_geterr(handle: *mut c_void) -> *mut c_char;
-}
-
+#[expect(
+    unsafe_code,
+    reason = "capture settings the pcap crate omits require direct libpcap FFI calls"
+)]
 pub(crate) fn open_capture(
     interface: &InterfaceId,
     limits: Limits,
@@ -74,22 +61,22 @@ pub(crate) fn open_capture(
         .timeout(READ_TIMEOUT_MILLIS)
         .immediate_mode(true);
     let handle = inactive.as_ptr().cast();
-    apply_native_settings(
-        "libpcap",
-        interface,
-        native,
-        |setting, value| {
-            // SAFETY: handle is a live inactive capture configured by this thread.
-            Ok(unsafe {
-                match setting {
-                    NativeSetting::BufferSize => pcap_set_buffer_size(handle, value),
-                    NativeSetting::TimestampSource => pcap_set_tstamp_type(handle, value),
-                    NativeSetting::TimestampPrecision => pcap_set_tstamp_precision(handle, value),
-                }
-            })
-        },
-        || pcap_error_message(handle),
-    )?;
+    apply_native_settings("libpcap", interface, native, |setting, value| {
+        // SAFETY: handle is a live inactive capture configured exclusively by this thread.
+        let status = unsafe {
+            match setting {
+                NativeSetting::BufferSize => pcap_set_buffer_size(handle, value),
+                NativeSetting::TimestampSource => pcap_set_tstamp_type(handle, value),
+                NativeSetting::TimestampPrecision => pcap_set_tstamp_precision(handle, value),
+            }
+        };
+        if status == 0 {
+            Ok(Ok(()))
+        } else {
+            // SAFETY: handle is exclusively owned by this thread.
+            Ok(Err((status, unsafe { pcap_error_message(handle) })))
+        }
+    })?;
     let mut capture = inactive
         .open()
         .map_err(|error| map_open_error(interface, error))?;
@@ -146,6 +133,10 @@ pub(crate) fn open_capture(
     })
 }
 
+#[expect(
+    unsafe_code,
+    reason = "timestamp type discovery calls libpcap FFI functions directly"
+)]
 pub(crate) fn timestamp_types(interface: &InterfaceId) -> Result<Vec<TimestampType>, Error> {
     let capture = Capture::from_device(interface.name.as_str())
         .map_err(|error| map_open_error(interface, error))?;
@@ -158,7 +149,8 @@ pub(crate) fn timestamp_types(interface: &InterfaceId) -> Result<Vec<TimestampTy
         "libpcap",
         interface,
         count,
-        || pcap_error_message(handle),
+        // SAFETY: handle is live and exclusively owned by this thread.
+        || unsafe { pcap_error_message(handle) },
         // SAFETY: list is the unchanged libpcap allocation, released exactly once.
         || unsafe { pcap_free_tstamp_types(list) },
         // SAFETY: list points to `count` consecutive c_int values libpcap owns.
@@ -171,22 +163,6 @@ pub(crate) fn timestamp_types(interface: &InterfaceId) -> Result<Vec<TimestampTy
         // SAFETY: same contract as the name lookup.
         |value| unsafe { tstamp_type_string(pcap_tstamp_type_val_to_description(value)) },
     ))
-}
-
-fn pcap_error_message(handle: *mut c_void) -> String {
-    if handle.is_null() {
-        return "libpcap returned no diagnostic".to_owned();
-    }
-    // SAFETY: handle is a live pcap handle whose error buffer is a
-    // NUL-terminated string copied out before returning.
-    let message = unsafe { pcap_geterr(handle) };
-    if message.is_null() {
-        return "libpcap returned no diagnostic".to_owned();
-    }
-    // SAFETY: `message` is non-null and points to a valid NUL-terminated C string.
-    unsafe { CStr::from_ptr(message) }
-        .to_string_lossy()
-        .into_owned()
 }
 
 struct PcapCaptureSource {
@@ -203,45 +179,24 @@ impl NativeCaptureSource for PcapCaptureSource {
                 let observed_at = SystemClock.now();
                 let observed_wall = SystemClock.wall_now();
                 #[cfg(target_os = "linux")]
-                let timestamp = system_time(
-                    packet.header.ts.tv_sec,
-                    packet.header.ts.tv_usec,
-                    self.timestamp_precision,
-                )?;
+                let tv_usec = packet.header.ts.tv_usec;
                 #[cfg(target_os = "macos")]
-                let timestamp = system_time(
-                    packet.header.ts.tv_sec,
-                    i64::from(packet.header.ts.tv_usec),
+                let tv_usec = i64::from(packet.header.ts.tv_usec);
+                let packet = validate_captured_packet(
+                    "libpcap",
+                    self.snap_length,
                     self.timestamp_precision,
+                    RawPacketHeader {
+                        tv_sec: packet.header.ts.tv_sec,
+                        tv_usec,
+                        observed_at,
+                        observed_wall,
+                        captured_length: packet.header.caplen,
+                        original_length: packet.header.len,
+                    },
+                    packet.data,
                 )?;
-                let received_at = monotonic_packet_time(timestamp, observed_wall, observed_at);
-                if packet.data.len() > self.snap_length {
-                    return Err(Error::Capture {
-                        message: format!(
-                            "libpcap returned {} bytes beyond configured snap length {}",
-                            packet.data.len(),
-                            self.snap_length
-                        ),
-                        source: None,
-                    });
-                }
-                if packet.data.len() != packet.header.caplen as usize {
-                    return Err(Error::Capture {
-                        message: format!(
-                            "libpcap packet data contains {} bytes but declares captured length {}",
-                            packet.data.len(),
-                            packet.header.caplen
-                        ),
-                        source: None,
-                    });
-                }
-                Ok(NativeCaptureEvent::Packet(NativeCapturedPacket {
-                    timestamp,
-                    received_at,
-                    captured_length: packet.header.caplen,
-                    original_length: packet.header.len,
-                    bytes: Bytes::copy_from_slice(packet.data),
-                }))
+                Ok(NativeCaptureEvent::Packet(packet))
             }
             Err(PcapError::TimeoutExpired) => Ok(NativeCaptureEvent::Timeout),
             Err(PcapError::NoMorePackets) => Ok(NativeCaptureEvent::Closed),

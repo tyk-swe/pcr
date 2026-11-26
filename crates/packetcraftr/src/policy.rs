@@ -21,8 +21,8 @@ pub use model::{DestinationConstraint, Error, Policy};
 
 pub(crate) use operation::Authorizer;
 pub use operation::{
-    DeclaredPackets, DnsOperation, LimitOverflow, Operation, PermissiveLive, SocketLimits,
-    SocketOperation, WireLimits,
+    DeclaredPackets, LimitOverflow, Operation, PermissiveLive, SocketLimits, SocketOperation,
+    TrafficOperation, WireLimits,
 };
 pub use resolution::ResolutionError;
 pub use scope::{MAX_SCOPE_DOCUMENT_BYTES, SCHEMA as SCOPE_SCHEMA, Scope};

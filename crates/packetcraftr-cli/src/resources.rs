@@ -21,6 +21,7 @@ use crate::output::resources::{Report, Setting, Worker};
 pub(crate) struct Diagnostics {
     settings: Vec<(Setting, Enabled)>,
     stream_index: AtomicBool,
+    scope_ceilings: Mutex<Option<(Option<u64>, Option<u64>)>>,
     runtimes: Mutex<Vec<(&'static str, Runtime)>>,
 }
 impl Diagnostics {
@@ -28,12 +29,20 @@ impl Diagnostics {
         Self {
             settings,
             stream_index: AtomicBool::new(true),
+            scope_ceilings: Mutex::new(None),
             runtimes: Mutex::new(Vec::new()),
         }
     }
 
     pub(crate) fn stream_index_needed(&self, needed: bool) {
         self.stream_index.store(needed, Ordering::Relaxed);
+    }
+
+    pub(crate) fn apply_scope(&self, max_packets: Option<u64>, max_bytes: Option<u64>) {
+        *self
+            .scope_ceilings
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some((max_packets, max_bytes));
     }
 
     pub(crate) fn register_runtime(&self, name: &'static str, runtime: &Runtime) {
@@ -66,15 +75,34 @@ impl Diagnostics {
                 .map(|(name, runtime)| Worker::from((*name, runtime.snapshot()))),
         );
         let stream_index = self.stream_index.load(Ordering::Relaxed);
+        let scope_ceilings = *self
+            .scope_ceilings
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         let settings = self
             .settings
             .iter()
-            .map(|(setting, enabled)| Setting {
-                enabled: match enabled {
-                    Enabled::Fixed(enabled) => *enabled,
-                    Enabled::StreamIndex => stream_index,
-                },
-                ..setting.clone()
+            .map(|(setting, enabled)| {
+                let mut setting = Setting {
+                    enabled: match enabled {
+                        Enabled::Fixed(enabled) => *enabled,
+                        Enabled::StreamIndex => stream_index,
+                    },
+                    ..setting.clone()
+                };
+                if let Some((max_packets, max_bytes)) = scope_ceilings
+                    && let crate::output::resources::Value::Number(value) = &mut setting.value
+                {
+                    let ceiling = match setting.name.as_str() {
+                        "--max-packets" => max_packets,
+                        "--max-bytes" => max_bytes,
+                        _ => None,
+                    };
+                    if let Some(ceiling) = ceiling {
+                        *value = (*value).min(ceiling);
+                    }
+                }
+                setting
             })
             .collect();
         Report {

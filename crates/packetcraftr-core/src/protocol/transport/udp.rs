@@ -8,10 +8,11 @@ use bytes::Bytes;
 
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
-    diagnostic::{Diagnostic, UDP_CHECKSUM},
+    diagnostic::Diagnostic,
     field::WireValue,
     layer::{Id, Layer, reflective_layer},
     protocol::BuiltinProtocol,
+    protocol::UDP_CHECKSUM,
     registry::Discriminator,
 };
 

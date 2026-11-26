@@ -170,7 +170,7 @@ impl Classified for Error {
                 Kind::Capability,
                 "grant the minimum raw-socket or capture permission required by the selected native backend",
             ),
-            Self::InterfaceDiscovery { .. } => crate::interface::discovery_classification(),
+            Self::InterfaceDiscovery { .. } => crate::code::interface_discovery(),
             Self::Device { .. } => classified(
                 crate::code::IoDevice,
                 Kind::Io,
@@ -209,11 +209,7 @@ impl Classified for Error {
                 Kind::Io,
                 "fix capture startup before transmitting; capture-before-send readiness cannot be bypassed",
             ),
-            Self::DeadlineExceeded { .. } => classified(
-                crate::code::IoDeadlineExceeded,
-                Kind::Io,
-                "increase the finite operation timeout or reduce readiness, send, and capture work",
-            ),
+            Self::DeadlineExceeded { .. } => crate::code::deadline_exceeded(),
             Self::CaptureQueueOverflow { .. } => classified(
                 crate::code::IoCaptureOverflow,
                 Kind::Io,
@@ -261,7 +257,7 @@ impl Classified for Error {
             Self::TransmissionModeMismatch { .. }
             | Self::UnresolvedLinkMode
             | Self::InvalidSendReport { .. }
-            | Self::InvalidCaptureStatistics { .. } => live_io_invariant(),
+            | Self::InvalidCaptureStatistics { .. } => crate::code::live_io_invariant(),
         }
     }
 
@@ -291,14 +287,6 @@ impl Error {
             _ => Self::DeadlineExceeded { operation },
         }
     }
-}
-
-pub(crate) fn live_io_invariant() -> Classification {
-    classified(
-        crate::code::InternalLiveIoInvariant,
-        Kind::Internal,
-        "report the inconsistent provider result; do not reinterpret it as a successful operation",
-    )
 }
 
 fn classified(

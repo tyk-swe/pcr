@@ -125,7 +125,11 @@ fn run(args: &Args, invocation: &Invocation) -> Result<(), CliError> {
         ..quic::Limits::default()
     };
     let mut collector = quic::Collector::new(quic_limits).map_err(CliError::classified)?;
-    keylog::Input::open(Some(&args.keylog))?.poll(&mut collector, invocation, true)?;
+    keylog::Input::open(&invocation.control, Some(&args.keylog))?.poll(
+        &mut collector,
+        invocation,
+        true,
+    )?;
     let mut reader = setup.open(invocation, &args.path)?;
     let mut options = setup.options(invocation);
     options.track_sources = true;

@@ -18,11 +18,10 @@ pub use error::Error;
 pub use plan::{PlanRow, PlanSummary};
 pub use report::{
     Aggregate, AttemptEvidence, Collector, Event, ReceptionRecord, Report, ResponderAggregate,
-    ResponderCollector, ResponderEvent, ResponderReport, Row, Verdict, hex, join_receptions,
-    rows_for, verdict_for,
+    ResponderCollector, ResponderEvent, ResponderReport, Row, Verdict, join_receptions, rows_for,
+    verdict_for,
 };
 pub use request::{
     DEFAULT_PAYLOAD_LEN, DEFAULT_REPEATS, DEFAULT_SOURCE_PORT, MAX_PAYLOAD_LEN, MAX_REPEATS,
     Request, ResponderRequest, generate_token,
 };
-pub use responder::respond;

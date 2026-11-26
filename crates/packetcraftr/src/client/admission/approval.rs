@@ -8,11 +8,34 @@ use std::net::IpAddr;
 
 use packetcraftr_netio::interface::Id as InterfaceId;
 
-use packetcraftr_core::budget::Deadline;
+use packetcraftr_core::budget::{Deadline, DeadlineExceeded, Interrupted};
+use packetcraftr_core::error::BoundaryError;
 
 use crate::error::{Failure, FromFailure};
 use crate::policy::{Authorizer, Operation, WireLimits};
 use crate::target::{Family, ResolveTarget, SelectedAddress, Target};
+
+#[derive(Debug)]
+pub(crate) enum AdmissionError {
+    Authorization(BoundaryError),
+    DurationLimit(DeadlineExceeded),
+    Interrupted(Interrupted),
+}
+
+pub(crate) trait FromAdmission: Sized {
+    fn from_admission(error: AdmissionError) -> Self;
+}
+
+impl<E: FromFailure> FromAdmission for E {
+    fn from_admission(error: AdmissionError) -> Self {
+        let failure = match error {
+            AdmissionError::Authorization(source) => Failure::Authorization(source),
+            AdmissionError::DurationLimit(source) => Failure::DurationLimit(source),
+            AdmissionError::Interrupted(source) => Failure::Interrupted(source),
+        };
+        Self::from_failure(0_u64, failure)
+    }
+}
 
 #[derive(Debug)]
 pub(crate) struct SelectedTargets {
@@ -36,14 +59,14 @@ pub(crate) fn resolve_selected<A, E>(
 ) -> Result<SelectedTargets, E>
 where
     A: ResolveTarget,
-    E: FromFailure,
+    E: FromAdmission,
 {
     let check = || check_deadline(deadline);
     check()?;
     let resolved = authorizer.resolve_and_authorize(target, deadline);
     check()?;
     let resolved =
-        resolved.map_err(|source| E::from_failure(0_u64, Failure::Authorization(source)))?;
+        resolved.map_err(|source| E::from_admission(AdmissionError::Authorization(source)))?;
 
     let declared = resolved.declared.to_string();
     let mut targets = Vec::with_capacity(resolved.selected.len());
@@ -69,18 +92,18 @@ pub(crate) fn approve_operation<A, E>(
 ) -> Result<(), E>
 where
     A: Authorizer,
-    E: FromFailure,
+    E: FromAdmission,
 {
     check_deadline(deadline)?;
     let approval = authorizer.authorize_operation(operation);
     check_deadline(deadline)?;
-    approval.map_err(|source| E::from_failure(0_u64, Failure::Authorization(source)))
+    approval.map_err(|source| E::from_admission(AdmissionError::Authorization(source)))
 }
 
-fn check_deadline<E: FromFailure>(deadline: &Deadline) -> Result<(), E> {
+fn check_deadline<E: FromAdmission>(deadline: &Deadline) -> Result<(), E> {
     deadline
         .check()
-        .map_err(|source| E::from_failure(0_u64, Failure::DurationLimit(source)))
+        .map_err(|source| E::from_admission(AdmissionError::DurationLimit(source)))
 }
 
 pub(crate) const fn wire_limits(packets: u64, maximum_wire_bytes: u64) -> Operation<'static> {

@@ -26,7 +26,7 @@ pub(super) fn run(
         plan,
         policy,
     } = request;
-    let policy = policy.into_policy();
+    let policy = crate::system::resolve_policy(invocation, policy)?;
     policy.validate().map_err(CliError::classified)?;
     let client: Client = client(
         invocation,

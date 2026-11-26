@@ -1,11 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#![allow(
-    unsafe_code,
-    reason = "interface enumeration walks the getifaddrs linked list from libc"
-)]
-
 use std::collections::BTreeMap;
 use std::ffi::CStr;
 use std::mem::size_of;
@@ -29,6 +24,10 @@ pub(crate) fn interfaces(_deadline: &Deadline) -> Result<Vec<interface::Info>, i
     snapshot().map_err(interface::Error::native)
 }
 
+#[expect(
+    unsafe_code,
+    reason = "interface enumeration walks the getifaddrs linked list from libc"
+)]
 pub(in crate::platform) fn snapshot() -> Result<Vec<interface::Info>, native::Error> {
     let mut head = ptr::null_mut();
     // SAFETY: `head` is a valid output pointer; the list stays valid until `freeifaddrs` below.
@@ -114,6 +113,10 @@ pub(in crate::platform) fn snapshot() -> Result<Vec<interface::Info>, native::Er
 struct IfAddrsGuard(*mut libc::ifaddrs);
 
 impl Drop for IfAddrsGuard {
+    #[expect(
+        unsafe_code,
+        reason = "releases the getifaddrs list via libc::freeifaddrs"
+    )]
     fn drop(&mut self) {
         if !self.0.is_null() {
             // SAFETY: this is the list returned by `getifaddrs`, freed once.
@@ -132,6 +135,7 @@ fn interface_flags(flags: libc::c_uint) -> interface::Flags {
     }
 }
 
+#[expect(unsafe_code, reason = "reads Darwin AF_LINK if_data from ifa_data")]
 fn link_mtu(family: libc::sa_family_t, data: *const libc::c_void) -> Option<u32> {
     if i32::from(family) != libc::AF_LINK || data.is_null() {
         return None;
@@ -141,6 +145,10 @@ fn link_mtu(family: libc::sa_family_t, data: *const libc::c_void) -> Option<u32>
     (data.ifi_mtu != 0).then_some(data.ifi_mtu)
 }
 
+#[expect(
+    unsafe_code,
+    reason = "reads the leading length and bytes of a libc sockaddr"
+)]
 fn sockaddr_prefix(address: *const libc::sockaddr, interface_address: IpAddr) -> Option<u8> {
     if address.is_null() {
         return None;
@@ -152,6 +160,10 @@ fn sockaddr_prefix(address: *const libc::sockaddr, interface_address: IpAddr) ->
     netmask_prefix(bytes, interface_address)
 }
 
+#[expect(
+    unsafe_code,
+    reason = "reads MAC bytes from a checked Darwin sockaddr_dl"
+)]
 fn link_address(address: *const libc::sockaddr, length: usize) -> Option<MacAddress> {
     if length < size_of::<libc::sockaddr_dl>() {
         return None;

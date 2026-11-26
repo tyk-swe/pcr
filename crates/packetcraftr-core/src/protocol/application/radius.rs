@@ -33,7 +33,7 @@ impl Default for Radius {
         }
     }
 }
-crate::reflective_layer! {
+crate::layer::reflective_layer! {
  fn radius_schema() => { protocol: crate::protocol::BuiltinProtocol::Radius.id(), name: "Radius" }
  impl Radius {
     "code" => { kind: Unsigned, derived: false, required: false, description: "code", reflect: code },

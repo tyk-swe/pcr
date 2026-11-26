@@ -7,8 +7,19 @@ use serde_json::json;
 
 mod policy;
 
-/// Audits one final HTTP response. Cookie values are never copied into the report.
+/// Audits one final HTTP response without assuming the request method. Cookie values are never copied into the report.
 pub fn audit(head: &Head, subject: &str, https: bool) -> Report {
+    audit_with_method(head, subject, https, None)
+}
+
+/// Audits one final HTTP response, recording `request_method` when the caller knows it.
+/// Cookie values are never copied into the report.
+pub fn audit_with_method(
+    head: &Head,
+    subject: &str,
+    https: bool,
+    request_method: Option<&str>,
+) -> Report {
     let mut report = Report::new("audit-http");
     report
         .measurements
@@ -79,6 +90,10 @@ pub fn audit(head: &Head, subject: &str, https: bool) -> Report {
             "After validating HTTPS deployment, configure a positive HSTS max-age.",
         ),
     ];
+    let header_evidence = match request_method {
+        Some(method) => json!({"response_status": head.status(), "request_method": method}),
+        None => json!({"response_status": head.status()}),
+    };
     for (rule, missing, summary, remediation) in checks {
         if missing {
             report.findings.push(Finding::new(
@@ -86,7 +101,7 @@ pub fn audit(head: &Head, subject: &str, https: bool) -> Report {
                 Severity::Low,
                 subject,
                 summary,
-                json!({"response_status":head.status(),"request_method":"HEAD"}),
+                header_evidence.clone(),
                 remediation,
             ));
         }
@@ -392,6 +407,28 @@ mod tests {
                 .findings
                 .iter()
                 .any(|finding| finding.rule_id == "http.cookie_same_site")
+        );
+    }
+
+    #[test]
+    fn audit_does_not_fabricate_request_method() {
+        let bare = audit(&head(""), "example.test", false);
+        let csp = bare
+            .findings
+            .iter()
+            .find(|finding| finding.rule_id == "http.csp")
+            .unwrap();
+        assert_eq!(csp.evidence, json!({"response_status": 200}));
+
+        let explicit = audit_with_method(&head(""), "example.test", false, Some("GET"));
+        let explicit_csp = explicit
+            .findings
+            .iter()
+            .find(|finding| finding.rule_id == "http.csp")
+            .unwrap();
+        assert_eq!(
+            explicit_csp.evidence,
+            json!({"response_status": 200, "request_method": "GET"})
         );
     }
 }

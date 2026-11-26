@@ -99,7 +99,6 @@ pub enum Constraint {
     BelowSerialHalfSpace,
     WithinClockRange,
     AtLeastTlsDirectionBuffer,
-    AtMostOneHour,
     AtMost { maximum: u64 },
     NonEmptyNonZeroPorts,
 }
@@ -120,7 +119,6 @@ impl std::fmt::Display for Constraint {
                 "cannot be below the per-direction handshake buffer of {} bytes",
                 super::tls::MAX_DIRECTION_BUFFER
             ),
-            Self::AtMostOneHour => formatter.write_str("exceeds the one-hour ceiling"),
             Self::AtMost { maximum } => write!(formatter, "cannot exceed {maximum}"),
             Self::NonEmptyNonZeroPorts => {
                 formatter.write_str("must name at least one port, and port 0 is not a service port")

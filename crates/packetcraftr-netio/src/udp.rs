@@ -12,8 +12,8 @@ use packetcraftr_core::error::{Classification, Classified, Kind};
 
 use crate::bounded::{Exchange, Outcome, prepare_transfer, retryable};
 
-pub const MAX_PAYLOAD_BYTES: usize = packetcraftr_core::document::udp_profiles::MAX_PAYLOAD_BYTES;
 pub const MAX_EXCHANGE_RESPONSE_BYTES: usize = 65_535;
+pub const MAX_PAYLOAD_BYTES: usize = MAX_EXCHANGE_RESPONSE_BYTES - 28;
 
 #[derive(Debug)]
 pub struct Reply {
@@ -178,6 +178,7 @@ mod tests {
     use std::time::Duration;
     #[test]
     fn retained_udp_response_limit_is_exact() {
+        assert_eq!(MAX_PAYLOAD_BYTES, 65_507);
         for length in [0, 3, 4, 5, 64] {
             let server = UdpSocket::bind("127.0.0.1:0").unwrap();
             server

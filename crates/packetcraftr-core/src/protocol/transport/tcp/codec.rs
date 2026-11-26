@@ -13,9 +13,10 @@ use super::reflection::{tcp_layout, tcp_schema};
 use super::{SackBlock, Tcp, TcpOption};
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
-    diagnostic::{Diagnostic, TCP_CHECKSUM},
+    diagnostic::Diagnostic,
     field::WireValue,
     layer::Layer,
+    protocol::TCP_CHECKSUM,
     protocol::{
         BuiltinProtocol,
         common::{

@@ -29,7 +29,7 @@ use crate::{
 };
 
 // Namespace services are a bounded cache, rather than immortal historical work.
-const RESIDENT_CAPACITY: usize = crate::workers::CAPACITY / 4;
+const RESIDENT_CAPACITY: usize = crate::workers::CONTROL_CAPACITY;
 
 mod inbox;
 
@@ -198,7 +198,7 @@ fn worker_inbox(
         namespace,
         caller,
         deadline,
-        workers::shared(),
+        workers::control(),
         start_worker,
     )
 }
@@ -294,7 +294,7 @@ fn start_worker(
     caller: &Deadline,
     deadline: Instant,
 ) -> Result<WorkerSlot, native::Error> {
-    start_worker_with(namespace, caller, deadline, workers::shared(), run_worker)
+    start_worker_with(namespace, caller, deadline, workers::control(), run_worker)
 }
 
 fn start_worker_with(

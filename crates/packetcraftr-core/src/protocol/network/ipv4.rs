@@ -8,9 +8,10 @@ use bytes::Bytes;
 
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
-    diagnostic::{Diagnostic, IPV4_CHECKSUM},
+    diagnostic::Diagnostic,
     field::WireValue,
     layer::{Id, Layer, reflective_layer},
+    protocol::IPV4_CHECKSUM,
     protocol::semantics::ipv4_source_route_destination,
     registry::Discriminator,
 };

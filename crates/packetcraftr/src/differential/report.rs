@@ -5,6 +5,7 @@ use std::net::SocketAddr;
 
 use packetcraftr_core::diagnostic::Diagnostic;
 use packetcraftr_core::error::BoundaryError;
+use packetcraftr_core::field::hex::compact_hex;
 use packetcraftr_core::frame::Frame;
 use serde::{Deserialize, Serialize};
 
@@ -267,7 +268,7 @@ pub fn join_receptions(mut aggregate: Aggregate, records: &[ReceptionRecord]) ->
         let Ok(variant_index) = u16::try_from(attempt.variant_index) else {
             continue;
         };
-        let digest = hex(&attempt.payload_sha256);
+        let digest = compact_hex(&attempt.payload_sha256);
         let key = (
             variant_index,
             attempt.attempt_seq,
@@ -292,11 +293,6 @@ pub fn join_receptions(mut aggregate: Aggregate, records: &[ReceptionRecord]) ->
         .is_some_and(|row| row.verdict == Verdict::Accepted);
     aggregate.provisional = false;
     aggregate
-}
-
-#[must_use]
-pub fn hex(bytes: &[u8]) -> String {
-    packetcraftr_core::field::hex::compact_hex(bytes)
 }
 
 #[cfg(test)]
@@ -345,13 +341,13 @@ mod tests {
                 variant_index: 1,
                 attempt_seq: 1,
                 source: "192.0.2.99:53210".parse().expect("addr"),
-                payload_sha256: hex(&[0x11; 32]),
+                payload_sha256: compact_hex(&[0x11; 32]),
             },
             ReceptionRecord {
                 variant_index: 2,
                 attempt_seq: 2,
                 source: "192.0.2.99:53210".parse().expect("addr"),
-                payload_sha256: hex(&[0x22; 32]),
+                payload_sha256: compact_hex(&[0x22; 32]),
             },
         ];
         let joined = join_receptions(aggregate, &records);
@@ -380,13 +376,13 @@ mod tests {
                 variant_index: 0,
                 attempt_seq: 0,
                 source: "192.0.2.99:53210".parse().expect("addr"),
-                payload_sha256: hex(&[0x11; 32]),
+                payload_sha256: compact_hex(&[0x11; 32]),
             },
             ReceptionRecord {
                 variant_index: 1,
                 attempt_seq: 1,
                 source: "198.51.100.7:53210".parse().expect("addr"),
-                payload_sha256: hex(&[0x11; 32]),
+                payload_sha256: compact_hex(&[0x11; 32]),
             },
         ];
         let joined = join_receptions(aggregate, &records);
@@ -413,13 +409,13 @@ mod tests {
                 variant_index: 0,
                 attempt_seq: 0,
                 source: "192.0.2.99:53210".parse().expect("addr"),
-                payload_sha256: hex(&[0x11; 32]),
+                payload_sha256: compact_hex(&[0x11; 32]),
             },
             ReceptionRecord {
                 variant_index: 1,
                 attempt_seq: 1,
                 source: "198.51.100.7:40000".parse().expect("addr"),
-                payload_sha256: hex(&[0x11; 32]),
+                payload_sha256: compact_hex(&[0x11; 32]),
             },
         ];
         let joined = join_receptions(aggregate, &records);
@@ -436,7 +432,7 @@ mod tests {
             variant_index: 1,
             attempt_seq: 1,
             source: "192.0.2.99:53210".parse().expect("addr"),
-            payload_sha256: hex(&[0x11; 32]),
+            payload_sha256: compact_hex(&[0x11; 32]),
         }];
         let rejoined = join_receptions(rejoined, &declared);
         assert!(rejoined.attempts[1].answered);

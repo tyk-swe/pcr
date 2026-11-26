@@ -12,8 +12,6 @@ pub(crate) const CliCaptureFiles: packetcraftr_core::error::Code =
     packetcraftr_core::error::Code::new("cli.capture_files");
 pub(crate) const CliCaptureNormalizeFormat: packetcraftr_core::error::Code =
     packetcraftr_core::error::Code::new("cli.capture_normalize_format");
-pub(crate) const CliCaptureNormalizePcap: packetcraftr_core::error::Code =
-    packetcraftr_core::error::Code::new("cli.capture_normalize_pcap");
 pub(crate) const CliCaptureRewriteFormat: packetcraftr_core::error::Code =
     packetcraftr_core::error::Code::new("cli.capture_rewrite_format");
 pub(crate) const CliDecodeAs: packetcraftr_core::error::Code =

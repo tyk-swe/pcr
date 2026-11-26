@@ -183,7 +183,7 @@ fn finish_probe<S: tcp::Stream>(
     match result.result {
         Ok(stream) => {
             match endpoint_query(entry.sequence, "peer", stream.peer_addr())? {
-                Some(peer) if !packetcraftr_netio::bounded::same_peer(entry.endpoint, peer) => {
+                Some(peer) if crate::client::tcp::verify_peer(entry.endpoint, peer).is_err() => {
                     return Err(Error::InvalidEvidence {
                         sequence: entry.sequence,
                         message: "TCP provider returned a different peer endpoint".to_owned(),

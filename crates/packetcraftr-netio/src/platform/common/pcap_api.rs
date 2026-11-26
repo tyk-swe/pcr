@@ -1,9 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::ffi::{CStr, c_char, c_int};
+use std::ffi::{CStr, c_char, c_int, c_uchar, c_uint, c_ushort};
 use std::fmt;
+use std::time::{Instant, SystemTime};
 
+use bytes::Bytes;
 use packetcraftr_core::error::Source;
 use packetcraftr_core::frame::LinkType;
 
@@ -12,9 +14,99 @@ use crate::{
     capture::{
         MAX_NATIVE_BUFFER_SIZE, MAX_TIMESTAMP_TYPES, NativeSettings, Realized, RealizedSettings,
         TimestampPrecision, TimestampSource, TimestampType,
+        live::{NativeCapturedPacket, monotonic_packet_time, system_time},
     },
     interface::Id as InterfaceId,
 };
+
+pub(in crate::platform) const PCAP_NETMASK_UNKNOWN: u32 = u32::MAX;
+
+#[repr(C)]
+pub(in crate::platform) struct BpfInstruction {
+    pub(in crate::platform) code: c_ushort,
+    pub(in crate::platform) jump_true: c_uchar,
+    pub(in crate::platform) jump_false: c_uchar,
+    pub(in crate::platform) value: c_uint,
+}
+
+#[repr(C)]
+pub(in crate::platform) struct BpfProgram {
+    pub(in crate::platform) instruction_count: c_uint,
+    pub(in crate::platform) instructions: *mut BpfInstruction,
+}
+
+impl BpfProgram {
+    pub(in crate::platform) const fn empty() -> Self {
+        Self {
+            instruction_count: 0,
+            instructions: std::ptr::null_mut(),
+        }
+    }
+}
+
+pub(in crate::platform) struct RawPacketHeader {
+    pub(in crate::platform) tv_sec: i64,
+    pub(in crate::platform) tv_usec: i64,
+    pub(in crate::platform) observed_at: Instant,
+    pub(in crate::platform) observed_wall: SystemTime,
+    pub(in crate::platform) captured_length: u32,
+    pub(in crate::platform) original_length: u32,
+}
+
+pub(in crate::platform) fn validate_captured_packet(
+    backend: &str,
+    snap_length: usize,
+    timestamp_precision: TimestampPrecision,
+    header: RawPacketHeader,
+    data: &[u8],
+) -> Result<NativeCapturedPacket, Error> {
+    let timestamp = system_time(header.tv_sec, header.tv_usec, timestamp_precision)?;
+    let received_at = monotonic_packet_time(timestamp, header.observed_wall, header.observed_at);
+    if data.len() > snap_length {
+        return Err(Error::Capture {
+            message: format!(
+                "{backend} returned {} bytes beyond configured snap length {snap_length}",
+                data.len(),
+            ),
+            source: None,
+        });
+    }
+    if data.len() != header.captured_length as usize {
+        return Err(Error::Capture {
+            message: format!(
+                "{backend} packet data contains {} bytes but declares captured length {}",
+                data.len(),
+                header.captured_length
+            ),
+            source: None,
+        });
+    }
+    if header.original_length < header.captured_length {
+        return Err(Error::Capture {
+            message: format!(
+                "{backend} returned captured length {} above original length {}",
+                header.captured_length, header.original_length
+            ),
+            source: None,
+        });
+    }
+    Ok(NativeCapturedPacket {
+        timestamp,
+        received_at,
+        captured_length: header.captured_length,
+        original_length: header.original_length,
+        bytes: Bytes::copy_from_slice(data),
+    })
+}
+
+pub(in crate::platform) fn validate_layer2_length(
+    backend: &str,
+    length: usize,
+) -> Result<c_int, Error> {
+    c_int::try_from(length).map_err(|_| Error::InvalidTransmissionFrame {
+        message: format!("Layer 2 frame length {length} exceeds the {backend} signed-length limit"),
+    })
+}
 
 pub(in crate::platform) const PCAP_TSTAMP_HOST: c_int = 0;
 pub(in crate::platform) const PCAP_TSTAMP_HOST_LOWPREC: c_int = 1;
@@ -124,51 +216,53 @@ pub(in crate::platform) fn apply_native_settings(
     backend: &str,
     interface: &InterfaceId,
     settings: &NativeSettings,
-    mut set: impl FnMut(NativeSetting, c_int) -> Result<c_int, Error>,
-    mut error_message: impl FnMut() -> String,
+    mut set: impl FnMut(NativeSetting, c_int) -> Result<Result<(), (c_int, String)>, Error>,
 ) -> Result<(), Error> {
     if let Some(buffer_size) = settings.buffer_size {
         let size = c_int::try_from(buffer_size).map_err(|_| Error::InvalidCaptureSetting {
             field: "buffer_size",
             message: format!("exceeds the native maximum of {MAX_NATIVE_BUFFER_SIZE} bytes"),
         })?;
-        let status = set(NativeSetting::BufferSize, size)?;
-        check_setting_status(
-            backend,
-            interface,
-            NativeSetting::BufferSize,
-            &buffer_size.to_string(),
-            status,
-            &mut error_message,
-        )?;
+        if let Err((status, diagnostic)) = set(NativeSetting::BufferSize, size)? {
+            return Err(map_setting_error(
+                backend,
+                interface,
+                NativeSetting::BufferSize,
+                &buffer_size.to_string(),
+                status,
+                diagnostic,
+            ));
+        }
     }
-    if let Some(source) = settings.timestamp_source {
-        let status = set(
+    if let Some(source) = settings.timestamp_source
+        && let Err((status, diagnostic)) = set(
             NativeSetting::TimestampSource,
             timestamp_source_value(source),
-        )?;
-        check_setting_status(
+        )?
+    {
+        return Err(map_setting_error(
             backend,
             interface,
             NativeSetting::TimestampSource,
             source.as_str(),
             status,
-            &mut error_message,
-        )?;
+            diagnostic,
+        ));
     }
-    if let Some(precision) = settings.timestamp_precision {
-        let status = set(
+    if let Some(precision) = settings.timestamp_precision
+        && let Err((status, diagnostic)) = set(
             NativeSetting::TimestampPrecision,
             timestamp_precision_value(precision),
-        )?;
-        check_setting_status(
+        )?
+    {
+        return Err(map_setting_error(
             backend,
             interface,
             NativeSetting::TimestampPrecision,
             precision.as_str(),
             status,
-            &mut error_message,
-        )?;
+            diagnostic,
+        ));
     }
     Ok(())
 }
@@ -203,38 +297,34 @@ impl fmt::Display for Diagnostic {
 
 impl std::error::Error for Diagnostic {}
 
-fn check_setting_status(
+fn map_setting_error(
     backend: &str,
     interface: &InterfaceId,
     setting: NativeSetting,
     requested: &str,
     status: c_int,
-    error_message: &mut impl FnMut() -> String,
-) -> Result<(), Error> {
-    if status == 0 {
-        return Ok(());
-    }
+    diagnostic: String,
+) -> Error {
     let operation = setting.operation();
-    let diagnostic = error_message();
     if matches!(
         status,
         PCAP_WARNING_TSTAMP_TYPE_NOTSUP
             | PCAP_ERROR_CANTSET_TSTAMP_TYPE
             | PCAP_ERROR_TSTAMP_PRECISION_NOTSUP
     ) {
-        return Err(Error::UnsupportedCaptureSetting {
+        return Error::UnsupportedCaptureSetting {
             setting: setting.field(),
             interface: interface.name.clone(),
             message: format!(
                 "{backend} rejected {requested} through {operation} (status {status}): {diagnostic}"
             )
             .into(),
-        });
+        };
     }
-    Err(Error::Capture {
+    Error::Capture {
         message: format!("{backend} {operation} failed for {}", interface.name),
         source: Diagnostic::new(Some(status), diagnostic).into_source(),
-    })
+    }
 }
 
 pub(in crate::platform) fn realize_settings(
@@ -461,5 +551,68 @@ pub(in crate::platform) fn map_send_error(
             message: format!("{backend} injection on {} failed", interface.name),
             source,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use packetcraftr_core::clock::{Clock, SystemClock};
+
+    #[test]
+    fn oversized_layer2_frame_reports_invalid_transmission_frame() {
+        assert_eq!(validate_layer2_length("libpcap", 64).unwrap(), 64);
+        assert!(matches!(
+            validate_layer2_length("Npcap", (c_int::MAX as usize) + 1),
+            Err(Error::InvalidTransmissionFrame { .. })
+        ));
+    }
+
+    #[test]
+    fn captured_packet_validation_rejects_inconsistent_lengths() {
+        let now = SystemClock.now();
+        let wall = SystemClock.wall_now();
+        let make = |caplen, origlen| RawPacketHeader {
+            tv_sec: 1_700_000_000,
+            tv_usec: 123,
+            observed_at: now,
+            observed_wall: wall,
+            captured_length: caplen,
+            original_length: origlen,
+        };
+        assert!(
+            validate_captured_packet(
+                "libpcap",
+                64,
+                TimestampPrecision::Micro,
+                make(4, 4),
+                b"abcd"
+            )
+            .is_ok()
+        );
+        assert!(matches!(
+            validate_captured_packet("libpcap", 3, TimestampPrecision::Micro, make(4, 4), b"abcd"),
+            Err(Error::Capture { .. })
+        ));
+        assert!(matches!(
+            validate_captured_packet(
+                "libpcap",
+                64,
+                TimestampPrecision::Micro,
+                make(5, 5),
+                b"abcd"
+            ),
+            Err(Error::Capture { .. })
+        ));
+        assert!(matches!(
+            validate_captured_packet(
+                "libpcap",
+                64,
+                TimestampPrecision::Micro,
+                make(4, 3),
+                b"abcd"
+            ),
+            Err(Error::Capture { .. })
+        ));
     }
 }

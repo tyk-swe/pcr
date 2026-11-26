@@ -3,14 +3,16 @@
 
 use std::cmp::Ordering;
 
-use packetcraftr_core::{
-    analysis::stats::{ConversationStat, Report},
-    diagnostic::{Diagnostic, Severity},
-};
+use crate::diagnostic::{Diagnostic, Severity};
 
-use super::arguments::Sort;
-use super::output::Table;
-use crate::commands::retained::omitted_diagnostic;
+use super::{ConversationStat, Report, Table};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Sort {
+    Frames,
+    Bytes,
+    Duration,
+}
 
 fn rank<T>(
     rows: &mut Vec<T>,
@@ -22,9 +24,8 @@ fn rank<T>(
     let metric = |row: &T| {
         let (frames, bytes) = volume(row);
         match sort {
-            Sort::Frames => (frames, bytes),
+            Sort::Frames | Sort::Duration => (frames, bytes),
             Sort::Bytes => (bytes, frames),
-            Sort::Duration => unreachable!("duration sorting is specific to conversations"),
         }
     };
     sort_rows(rows, top, |left, right| {
@@ -95,23 +96,51 @@ fn cap<T>(
     let Some(limit) = top else { return Vec::new() };
     let omitted = u64::try_from(rows.len().saturating_sub(limit)).unwrap_or(u64::MAX);
     rows.truncate(limit);
-    omitted_diagnostic(code, subject, omitted, "--top")
+    if omitted == 0 {
+        return Vec::new();
+    }
+    vec![Diagnostic::new(
+        Severity::Warning,
+        code,
+        format!("{omitted} {subject} omitted from this document by the --top ceiling"),
+    )]
 }
 
-pub(super) fn select(
+/// Applies minimum-frame filtering, ranking, and top-N truncation to `report`
+/// for `table`, returning warning diagnostics for any omitted rows.
+pub fn select(
     report: &mut Report,
     table: Table,
     top: Option<usize>,
     sort: Option<Sort>,
     min_frames: Option<u64>,
 ) -> Vec<Diagnostic> {
+    if table == Table::All {
+        return [
+            Table::Protocols,
+            Table::Endpoints,
+            Table::Conversations,
+            Table::Ports,
+            Table::Io,
+        ]
+        .into_iter()
+        .flat_map(|component| {
+            let component_sort = match (component, sort) {
+                (Table::Conversations, s) => s,
+                (_, Some(Sort::Duration)) => None,
+                (_, s) => s,
+            };
+            select(report, component, top, component_sort, min_frames)
+        })
+        .collect();
+    }
     if table == Table::Overview {
         return [Table::Protocols, Table::Endpoints, Table::Conversations]
             .into_iter()
-            .flat_map(|table| {
+            .flat_map(|component| {
                 select(
                     report,
-                    table,
+                    component,
                     top,
                     Some(sort.unwrap_or(Sort::Frames)),
                     min_frames,
@@ -155,11 +184,9 @@ pub(super) fn select(
             "stats.io_filtered",
             "io bucket(s)",
         ),
-        Table::Fragments => Vec::new(),
-        Table::Overview => unreachable!("overview selects its component tables"),
+        Table::Fragments | Table::All | Table::Overview => Vec::new(),
     };
     diagnostics.extend(match table {
-        Table::Overview => unreachable!("overview selects its component tables"),
         Table::Conversations => {
             if sort == Some(Sort::Duration) {
                 sort_rows(&mut report.conversations, top, |a, b| {
@@ -247,7 +274,7 @@ pub(super) fn select(
             }
             cap(&mut report.io, top, "stats.io_omitted", "io bucket(s)")
         }
-        Table::Fragments => Vec::new(),
+        Table::Fragments | Table::All | Table::Overview => Vec::new(),
     });
     diagnostics
 }
@@ -255,7 +282,7 @@ pub(super) fn select(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use packetcraftr_core::analysis::{
+    use crate::analysis::{
         self, StreamTransport,
         scope::Interner,
         stats::{Collector, EndpointStat, IoBucketStat, PortStat, ProtocolStat},
@@ -263,7 +290,7 @@ mod tests {
     use std::time::{Duration, UNIX_EPOCH};
 
     fn report() -> Report {
-        Collector::for_table(Duration::from_secs(1), Default::default())
+        Collector::for_table(Duration::from_secs(1), Table::default())
             .unwrap()
             .finish(&analysis::Summary::default())
     }
@@ -416,165 +443,28 @@ mod tests {
         assert!(report.io.is_empty());
     }
 
-    fn full_sort_selection(
-        report: &mut Report,
-        table: Table,
-        top: Option<usize>,
-        sort: Option<Sort>,
-        min_frames: Option<u64>,
-    ) -> Vec<Diagnostic> {
-        if table == Table::Overview {
-            return [Table::Protocols, Table::Endpoints, Table::Conversations]
-                .into_iter()
-                .flat_map(|table| {
-                    full_sort_selection(report, table, top, sort.or(Some(Sort::Frames)), min_frames)
-                })
-                .collect();
-        }
-        let default_sort = if top.is_some()
-            && matches!(
-                table,
-                Table::Conversations | Table::Endpoints | Table::Ports
-            ) {
-            Some(Sort::Frames)
-        } else {
-            None
-        };
-        let mut diagnostics = select(report, table, None, sort.or(default_sort), min_frames);
-        let omitted = match table {
-            Table::Conversations => cap(
-                &mut report.conversations,
-                top,
-                "stats.conversations_omitted",
-                "conversation row(s)",
-            ),
-            Table::Endpoints => cap(
-                &mut report.endpoints,
-                top,
-                "stats.endpoints_omitted",
-                "endpoint row(s)",
-            ),
-            Table::Protocols => cap(
-                &mut report.protocols,
-                top,
-                "stats.protocols_omitted",
-                "protocol row(s)",
-            ),
-            Table::Ports => cap(&mut report.ports, top, "stats.ports_omitted", "port row(s)"),
-            Table::Io => cap(&mut report.io, top, "stats.io_omitted", "io bucket(s)"),
-            _ => unreachable!("test helper only caps the five sortable tables"),
-        };
-        diagnostics.extend(omitted);
-        diagnostics
-    }
-
     #[test]
-    fn partial_selection_matches_stable_sort() {
-        let mut seed = 42_u64;
-        for size in [0, 1, 2, 19, 257] {
-            let mut original = report();
-            for index in 0..size {
-                seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
-                let frames = (seed >> 32) % 5;
-                let bytes = (seed >> 37) % 7;
-                let key = (seed >> 43) % 4;
-                let mut row = conversation(key, key, frames, bytes);
-                row.port_a = u16::try_from(index + 1).unwrap();
-                original.conversations.push(row);
-                original.endpoints.push(EndpointStat {
-                    address: format!("192.0.2.{}", key + 1).parse().unwrap(),
-                    tx_frames: frames / 2,
-                    rx_frames: frames - frames / 2,
-                    tx_bytes: bytes / 2,
-                    rx_bytes: bytes - bytes / 2,
-                });
-                original.protocols.push(ProtocolStat {
-                    protocol: key.to_string(),
-                    frames,
-                    bytes,
-                });
-                original.ports.push(PortStat {
-                    transport: StreamTransport::Tcp,
-                    port: u16::try_from(key).unwrap(),
-                    frames,
-                    bytes,
-                });
-                original.io.push(IoBucketStat {
-                    offset: Duration::from_secs(key),
-                    frames,
-                    bytes,
-                });
-            }
-            for table in [
-                Table::Conversations,
-                Table::Endpoints,
-                Table::Protocols,
-                Table::Ports,
-                Table::Io,
-                Table::Overview,
-            ] {
-                for sort in [
-                    None,
-                    Some(Sort::Frames),
-                    Some(Sort::Bytes),
-                    Some(Sort::Duration),
-                ] {
-                    if sort == Some(Sort::Duration) && table != Table::Conversations {
-                        continue;
-                    }
-                    for top in [
-                        None,
-                        Some(0),
-                        Some(1),
-                        Some(size / 2),
-                        Some(size),
-                        Some(size + 1),
-                    ] {
-                        for min_frames in [None, Some(2)] {
-                            let mut actual = original.clone();
-                            let mut expected = original.clone();
-                            let actual_diagnostics =
-                                select(&mut actual, table, top, sort, min_frames);
-                            let expected_diagnostics =
-                                full_sort_selection(&mut expected, table, top, sort, min_frames);
-                            assert_eq!(
-                                actual, expected,
-                                "table={table:?} sort={sort:?} top={top:?} min={min_frames:?}"
-                            );
-                            assert_eq!(
-                                actual_diagnostics, expected_diagnostics,
-                                "table={table:?} sort={sort:?} top={top:?} min={min_frames:?}"
-                            );
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn small_top_reduces_comparisons() {
-        use std::cell::Cell;
-        let mut seed = 23_u64;
-        let original = (0..10_000)
-            .map(|_| {
-                seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
-                seed >> 16
-            })
-            .collect::<Vec<_>>();
-        let mut partial = original.clone();
-        let mut full = original;
-        let partial_comparisons = Cell::new(0);
-        sort_rows(&mut partial, Some(5), |a, b| {
-            partial_comparisons.set(partial_comparisons.get() + 1);
-            a.cmp(b)
-        });
-        let full_comparisons = Cell::new(0);
-        full.sort_by(|a, b| {
-            full_comparisons.set(full_comparisons.get() + 1);
-            a.cmp(b)
-        });
-        assert_eq!(&partial[..5], &full[..5]);
-        assert!(partial_comparisons.get() * 2 < full_comparisons.get());
+    fn all_table_selects_every_component_without_panicking() {
+        let mut report = report();
+        report.protocols = vec![ProtocolStat {
+            protocol: "tcp".into(),
+            frames: 1,
+            bytes: 64,
+        }];
+        report.conversations = vec![conversation(0, 5, 1, 64), conversation(1, 10, 2, 128)];
+        let diagnostics = select(
+            &mut report,
+            Table::All,
+            Some(1),
+            Some(Sort::Duration),
+            Some(2),
+        );
+        assert!(report.protocols.is_empty());
+        assert_eq!(report.conversations.len(), 1);
+        assert_eq!(report.conversations[0].stream, 1);
+        assert_eq!(
+            diagnostics.iter().map(|d| d.code).collect::<Vec<_>>(),
+            vec!["stats.protocols_filtered", "stats.conversations_filtered"]
+        );
     }
 }

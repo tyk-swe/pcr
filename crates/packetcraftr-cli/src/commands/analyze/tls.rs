@@ -100,9 +100,6 @@ pub(super) fn run(
         max_sessions: arguments.max_tls_sessions,
         max_buffered_bytes: arguments.max_tls_buffer_bytes,
     };
-    if arguments.max_tls_buffer_bytes < analysis::tls::MAX_DIRECTION_BUFFER {
-        return Err(buffer_floor_error(arguments.max_tls_buffer_bytes));
-    }
     let collector = Collector::new(tls_limits).map_err(CliError::classified)?;
 
     let prepared = prepare(arguments.limits, None, &arguments.decode)?;
@@ -154,14 +151,6 @@ pub(super) fn run(
         Format::Ndjson => rendering::render_stream(summary, stream),
         other => other.unreachable(),
     }
-}
-
-fn buffer_floor_error(value: usize) -> CliError {
-    CliError::classified(analysis::Error::InvalidLimit {
-        field: "--max-tls-buffer-bytes",
-        value: u64::try_from(value).unwrap_or(u64::MAX),
-        reason: analysis::Constraint::AtLeastTlsDirectionBuffer,
-    })
 }
 
 fn sni_pattern(pattern: &str) -> Result<SniPattern, CliError> {

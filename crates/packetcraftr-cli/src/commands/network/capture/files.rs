@@ -5,11 +5,13 @@
 //! truncates an unrelated pre-existing pathname.
 
 use crate::command_options::Compression;
+use crate::invocation::Invocation;
 use crate::output::capture::{File as FileReport, Files as FilesReport, Retention};
+use crate::staged_output::OutputDirectory;
 use packetcraftr::capture::Source;
 use packetcraftr_core::{
     capture_file::{self, compression},
-    error::{Classification, Classified, Kind},
+    error::{BoundaryError, Classification, Classified, Kind},
     frame::Frame,
 };
 use std::{
@@ -107,6 +109,8 @@ pub(super) enum Error {
         source: io::Error,
     },
     #[error(transparent)]
+    Staged(Box<BoundaryError>),
+    #[error(transparent)]
     Capture(#[from] capture_file::Error),
     #[error(transparent)]
     Compression(#[from] compression::Error),
@@ -124,6 +128,7 @@ pub(super) enum Error {
 impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
+            Self::Staged(source) => source.classification(),
             Self::Capture(source) => source.classification(),
             Self::Compression(source) => source.classification(),
             Self::Io { .. } | Self::Exists(_) => Classification::new(
@@ -140,6 +145,13 @@ impl Classified for Error {
             Self::State | Self::Counters | Self::ElapsedRegressed => {
                 Classification::new(crate::code::InternalCaptureFiles, Kind::Internal, None)
             }
+        }
+    }
+
+    fn causes(&self) -> Vec<String> {
+        match self {
+            Self::Staged(source) => source.causes(),
+            _ => packetcraftr_core::error::source_chain(self),
         }
     }
 }
@@ -199,6 +211,8 @@ struct Active {
     opened_at: Duration,
 }
 pub(super) struct Files {
+    invocation: Invocation,
+    directory: OutputDirectory,
     options: Options,
     budget: capture_file::Budget,
     sources: Vec<Source>,
@@ -213,9 +227,17 @@ pub(super) struct Files {
     stopped: bool,
 }
 impl Files {
-    pub(super) fn new(options: Options, limits: capture_file::Limits) -> Result<Self, Error> {
+    pub(super) fn new(
+        invocation: &Invocation,
+        options: Options,
+        limits: capture_file::Limits,
+    ) -> Result<Self, Error> {
         options.validate()?;
+        let directory = OutputDirectory::open(parent(&options.path))
+            .map_err(|error| Error::Staged(Box::new(error.into_boundary_error())))?;
         Ok(Self {
+            invocation: invocation.clone(),
+            directory,
             options,
             budget: capture_file::Budget::new(limits)?,
             sources: Vec::new(),
@@ -334,17 +356,16 @@ impl Files {
         let generation = self.generation.checked_add(1).ok_or(Error::Counters)?;
         if slot == self.slots.len() {
             let path = self.options.slot_path(slot)?;
-            let temporary =
-                tempfile::NamedTempFile::new_in(parent(&path)).map_err(|source| Error::Io {
-                    path: path.clone(),
-                    source,
-                })?;
-            let handle = temporary
-                .persist_noclobber(&path)
-                .map_err(|error| Error::Io {
-                    path: path.clone(),
-                    source: error.error,
-                })?;
+            let name = path
+                .file_name()
+                .ok_or(Error::Invalid("capture output needs a file name"))?;
+            let staged = self
+                .directory
+                .stage(&self.invocation, name)
+                .map_err(|error| Error::Staged(Box::new(error.into_boundary_error())))?;
+            let (_, handle) = staged
+                .persist_open()
+                .map_err(|error| Error::Staged(Box::new(error.into_boundary_error())))?;
             self.slots.push(Slot {
                 handle,
                 report: fresh_report(path.display().to_string(), slot, generation),

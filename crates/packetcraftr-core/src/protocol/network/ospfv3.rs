@@ -52,7 +52,7 @@ impl Default for Ospfv3 {
         }
     }
 }
-crate::reflective_layer! {
+crate::layer::reflective_layer! {
  fn ospfv3_schema() => { protocol: crate::protocol::BuiltinProtocol::Ospfv3.id(), name: "Ospfv3" }
  impl Ospfv3 {
     "packet_type" => { kind: Unsigned, derived: false, required: false, description: "packet type", reflect: packet_type },

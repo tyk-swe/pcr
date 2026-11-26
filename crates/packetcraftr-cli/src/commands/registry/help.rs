@@ -22,7 +22,6 @@ const COMMON: &[&str] = &[
     "ports",
     "table",
     "filter",
-    "display_filter",
     "decode_as",
     "tree",
     "dissect",
@@ -46,21 +45,7 @@ const COMMON: &[&str] = &[
 ];
 
 fn heading(id: &str) -> &'static str {
-    if matches!(
-        id,
-        "allow"
-            | "allow_host"
-            | "allow_hostname"
-            | "allow_cidr"
-            | "allow_public"
-            | "allow_broadcast"
-            | "allow_multicast"
-            | "allow_spoofing"
-            | "confirm"
-            | "dry_run"
-    ) || id.starts_with("allow_")
-        || id.contains("policy")
-    {
+    if matches!(id, "allow" | "dry_run") || id.starts_with("allow_") || id.contains("policy") {
         "Policy"
     } else if matches!(
         id,
@@ -99,7 +84,6 @@ fn heading(id: &str) -> &'static str {
     } else if matches!(
         id,
         "filter"
-            | "display_filter"
             | "decode_as"
             | "field"
             | "stream"

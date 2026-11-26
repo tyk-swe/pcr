@@ -6,7 +6,7 @@
 use packetcraftr_core::protocol::identity;
 use std::net::IpAddr;
 
-use crate::probe::model::Transport;
+use crate::model::Transport;
 use bytes::Bytes;
 use packetcraftr_core::field::WireValue;
 use packetcraftr_core::protocol::{

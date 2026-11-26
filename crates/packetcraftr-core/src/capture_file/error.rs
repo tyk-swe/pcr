@@ -5,7 +5,7 @@ use std::io;
 
 use thiserror::Error;
 
-use super::format::Format;
+use super::format::{Format, TimestampResolution};
 use crate::error::{BoundaryError, Classification, Classified, Coordinate, Kind};
 
 #[derive(Debug, Error)]
@@ -142,6 +142,32 @@ pub enum Error {
     MergeClockRegression { input: usize, frame: u64 },
     #[error("merge source {input} has unsupported metadata: {field}")]
     MergeMetadata { input: usize, field: &'static str },
+    #[error("classic PCAP output needs one selected frame to choose its link type")]
+    EmptyPcapNormalization,
+    #[error("pcap cannot represent direction (frame {number} is marked inbound or outbound)")]
+    PcapNormalizeDirection { number: u64 },
+    #[error(
+        "pcap cannot represent the source timestamp resolution {}; classic PCAP holds microseconds or nanoseconds",
+        format_resolution(*resolution)
+    )]
+    PcapNormalizeTimestampResolution { resolution: TimestampResolution },
+    #[error(
+        "pcap holds one interface, but selected frames use interface {first_interface} (link type {first_link_type}) and interface {other_interface} (link type {other_link_type}) at frame {number}"
+    )]
+    PcapNormalizeInterfaceConflict {
+        number: u64,
+        first_interface: u32,
+        first_link_type: u32,
+        other_interface: u32,
+        other_link_type: u32,
+    },
+}
+
+fn format_resolution(resolution: TimestampResolution) -> String {
+    match resolution {
+        TimestampResolution::Decimal(exponent) => format!("10^-{exponent} s"),
+        TimestampResolution::Binary(exponent) => format!("2^-{exponent} s"),
+    }
 }
 
 impl Classified for Error {
@@ -161,6 +187,18 @@ impl Classified for Error {
                 crate::error::Code::PacketCaptureTransformMetadata,
                 Kind::Packet,
                 None,
+            ),
+            Self::PcapNormalizeDirection { .. }
+            | Self::PcapNormalizeTimestampResolution { .. }
+            | Self::PcapNormalizeInterfaceConflict { .. } => Classification::new(
+                crate::error::Code::PacketCaptureTransformMetadata,
+                Kind::Packet,
+                Some("use --output pcapng to keep capture metadata classic PCAP cannot carry"),
+            ),
+            Self::EmptyPcapNormalization => Classification::new(
+                crate::error::Code::CliCaptureOption,
+                Kind::Usage,
+                Some("select at least one frame, or use --output pcapng for an empty capture"),
             ),
             Self::TransformIdentity { .. } => Classification::new(
                 crate::error::Code::InternalCaptureTransformIdentity,
@@ -255,7 +293,11 @@ impl Classified for Error {
         match self {
             Self::Predicate { number, .. }
             | Self::Transform { number, .. }
-            | Self::TransformIdentity { number } => Some(Coordinate::SourceFrame(*number)),
+            | Self::TransformIdentity { number }
+            | Self::PcapNormalizeDirection { number }
+            | Self::PcapNormalizeInterfaceConflict { number, .. } => {
+                Some(Coordinate::SourceFrame(*number))
+            }
             Self::MergeSource { source, .. } => source.context(),
             _ => None,
         }

@@ -7,9 +7,10 @@ use bytes::Bytes;
 
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
-    diagnostic::{Diagnostic, IGMP_CHECKSUM},
+    diagnostic::Diagnostic,
     field::WireValue,
     layer::{Id, Layer, reflective_layer},
+    protocol::IGMP_CHECKSUM,
 };
 
 use crate::protocol::common::{

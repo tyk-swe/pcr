@@ -204,6 +204,12 @@ impl Invocation {
             diagnostics.stream_index_needed(needed);
         }
     }
+
+    pub(crate) fn apply_scope(&self, scope: &packetcraftr::policy::Scope) {
+        if let Some(diagnostics) = &self.diagnostics {
+            diagnostics.apply_scope(scope.max_packets, scope.max_bytes);
+        }
+    }
 }
 
 impl std::fmt::Debug for Invocation {

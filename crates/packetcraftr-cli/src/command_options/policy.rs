@@ -135,9 +135,10 @@ pub(crate) struct HostnamePolicyArgs {
     scope: ScopeArgs,
 }
 
-/// Identification uses numeric endpoints and constructs reviewed requests.
+/// `identify`, `audit`, and `differential-responder`: numeric endpoints, no
+/// hostname resolution, and no raw packet opt-ins.
 #[derive(Clone, Debug, Args)]
-pub(crate) struct IdentificationPolicyArgs {
+pub(crate) struct EndpointPolicyArgs {
     #[command(flatten)]
     public_destination: PublicDestinationArgs,
     #[command(flatten)]
@@ -148,7 +149,7 @@ pub(crate) struct IdentificationPolicyArgs {
     scope: ScopeArgs,
 }
 
-impl PolicyOptions for IdentificationPolicyArgs {
+impl PolicyOptions for EndpointPolicyArgs {
     fn into_base_policy(self) -> (packetcraftr::policy::Policy, ScopeArgs) {
         let mut policy = packetcraftr::policy::Policy::default();
         self.public_destination.apply_to(&mut policy);
@@ -164,7 +165,7 @@ impl NumericPolicyArgs {
     }
 }
 
-impl IdentificationPolicyArgs {
+impl EndpointPolicyArgs {
     pub(crate) fn resources(&self, settings: &mut Settings<'_>) {
         self.budgets.resources(settings);
     }

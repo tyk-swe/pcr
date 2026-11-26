@@ -12,7 +12,7 @@ pub(crate) use offline_limits::{
 };
 pub(crate) use packet_budget::PacketBudgetArgs;
 pub(crate) use policy::{
-    DestinationAllowlistArgs, HostnamePolicyArgs, HostnameResolutionArgs, IdentificationPolicyArgs,
+    DestinationAllowlistArgs, EndpointPolicyArgs, HostnamePolicyArgs, HostnameResolutionArgs,
     NumericPolicyArgs, PolicyOptions, PublicDestinationArgs, ScopeArgs, SendPolicyArgs,
     TrafficBudgetArgs,
 };

@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use packetcraftr::differential as lib;
 
-use crate::command_options::{Bounded as _, MaxDurationArgs};
+use crate::command_options::{Bounded as _, EndpointPolicyArgs, MaxDurationArgs};
 use crate::errors::CliError;
 use crate::output;
 use crate::output::contract::Format;
@@ -46,6 +46,8 @@ pub(crate) struct Args {
     pub(crate) log_file: Option<PathBuf>,
     #[command(flatten)]
     pub(crate) duration: MaxDurationArgs,
+    #[command(flatten)]
+    pub(crate) policy: EndpointPolicyArgs,
 }
 
 use crate::output::contract::PublishedType;
@@ -86,6 +88,7 @@ impl crate::commands::Spec for Args {
             idle_ms: Milliseconds @ Operation,
         ]);
         self.duration.resources(settings);
+        self.policy.resources(settings);
     }
 
     fn run(
@@ -184,6 +187,7 @@ where
 
 fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<(), CliError> {
     let token = parse_token(&arguments.token)?;
+    let policy = crate::system::resolve_policy(invocation, arguments.policy)?;
     let log = ReceptionLog::stage(invocation, arguments.log_file.as_deref())?;
     let mut request = lib::ResponderRequest::new(arguments.bind, arguments.port, token);
     request.max_duration = arguments.duration.max_duration();
@@ -197,7 +201,7 @@ fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<()
     let client = crate::system::client(
         invocation,
         packetcraftr_core::protocol::builtin::registry(),
-        packetcraftr::policy::Policy::default(),
+        policy,
         crate::system::Runtime::Workflow,
     );
     let mut collector = lib::ResponderCollector::default();
@@ -285,6 +289,43 @@ mod tests {
             }
         }
         panic!("responder never answered across retries");
+    }
+
+    #[test]
+    fn policy_flags_govern_responder_authorization() {
+        let respond = |policy: &[&str]| {
+            let port = free_port().to_string();
+            let token = "42".repeat(16);
+            let arguments = Wrap::try_parse_from(
+                [
+                    "test",
+                    "--bind",
+                    "127.0.0.1",
+                    "--port",
+                    &port,
+                    "--token",
+                    &token,
+                    "--max-duration-ms",
+                    "20",
+                    "--max-datagrams",
+                    "20000",
+                ]
+                .into_iter()
+                .chain(policy.iter().copied()),
+            )
+            .expect("arguments parse")
+            .args;
+            run(&ndjson(Stdout::default(), None), arguments)
+                .map_err(|error| error.classification.code)
+        };
+
+        let code = packetcraftr_core::error::Code::new;
+        assert_eq!(respond(&[]), Err(code("policy.traffic_unit_limit")));
+        assert_eq!(
+            respond(&["--max-packets", "20000", "--allow-destination", "192.0.2.1"]),
+            Err(code("policy.destination_not_allowed"))
+        );
+        assert_eq!(respond(&["--max-packets", "20000"]), Ok(()));
     }
 
     fn parsed_args(port: u16, idle_ms: u64, duration_ms: u64, log: &std::path::Path) -> Args {

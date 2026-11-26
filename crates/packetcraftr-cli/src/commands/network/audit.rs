@@ -6,7 +6,7 @@ use crate::commands::{CommandExit, Spec};
 use crate::invocation::Invocation;
 use crate::output::contract::{Command, Format};
 use crate::{
-    command_options::{Bounded, IdentificationPolicyArgs},
+    command_options::{Bounded, EndpointPolicyArgs},
     errors::CliError,
     resources::Settings,
 };
@@ -30,7 +30,7 @@ struct Connection {
     #[arg(long, default_value_t = 131072)]
     max_tls_read_bytes: usize,
     #[command(flatten)]
-    policy: IdentificationPolicyArgs,
+    policy: EndpointPolicyArgs,
     #[command(flatten)]
     bounds: Bounds,
 }

@@ -178,7 +178,7 @@ fn capture(
     let context = Context {
         pipeline: analysis::FramePipeline::new(builtin::registry(), options).unwrap(),
         collector: quic::Collector::new(quic::Limits::default()).unwrap(),
-        secrets: keylog::Input::open(Some(&keys)).unwrap(),
+        secrets: keylog::Input::open(&invocation.control, Some(&keys)).unwrap(),
         state: State::new(&args, &invocation).unwrap(),
         interfaces: Vec::new(),
     };

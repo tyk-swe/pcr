@@ -5,7 +5,6 @@ pub(in crate::commands) mod arguments;
 mod csv;
 pub(in crate::commands) mod output;
 mod rendering;
-mod selection;
 
 use crate::output::contract::Format;
 use crate::output::envelope::Published;
@@ -89,28 +88,25 @@ pub(super) fn run(
         arguments.filter.as_deref(),
         &arguments.decode,
     )?;
-    let mut collector = analysis::stats::Collector::for_table(
+    let collector = analysis::stats::Collector::for_table(
         Duration::from_millis(arguments.interval_ms),
         aggregation,
     )
     .map_err(CliError::classified)?;
 
     let mut reader = prepared.open(invocation, &arguments.path)?;
-
-    let options = prepared.options(invocation);
-    let summary = analysis::run(&mut reader, prepared.registry.clone(), &options, |record| {
-        collector.observe(&record);
-        Ok(())
-    })
-    .map_err(CliError::classified)?;
-    let mut report = collector.finish(&summary);
-    let frames_read = summary.frames_read;
+    let session = prepared.session(invocation, collector, None);
+    let outcome = session
+        .run(&mut reader, |_| Ok(()), |event| match event {})
+        .map_err(CliError::classified)?;
+    let mut report = outcome.summary;
+    let frames_read = outcome.run.frames_read;
     invocation.check()?;
-    let diagnostics = selection::select(
+    let diagnostics = analysis::stats::select(
         &mut report,
-        table,
+        aggregation,
         top,
-        arguments.sort,
+        arguments.sort.map(Into::into),
         arguments.min_frames,
     );
     invocation.check()?;

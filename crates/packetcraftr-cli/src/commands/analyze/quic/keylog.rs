@@ -1,4 +1,8 @@
-use crate::{errors::CliError, invocation::Invocation};
+use crate::{
+    errors::CliError,
+    input::open_regular_file,
+    invocation::{Control, Invocation},
+};
 use packetcraftr_core::analysis::quic::Collector;
 use packetcraftr_core::error::Kind;
 use std::fs::File;
@@ -10,19 +14,12 @@ pub(in crate::commands::analyze) struct Input {
     read: u64,
 }
 impl Input {
-    pub(in crate::commands::analyze) fn open(path: Option<&Path>) -> Result<Self, CliError> {
+    pub(in crate::commands::analyze) fn open(
+        control: &Control,
+        path: Option<&Path>,
+    ) -> Result<Self, CliError> {
         let file = path
-            .map(|path| {
-                let metadata =
-                    std::fs::metadata(path).map_err(|error| CliError::caused(Kind::Io, &error))?;
-                if !metadata.is_file() {
-                    return Err(CliError::new(
-                        Kind::Usage,
-                        "TLS key log must be a regular file",
-                    ));
-                }
-                File::open(path).map_err(|error| CliError::caused(Kind::Io, &error))
-            })
+            .map(|path| open_regular_file(control, path, "TLS key log"))
             .transpose()?;
         Ok(Self { file, read: 0 })
     }

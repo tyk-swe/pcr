@@ -87,98 +87,70 @@ pub(super) fn run(
     }
     let queue_limits = arguments.limits.clone().into_limits();
     let mut requests = prepare_requests(&arguments, queue_limits)?;
-    let workflow = prepare_workflow(
-        &arguments.route,
-        arguments.policy.into_policy(),
-        requests[0].timeout,
-        queue_limits,
-    )?;
+    let policy = crate::system::resolve_policy(invocation, arguments.policy)?;
+    let workflow = prepare_workflow(&arguments.route, policy, requests[0].timeout, queue_limits)?;
     for request in &mut requests {
         request.route = workflow.route.clone();
         request.collection = workflow.collection.clone();
     }
     let client = &workflow.client(invocation, Runtime::Workflow);
     // A lone question keeps the single-query contract.
-    if let [request] = requests.as_slice() {
-        return match format {
-            Format::Ndjson => {
-                let emit = crate::commands::execution::emitter(invocation, rendering::emit_event)?;
-                let summary = client
-                    .dns(request.clone(), emit)
-                    .map_err(CliError::classified)?;
-                invocation.check()?;
-                rendering::emit_complete(summary, stream)
-            }
-            _ => {
-                let report = {
-                    let mut collector = packetcraftr::dns::Collector::default();
-                    let report = client
-                        .dns(request.clone(), &mut collector)
+    if requests.len() == 1 {
+        let request = requests.pop().expect("single question");
+        return crate::commands::execution::run_workflow(
+            invocation,
+            rendering::emit_event,
+            |sink| client.dns(request, sink).map_err(CliError::classified),
+            rendering::emit_complete,
+            |collector: packetcraftr::dns::Collector, report| {
+                collector.finish(report).map_err(CliError::classified)
+            },
+            |report| {
+                let published =
+                    crate::output::envelope::Published::<output::Report>::try_from(report)
                         .map_err(CliError::classified)?;
-                    collector.finish(report).map_err(CliError::classified)?
-                };
-                invocation.check()?;
                 if format == Format::Json {
                     crate::publication::emit_published(
                         invocation,
                         crate::output::contract::Command::Dns,
-                        crate::output::envelope::Published::<output::Report>::try_from(report)
-                            .map_err(CliError::classified)?,
+                        published,
                     )
                 } else {
-                    rendering::render_text(
-                        invocation,
-                        crate::output::envelope::Published::try_from(report)
-                            .map_err(CliError::classified)?,
-                        stream.presentation(),
-                    )
+                    rendering::render_text(invocation, published, stream.presentation())
                 }
-            }
-        };
+            },
+        );
     }
     let request = packetcraftr::dns::batch::Request {
         questions: requests,
     };
-    match format {
-        Format::Ndjson => {
-            let emit = crate::commands::execution::emitter(
-                invocation,
-                |event: packetcraftr::dns::batch::Event, stream| {
-                    rendering::emit_event(event.event, stream)
-                },
-            )?;
-            let summary = client
-                .dns_batch(request.clone(), emit)
-                .map_err(CliError::classified)?;
-            invocation.check()?;
-            rendering::emit_batch_complete(summary, stream)
-        }
-        _ => {
-            let report = {
-                let mut collector = packetcraftr::dns::batch::Collector::default();
-                let report = client
-                    .dns_batch(request.clone(), &mut collector)
+    crate::commands::execution::run_workflow(
+        invocation,
+        |event: packetcraftr::dns::batch::Event, stream| rendering::emit_event(event.event, stream),
+        |sink| {
+            client
+                .dns_batch(request, sink)
+                .map_err(CliError::classified)
+        },
+        rendering::emit_batch_complete,
+        |collector: packetcraftr::dns::batch::Collector, report| {
+            collector.finish(report).map_err(CliError::classified)
+        },
+        |report| {
+            let published =
+                crate::output::envelope::Published::<output::BatchResult>::try_from(report)
                     .map_err(CliError::classified)?;
-                collector.finish(report).map_err(CliError::classified)?
-            };
-            invocation.check()?;
             if format == Format::Json {
                 crate::publication::emit_published(
                     invocation,
                     crate::output::contract::Command::Dns,
-                    crate::output::envelope::Published::<output::BatchResult>::try_from(report)
-                        .map_err(CliError::classified)?,
+                    published,
                 )
             } else {
-                rendering::render_batch_text(
-                    invocation,
-                    crate::output::envelope::Published::try_from(report)
-                        .map_err(CliError::classified)?,
-                    stream.presentation(),
-                )
+                rendering::render_batch_text(invocation, published, stream.presentation())
             }
-        }
-    }
+        },
+    )
 }
 
 fn prepare_requests(

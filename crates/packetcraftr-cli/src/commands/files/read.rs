@@ -148,7 +148,7 @@ pub(super) fn run(
         output.validate_input(reader.format())?;
         let stdout = io::stdout();
         let mut destination = compression.writer(stdout.lock())?;
-        let result = output.write(invocation, &mut reader, limits, selection, &mut destination);
+        let result = output.write(&mut reader, limits, selection, &mut destination);
         return finish_compressed_output(result, destination);
     }
     let mut run = || {

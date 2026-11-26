@@ -72,10 +72,17 @@ fn root_after_help() -> String {
 
 fn long_version() -> &'static str {
     static LONG_VERSION: LazyLock<String> = LazyLock::new(|| {
+        use packetcraftr_netio::{NativeCapability, link::Mode};
         let enabled = [
-            ("native-route", cfg!(feature = "native-route")),
-            ("native-layer2", cfg!(feature = "native-layer2")),
-            ("native-layer3", cfg!(feature = "native-layer3")),
+            ("native-route", NativeCapability::Route.check().is_ok()),
+            (
+                "native-layer2",
+                NativeCapability::Transmission(Mode::Layer2).check().is_ok(),
+            ),
+            (
+                "native-layer3",
+                NativeCapability::Transmission(Mode::Layer3).check().is_ok(),
+            ),
         ];
         let names = enabled
             .into_iter()

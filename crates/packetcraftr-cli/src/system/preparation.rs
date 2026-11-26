@@ -8,7 +8,7 @@ use std::time::Duration;
 use packetcraftr_core as core;
 use packetcraftr_netio as net;
 
-use super::{Client, Runtime, client, route};
+use super::{Client, Runtime, client, resolve_policy, route};
 use crate::command_options::{RouteArgs, RouteSelectionArgs, SendArgs, TemplateArgs};
 use crate::errors::CliError;
 use crate::input::read_recipe;
@@ -84,7 +84,7 @@ pub(crate) fn prepare_live<D: LiveDraft>(
         core::packet::DEFAULT_MAX_LAYERS,
     )?;
     let template = axes.into_template(packet, &registry)?;
-    let policy = send.policy.into_policy();
+    let policy = resolve_policy(invocation, send.policy)?;
     policy.validate().map_err(CliError::classified)?;
     let count = parameters.budget_count(&template)?;
     policy

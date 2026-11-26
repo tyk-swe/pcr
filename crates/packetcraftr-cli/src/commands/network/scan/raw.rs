@@ -40,7 +40,8 @@ pub(super) fn run(
         reverse_dns,
         reverse_dns_port,
     } = run;
-    let workflow = prepare_workflow(&route, policy.into_policy(), request.timeout, queue_limits)?;
+    let policy = crate::system::resolve_policy(invocation, policy)?;
+    let workflow = prepare_workflow(&route, policy, request.timeout, queue_limits)?;
     let client = workflow.client(invocation, Runtime::Workflow);
     let request = packetcraftr::scan::Request {
         route: workflow.route,

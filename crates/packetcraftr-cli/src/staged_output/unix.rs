@@ -71,6 +71,10 @@ impl Directory {
             staging: Staging::Named(named),
         })
     }
+
+    pub(super) fn duplicate(&self) -> io::Result<Self> {
+        Ok(Self(Arc::clone(&self.0)))
+    }
 }
 
 #[derive(Debug)]
@@ -90,7 +94,7 @@ enum Staging {
 
 impl Staged {
     pub(super) fn directory(&self) -> io::Result<Directory> {
-        Ok(Directory(Arc::clone(&self.directory.0)))
+        self.directory.duplicate()
     }
 
     pub(super) fn file(&self) -> &File {
@@ -109,7 +113,7 @@ impl Staged {
         Ok(rustix::fs::fchmod(&self.file, *mode)?)
     }
 
-    pub(super) fn publish(self, name: &OsStr, publication: Publication) -> io::Result<()> {
+    pub(super) fn publish(self, name: &OsStr, publication: Publication) -> io::Result<File> {
         let Self {
             file,
             directory: Directory(directory),
@@ -143,7 +147,8 @@ impl Staged {
             },
             Staging::Named(named) => publish_named(&named, name, publication)?,
         }
-        verify_published(&directory, &file, name, publication)
+        verify_published(&directory, &file, name, publication)?;
+        Ok(file)
     }
 }
 

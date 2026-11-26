@@ -99,51 +99,33 @@ fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<()
         },
     };
     let Prepared { request, client } = prepare_live(invocation, send, template, draft)?;
-    match format {
-        Format::Ndjson => {
-            let emit = crate::commands::execution::emitter(invocation, rendering::emit_event)?;
-            let summary = client
-                .exchange(request.clone(), emit)
-                .map_err(CliError::classified)?;
-            invocation.check()?;
-            rendering::render_complete(summary, stream)
-        }
-        _ => {
-            let report = {
-                let mut collector = packetcraftr::exchange::Collector::default();
-                let report = client
-                    .exchange(request.clone(), &mut collector)
-                    .map_err(CliError::classified)?;
-                collector.finish(report).map_err(CliError::classified)?
-            };
-            invocation.check()?;
-            if format == Format::Json {
-                crate::publication::emit_published(
-                    invocation,
-                    crate::output::contract::Command::Exchange,
-                    crate::output::envelope::Published::<output::Report>::try_from(report)
-                        .map_err(CliError::classified)?,
-                )
-            } else {
-                match format {
-                    Format::Text => {
-                        rendering::render_text(invocation, &report, stream.presentation())
-                    }
-                    Format::Pcap => {
-                        rendering::render_capture(&report, capture::Format::Pcap, compression)
-                    }
-                    Format::PcapNg => {
-                        rendering::render_capture(&report, capture::Format::PcapNg, compression)
-                    }
-                    Format::Json | Format::Ndjson => Err(CliError::new(
-                        Kind::Internal,
-                        "exchange machine formats dispatch before text rendering",
-                    )),
-                    other => other.unreachable(),
-                }
+    crate::commands::execution::run_workflow(
+        invocation,
+        rendering::emit_event,
+        |sink| client.exchange(request, sink).map_err(CliError::classified),
+        rendering::render_complete,
+        |collector: packetcraftr::exchange::Collector, report| {
+            collector.finish(report).map_err(CliError::classified)
+        },
+        |report| match format {
+            Format::Json => crate::publication::emit_published(
+                invocation,
+                crate::output::contract::Command::Exchange,
+                crate::output::envelope::Published::<output::Report>::try_from(report)
+                    .map_err(CliError::classified)?,
+            ),
+            Format::Text => rendering::render_text(invocation, &report, stream.presentation()),
+            Format::Pcap => rendering::render_capture(&report, capture::Format::Pcap, compression),
+            Format::PcapNg => {
+                rendering::render_capture(&report, capture::Format::PcapNg, compression)
             }
-        }
-    }
+            Format::Ndjson => Err(CliError::new(
+                Kind::Internal,
+                "exchange machine formats dispatch before text rendering",
+            )),
+            other => other.unreachable(),
+        },
+    )
 }
 
 struct Draft {

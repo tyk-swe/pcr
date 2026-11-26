@@ -57,7 +57,9 @@ impl Connection {
                 path,
                 1024 * 1024,
             )?)
-            .map_err(invalid)?;
+            .map_err(|error: packetcraftr_netio::tls::TrustStoreError| {
+                CliError::caused(packetcraftr_core::error::Kind::Usage, &error)
+            })?;
         }
         Ok(request)
     }
@@ -116,10 +118,11 @@ impl Spec for AuditTls {
     }
     fn run(self, i: &Invocation) -> Result<CommandExit, CliError> {
         let request = self.connection.request(i)?;
+        let policy = crate::system::resolve_policy(i, self.connection.policy)?;
         let client = crate::system::client(
             i,
             packetcraftr_core::protocol::builtin::registry(),
-            self.connection.policy.into_policy(),
+            policy,
             crate::system::Runtime::Workflow,
         );
         publish(
@@ -187,10 +190,11 @@ impl Spec for AuditHttp {
         });
         request.path = self.path;
         request.max_response_bytes = self.max_response_bytes;
+        let policy = crate::system::resolve_policy(i, self.connection.policy)?;
         let client = crate::system::client(
             i,
             packetcraftr_core::protocol::builtin::registry(),
-            self.connection.policy.into_policy(),
+            policy,
             crate::system::Runtime::Workflow,
         );
         publish(

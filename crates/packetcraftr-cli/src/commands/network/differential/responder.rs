@@ -194,13 +194,19 @@ fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<()
 
     let format = invocation.format;
     let stream = &invocation.output;
+    let client = crate::system::client(
+        invocation,
+        packetcraftr_core::protocol::builtin::registry(),
+        packetcraftr::policy::Policy::default(),
+        crate::system::Runtime::Workflow,
+    );
     let mut collector = lib::ResponderCollector::default();
 
     let outcome = match format {
         Format::Ndjson => {
             let emitter =
                 crate::commands::execution::emitter(invocation, rendering::emit_responder_event)?;
-            lib::respond(
+            client.respond_differential(
                 request,
                 CollectingEmitter {
                     collector: &mut collector,
@@ -208,7 +214,7 @@ fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<()
                 },
             )
         }
-        Format::Text | Format::Json => lib::respond(request, &mut collector),
+        Format::Text | Format::Json => client.respond_differential(request, &mut collector),
         other => other.unreachable(),
     };
 
@@ -330,7 +336,8 @@ mod tests {
     }
 
     fn holds_probe_record(contents: &str) -> bool {
-        let expected = lib::hex(&canary::payload_sha256(&probe()));
+        let expected =
+            packetcraftr_core::field::hex::compact_hex(&canary::payload_sha256(&probe()));
         contents
             .lines()
             .filter_map(|line| serde_json::from_str::<lib::ReceptionRecord>(line).ok())

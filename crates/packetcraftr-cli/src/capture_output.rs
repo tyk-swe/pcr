@@ -5,4 +5,4 @@ mod spool;
 mod writer;
 
 pub(crate) use spool::{stream_capture_error, stream_limits, write_capture_file};
-pub(crate) use writer::{SourceCaptureWriter, finish_compressed_output};
+pub(crate) use writer::{SourceCaptureWriter, finish_compressed_output, source_interface};

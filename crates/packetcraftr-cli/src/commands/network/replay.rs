@@ -140,7 +140,7 @@ fn prepare(
     invocation: &crate::invocation::Invocation,
     arguments: &Args,
 ) -> Result<ReplayRun, CliError> {
-    let policy = arguments.policy.clone().into_policy();
+    let policy = crate::system::resolve_policy(invocation, arguments.policy.clone())?;
     let capture_limits = OfflineCaptureLimitsArgs {
         max_frames: policy.max_packets_per_operation,
         max_bytes: policy.max_bytes_per_operation,

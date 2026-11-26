@@ -233,27 +233,3 @@ where
         other => other.unreachable(),
     }
 }
-
-/// Syncs every staged file before persisting any, reporting already-published
-/// paths if a later persist fails.
-pub(super) fn publish_staged<T, R>(
-    staged: Vec<(T, crate::staged_output::StagedFile)>,
-    mut on_published: impl FnMut(T, crate::staged_output::Published) -> R,
-    on_error: impl FnOnce(CliError, &[String]) -> CliError,
-) -> Result<Vec<R>, CliError> {
-    for (_, file) in &staged {
-        file.sync()?;
-    }
-    let mut published_paths = Vec::with_capacity(staged.len());
-    let mut results = Vec::with_capacity(staged.len());
-    for (item, file) in staged {
-        match file.persist() {
-            Ok(published) => {
-                published_paths.push(published.destination().display().to_string());
-                results.push(on_published(item, published));
-            }
-            Err(error) => return Err(on_error(error, &published_paths)),
-        }
-    }
-    Ok(results)
-}

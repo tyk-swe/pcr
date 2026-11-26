@@ -133,7 +133,7 @@ impl DirectionFiles {
             .into_iter()
             .map(|staged| ((staged.direction, staged.bytes), staged.file))
             .collect();
-        crate::commands::offline_analysis::publish_staged(
+        crate::staged_output::publish_staged(
             staged,
             |(direction, bytes), file| Written {
                 direction,

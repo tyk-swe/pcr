@@ -1916,7 +1916,7 @@ mod differential {
             variant_index: 0,
             attempt_seq,
             source: "192.0.2.1:40000".parse().unwrap(),
-            payload_sha256: lib::hex(&[0x11; 32]),
+            payload_sha256: packetcraftr_core::field::hex::compact_hex(&[0x11; 32]),
         })
         .unwrap()
     }
@@ -3547,6 +3547,91 @@ fn scope_denies_an_excluded_destination_before_route_lookup() {
     let output = run(&args);
     assert_eq!(output.status.code(), Some(6), "{}", stdout(&output));
     assert_error(&output, "policy.destination_not_allowed");
+
+    let directory = tempfile::tempdir().unwrap();
+    let missing = directory.path().join("no-such-scope.json");
+    let args = [
+        "--output",
+        "json",
+        "network",
+        "plan",
+        "--packet",
+        "ipv4(dst=192.0.2.1)/udp(dport=53)",
+        "--scope-file",
+        missing.to_str().unwrap(),
+    ];
+    let output = run(&args);
+    assert_eq!(output.status.code(), Some(5), "{}", stdout(&output));
+    let envelope: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+    assert_eq!(envelope["error"]["kind"], "io");
+
+    let args = [
+        "--output",
+        "json",
+        "network",
+        "plan",
+        "--packet",
+        "ipv4(dst=192.0.2.1)/udp(dport=53)",
+        "--scope-file",
+        directory.path().to_str().unwrap(),
+    ];
+    let output = run(&args);
+    assert_eq!(output.status.code(), Some(2), "{}", stdout(&output));
+    let envelope: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+    assert_eq!(envelope["error"]["kind"], "usage");
+
+    let invalid = directory.path().join("invalid-scope.json");
+    std::fs::write(&invalid, b"{not json").unwrap();
+    let args = [
+        "--output",
+        "json",
+        "network",
+        "plan",
+        "--packet",
+        "ipv4(dst=192.0.2.1)/udp(dport=53)",
+        "--scope-file",
+        invalid.to_str().unwrap(),
+    ];
+    let output = run(&args);
+    assert_eq!(output.status.code(), Some(2), "{}", stdout(&output));
+    let envelope: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+    assert_eq!(envelope["error"]["kind"], "usage");
+
+    let capped = directory.path().join("capped-scope.json");
+    std::fs::write(
+        &capped,
+        br#"{"schema":"packetcraftr.scope/v1","label":"capped","allowed_destinations":["192.0.2.0/24"],"denied_destinations":["192.0.2.1/32"],"max_packets":7,"max_bytes":1024}"#,
+    )
+    .unwrap();
+    let args = [
+        "--output",
+        "json",
+        "--resource-diagnostics",
+        "network",
+        "send",
+        "--packet",
+        "ipv4(dst=192.0.2.1)/udp(dport=53)",
+        "--max-packets",
+        "100",
+        "--max-bytes",
+        "65536",
+        "--scope-file",
+        capped.to_str().unwrap(),
+    ];
+    let output = run(&args);
+    assert_eq!(output.status.code(), Some(6), "{}", stdout(&output));
+    let envelope: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+    let settings = envelope["resources"]["settings"].as_array().unwrap();
+    let max_packets = settings
+        .iter()
+        .find(|entry| entry["name"] == "--max-packets")
+        .expect("max_packets setting");
+    let max_bytes = settings
+        .iter()
+        .find(|entry| entry["name"] == "--max-bytes")
+        .expect("max_bytes setting");
+    assert_eq!(max_packets["value"], 7);
+    assert_eq!(max_bytes["value"], 1024);
 }
 
 #[test]

@@ -94,12 +94,8 @@ pub(super) fn run(
     let queue_limits = arguments.limits.clone().into_limits();
     let flow_count = arguments.flow_count();
     let request = prepare_request(&arguments, queue_limits)?;
-    let workflow = prepare_workflow(
-        &arguments.route,
-        arguments.policy.into_policy(),
-        request.timeout,
-        queue_limits,
-    )?;
+    let policy = crate::system::resolve_policy(invocation, arguments.policy)?;
+    let workflow = prepare_workflow(&arguments.route, policy, request.timeout, queue_limits)?;
     let client = workflow.client(invocation, Runtime::Workflow);
     let request = packetcraftr::traceroute::Request {
         route: workflow.route,
@@ -118,41 +114,32 @@ pub(super) fn run(
             stream,
         );
     }
-    match format {
-        Format::Ndjson => {
-            let emit = crate::commands::execution::emitter(invocation, rendering::emit_event)?;
-            let summary = client
-                .traceroute(request.clone(), emit)
+    crate::commands::execution::run_workflow(
+        invocation,
+        rendering::emit_event,
+        |sink| {
+            client
+                .traceroute(request, sink)
+                .map_err(CliError::classified)
+        },
+        rendering::emit_complete,
+        |collector: packetcraftr::traceroute::Collector, report| {
+            collector.finish(report).map_err(CliError::classified)
+        },
+        |report| {
+            let published = crate::output::envelope::Published::<output::Report>::try_from(report)
                 .map_err(CliError::classified)?;
-            invocation.check()?;
-            rendering::emit_complete(summary, stream)
-        }
-        _ => {
-            let report = {
-                let mut collector = packetcraftr::traceroute::Collector::default();
-                let report = client
-                    .traceroute(request.clone(), &mut collector)
-                    .map_err(CliError::classified)?;
-                collector.finish(report).map_err(CliError::classified)?
-            };
-            invocation.check()?;
             if format == Format::Json {
                 crate::publication::emit_published(
                     invocation,
                     crate::output::contract::Command::Traceroute,
-                    crate::output::envelope::Published::<output::Report>::try_from(report)
-                        .map_err(CliError::classified)?,
+                    published,
                 )
             } else {
-                rendering::render_text(
-                    invocation,
-                    crate::output::envelope::Published::try_from(report)
-                        .map_err(CliError::classified)?,
-                    stream.presentation(),
-                )
+                rendering::render_text(invocation, published, stream.presentation())
             }
-        }
-    }
+        },
+    )
 }
 
 fn prepare_request(

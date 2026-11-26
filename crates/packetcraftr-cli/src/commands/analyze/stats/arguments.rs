@@ -103,6 +103,16 @@ pub(crate) enum Sort {
     Duration,
 }
 
+impl From<Sort> for packetcraftr_core::analysis::stats::Sort {
+    fn from(value: Sort) -> Self {
+        match value {
+            Sort::Frames => Self::Frames,
+            Sort::Bytes => Self::Bytes,
+            Sort::Duration => Self::Duration,
+        }
+    }
+}
+
 impl Args {
     pub(super) fn validate_selection(&self) -> Result<(), crate::errors::CliError> {
         use crate::errors::CliError;

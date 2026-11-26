@@ -64,6 +64,13 @@ impl Directory {
             directory: self,
         })
     }
+
+    pub(super) fn duplicate(&self) -> io::Result<Self> {
+        Ok(Self {
+            path: self.path.clone(),
+            _handle: self._handle.try_clone()?,
+        })
+    }
 }
 
 #[derive(Debug)]
@@ -77,10 +84,7 @@ pub(super) struct Staged {
 
 impl Staged {
     pub(super) fn directory(&self) -> io::Result<Directory> {
-        Ok(Directory {
-            path: self.directory.path.clone(),
-            _handle: self.directory._handle.try_clone()?,
-        })
+        self.directory.duplicate()
     }
 
     pub(super) fn file(&self) -> &File {
@@ -99,7 +103,7 @@ impl Staged {
         self.file.as_file().set_permissions(permissions.clone())
     }
 
-    pub(super) fn publish(self, name: &OsStr, publication: Publication) -> io::Result<()> {
+    pub(super) fn publish(self, name: &OsStr, publication: Publication) -> io::Result<File> {
         let Self {
             file,
             _registration,
@@ -111,8 +115,7 @@ impl Staged {
             Publication::NoClobber => file.persist_noclobber(&destination),
             Publication::Replace => file.persist(&destination),
         };
-        published.map_err(|error| error.error)?;
-        Ok(())
+        published.map_err(|error| error.error)
     }
 }
 

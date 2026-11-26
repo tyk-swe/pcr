@@ -166,6 +166,57 @@ pub(super) fn open_file(control: &Control, path: &Path) -> Result<Source, CliErr
     source::open(control, path).map_err(|source| file_io_error("open", path, source))
 }
 
+pub(crate) fn open_regular_file(
+    control: &Control,
+    path: &Path,
+    label: &'static str,
+) -> Result<std::fs::File, CliError> {
+    control.check()?;
+    let non_regular = || {
+        CliError::new(
+            Kind::Usage,
+            format!("{label} {} must be a regular file", path.display()),
+        )
+    };
+    let metadata = std::fs::metadata(path).map_err(|source| file_io_error("open", path, source))?;
+    if !metadata.is_file() {
+        return Err(non_regular());
+    }
+    let file = open_nonblocking(path).map_err(|source| file_io_error("open", path, source))?;
+    if !file
+        .metadata()
+        .map_err(|source| file_io_error("inspect", path, source))?
+        .is_file()
+    {
+        return Err(non_regular());
+    }
+    Ok(file)
+}
+
+#[cfg(unix)]
+fn open_nonblocking(path: &Path) -> io::Result<std::fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(rustix::fs::OFlags::NONBLOCK.bits().cast_signed())
+        .open(path)
+}
+
+#[cfg(not(unix))]
+fn open_nonblocking(path: &Path) -> io::Result<std::fs::File> {
+    std::fs::File::open(path)
+}
+
+pub(crate) fn read_scope(
+    control: &Control,
+    path: &Path,
+) -> Result<packetcraftr::policy::Scope, CliError> {
+    let file = open_regular_file(control, path, "scope file")?;
+    let bytes = read_file_reader_capped(file, path, packetcraftr::policy::MAX_SCOPE_DOCUMENT_BYTES)
+        .map_err(|error| interrupted_or(control, error))?;
+    packetcraftr::policy::Scope::parse(&bytes).map_err(CliError::classified)
+}
+
 pub(super) fn redirected_stdin(control: &Control, kind: InputKind) -> Result<Source, CliError> {
     require_redirected_stdin(kind, io::stdin().is_terminal())?;
     source::stdin(control).map_err(|source| input_read_error(kind, source))
@@ -485,5 +536,68 @@ mod tests {
             error.message
         );
         assert!(error.message.ends_with(" budget"), "{}", error.message);
+    }
+
+    #[test]
+    fn scope_file_loading_classifies_io_usage_invalid_and_control_stops() {
+        let control = source::test_control(None, Default::default());
+        let directory = tempfile::tempdir().unwrap();
+
+        let missing = directory.path().join("missing-scope.json");
+        let error = read_scope(&control, &missing).unwrap_err();
+        assert_eq!(error.classification.kind, Kind::Io);
+        assert_eq!(error.exit_code(), crate::errors::exit_code_for(Kind::Io));
+
+        let error = read_scope(&control, directory.path()).unwrap_err();
+        assert_eq!(error.classification.kind, Kind::Usage);
+
+        let invalid = directory.path().join("bad-scope.json");
+        std::fs::write(&invalid, b"{not json").unwrap();
+        let error = read_scope(&control, &invalid).unwrap_err();
+        assert_eq!(error.classification.kind, Kind::Usage);
+
+        let valid = directory.path().join("scope.json");
+        std::fs::write(
+            &valid,
+            br#"{"schema":"packetcraftr.scope/v1","label":"lab","allowed_destinations":["192.0.2.0/24"]}"#,
+        )
+        .unwrap();
+        let scope = read_scope(&control, &valid).unwrap();
+        assert_eq!(scope.label, "lab");
+
+        let cancellation = packetcraftr_core::budget::Cancellation::default();
+        cancellation.cancel();
+        let cancelled = source::test_control(None, cancellation);
+        let error = read_scope(&cancelled, &valid).unwrap_err();
+        let expected = cancelled.check().unwrap_err();
+        assert_eq!(error.classification, expected.classification);
+
+        let expired = source::test_control(Some(std::time::Duration::ZERO), Default::default());
+        let error = read_scope(&expired, &valid).unwrap_err();
+        let expected = expired.check().unwrap_err();
+        assert_eq!(error.classification, expected.classification);
+        assert_eq!(error.exit_code(), expected.exit_code());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn scope_and_keylog_reject_fifo_without_blocking() {
+        let directory = tempfile::tempdir().unwrap();
+        let fifo = directory.path().join("non-regular.fifo");
+        let status = std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .unwrap();
+        assert!(status.success(), "mkfifo failed: {status:?}");
+        let control =
+            source::test_control(Some(std::time::Duration::from_secs(5)), Default::default());
+
+        let error = read_scope(&control, &fifo).unwrap_err();
+        assert_eq!(error.classification.kind, Kind::Usage);
+        assert!(error.message.contains("regular file"), "{}", error.message);
+
+        let error = open_regular_file(&control, &fifo, "TLS key log").unwrap_err();
+        assert_eq!(error.classification.kind, Kind::Usage);
+        assert!(error.message.contains("regular file"), "{}", error.message);
     }
 }

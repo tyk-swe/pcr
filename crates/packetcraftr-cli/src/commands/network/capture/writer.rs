@@ -53,17 +53,7 @@ pub(super) fn initialize<W: Write>(
         },
     )?;
     for source in sources {
-        let description = capture_file::Interface {
-            link_type: source.native.metadata.link_type,
-            snap_len: u32::try_from(source.native.metadata.snap_length).map_err(|_| {
-                Error::InvalidData {
-                    format,
-                    reason: "snapshot exceeds capture wire range",
-                }
-            })?,
-            timestamp_resolution: capture_file::TimestampResolution::Decimal(9),
-            timestamp_offset: 0,
-        };
+        let description = crate::capture_output::source_interface(source, format)?;
         let id = writer.add_interface_description_with_options(
             description,
             &[capture_file::PcapNgOption {

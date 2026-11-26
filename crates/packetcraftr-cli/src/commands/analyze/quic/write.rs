@@ -122,7 +122,7 @@ impl Exporter {
         write_pretty_json_buffered(manifest.as_file_mut(), &contents)
             .map_err(|error| CliError::caused(Kind::Io, &error))?;
         self.files.push((path, manifest));
-        crate::commands::offline_analysis::publish_staged(
+        crate::staged_output::publish_staged(
             self.files,
             |_, _| (),
             |mut error, published| {

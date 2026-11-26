@@ -17,12 +17,12 @@ use crate::{
     errors::CliError,
     filtering,
     invocation::StreamEncoder,
-    system::{Runtime, client, resolve},
+    system::{Runtime, client, resolve_unique},
 };
 use packetcraftr_core::clock::{Clock, SystemClock};
 use packetcraftr_core::{capture_file, error::Kind};
 use packetcraftr_netio as net;
-use std::{collections::HashSet, time::Duration};
+use std::time::Duration;
 
 use self::files::Files;
 use self::frames::{Decoding, Destinations};
@@ -86,7 +86,7 @@ impl crate::commands::Spec for Args {
         ]);
         self.timeout.resources(settings);
         self.limits.resources(settings);
-        self.budgets.resources_with_scope(settings, &self.scope);
+        self.budgets.resources(settings);
         self.tree.resources(settings);
     }
 
@@ -107,12 +107,6 @@ pub(super) fn run(invocation: &crate::invocation::Invocation, args: Args) -> Res
             timeout,
             maximum: net::deadline::MAX_WAIT,
         }));
-    }
-    if args.interface.len() > 256 {
-        return Err(CliError::new(
-            Kind::Usage,
-            "capture accepts at most 256 interface selectors before deduplication",
-        ));
     }
     let compression = validate_output(&args, format)?;
     let limits = args.limits.into_limits();
@@ -159,12 +153,16 @@ pub(super) fn run(invocation: &crate::invocation::Invocation, args: Args) -> Res
     } else {
         None
     };
-    let mut policy = args.budgets.into_policy();
-    args.scope.apply_to(&mut policy);
+    let base_policy = args.budgets.into_policy();
+    let policy = match crate::system::load_scope(invocation, &args.scope)? {
+        Some(scope) => scope.narrow(&base_policy),
+        None => base_policy,
+    };
     let files = args
         .write
         .map(|path| {
             files::Files::new(
+                invocation,
                 files::Options {
                     path,
                     compression,
@@ -178,14 +176,7 @@ pub(super) fn run(invocation: &crate::invocation::Invocation, args: Args) -> Res
         })
         .transpose()
         .map_err(CliError::classified)?;
-    let mut seen = HashSet::new();
-    let mut interfaces = Vec::new();
-    for source in args.interface {
-        let interface = resolve(invocation, source.get()?)?;
-        if seen.insert(interface.index) {
-            interfaces.push(interface);
-        }
-    }
+    let interfaces = resolve_unique(invocation, &args.interface, 256)?;
     if format == Format::Pcap && interfaces.len() != 1 {
         return Err(CliError::new(
             Kind::Usage,

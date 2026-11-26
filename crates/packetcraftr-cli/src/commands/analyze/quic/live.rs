@@ -1,5 +1,6 @@
 use super::{arguments::Args, keylog, rendering::State};
 use crate::{errors::CliError, invocation::Invocation, output, system};
+use packetcraftr::Sink as _;
 use packetcraftr_core::{
     analysis::{self, quic},
     capture_file,
@@ -30,23 +31,7 @@ pub(super) fn run(
     state: State,
     invocation: &Invocation,
 ) -> Result<Outcome, CliError> {
-    if args.interface.len() > 256 {
-        return Err(CliError::new(
-            Kind::Usage,
-            "QUIC capture supports at most 256 interface selectors",
-        ));
-    }
-    let interfaces = args
-        .interface
-        .iter()
-        .map(|selector| system::resolve(invocation, selector.get()?))
-        .collect::<Result<Vec<_>, CliError>>()?;
-    let interfaces = interfaces
-        .into_iter()
-        .map(|id| (id.index, id))
-        .collect::<std::collections::BTreeMap<_, _>>()
-        .into_values()
-        .collect();
+    let interfaces = system::resolve_unique(invocation, &args.interface, 256)?;
     let request = packetcraftr::capture::Request::new(
         net::capture::GroupRequest {
             interfaces,
@@ -93,88 +78,81 @@ fn drive<P: packetcraftr::CaptureProviders, K: packetcraftr::clock::Clock>(
     let sink_context = Arc::clone(&context);
     let sink_args = args.clone();
     let sink_invocation = invocation.clone();
-    let result = client.capture(
-        request,
-        packetcraftr::forwarding(
-            move |event, _| -> Result<packetcraftr::capture::Control, BoundaryError> {
-                let mut guard = sink_context
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
-                let context = guard.as_mut().ok_or_else(|| {
-                    CliError::new(Kind::Internal, "live QUIC state unavailable")
-                        .into_boundary_error()
-                })?;
-                let Context {
-                    pipeline,
-                    collector,
-                    secrets,
-                    state,
-                    interfaces,
-                } = context;
-                let args = &sink_args;
-                let invocation = &sink_invocation;
-                let encoder = &invocation.output;
-                match event {
-                    packetcraftr::capture::Event::Started { sources } => {
-                        *interfaces = sources
-                            .iter()
-                            .map(|source| capture_file::Interface {
-                                link_type: source.native.metadata.link_type,
-                                snap_len: u32::try_from(source.native.metadata.snap_length)
-                                    .unwrap_or(u32::MAX),
-                                timestamp_resolution: capture_file::TimestampResolution::Decimal(
-                                    match source
-                                        .native
-                                        .metadata
-                                        .native
-                                        .timestamp_precision
-                                        .effective
-                                    {
-                                        Some(net::capture::TimestampPrecision::Micro) => 6,
-                                        _ => 9,
-                                    },
-                                ),
-                                timestamp_offset: 0,
-                            })
-                            .collect();
-                    }
-                    packetcraftr::capture::Event::Frame {
-                        source_frame,
-                        frame,
-                        ..
-                    } => {
-                        secrets
-                            .poll(collector, invocation, false)
-                            .map_err(CliError::into_boundary_error)?;
-                        collector.refresh(&invocation.control.io_control(), |event| {
+    let mut emit = crate::commands::execution::emitter(
+        invocation,
+        move |event: packetcraftr::capture::Event, encoder| -> Result<(), CliError> {
+            let mut guard = sink_context
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let context = guard
+                .as_mut()
+                .ok_or_else(|| CliError::new(Kind::Internal, "live QUIC state unavailable"))?;
+            let Context {
+                pipeline,
+                collector,
+                secrets,
+                state,
+                interfaces,
+            } = context;
+            let args = &sink_args;
+            let invocation = &sink_invocation;
+            match event {
+                packetcraftr::capture::Event::Started { sources } => {
+                    *interfaces = sources
+                        .iter()
+                        .map(|source| {
+                            crate::capture_output::source_interface(
+                                source,
+                                capture_file::Format::PcapNg,
+                            )
+                        })
+                        .collect::<Result<Vec<_>, _>>()
+                        .map_err(CliError::classified)?;
+                }
+                packetcraftr::capture::Event::Frame {
+                    source_frame,
+                    frame,
+                    ..
+                } => {
+                    secrets.poll(collector, invocation, false)?;
+                    collector
+                        .refresh(&invocation.control.io_control(), |event| {
                             state
                                 .event(event, args, invocation, encoder)
                                 .map_err(CliError::into_boundary_error)
-                        })?;
-                        pipeline
-                            .push(
-                                source_frame,
-                                frame,
-                                |_| Ok(()),
-                                |record| {
-                                    for event in collector
-                                        .observe(&record)
-                                        .map_err(BoundaryError::from_error)?
-                                    {
-                                        state
-                                            .event(event, args, invocation, encoder)
-                                            .map_err(CliError::into_boundary_error)?;
-                                    }
-                                    Ok(())
-                                },
-                            )
-                            .map_err(BoundaryError::from_error)?;
-                    }
+                        })
+                        .map_err(CliError::classified)?;
+                    pipeline
+                        .push(
+                            source_frame,
+                            frame,
+                            |_| Ok(()),
+                            |record| {
+                                for event in collector
+                                    .observe(&record)
+                                    .map_err(BoundaryError::from_error)?
+                                {
+                                    state
+                                        .event(event, args, invocation, encoder)
+                                        .map_err(CliError::into_boundary_error)?;
+                                }
+                                Ok(())
+                            },
+                        )
+                        .map_err(CliError::classified)?;
                 }
-                Ok(packetcraftr::capture::Control::Continue)
-            },
-        ),
-    );
+            }
+            Ok(())
+        },
+    )?;
+    let sink = packetcraftr::forwarding(move |event, control| {
+        match control {
+            Some(control) => emit.publish_controlled(event, control),
+            None => emit.publish(event),
+        }
+        .map(|()| packetcraftr::capture::Control::Continue)
+    });
+    let result = client.capture(request, sink);
     let report = match result {
         Ok(report) => report,
         Err(error) => {

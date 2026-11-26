@@ -3,9 +3,6 @@
 
 use serde::{Deserialize, Serialize};
 
-#[doc(hidden)]
-pub const ICMPV6_CHECKSUM: &str = "decode.icmpv6_checksum";
-
 /// Diagnostic weight, ordered from least to most severe.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

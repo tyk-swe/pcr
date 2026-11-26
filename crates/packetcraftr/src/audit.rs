@@ -380,10 +380,11 @@ impl<P: TcpProviders, K: Clock> Client<P, K> {
             _ => {}
         }
         let head = final_head(&exchange.response)?.ok_or(Error::IncompleteResponse)?;
-        let mut report = security::http::audit(
+        let mut report = security::http::audit_with_method(
             &head,
             &connection.endpoint.to_string(),
             matches!(request.transport, HttpTransport::Tls(_)),
+            Some("HEAD"),
         );
         report
             .measurements

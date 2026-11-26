@@ -1,19 +1,17 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr_core::protocol::BuiltinProtocol;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use crate::neighbor::{MAX_VLAN_TAGS, Request as NeighborRequest};
 use packetcraftr_core::decode::{self, DecodedPacket, Dissector};
-use packetcraftr_core::diagnostic::ICMPV6_CHECKSUM;
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::Layer;
 use packetcraftr_core::packet::{MacAddress, VlanTag};
-use packetcraftr_core::protocol::builtin;
 use packetcraftr_core::protocol::identity::{self, NetworkHeader};
 use packetcraftr_core::protocol::link::Arp;
 use packetcraftr_core::protocol::network::ndp;
+use packetcraftr_core::protocol::{BuiltinProtocol, ICMPV6_CHECKSUM, builtin};
 
 use super::is_unicast_mac;
 use super::request::NDP_HOP_LIMIT;

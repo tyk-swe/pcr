@@ -339,6 +339,13 @@ def validated(validator: Any, label: str, text: str, ndjson: bool,
                     return [f'{earlier_label}: terminal event before end of stream']
             if not isinstance(record, dict) or record.get('event') not in ('complete', 'error'):
                 return [f'{record_label}: missing terminal event']
+            command = record.get('command')
+            for expected, (line_label, item) in enumerate(records):
+                if (not isinstance(item, dict) or type(item.get('seq')) is not int
+                        or item['seq'] != expected):
+                    return [f'{line_label}: non-contiguous stream sequence, expected {expected}']
+                if item.get('command') != command:
+                    return [f'{line_label}: command changed within stream']
         status = record.get('status') if isinstance(record, dict) else None
         if status != expected_status:
             problems.append(f'{record_label}: expected {expected_status!r} envelope status, got {status!r}')

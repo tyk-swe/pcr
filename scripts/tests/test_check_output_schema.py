@@ -275,6 +275,23 @@ class RuntimeValidationTests(unittest.TestCase):
                     self.assertEqual(len(found), 1, found)
                     self.assertIn(message, found[0])
 
+    def test_runtime_ndjson_requires_contiguous_sequences_for_one_command(self):
+        command = checker.RuntimeCommand(('--output', 'ndjson', 'stream'), succeeds=True)
+        validator = checker.load_validator(SCHEMA)
+        reader = dict(VALID, mode='stream', command='read')
+        with tempfile.TemporaryDirectory() as directory:
+            def problems(first: int, last: int, terminal_command: str = 'read') -> list[str]:
+                event = json.dumps(dict(reader, event='event', seq=first))
+                terminal = json.dumps(dict(reader, event='complete', seq=last, command=terminal_command))
+                binary = self.fake_binary(directory, VALID, stdout=f'{event}\n{terminal}\n')
+                return checker.runtime_problems(binary, Path(directory), validator, set(), (command,))
+
+            self.assertEqual(problems(0, 1), [])
+            for first, last in ((0, 0), (0, 2), (1, 2)):
+                with self.subTest(first=first, last=last):
+                    self.assertIn('non-contiguous stream sequence', problems(first, last)[0])
+            self.assertIn('command changed within stream', problems(0, 1, 'dns')[0])
+
 
 REGISTRY_SCHEMA = {
     '$defs': {

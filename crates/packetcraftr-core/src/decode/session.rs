@@ -23,6 +23,7 @@ struct DecodeCursor {
     protocol: crate::layer::Id,
     discriminator: Option<Discriminator>,
     bytes: Range<usize>,
+    missing_tail: usize,
 }
 
 struct ChildSelection {
@@ -84,6 +85,7 @@ impl<'registry> DecodeSession<'registry> {
             protocol: self.root,
             discriminator: None,
             bytes: 0..self.frame.bytes().len(),
+            missing_tail: (self.frame.original_length() - self.frame.captured_length()) as usize,
         };
         loop {
             self.ensure_layer_capacity()?;
@@ -150,20 +152,22 @@ impl<'registry> DecodeSession<'registry> {
     ) -> Result<Decoded, crate::codec::Error> {
         // validate_layer checks cursor ranges; slicing shares the buffer instead of copying
         let input = self.frame.bytes().slice(cursor.bytes.clone());
-        codec.decode(
-            input,
-            &DecodeContext {
-                parent: self
-                    .packet
-                    .iter()
-                    .next_back()
-                    .map(|layer| *layer.protocol_id()),
-                registry: self.registry,
-                network: self.traversal.network(),
-                hop_limit: self.enclosing_hop_limit(),
-                discriminator: cursor.discriminator,
-            },
-        )
+        let context = DecodeContext {
+            parent: self
+                .packet
+                .iter()
+                .next_back()
+                .map(|layer| *layer.protocol_id()),
+            registry: self.registry,
+            network: self.traversal.network(),
+            hop_limit: self.enclosing_hop_limit(),
+            discriminator: cursor.discriminator,
+        };
+        if cursor.missing_tail != 0 {
+            codec.decode_capture_prefix(input, &context, cursor.missing_tail)
+        } else {
+            codec.decode(input, &context)
+        }
     }
 
     /// The TTL or hop limit of the IP header whose envelope is in scope.
@@ -369,6 +373,19 @@ impl<'registry> DecodeSession<'registry> {
             protocol: next_protocol,
             discriminator: child.discriminator,
             bytes: layer_end..payload_end,
+            missing_tail: if payload_end < cursor.bytes.end
+                || decoded.network.is_some()
+                || child.discriminator
+                    == Some(Discriminator(
+                        crate::protocol::link::LLC_FRAME_DISCRIMINATOR,
+                    ))
+                || crate::protocol::BuiltinProtocol::from_id(decoded_protocol)
+                    == Some(crate::protocol::BuiltinProtocol::Pppoe)
+            {
+                0
+            } else {
+                cursor.missing_tail
+            },
         }))
     }
 

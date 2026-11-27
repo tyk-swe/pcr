@@ -66,8 +66,7 @@ impl Selection<'_> {
         };
         decoding
             .frames
-            .decode_selected(number, frame)
-            .map(|decoded| decoded.is_some())
+            .keep(number, frame)
             .map_err(|error| filtering::frame_error(number, error))
     }
 }

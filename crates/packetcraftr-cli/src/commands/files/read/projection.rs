@@ -36,78 +36,89 @@ pub(super) fn run(invocation: &crate::invocation::Invocation, args: Args) -> Res
         .transpose()?;
     let mut reader =
         crate::input::open_capture(&invocation.control, &invocation.output, &args.path, limits)?;
-    let mut frames = 0u64;
-    let mut bytes = 0u64;
-    if projector.requirements().stream_index
-        || filter
-            .as_ref()
-            .is_some_and(|filter| filter.requirements().stream_index)
-    {
-        let summary = core::analysis::run(
-            &mut reader,
-            registry,
-            &core::analysis::Options {
-                time_bounds: bounds,
-                cancellation: Some(invocation.control.cancellation.clone()),
-                limits: core::analysis::Limits {
-                    max_frames: limits.max_frames(),
-                    max_bytes: limits.max_bytes(),
-                    max_frame_bytes: limits.reader_bounds().max_frame_bytes,
+    let batch =
+        invocation.format == crate::output::contract::Format::Text && stream.batches_records();
+    if batch {
+        projector.batch_text(invocation);
+    }
+    let run = || {
+        let mut frames = 0u64;
+        let mut bytes = 0u64;
+        if projector.requirements().stream_index
+            || filter
+                .as_ref()
+                .is_some_and(|filter| filter.requirements().stream_index)
+        {
+            let summary = core::analysis::run(
+                &mut reader,
+                registry,
+                &core::analysis::Options {
+                    time_bounds: bounds,
+                    cancellation: Some(invocation.control.cancellation.clone()),
+                    limits: core::analysis::Limits {
+                        max_frames: limits.max_frames(),
+                        max_bytes: limits.max_bytes(),
+                        max_frame_bytes: limits.reader_bounds().max_frame_bytes,
+                        ..Default::default()
+                    },
                     ..Default::default()
                 },
-                ..Default::default()
-            },
-            |record| {
-                // Selection hides rows only; the analysis still indexes every frame.
-                if !selection.keeps(record.number) {
-                    return Ok(());
-                }
-                let context = record.physical_context();
-                let kept = filter
-                    .as_ref()
-                    .map(|filter| filter.matches(&context))
-                    .transpose()
-                    .map_err(|source| CliError::classified(source).into_boundary_error())?
-                    .unwrap_or(true);
-                if kept {
-                    projector
-                        .emit(record.number, &context, stream)
-                        .map_err(CliError::into_boundary_error)?;
-                }
-                Ok(())
-            },
-        )
-        .map_err(CliError::classified)?;
-        frames = summary.frames_read;
-        bytes = summary.bytes_read;
-    } else {
-        let decoder = core::filter::FrameDecoder::new(
-            registry,
-            filter,
-            limits.reader_bounds().max_frame_bytes,
-        )
-        .map_err(CliError::classified)?;
-        let mut budget = core::capture_file::Budget::new(limits.stream_limits())
+                |record| {
+                    // Selection hides rows only; the analysis still indexes every frame.
+                    if !selection.keeps(record.number) {
+                        return Ok(());
+                    }
+                    let context = record.physical_context();
+                    let kept = filter
+                        .as_ref()
+                        .map(|filter| filter.matches(&context))
+                        .transpose()
+                        .map_err(|source| CliError::classified(source).into_boundary_error())?
+                        .unwrap_or(true);
+                    if kept {
+                        projector
+                            .emit(record.number, &context, stream)
+                            .map_err(CliError::into_boundary_error)?;
+                    }
+                    Ok(())
+                },
+            )
             .map_err(CliError::classified)?;
-        while let Some(frame) = reader.next_frame().map_err(CliError::classified)? {
-            budget
-                .charge(frame.captured_length())
+            frames = summary.frames_read;
+            bytes = summary.bytes_read;
+        } else {
+            let decoder = core::filter::FrameDecoder::new(
+                registry,
+                filter,
+                limits.reader_bounds().max_frame_bytes,
+            )
+            .map_err(CliError::classified)?;
+            let mut budget = core::capture_file::Budget::new(limits.stream_limits())
                 .map_err(CliError::classified)?;
-            (frames, bytes) = (budget.frames(), budget.captured_bytes());
-            if bounds.is_some_and(|bounds| !bounds.contains(frame.timestamp))
-                || !selection.keeps(frames)
-            {
-                continue;
+            while let Some(frame) = reader.next_frame().map_err(CliError::classified)? {
+                budget
+                    .charge(frame.captured_length())
+                    .map_err(CliError::classified)?;
+                (frames, bytes) = (budget.frames(), budget.captured_bytes());
+                if bounds.is_some_and(|bounds| !bounds.contains(frame.timestamp))
+                    || !selection.keeps(frames)
+                {
+                    continue;
+                }
+                let evaluation = decoder.evaluate(frames, &frame);
+                if !evaluation
+                    .selected()
+                    .map_err(|error| crate::filtering::frame_error(frames, error))?
+                {
+                    continue;
+                }
+                projector.emit_frame(frames, &evaluation, stream)?;
             }
-            let Some(decoded) = decoder
-                .decode_selected(frames, &frame)
-                .map_err(|error| crate::filtering::frame_error(frames, error))?
-            else {
-                continue;
-            };
-            let context = core::filter::Context::frame(&decoded, frames);
-            projector.emit(frames, &context, stream)?;
         }
+        projector.finish(invocation, frames, bytes, stream)
+    };
+    if batch {
+        return crate::terminal::batched_raw(invocation, run);
     }
-    projector.finish(invocation, frames, bytes, stream)
+    run()
 }

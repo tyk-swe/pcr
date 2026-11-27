@@ -4,7 +4,7 @@
 //! Lowers postfix filters to jump-threaded predicates once at compile time.
 
 use super::ast::{Op, Predicate};
-use super::eval::{self, Context};
+use super::eval::{self, Evaluation};
 
 const MATCH: u32 = u32::MAX;
 const MISS: u32 = u32::MAX - 1;
@@ -97,7 +97,7 @@ impl Plan {
         }
     }
 
-    pub(super) fn evaluate(&self, context: &Context<'_>) -> bool {
+    pub(super) fn evaluate(&self, context: &Evaluation<'_>) -> bool {
         let mut index = 0u32;
         while let Some(step) = self.steps.get(index as usize) {
             index = if eval::test(&step.predicate, context) {

@@ -14,7 +14,7 @@ use super::path::{
 };
 use crate::decode::DecodedPacket;
 use crate::field;
-use crate::frame::{Direction, unix_floor};
+use crate::frame::{Direction, Frame, unix_floor};
 use crate::layer::Layer;
 use crate::registry::FilterFieldBinding;
 
@@ -35,7 +35,33 @@ pub struct DerivedPacket<'a> {
     pub replayed_prefix_layers: usize,
 }
 
-pub(super) fn test(predicate: &Predicate, context: &Context<'_>) -> bool {
+pub(super) struct Evaluation<'a> {
+    pub frame: &'a Frame,
+    pub number: u64,
+    decoded: Option<Context<'a>>,
+}
+
+impl<'a> Evaluation<'a> {
+    pub(super) fn frame(frame: &'a Frame, number: u64) -> Self {
+        Self {
+            frame,
+            number,
+            decoded: None,
+        }
+    }
+}
+
+impl<'a> From<&Context<'a>> for Evaluation<'a> {
+    fn from(context: &Context<'a>) -> Self {
+        Self {
+            frame: &context.decoded.frame,
+            number: context.number,
+            decoded: Some(*context),
+        }
+    }
+}
+
+pub(super) fn test(predicate: &Predicate, context: &Evaluation<'_>) -> bool {
     match predicate {
         Predicate::LayerPresent {
             protocol,
@@ -119,24 +145,28 @@ fn any_byte_length(value: &field::Value, mut test: impl FnMut(u64) -> bool) -> b
 
 /// Every layer the filter reads, outermost first: the physical packet's
 /// layers, then each derived packet beyond its replayed prefix.
-fn visible_layers<'a>(context: &'a Context<'a>) -> impl DoubleEndedIterator<Item = &'a dyn Layer> {
-    context
-        .decoded
-        .packet
-        .iter()
-        .chain(context.derived.iter().flat_map(|derived| {
-            derived
-                .decoded
-                .packet
-                .iter()
-                .skip(derived.replayed_prefix_layers)
-        }))
+fn visible_layers<'a>(
+    context: &'a Evaluation<'a>,
+) -> impl DoubleEndedIterator<Item = &'a dyn Layer> {
+    context.decoded.iter().flat_map(|context| {
+        context
+            .decoded
+            .packet
+            .iter()
+            .chain(context.derived.iter().flat_map(|derived| {
+                derived
+                    .decoded
+                    .packet
+                    .iter()
+                    .skip(derived.replayed_prefix_layers)
+            }))
+    })
 }
 
 /// Layers matching `protocol`, selected by occurrence, in the order occurrences are counted:
 /// the outer packet first, then each derived packet beyond its replayed prefix.
 fn layers<'a>(
-    context: &'a Context<'a>,
+    context: &'a Evaluation<'a>,
     protocol: &'a str,
     occurrence: Option<Occurrence>,
 ) -> impl Iterator<Item = &'a dyn Layer> {
@@ -158,7 +188,7 @@ fn layers<'a>(
     innermost.into_iter().chain(counted.into_iter().flatten())
 }
 
-pub(super) fn any_value<F>(context: &Context<'_>, field: &FieldRef, mut predicate: F) -> bool
+pub(super) fn any_value<F>(context: &Evaluation<'_>, field: &FieldRef, mut predicate: F) -> bool
 where
     F: FnMut(&field::Value) -> bool,
 {
@@ -173,7 +203,7 @@ where
 /// Whether the list a `field` selection reads from exists on the layers it
 /// selects. An existing-but-empty list yields no values yet still projects as
 /// `[]` rather than an absent field's null.
-pub(super) fn selected_list_present(context: &Context<'_>, field: &FieldRef) -> bool {
+pub(super) fn selected_list_present(context: &Evaluation<'_>, field: &FieldRef) -> bool {
     let FieldSource::Layer {
         read:
             LayerRead::Selected {
@@ -195,7 +225,7 @@ pub(super) fn selected_list_present(context: &Context<'_>, field: &FieldRef) -> 
     })
 }
 
-pub(super) fn each_value<F>(context: &Context<'_>, field: &FieldRef, mut consume: F)
+pub(super) fn each_value<F>(context: &Evaluation<'_>, field: &FieldRef, mut consume: F)
 where
     F: FnMut(Cow<'_, field::Value>) -> bool,
 {
@@ -207,10 +237,10 @@ where
             }
         }
         FieldSource::Stream(transport) => {
-            let stream = match transport {
+            let stream = context.decoded.and_then(|context| match transport {
                 StreamTransport::Tcp => context.tcp_stream,
                 StreamTransport::Udp => context.udp_stream,
-            };
+            });
             if let Some(index) = stream {
                 consume(Cow::Owned(field::Value::Unsigned(index)));
             }
@@ -219,7 +249,7 @@ where
 }
 
 fn each_layer_value<F>(
-    context: &Context<'_>,
+    context: &Evaluation<'_>,
     read: &LayerRead,
     slice: Option<ByteSlice>,
     mut consume: F,
@@ -393,8 +423,8 @@ fn sliced_bytes(bytes: &[u8], slice: ByteSlice) -> Option<field::Value> {
     )))
 }
 
-fn frame_value(context: &Context<'_>, which: FrameField) -> Option<field::Value> {
-    let frame = &context.decoded.frame;
+fn frame_value(context: &Evaluation<'_>, which: FrameField) -> Option<field::Value> {
+    let frame = context.frame;
     Some(match which {
         FrameField::Number => field::Value::Unsigned(context.number),
         // Floor to whole Unix seconds, matching the capture and output layers.

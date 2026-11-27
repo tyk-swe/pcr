@@ -228,7 +228,6 @@ pub(crate) fn ip_fragments(
             else {
                 continue;
             };
-            let scope = scope_for(decoded, base, path.without(hop.path_index), scopes)?;
             let Some(layout) = decoded.layout.layer(index) else {
                 continue;
             };
@@ -243,8 +242,11 @@ pub(crate) fn ip_fragments(
             let payload_length = total_length.saturating_sub(header_length);
             let payload_end = layout.range.end.checked_add(payload_length);
             let payload = payload_end
-                .and_then(|end| checked_slice(decoded.frame.bytes(), layout.range.end, end))
-                .unwrap_or_default();
+                .and_then(|end| checked_slice(decoded.frame.bytes(), layout.range.end, end));
+            if payload.is_none() && decoded.frame.is_truncated() {
+                continue;
+            }
+            let scope = scope_for(decoded, base, path.without(hop.path_index), scopes)?;
             let protocol = protocol.exact().copied().unwrap_or_default();
             non_atomic = Some(ReassemblyFragment::Ipv4(Ipv4Fragment {
                 key: Ipv4DatagramKey {
@@ -257,7 +259,7 @@ pub(crate) fn ip_fragments(
                 fragment_offset,
                 more_fragments,
                 header,
-                payload,
+                payload: payload.unwrap_or_default(),
             }));
             break;
         }

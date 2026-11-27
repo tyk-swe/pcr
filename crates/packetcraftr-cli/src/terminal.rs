@@ -18,8 +18,9 @@ pub(crate) use stderr::{
     report_structured_error,
 };
 pub(crate) use stdout::{
-    WriteError, batched, emit_stdout_document, push_stdout_line, try_write_stdout_line,
-    write_details, write_stdout_block, write_stdout_line, write_summary_line, write_warning,
+    WriteError, batched, batched_raw, emit_stdout_document, push_stdout_line,
+    try_write_stdout_line, write_details, write_raw_batch, write_stdout_block, write_stdout_line,
+    write_summary_line, write_warning,
 };
 pub(crate) use table::table_row;
 pub(crate) use text::{comma_separated, duration_text, render_optional};

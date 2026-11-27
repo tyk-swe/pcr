@@ -346,6 +346,16 @@ pub trait Codec: Send + Sync + fmt::Debug {
     ) -> Result<Encoded, Error>;
 
     fn decode(&self, input: Bytes, context: &DecodeContext<'_>) -> Result<Decoded, Error>;
+
+    /// Decodes a capture prefix with up to `missing_tail` bytes absent from the end.
+    fn decode_capture_prefix(
+        &self,
+        input: Bytes,
+        context: &DecodeContext<'_>,
+        _missing_tail: usize,
+    ) -> Result<Decoded, Error> {
+        self.decode(input, context)
+    }
 }
 
 pub(crate) fn construct_layer(

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use super::error::Error;
-use super::eval::Context;
+use super::eval::{Context, Evaluation};
 use super::plan::Plan;
 use super::{Limits, Requirements, parser};
 use crate::registry::Registry;
@@ -51,7 +51,11 @@ impl Filter {
     }
 
     pub fn matches(&self, context: &Context<'_>) -> Result<bool, Error> {
-        if self.requirements.timestamp && context.decoded.frame.timestamp.is_none() {
+        self.evaluate(&Evaluation::from(context))
+    }
+
+    pub(super) fn evaluate(&self, context: &Evaluation<'_>) -> Result<bool, Error> {
+        if self.requirements.timestamp && context.frame.timestamp.is_none() {
             return Err(Error::TimestampUnavailable);
         }
         Ok(self.plan.evaluate(context))

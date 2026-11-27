@@ -133,65 +133,16 @@ impl Codec for Ipv6Codec {
         input: Bytes,
         _context: &DecodeContext<'_>,
     ) -> Result<Decoded, crate::codec::Error> {
-        let Some(header) = input.first_chunk::<IPV6_LEN>() else {
-            return Err(truncated(NAME, IPV6_LEN, input.len()));
-        };
-        if header[0] >> 4 != 6 {
-            return Err(invalid(
-                NAME,
-                format!("version is {}, not 6", header[0] >> 4),
-            ));
-        }
-        let payload_length_field = u16::from_be_bytes([header[4], header[5]]);
-        let payload_length = usize::from(payload_length_field);
-        // A jumbogram must start with a Hop-by-Hop header carrying the Jumbo
-        // Payload option.
-        if payload_length == 0 && header[6] == 0 && has_jumbo_option(&input[IPV6_LEN..]) {
-            return Err(unsupported(
-                NAME,
-                "IPv6 jumbogram payload requires a Hop-by-Hop Jumbo Payload option",
-            ));
-        }
-        let required = IPV6_LEN
-            .checked_add(payload_length)
-            .ok_or_else(|| invalid(NAME, "payload length overflow"))?;
-        if input.len() < required {
-            return Err(truncated(NAME, required, input.len()));
-        }
-        let first = u32::from_be_bytes([header[0], header[1], header[2], header[3]]);
-        let source_bytes = input
-            .get(8..)
-            .and_then(<[u8]>::first_chunk::<16>)
-            .ok_or_else(|| truncated(NAME, IPV6_LEN, input.len()))?;
-        let source = Ipv6Addr::from(*source_bytes);
-        let destination_bytes = input
-            .get(24..)
-            .and_then(<[u8]>::first_chunk::<16>)
-            .ok_or_else(|| truncated(NAME, IPV6_LEN, input.len()))?;
-        let destination = Ipv6Addr::from(*destination_bytes);
-        let next = header[6];
-        Ok(Decoded {
-            layer: Box::new(Ipv6 {
-                traffic_class: ((first >> 20) & 0xff) as u8,
-                flow_label: first & 0x000f_ffff,
-                payload_length: WireValue::Exact(payload_length_field),
-                next_header: WireValue::Exact(next),
-                hop_limit: header[7],
-                source,
-                destination,
-            }),
-            consumed: IPV6_LEN,
-            payload_len: payload_length,
-            next: if payload_length == 0 {
-                Vec::new()
-            } else {
-                vec![Discriminator(u64::from(next))]
-            },
-            fields: ipv6_layout(),
-            diagnostics: Vec::new(),
-            stop: payload_length == 0,
-            network: Some(network_from_addresses(source.into(), destination.into())),
-        })
+        decode_ip(input, 0)
+    }
+
+    fn decode_capture_prefix(
+        &self,
+        input: Bytes,
+        _context: &DecodeContext<'_>,
+        missing_tail: usize,
+    ) -> Result<Decoded, crate::codec::Error> {
+        decode_ip(input, missing_tail)
     }
 
     fn schema(&self) -> Option<&'static crate::layer::Schema> {
@@ -201,6 +152,69 @@ impl Codec for Ipv6Codec {
     fn new_layer(&self) -> Result<Box<dyn Layer>, crate::codec::Error> {
         Ok(Box::new(Ipv6::default()))
     }
+}
+
+fn decode_ip(input: Bytes, missing_tail: usize) -> Result<Decoded, crate::codec::Error> {
+    let Some(header) = input.first_chunk::<IPV6_LEN>() else {
+        return Err(truncated(NAME, IPV6_LEN, input.len()));
+    };
+    if header[0] >> 4 != 6 {
+        return Err(invalid(
+            NAME,
+            format!("version is {}, not 6", header[0] >> 4),
+        ));
+    }
+    let payload_length_field = u16::from_be_bytes([header[4], header[5]]);
+    let payload_length = usize::from(payload_length_field);
+    // A jumbogram must start with a Hop-by-Hop header carrying the Jumbo
+    // Payload option.
+    if payload_length == 0 && header[6] == 0 && has_jumbo_option(&input[IPV6_LEN..]) {
+        return Err(unsupported(
+            NAME,
+            "IPv6 jumbogram payload requires a Hop-by-Hop Jumbo Payload option",
+        ));
+    }
+    let required = IPV6_LEN
+        .checked_add(payload_length)
+        .ok_or_else(|| invalid(NAME, "payload length overflow"))?;
+    let missing = required.saturating_sub(input.len());
+    if missing > missing_tail {
+        return Err(truncated(NAME, required, input.len()));
+    }
+    let first = u32::from_be_bytes([header[0], header[1], header[2], header[3]]);
+    let source_bytes = input
+        .get(8..)
+        .and_then(<[u8]>::first_chunk::<16>)
+        .ok_or_else(|| truncated(NAME, IPV6_LEN, input.len()))?;
+    let source = Ipv6Addr::from(*source_bytes);
+    let destination_bytes = input
+        .get(24..)
+        .and_then(<[u8]>::first_chunk::<16>)
+        .ok_or_else(|| truncated(NAME, IPV6_LEN, input.len()))?;
+    let destination = Ipv6Addr::from(*destination_bytes);
+    let next = header[6];
+    Ok(Decoded {
+        layer: Box::new(Ipv6 {
+            traffic_class: ((first >> 20) & 0xff) as u8,
+            flow_label: first & 0x000f_ffff,
+            payload_length: WireValue::Exact(payload_length_field),
+            next_header: WireValue::Exact(next),
+            hop_limit: header[7],
+            source,
+            destination,
+        }),
+        consumed: IPV6_LEN,
+        payload_len: payload_length - missing,
+        next: if payload_length == 0 || missing != 0 {
+            Vec::new()
+        } else {
+            vec![Discriminator(u64::from(next))]
+        },
+        fields: ipv6_layout(),
+        diagnostics: Vec::new(),
+        stop: payload_length == 0 || missing != 0,
+        network: Some(network_from_addresses(source.into(), destination.into())),
+    })
 }
 
 /// A zero payload length alone does not make trailing link padding a

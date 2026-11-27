@@ -113,10 +113,7 @@ impl ActiveState {
                 .with_evidence_ref(evidence),
             )?;
         }
-        if window < 0 && self.reconcile_closed_credit(side, Some(stream_id), reporter, context)? {
-            return Ok(true);
-        }
-        Ok(false)
+        Ok(window < 0 && self.reconcile_closed_credit(side, Some(stream_id), reporter, context)?)
     }
 
     fn handle_non_open_stream_data(

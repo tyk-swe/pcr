@@ -1,7 +1,7 @@
 # Third-party notices
 
 Required distribution notices are unabridged below; Cargo.lock pins dependencies.
-Zstd adapters use zstd 0.14.4, zstd-safe 8.3.0, and zstd-sys 2.1.3+zstd.1.5.7.
+Zstd adapters use zstd 0.14.5, zstd-safe 8.4.0, and zstd-sys 2.2.0+zstd.1.6.0.
 
 ## Rust Zstd bindings
 
@@ -162,12 +162,12 @@ future advisory checks.
 | Dependency | Reviewed version | License used |
 | --- | --- | --- |
 | rustls | 0.23.46 | ISC |
-| rustls-pki-types | 1.15.1 | MIT |
-| rustls-webpki | 0.103.16 | ISC |
+| rustls-pki-types | 1.16.0 | MIT |
+| rustls-webpki | 0.103.17 | ISC |
 | ring | 0.17.14 | ISC, Apache-2.0, MIT (bundled components) |
 | untrusted | 0.9.0 | ISC |
 | subtle | 2.6.1 | BSD-3-Clause |
-| zeroize | 1.9.1 | MIT |
+| zeroize | 1.9.2 | MIT |
 | getrandom | 0.2.17 | MIT |
 
 `subtle` has an exact-version BSD-3-Clause exception in `deny.toml`, with its
@@ -178,8 +178,8 @@ platform dependencies where their version constraints permit it. No broader
 license or duplicate-version exemption is introduced.
 
 The configured target graph also requires exact older versions of bitflags,
-errno, and libloading through pcap, nix through rtnetlink, and syn through
-proc-macro dependencies.
+errno, libloading, and windows-sys through pcap, and syn through proc-macro
+dependencies.
 `deny.toml` documents those exceptions and continues to reject other duplicates.
 
 The transport records bounded whole presented DER certificates as observations

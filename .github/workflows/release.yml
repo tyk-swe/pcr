@@ -50,9 +50,9 @@ jobs:
           echo "release_sha=$release_sha" >> "$GITHUB_OUTPUT"
       - name: Install the pinned toolchain
         run: rustup toolchain install
-      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+      - uses: taiki-e/install-action@073e1fd0bc889c9aee68dbaaa927cde1b5653a83 # v2.90.11
         with:
-          tool: cargo-deny@0.20.2
+          tool: cargo-deny@0.22.1
       - name: Recheck current advisories and dependency policy for release contents
         run: |
           cargo deny --locked check

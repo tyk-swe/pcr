@@ -8,7 +8,6 @@ edition = "2024"
 rust-version = "1.98.1"
 license = "AGPL-3.0-only"
 repository = "https://github.com/tyk-swe/pcr"
-homepage = "https://github.com/tyk-swe/pcr"
 publish = false
 
 [workspace.lints.rust]
@@ -28,7 +27,7 @@ mod_module_files = "deny"
 wildcard_imports = "deny"
 
 [workspace.dependencies]
-webpki-roots = "1.0.11"
+webpki-roots = "1.0.12"
 # `deny.toml` rejects wildcard dependencies, so each internal path dependency
 # pins the shared workspace version. Bump these with `workspace.package.version`.
 packetcraftr = { path = "crates/packetcraftr", version = "0.5.0-beta.3", default-features = false }
@@ -37,18 +36,18 @@ packetcraftr-netio = { path = "crates/packetcraftr-netio", version = "0.5.0-beta
 
 anstream = "1.0.0"
 getrandom = { version = "0.4.3", features = ["std"] }
-bytes = { version = "1.12.1", features = ["serde"] }
+bytes = { version = "1.12.2", features = ["serde"] }
 flate2 = { version = "1.1.11", default-features = false, features = ["rust_backend"] }
-zstd = { version = "0.14.3", default-features = false }
-clap = { version = "4.6.7", features = ["derive"] }
-clap_lex = "1.1.1"
-clap_complete = "4.6.11"
-clap_mangen = "0.3.3"
-ctrlc = { version = "3.5.2", features = ["termination"] }
-noyalib = { version = "0.0.60", default-features = false, features = ["std", "fast-int", "fast-float", "lossless-u64"] }
+zstd = { version = "0.14.5", default-features = false }
+clap = { version = "4.6.10", features = ["derive"] }
+clap_lex = "1.1.2"
+clap_complete = "4.6.12"
+clap_mangen = "0.3.4"
+ctrlc = { version = "3.5.3", features = ["termination"] }
+noyalib = { version = "0.0.64", default-features = false, features = ["std", "fast-int", "fast-float", "lossless-u64"] }
 # RustCrypto hashes for TLS client fingerprints: MD5 for JA3, SHA-256 for JA4.
 md5 = { package = "md-5", version = "0.11.0", default-features = false }
-sha2 = { version = "0.11.1", default-features = false }
+sha2 = { version = "0.11.2", default-features = false }
 # Linear-time substring search for the display-filter `contains` operator.
 memchr = { version = "2.8.3", default-features = false, features = ["alloc"] }
 serde = { version = "1.0.229", features = ["derive", "rc"] }
@@ -63,7 +62,7 @@ rustix = { version = "1.1.6", default-features = false, features = ["std", "fs",
 
 futures-util = { version = "0.3.34", default-features = false }
 libc = { version = "0.2.191", default-features = false }
-libloading = "0.9.0"
+libloading = "0.9.1"
 pcap = { version = "2.5.0", default-features = false }
 rtnetlink = { version = "0.24.0", default-features = false, features = ["tokio_socket"] }
 socket2 = { version = "0.6.5", default-features = false, features = ["all"] }

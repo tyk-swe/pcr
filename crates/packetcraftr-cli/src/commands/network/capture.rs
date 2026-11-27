@@ -22,7 +22,7 @@ use crate::{
 use packetcraftr_core::clock::{Clock, SystemClock};
 use packetcraftr_core::{capture_file, error::Kind};
 use packetcraftr_netio as net;
-use std::time::Duration;
+use std::{io, time::Duration};
 
 use self::files::Files;
 use self::frames::{Decoding, Destinations};
@@ -33,7 +33,7 @@ use packetcraftr::capture::{self as workflow, Control, Event};
 use packetcraftr::policy::{CaptureBudget, Policy};
 use packetcraftr_core::error::Classified;
 use packetcraftr_core::filter::FrameSelector;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError, mpsc};
 
 use crate::output::contract::PublishedType;
 
@@ -200,6 +200,7 @@ pub(super) fn run(invocation: &crate::invocation::Invocation, args: Args) -> Res
         &client(invocation, registry, policy, Runtime::Capture),
         request,
         Output {
+            binary: io::stdout(),
             format,
             compression,
             selector,
@@ -267,7 +268,8 @@ fn validate_output(args: &Args, format: Format) -> Result<Compression, CliError>
     Ok(compression)
 }
 
-struct Output<'a> {
+struct Output<'a, W> {
+    binary: W,
     format: Format,
     compression: Compression,
     selector: Option<FrameSelector>,
@@ -284,13 +286,14 @@ fn file_limits(policy: &Policy) -> capture_file::Limits {
     }
 }
 
-fn drive<P: packetcraftr::CaptureProviders>(
+fn drive<P: packetcraftr::CaptureProviders, W: io::Write + Send + 'static>(
     invocation: &crate::invocation::Invocation,
     client: &packetcraftr::Client<P>,
     request: workflow::Request,
-    rendering: Output<'_>,
+    rendering: Output<'_, W>,
 ) -> Result<(), CliError> {
     let Output {
+        binary,
         format,
         compression,
         selector,
@@ -302,14 +305,15 @@ fn drive<P: packetcraftr::CaptureProviders>(
     // The selector runs on the capture's thread and the sink on its worker;
     // the capture waits for each answer, so they never contend.
     let decoding = decoding.map(|decoding| Arc::new(Mutex::new(decoding)));
-    let destinations = Arc::new(Mutex::new(Destinations {
+    let destinations = Destinations {
+        binary: Some(binary),
         files,
         writer: None,
         projector,
         format,
         compression,
         limits: file_limits(client.policy()),
-    }));
+    };
     let request = match (&decoding, selector) {
         (Some(decoding), _) => {
             let decoding = Arc::clone(decoding);
@@ -326,34 +330,20 @@ fn drive<P: packetcraftr::CaptureProviders>(
         }),
         (None, None) => request,
     };
-    let sink = {
-        let invocation = invocation.clone();
-        let destinations = Arc::clone(&destinations);
-        let runtime = invocation.output_writer_runtime();
-        packetcraftr::Isolated::new(&runtime, move |(event, _)| {
-            let mut destinations = lock(&destinations);
-            match event {
-                Event::Started { sources } => {
-                    destinations.start(sources).map(|()| Control::Continue)
-                }
-                Event::Frame {
-                    source_frame,
-                    elapsed,
-                    frame,
-                    ..
-                } => destinations.frame(
-                    &invocation,
-                    decoding.as_deref(),
-                    source_frame,
-                    elapsed,
-                    frame,
-                ),
-            }
-        })
-        .map_err(CliError::classified)?
+    let (finished, completion) = mpsc::sync_channel(1);
+    let mut output = CaptureOutput {
+        destinations,
+        finished,
+        invocation: invocation.clone(),
+        decoding,
     };
+    let runtime = invocation.output_writer_runtime();
+    let sink = packetcraftr::Isolated::new(&runtime, move |(event, control)| {
+        output.publish(event, &control)
+    })
+    .map_err(CliError::classified)?;
     let result = client.capture(request, sink);
-    let (report, error) = match result {
+    let (report, mut error) = match result {
         Ok(report) => (report, None),
         Err(error) => {
             let cli = CliError::from_classification(
@@ -365,8 +355,26 @@ fn drive<P: packetcraftr::CaptureProviders>(
             (*error.report, Some(cli))
         }
     };
-    let mut destinations = lock(&destinations);
-    let (error, files) = destinations.finish(error);
+    let CompleteOutput {
+        files,
+        projector,
+        error: output_error,
+    } = completion
+        .recv_timeout(net::capture::CLEANUP_TIMEOUT)
+        .unwrap_or_else(|_| CompleteOutput {
+            files: None,
+            projector: None,
+            error: Some(CliError::new(
+                Kind::Io,
+                "capture output finalization was not confirmed",
+            )),
+        });
+    if let Some(output_error) = output_error {
+        error = Some(match error {
+            Some(primary) => primary.with_secondary("output finalization", output_error),
+            None => output_error,
+        });
+    }
 
     let snapshot = output::capture::Snapshot::from((&report, files));
     if let Some(error) = error {
@@ -374,7 +382,7 @@ fn drive<P: packetcraftr::CaptureProviders>(
     }
     // A projection that never matched a frame still owes its text header.
     if format == Format::Text
-        && let Some(projector) = destinations.projector.take()
+        && let Some(projector) = projector
     {
         projector
             .finish(
@@ -394,7 +402,63 @@ fn drive<P: packetcraftr::CaptureProviders>(
     .map_err(|error| error.with_capture(snapshot))
 }
 
-/// A panic in the selector or sink leaves the state as it was, which finalization still needs.
+struct CompleteOutput {
+    files: Option<output::capture::Files>,
+    projector: Option<crate::field_projection::Projector>,
+    error: Option<CliError>,
+}
+
+struct CaptureOutput<W: io::Write> {
+    destinations: Destinations<W>,
+    finished: mpsc::SyncSender<CompleteOutput>,
+    invocation: crate::invocation::Invocation,
+    decoding: Option<Arc<Mutex<Decoding>>>,
+}
+
+impl<W: io::Write> CaptureOutput<W> {
+    fn publish(
+        &mut self,
+        event: Event,
+        control: &packetcraftr_core::budget::Deadline,
+    ) -> Result<Control, packetcraftr_core::error::BoundaryError> {
+        use packetcraftr_core::error::BoundaryError;
+
+        control.enforce().map_err(BoundaryError::from_error)?;
+        match event {
+            Event::Started { sources } => {
+                self.destinations.start(sources).map(|()| Control::Continue)
+            }
+            Event::Frame {
+                source_frame,
+                elapsed,
+                frame,
+                ..
+            } => self.destinations.frame(
+                &self.invocation,
+                self.decoding.as_deref(),
+                source_frame,
+                elapsed,
+                frame,
+                control,
+            ),
+        }
+    }
+}
+
+impl<W: io::Write> Drop for CaptureOutput<W> {
+    fn drop(&mut self) {
+        let (error, files) = self.destinations.finish();
+        let _ = self.finished.send(CompleteOutput {
+            files,
+            projector: self.destinations.projector.take(),
+            error,
+        });
+    }
+}
+
 fn lock<T>(state: &Mutex<T>) -> MutexGuard<'_, T> {
     state.lock().unwrap_or_else(PoisonError::into_inner)
 }
+
+#[cfg(test)]
+mod tests;

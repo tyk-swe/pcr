@@ -16,20 +16,12 @@ impl<P: CaptureProviders, K: Clock> Client<P, K> {
         deadline: &Deadline,
         report: Report,
     ) -> Result<Armed<<P::Capture as native::Provider>::Capture>, Error> {
-        // A zero window still arms its sources, then stops without waiting.
-        let unbounded;
-        let arming = if window.is_zero() {
-            unbounded = self.deadline(packetcraftr_netio::deadline::MAX_WAIT);
-            &unbounded
-        } else {
-            deadline
-        };
         let mut group = match Group::new(request) {
             Ok(group) => group,
             Err(error) => return Err(failure(Cause::Native(error), report, None)),
         };
         let mut primary = group
-            .arm(self.providers.capture(), arming)
+            .arm(self.providers.capture(), deadline)
             .err()
             .map(Cause::Native);
         if primary.is_none() && !window.is_zero() {

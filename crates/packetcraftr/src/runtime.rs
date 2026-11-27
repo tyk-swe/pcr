@@ -7,7 +7,7 @@ use std::{
     sync::{
         Arc, Mutex,
         atomic::{AtomicUsize, Ordering},
-        mpsc::{self, RecvTimeoutError, SyncSender, TrySendError},
+        mpsc::{self, RecvTimeoutError, SyncSender, TryRecvError, TrySendError},
     },
     thread,
 };
@@ -129,6 +129,17 @@ impl WorkerStatus {
         if matches!(*state, WorkerState::Running) {
             self.budget.timed_out.fetch_add(1, Ordering::AcqRel);
             *state = WorkerState::TimedOut;
+        }
+    }
+
+    fn mark_recovered(&self) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if matches!(*state, WorkerState::TimedOut) {
+            self.budget.timed_out.fetch_sub(1, Ordering::AcqRel);
+            *state = WorkerState::Running;
         }
     }
 }
@@ -320,11 +331,28 @@ impl<T: Send + 'static, A: Send + 'static> Worker<T, A> {
     /// cannot interrupt a callback already running on the worker.
     pub fn emit(&self, event: T, deadline: &Deadline) -> Result<A, Error> {
         self.cleanup.retry_pending();
-        let deadline = deadline.detach()?;
+        let deadline =
+            Deadline::new(deadline.live_remaining()?).with_parent(Some(Arc::new(deadline.clone())));
         deadline.enforce()?;
-        if self.in_flight.replace(true) {
-            return Err(unavailable("progressive output already has an in-flight callback").into());
+        if self.in_flight.get() {
+            let outcome = match self.outcomes.try_recv() {
+                Ok(outcome) => outcome,
+                Err(TryRecvError::Empty) => {
+                    return Err(unavailable(
+                        "progressive output already has an in-flight callback",
+                    )
+                    .into());
+                }
+                Err(TryRecvError::Disconnected) => Err(unavailable(
+                    "progressive output worker stopped without a result",
+                )),
+            };
+            self.in_flight.set(false);
+            outcome?;
+            self.worker.mark_recovered();
+            deadline.enforce()?;
         }
+        self.in_flight.set(true);
         if let Err(error) = self.events.try_send(event) {
             self.in_flight.set(false);
             return Err(unavailable(match error {
@@ -359,7 +387,11 @@ impl<T: Send + 'static, A: Send + 'static> Worker<T, A> {
             deadline.enforce()?;
             Ok(outcome)
         }) {
-            Ok(outcome) => outcome.map_err(Error::Output),
+            Ok(Ok(ack)) => {
+                self.worker.mark_recovered();
+                Ok(ack)
+            }
+            Ok(Err(error)) => Err(Error::Output(error)),
             Err(interrupted) => {
                 self.worker.mark_timed_out();
                 Err(interrupted.into())

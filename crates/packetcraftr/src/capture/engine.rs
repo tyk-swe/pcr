@@ -33,6 +33,13 @@ impl<P: CaptureProviders, K: Clock> Client<P, K> {
         } = request;
         let started = self.now();
         let deadline = self.deadline(window);
+        let zero_window_control;
+        let publication_control = if window.is_zero() {
+            zero_window_control = self.deadline(packetcraftr_netio::deadline::MAX_WAIT);
+            &zero_window_control
+        } else {
+            &deadline
+        };
         let report = self.plan_capture(&group_request, window, started, &deadline)?;
         let mut publisher = match crate::engine::execution::publisher(
             sink,
@@ -43,18 +50,15 @@ impl<P: CaptureProviders, K: Clock> Client<P, K> {
             Err(cause) => return Err(failure(cause, report, None)),
         };
         let mut publish = |event: Event| -> Result<Control, Cause> {
-            publisher(
-                event,
-                &self.deadline(packetcraftr_netio::deadline::MAX_WAIT),
-            )
-            .map(Into::into)
-            .map_err(|cause| interrupted_or(&deadline, cause))
+            publisher(event, publication_control)
+                .map(Into::into)
+                .map_err(|cause| interrupted_or(&deadline, cause))
         };
         let Armed {
             mut group,
             mut report,
             primary,
-        } = self.arm_capture_group(&group_request, window, &deadline, report)?;
+        } = self.arm_capture_group(&group_request, window, publication_control, report)?;
         replace_sources(&mut report, &group.snapshot());
         let failed = match primary {
             Some(cause) => Some((cause, None)),
@@ -134,6 +138,13 @@ impl<P: CaptureProviders, K: Clock> Client<P, K> {
                 Ok(false) => continue,
                 Err(error) => return Err((Cause::Consumer(error), Some(number))),
             }
+            if let Err(cancelled) = deadline.check_cancelled() {
+                return Err((Cause::Cancelled(cancelled), Some(number)));
+            }
+            if deadline.bounded_timeout(Duration::MAX).is_err() {
+                report.stop = StopReason::Window;
+                break;
+            }
             report.sources[record.source].matched_frames += 1;
             let control = publish(Event::Frame {
                 source_frame: number,
@@ -160,7 +171,7 @@ impl<P: CaptureProviders, K: Clock> Client<P, K> {
         started: Instant,
     ) -> Result<Report, Error> {
         let mut cleanup = Vec::new();
-        if let Err(error) = group.shutdown() {
+        if let Err(error) = group.shutdown_once() {
             if failed.is_none() {
                 failed = Some((Cause::Native(error), None));
             } else {
@@ -184,3 +195,6 @@ impl<P: CaptureProviders, K: Clock> Client<P, K> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

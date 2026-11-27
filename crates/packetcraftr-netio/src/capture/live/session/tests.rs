@@ -8,6 +8,7 @@ use crate::capture::live::{
 use crate::capture::{self, Group, GroupRequest, Provider};
 use crate::interface::Id;
 use crate::workers::Pool;
+use packetcraftr_core::error::Classified as _;
 use std::sync::{Condvar, Mutex, atomic::AtomicUsize, mpsc};
 use std::time::{Duration, Instant};
 
@@ -19,6 +20,9 @@ struct Gate {
     stopped: AtomicUsize,
     destroyed: AtomicUsize,
     hold_stats: AtomicBool,
+    readings: AtomicUsize,
+    fail_final_stats: bool,
+    starting_drops: u32,
 }
 struct Source(Arc<Gate>);
 impl NativeCaptureSource for Source {
@@ -38,7 +42,22 @@ impl NativeCaptureSource for Source {
                 released = self.0.changed.wait(released).unwrap();
             }
         }
-        Ok(Default::default())
+        if self.0.readings.fetch_add(1, Ordering::SeqCst) != 0 && self.0.fail_final_stats {
+            return Err(Error::Capture {
+                message: "controlled final statistics failure".into(),
+                source: None,
+            });
+        }
+        Ok(NativeCaptureStats {
+            capture_dropped_frames: self.0.starting_drops,
+            ..Default::default()
+        })
+    }
+    fn initial_drop_baseline(&self, first: NativeCaptureStats) -> NativeCaptureStats {
+        NativeCaptureStats {
+            capture_dropped_frames: 0,
+            ..first
+        }
     }
 }
 impl Drop for Source {
@@ -153,6 +172,91 @@ fn dropped_readers_remain_charged_until_release() {
         assert_eq!(pool.snapshot().cleanup_retaining_capacity, 0);
         assert_eq!(gate.destroyed.load(Ordering::SeqCst), count);
     }
+}
+
+#[test]
+fn group_retries_pending_native_shutdown_and_refreshes_statistics() {
+    let pool = Arc::new(Pool::new(1));
+    let gate = Arc::new(Gate {
+        starting_drops: 3,
+        ..Default::default()
+    });
+    let mut group = test_group(&pool, &gate);
+    until(|| gate.entered.load(Ordering::SeqCst) == 1);
+    let first = group.shutdown_until(&Deadline::new(Duration::ZERO));
+    let pending = group.snapshot().pop().unwrap();
+    *gate.released.lock().unwrap() = true;
+    gate.changed.notify_all();
+    group
+        .shutdown_until(&Deadline::new(Duration::from_secs(5)))
+        .unwrap();
+    assert!(first.is_err());
+    assert!(!pending.shutdown_confirmed);
+    assert!(!pending.statistics_valid);
+    let completed = group.snapshot().pop().unwrap();
+    assert!(completed.shutdown_confirmed);
+    assert!(completed.statistics_valid);
+    assert_eq!(
+        completed.statistics.receiver_dropped_frames,
+        u64::from(gate.starting_drops)
+    );
+    assert_eq!(gate.stopped.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn already_reported_reader_error_does_not_make_final_statistics_valid() {
+    let pool = Arc::new(Pool::new(1));
+    let gate = Arc::new(Gate {
+        fail_final_stats: true,
+        starting_drops: 3,
+        ..Default::default()
+    });
+    let mut group = test_group(&pool, &gate);
+    let deadline = Deadline::new(Duration::from_secs(5));
+    group.wait_ready(&deadline).unwrap();
+    *gate.released.lock().unwrap() = true;
+    gate.changed.notify_all();
+    let error = group.next_captured_frame(&deadline).unwrap_err();
+    assert!(
+        error
+            .causes()
+            .iter()
+            .any(|cause| cause.contains("closed unexpectedly"))
+    );
+    assert!(
+        error
+            .causes()
+            .iter()
+            .any(|cause| cause.contains("final statistics failure"))
+    );
+    let source = group.snapshot().pop().unwrap();
+    assert!(source.shutdown_confirmed);
+    assert!(!source.statistics_valid);
+    assert_eq!(
+        source.statistics.receiver_dropped_frames,
+        u64::from(gate.starting_drops)
+    );
+}
+
+fn test_group(pool: &Arc<Pool>, gate: &Arc<Gate>) -> Group<NativeCaptureSession> {
+    let mut group = Group::new(&GroupRequest::new(
+        vec![Id {
+            index: 1,
+            name: "controlled".into(),
+        }],
+        Limits::default(),
+    ))
+    .unwrap();
+    group
+        .arm(
+            &Backend {
+                pool: Arc::clone(pool),
+                gate: Arc::clone(gate),
+            },
+            &Deadline::new(Duration::from_secs(5)),
+        )
+        .unwrap();
+    group
 }
 
 fn elapsed_capture_wait(readiness: bool) {

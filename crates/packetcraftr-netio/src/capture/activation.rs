@@ -19,9 +19,7 @@ pub(super) fn open(
     caller: &Deadline,
     activate: impl FnOnce() -> Result<NativeCaptureParts, Error> + Send + 'static,
 ) -> Result<Box<dyn Session>, Error> {
-    // Native activation spends wall time even when the caller's clock is frozen.
-    let deadline = caller
-        .detach()
+    let deadline = crate::deadline::wall_clock(caller)
         .map_err(|interrupted| Error::interrupted(interrupted, ARMING))?;
     // Both fallible cleanup-service steps happen before any native call.
     let reaper = crate::workers::shared()

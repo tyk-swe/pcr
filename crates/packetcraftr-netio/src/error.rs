@@ -153,6 +153,12 @@ pub enum Error {
         first: Box<Self>,
         remaining: Vec<Self>,
     },
+    #[error("capture failed and final statistics could not be collected")]
+    CaptureReadAndStatistics {
+        #[source]
+        first: Box<Self>,
+        statistics: Box<Self>,
+    },
 }
 
 impl Classified for Error {
@@ -252,7 +258,9 @@ impl Classified for Error {
                 "report the inconsistent capture provider or call order; do not treat the capture as complete",
             ),
             Self::CaptureSource { source, .. } => source.classification(),
-            Self::CaptureCleanup { first, .. } => first.classification(),
+            Self::CaptureCleanup { first, .. } | Self::CaptureReadAndStatistics { first, .. } => {
+                first.classification()
+            }
             Self::InvalidSendEvidence { fault } => fault.classification(),
             Self::TransmissionModeMismatch { .. }
             | Self::UnresolvedLinkMode
@@ -262,17 +270,17 @@ impl Classified for Error {
     }
 
     fn causes(&self) -> Vec<String> {
-        let remaining: &[Self] = match self {
-            Self::CaptureCleanup { remaining, .. } => remaining,
-            _ => &[],
+        let (first, remaining): (&Self, &[Self]) = match self {
+            Self::CaptureSource { source, .. } => (source, &[]),
+            Self::CaptureCleanup { first, remaining } => (first, remaining),
+            Self::CaptureReadAndStatistics { first, statistics } => {
+                (first, std::slice::from_ref(statistics.as_ref()))
+            }
+            _ => return source_chain(self),
         };
-        source_chain(self)
-            .into_iter()
-            .chain(
-                remaining.iter().flat_map(|failure| {
-                    std::iter::once(failure.to_string()).chain(failure.causes())
-                }),
-            )
+        std::iter::once(first)
+            .chain(remaining)
+            .flat_map(|failure| std::iter::once(failure.to_string()).chain(failure.causes()))
             .collect()
     }
 }

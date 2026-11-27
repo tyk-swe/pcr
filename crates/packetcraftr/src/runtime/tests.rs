@@ -140,6 +140,53 @@ fn completed_workers_allow_immediate_slot_reuse() {
 }
 
 #[test]
+fn interrupted_acknowledgement_does_not_disable_worker() {
+    let runtime = Runtime::new(1).unwrap();
+    let (entered, running) = mpsc::channel();
+    let gate = Arc::new(Gate {
+        entered,
+        released: Mutex::new(false),
+        changed: Condvar::new(),
+    });
+    let callback_gate = Arc::clone(&gate);
+    let worker = Worker::new_in(&runtime, move |event: usize| {
+        if event == 1 {
+            callback_gate.block();
+        }
+        Ok(event)
+    })
+    .unwrap();
+    let cancel = packetcraftr_core::budget::Cancellation::default();
+    let control = Deadline::new(Duration::from_secs(5)).with_cancellation(Some(cancel.clone()));
+    let caller = thread::spawn(move || {
+        let result = worker.emit(1, &control);
+        (worker, result)
+    });
+    running.recv_timeout(Duration::from_secs(5)).unwrap();
+    cancel.cancel();
+    let (worker, result) = caller.join().unwrap();
+    let deadline = Deadline::new(Duration::from_secs(5));
+    let overlapping = worker.emit(2, &deadline);
+    gate.release();
+    assert_eq!(
+        result.unwrap_err().classification().code,
+        packetcraftr_core::error::Code::IoCancelled
+    );
+    assert!(overlapping.is_err());
+    let resumed = loop {
+        match worker.emit(3, &deadline) {
+            Ok(ack) => break ack,
+            Err(error) => {
+                assert!(deadline.enforce().is_ok(), "{error}");
+                thread::yield_now();
+            }
+        }
+    };
+    assert_eq!(resumed, 3);
+    assert_eq!(runtime.snapshot().timed_out_retaining_capacity, 0);
+}
+
+#[test]
 fn parent_cancellation_preserves_independent_roots() {
     let runtime = Runtime::new(1).unwrap();
     let (entered, running) = mpsc::channel();

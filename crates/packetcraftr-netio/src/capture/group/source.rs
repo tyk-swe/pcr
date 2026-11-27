@@ -5,15 +5,14 @@ use super::{MAX_INTERFACE_NAME_BYTES, Phase, Source};
 use crate::capture::{Captured, Metadata, Request, Session, Stats};
 use crate::{Error, interface::Id};
 use packetcraftr_core::budget::Deadline;
-use packetcraftr_core::clock::{Clock, SystemClock};
-use std::time::Instant;
 
 pub(super) struct Owned<C: Session> {
     capture: C,
     pub(super) source: Source,
     stop_attempted: bool,
     stop_failed: bool,
-    shutdown_attempted: bool,
+    shutdown_complete: bool,
+    pub(super) pending_shutdown: Option<Error>,
 }
 
 impl<C: Session> Owned<C> {
@@ -75,15 +74,17 @@ impl<C: Session> Owned<C> {
             },
             stop_attempted: false,
             stop_failed: false,
-            shutdown_attempted: false,
+            shutdown_complete: false,
+            pending_shutdown: None,
         }
     }
 
     pub(super) fn snapshot(&self) -> Source {
         let mut source = self.source.clone();
-        if !self.shutdown_attempted {
+        if !self.shutdown_complete {
             source.statistics = self.capture.stats();
-            source.statistics_valid = source.statistics.validate().is_ok();
+            source.statistics_valid =
+                self.pending_shutdown.is_none() && source.statistics.validate().is_ok();
             source.observation_quality = self
                 .capture
                 .observation_quality()
@@ -93,7 +94,7 @@ impl<C: Session> Owned<C> {
     }
 
     pub(super) fn current_stats(&self) -> Stats {
-        if self.shutdown_attempted {
+        if self.shutdown_complete {
             self.source.statistics
         } else {
             self.capture.stats()
@@ -101,7 +102,7 @@ impl<C: Session> Owned<C> {
     }
 
     pub(super) fn current_observation_quality(&self) -> crate::capture::ObservationQuality {
-        if self.shutdown_attempted {
+        if self.shutdown_complete {
             self.source.observation_quality
         } else {
             self.capture
@@ -110,27 +111,11 @@ impl<C: Session> Owned<C> {
         }
     }
 
-    pub(super) fn wait_ready(&mut self, caller: &Deadline, deadline: Instant) -> Result<(), Error> {
-        caller.check_cancelled()?;
-        if crate::deadline::remaining_before(deadline).is_none() {
-            return Err(self.failure(
-                Phase::Ready,
-                Error::CaptureReadiness {
-                    message: "shared capture readiness deadline expired".to_owned(),
-                },
-            ));
-        }
+    pub(super) fn wait_ready(&mut self, caller: &Deadline) -> Result<(), Error> {
         self.capture
             .wait_ready(caller)
             .map_err(|source| self.failure(Phase::Ready, source))?;
-        if SystemClock.now() > deadline {
-            return Err(self.failure(
-                Phase::Ready,
-                Error::CaptureReadiness {
-                    message: "provider exceeded shared readiness timeout".to_owned(),
-                },
-            ));
-        }
+        crate::capture::check_readiness_control(caller)?;
         self.source.ready = true;
         Ok(())
     }
@@ -191,21 +176,29 @@ impl<C: Session> Owned<C> {
     }
 
     pub(super) fn shutdown(&mut self, deadline: &Deadline, cleanup: &mut Vec<Error>) {
-        if self.shutdown_attempted {
+        if self.shutdown_complete {
             return;
         }
-        self.shutdown_attempted = true;
+        self.pending_shutdown = None;
         match self.capture.shutdown_until(deadline) {
             Ok(()) => self.source.shutdown_confirmed = !self.stop_failed,
+            Err(source) if self.capture.shutdown_pending() => {
+                self.pending_shutdown = Some(self.failure(Phase::Shutdown, source));
+            }
             Err(source) => cleanup.push(self.failure(Phase::Shutdown, source)),
         }
+        self.shutdown_complete = self.pending_shutdown.is_none();
         self.source.statistics = self.capture.stats();
         self.source.observation_quality = self
             .capture
             .observation_quality()
             .with_statistics(self.source.statistics);
         match self.source.statistics.validate() {
-            Ok(()) => self.source.statistics_valid = true,
+            Ok(()) => {
+                self.source.statistics_valid =
+                    self.shutdown_complete && self.capture.final_stats_available();
+            }
+            Err(_) if !self.shutdown_complete => {}
             Err(source) => cleanup.push(self.failure(Phase::Stats, source)),
         }
     }

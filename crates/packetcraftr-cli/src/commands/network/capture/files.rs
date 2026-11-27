@@ -372,24 +372,27 @@ impl Files {
             });
         } else {
             let previous = &self.slots[slot].report;
-            self.discarded_files = self.discarded_files.checked_add(1).ok_or(Error::Counters)?;
-            self.discarded_frames = self
+            let discarded_files = self.discarded_files.checked_add(1).ok_or(Error::Counters)?;
+            let discarded_frames = self
                 .discarded_frames
                 .checked_add(previous.frames)
                 .ok_or(Error::Counters)?;
-            self.discarded_bytes = self
+            let discarded_bytes = self
                 .discarded_bytes
                 .checked_add(previous.capture_bytes)
                 .ok_or(Error::Counters)?;
             let file = &mut self.slots[slot];
-            file.handle.set_len(0).map_err(|source| Error::Io {
-                path: PathBuf::from(&file.report.path),
-                source,
-            })?;
             file.handle.rewind().map_err(|source| Error::Io {
                 path: PathBuf::from(&file.report.path),
                 source,
             })?;
+            file.handle.set_len(0).map_err(|source| Error::Io {
+                path: PathBuf::from(&file.report.path),
+                source,
+            })?;
+            self.discarded_files = discarded_files;
+            self.discarded_frames = discarded_frames;
+            self.discarded_bytes = discarded_bytes;
             file.report = fresh_report(mem::take(&mut file.report.path), slot, generation);
         }
         self.generation = generation;

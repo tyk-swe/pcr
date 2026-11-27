@@ -42,6 +42,9 @@ pub(crate) enum NativeCaptureEvent {
 pub(crate) trait NativeCaptureSource: Send {
     fn next_event(&mut self) -> Result<NativeCaptureEvent, Error>;
     fn stats(&mut self) -> Result<NativeCaptureStats, Error>;
+    fn initial_drop_baseline(&self, first: NativeCaptureStats) -> NativeCaptureStats {
+        first
+    }
 }
 
 pub(crate) trait CaptureInterrupt: Send + Sync {

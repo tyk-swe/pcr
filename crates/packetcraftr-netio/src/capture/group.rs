@@ -13,9 +13,7 @@ use std::{collections::HashSet, fmt, sync::Arc, time::Duration};
 
 mod source;
 
-/// Sources one group arms at once. One worker-pool slot stays free for the
-/// persistent Linux netlink route worker and other pooled work; without it the
-/// last source of a full group is refused while the other readers run.
+/// Sources one group arms at once, leaving one native worker slot for other work.
 pub const MAX_SOURCES: usize = crate::resources::WORKER_CAPACITY - 1;
 /// Longest wait on one source before the group checks the others.
 const POLL_SLICE: Duration = Duration::from_millis(5);
@@ -162,6 +160,7 @@ pub struct Group<C: Session> {
     requests: Vec<Request>,
     sources: Vec<Owned<C>>,
     cleanup: Vec<Error>,
+    shutdown_attempted: bool,
     cursor: usize,
     lifecycle: Lifecycle,
 }
@@ -174,6 +173,7 @@ impl<C: Session> Group<C> {
             sources: Vec::with_capacity(requests.len()),
             requests,
             cleanup: Vec::new(),
+            shutdown_attempted: false,
             cursor: 0,
             lifecycle: Lifecycle::New,
         })
@@ -197,18 +197,19 @@ impl<C: Session> Group<C> {
             return Err(Error::CaptureGroupState);
         }
         self.lifecycle = Lifecycle::Armed;
+        let deadline = crate::deadline::wall_clock(deadline)
+            .map_err(|interrupted| Error::interrupted(interrupted, ARMING))?;
         for index in 0..self.requests.len() {
-            admit(deadline, ARMING)?;
+            admit(&deadline, ARMING)?;
             let request = &self.requests[index];
-            let capture =
-                provider
-                    .arm_capture(request, deadline)
-                    .map_err(|source| Error::CaptureSource {
-                        index,
-                        interface: request.interface.clone(),
-                        phase: Phase::Arm,
-                        source: Box::new(source),
-                    })?;
+            let capture = provider.arm_capture(request, &deadline).map_err(|source| {
+                Error::CaptureSource {
+                    index,
+                    interface: request.interface.clone(),
+                    phase: Phase::Arm,
+                    source: Box::new(source),
+                }
+            })?;
             let owned = Owned::new(index, request, capture);
             let valid = owned.source.metadata_valid;
             self.sources.push(owned);
@@ -218,7 +219,7 @@ impl<C: Session> Group<C> {
                     reason: "activation metadata disagrees with the request",
                 });
             }
-            admit(deadline, ARMING)?;
+            admit(&deadline, ARMING)?;
         }
         Ok(())
     }
@@ -240,12 +241,12 @@ impl<C: Session> Group<C> {
                 message: "capture readiness deadline expired".to_owned(),
             });
         };
+        let control = Deadline::until(deadline, None).with_parent(Some(Arc::new(caller.clone())));
         for owned in &mut self.sources {
-            super::check_readiness_control(caller)?;
-            owned.wait_ready(caller, deadline)?;
-            super::check_readiness_control(caller)?;
+            super::check_readiness_control(&control)?;
+            owned.wait_ready(&control)?;
         }
-        super::check_readiness_control(caller)?;
+        super::check_readiness_control(&control)?;
         self.lifecycle = Lifecycle::Ready;
         Ok(())
     }
@@ -276,9 +277,7 @@ impl<C: Session> Group<C> {
             let index = self.cursor;
             self.cursor = (self.cursor + 1) % self.sources.len();
             let wait = remaining.min(POLL_SLICE);
-            let Ok(slice) = caller.for_wait(wait) else {
-                return Ok(None);
-            };
+            let slice = Deadline::new(wait).with_parent(Some(Arc::new(caller.clone())));
             let started = SystemClock.now();
             if let Some(captured) = self.sources[index].poll(&slice, caller)? {
                 return Ok(Some(captured));
@@ -291,7 +290,7 @@ impl<C: Session> Group<C> {
     }
 
     fn fail(&mut self, error: Error) -> Error {
-        self.shutdown_all();
+        let _ = self.shutdown_once();
         error
     }
 
@@ -304,13 +303,38 @@ impl<C: Session> Group<C> {
 
     fn shutdown_all_until(&mut self, deadline: &Deadline) {
         self.stop_all();
+        self.shutdown_attempted = true;
         for owned in &mut self.sources {
             owned.shutdown(deadline, &mut self.cleanup);
         }
     }
 
-    fn shutdown_all(&mut self) {
-        self.shutdown_all_until(&Deadline::new(super::CLEANUP_TIMEOUT));
+    /// Cleans up an operation once. Use `Session::shutdown_until` to retry unfinished joins.
+    pub fn shutdown_once(&mut self) -> Result<(), Error> {
+        if !self.shutdown_attempted {
+            return self.shutdown();
+        }
+        self.cleanup_result()
+    }
+
+    fn cleanup_result(&self) -> Result<(), Error> {
+        let mut failures = self.cleanup.iter().cloned().chain(
+            self.sources
+                .iter()
+                .filter_map(|owned| owned.pending_shutdown.clone()),
+        );
+        let Some(first) = failures.next() else {
+            return Ok(());
+        };
+        let remaining: Vec<_> = failures.collect();
+        if remaining.is_empty() {
+            Err(first)
+        } else {
+            Err(Error::CaptureCleanup {
+                first: Box::new(first),
+                remaining,
+            })
+        }
     }
 }
 
@@ -356,15 +380,21 @@ impl<C: Session> Session for Group<C> {
 
     fn shutdown_until(&mut self, deadline: &Deadline) -> Result<(), Error> {
         self.shutdown_all_until(deadline);
-        let mut failures = self.cleanup.iter().cloned();
-        match failures.next() {
-            None => Ok(()),
-            Some(first) if self.cleanup.len() == 1 => Err(first),
-            Some(first) => Err(Error::CaptureCleanup {
-                first: Box::new(first),
-                remaining: failures.collect(),
-            }),
-        }
+        self.cleanup_result()
+    }
+
+    fn shutdown_pending(&self) -> bool {
+        self.sources
+            .iter()
+            .any(|owned| owned.pending_shutdown.is_some())
+    }
+
+    fn final_stats_available(&self) -> bool {
+        !self.sources.is_empty()
+            && self
+                .sources
+                .iter()
+                .all(|owned| owned.source.statistics_valid)
     }
 
     fn stats(&self) -> Stats {
@@ -386,7 +416,7 @@ impl<C: Session> Session for Group<C> {
 
 impl<C: Session> Drop for Group<C> {
     fn drop(&mut self) {
-        self.shutdown_all();
+        let _ = self.shutdown_once();
     }
 }
 

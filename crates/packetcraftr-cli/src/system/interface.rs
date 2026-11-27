@@ -16,19 +16,22 @@ pub(crate) fn interfaces(
     select_interfaces(invocation, &net::interface::SystemProvider, selector)
 }
 
-pub(crate) fn resolve(
-    invocation: &crate::invocation::Invocation,
-    selector: InterfaceSelector,
-) -> Result<net::interface::Id, CliError> {
-    select_interfaces(invocation, &net::interface::SystemProvider, Some(&selector))?
-        .into_iter()
-        .next()
-        .map(|interface| interface.id)
-        .ok_or_else(|| CliError::new(Kind::Internal, "interface selection returned no match"))
-}
-
 pub(crate) fn resolve_unique(
     invocation: &crate::invocation::Invocation,
+    selectors: &[crate::command_options::Selector<InterfaceSelector>],
+    max_selectors: usize,
+) -> Result<Vec<net::interface::Id>, CliError> {
+    resolve_unique_with(
+        invocation,
+        &net::interface::SystemProvider,
+        selectors,
+        max_selectors,
+    )
+}
+
+fn resolve_unique_with<I: net::interface::Provider>(
+    invocation: &crate::invocation::Invocation,
+    provider: &I,
     selectors: &[crate::command_options::Selector<InterfaceSelector>],
     max_selectors: usize,
 ) -> Result<Vec<net::interface::Id>, CliError> {
@@ -40,15 +43,32 @@ pub(crate) fn resolve_unique(
             ),
         ));
     }
-    let mut seen = std::collections::HashSet::with_capacity(selectors.len());
-    let mut interfaces = Vec::with_capacity(selectors.len());
-    for selector in selectors {
-        let interface = resolve(invocation, selector.get()?)?;
-        if seen.insert(interface.index) {
-            interfaces.push(interface);
-        }
+    if selectors.is_empty() {
+        return Ok(Vec::new());
     }
-    Ok(interfaces)
+    let selectors = selectors
+        .iter()
+        .map(crate::command_options::Selector::get)
+        .collect::<Result<Vec<_>, _>>()?;
+    let snapshot = provider
+        .interfaces(&invocation.passive_lookup())
+        .map_err(CliError::classified)?;
+    let mut seen = std::collections::HashSet::with_capacity(selectors.len());
+    selectors
+        .into_iter()
+        .filter_map(|selector| {
+            let wanted = packetcraftr::route::Interface::from(selector.clone());
+            match snapshot
+                .iter()
+                .find(|interface| wanted.matches(&interface.id))
+            {
+                Some(interface) => seen
+                    .insert(interface.id.index)
+                    .then(|| Ok(interface.id.clone())),
+                None => Some(Err(no_match(&selector))),
+            }
+        })
+        .collect()
 }
 
 pub(crate) fn timestamp_types(
@@ -86,11 +106,79 @@ fn select_interfaces<I: net::interface::Provider>(
         .filter(|interface| wanted.matches(&interface.id))
         .collect::<Vec<_>>();
     if selected.is_empty() {
-        return Err(CliError::classified(net::Error::Device {
-            interface: selector.to_string(),
-            message: "no interface matches the requested name or index".to_owned(),
-            source: None,
-        }));
+        return Err(no_match(selector));
     }
     Ok(selected)
+}
+
+fn no_match(selector: &InterfaceSelector) -> CliError {
+    CliError::classified(net::Error::Device {
+        interface: selector.to_string(),
+        message: "no interface matches the requested name or index".to_owned(),
+        source: None,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use packetcraftr_core::{
+        budget::{Cancellation, Deadline},
+        frame::LinkType,
+    };
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    struct ChangingSnapshot(AtomicBool);
+
+    impl net::interface::Provider for ChangingSnapshot {
+        fn interfaces(
+            &self,
+            _: &Deadline,
+        ) -> Result<Vec<net::interface::Info>, net::interface::Error> {
+            let index = if self.0.swap(true, Ordering::Relaxed) {
+                2
+            } else {
+                1
+            };
+            Ok(vec![net::interface::Info {
+                id: net::interface::Id {
+                    index,
+                    name: "controlled".into(),
+                },
+                description: None,
+                addresses: Vec::new(),
+                mac_address: None,
+                flags: Default::default(),
+                mtu: None,
+                capability: net::link::Capability::Layer2,
+                link_type: LinkType::ETHERNET,
+            }])
+        }
+    }
+
+    #[test]
+    fn repeated_selectors_resolve_to_one_identity_when_interfaces_change() {
+        use crate::invocation::StreamEncoder;
+        use crate::output::contract::{Command, Format};
+
+        let invocation = crate::invocation::Invocation::new(
+            Format::Text,
+            StreamEncoder::new(Command::Capture, std::io::sink()),
+            None,
+            Cancellation::default(),
+            None,
+        );
+        let provider = ChangingSnapshot(AtomicBool::new(false));
+        let by_name = crate::command_options::interface_selector("controlled").unwrap();
+        let by_index = crate::command_options::interface_selector("1").unwrap();
+        let selected =
+            resolve_unique_with(&invocation, &provider, &[by_name, by_index], 2).unwrap();
+        assert_eq!(
+            selected,
+            vec![net::interface::Id {
+                index: 1,
+                name: "controlled".into()
+            }]
+        );
+    }
 }

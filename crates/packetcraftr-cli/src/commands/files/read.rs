@@ -146,7 +146,14 @@ pub(super) fn run(
     if let Some(output) = capture_output {
         output.validate_input(reader.format())?;
         let stdout = io::stdout();
-        return output.write_stdout(&mut reader, limits, selection, compression, stdout.lock());
+        return output.write_stdout(
+            &mut reader,
+            limits,
+            selection,
+            compression,
+            stdout.lock(),
+            &invocation.control,
+        );
     }
     let mut run = || {
         records::run(

@@ -15,7 +15,6 @@ use crate::terminal::{
     terminal_document,
 };
 
-#[must_use]
 pub fn run() -> ExitCode {
     let arguments = std::env::args_os().collect::<Vec<_>>();
     let context = cli::error_context(&arguments);

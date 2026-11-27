@@ -176,13 +176,14 @@ fn ndjson_cancellation_reports_terminal_or_failure() {
             let document: serde_json::Value = serde_json::from_slice(&before).unwrap();
             assert_eq!(document["event"], "error");
         }
-        command_failure_with(
+        let later = command_failure_with(
             &invocation,
             Command::Build,
             CliError::new(Kind::Packet, "later failure"),
             |_, _| panic!("closed stream must not use aggregate JSON"),
             |_| Ok(()),
         );
+        assert_ne!(later, ExitCode::SUCCESS);
         assert_eq!(*writer.bytes.lock().unwrap(), before);
     }
 }

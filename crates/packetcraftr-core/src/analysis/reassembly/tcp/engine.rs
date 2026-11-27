@@ -7,6 +7,7 @@ use std::time::Instant;
 use super::pending::{commit::commit_push, plan_push};
 use super::state::{TcpFlowState, flow_memory_charge, retained_bytes};
 use super::{Error, Event, EvictionReason, Limits, Reassembler, Resource, ScopedFlowKey, Segment};
+use crate::analysis::serial::serial_offset;
 
 impl Reassembler {
     pub fn new(limits: Limits) -> Result<Self, crate::analysis::Error> {
@@ -70,6 +71,25 @@ impl Reassembler {
         )?;
 
         Ok(commit_push(self, segment, now, changes_generation, plan))
+    }
+
+    pub(crate) fn refresh_activity(&mut self, flow: &ScopedFlowKey, sequence: u32, now: Instant) {
+        let Some(state) = self.flows.get_mut(flow) else {
+            return;
+        };
+        let limit = self.limits.max_bytes_per_flow as i64;
+        let expected = state.base_sequence.wrapping_add(state.next_offset as u32);
+        let offset = serial_offset(sequence, expected);
+        if state.deadline.is_some_and(|deadline| deadline <= now)
+            || now <= state.last_update
+            || !(-limit.max(1)..=limit).contains(&offset)
+        {
+            return;
+        }
+        self.expiry.remove(state.deadline, flow);
+        state.last_update = now;
+        state.deadline = now.checked_add(self.limits.idle_expiry);
+        self.expiry.insert(state.deadline, flow.clone());
     }
 
     pub fn expire(&mut self, now: Instant) -> Vec<Event> {

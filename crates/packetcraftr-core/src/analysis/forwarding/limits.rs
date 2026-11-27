@@ -4,7 +4,7 @@
 use serde::Serialize;
 use std::io::{self, Write};
 
-use super::report::{AmbiguousGroup, Evidence, Match, UnkeyedObservation, Violation};
+use super::Observation;
 
 /// Every value is honored as given: zero `max_details` or `max_detail_bytes`
 /// retains no details, and zero `max_scratch_bytes` refuses any comparison that
@@ -63,6 +63,9 @@ impl DetailBudget {
     pub(super) fn has_slot(&self, retained: usize) -> bool {
         retained < self.max_details
     }
+    pub(super) fn can_fit(&self, retained: usize, bytes: usize) -> bool {
+        self.has_slot(retained) && bytes <= self.remaining
+    }
     pub(super) fn reserve(&mut self, bytes: usize) -> bool {
         if let Some(remaining) = self.remaining.checked_sub(bytes) {
             self.remaining = remaining;
@@ -73,53 +76,8 @@ impl DetailBudget {
     }
 }
 
-pub(super) trait DetailCharge {
-    fn detail_charge(&self) -> usize;
-}
-
-impl DetailCharge for Evidence {
-    fn detail_charge(&self) -> usize {
-        512usize.saturating_add(json_bytes(&self.diagnostics))
-    }
-}
-
-impl DetailCharge for Match {
-    fn detail_charge(&self) -> usize {
-        512usize
-            .saturating_add(json_bytes(&self.key))
-            .saturating_add(self.ingress.detail_charge())
-            .saturating_add(self.egress.detail_charge())
-            .saturating_add(json_bytes(&self.checks))
-    }
-}
-
-impl DetailCharge for Violation {
-    fn detail_charge(&self) -> usize {
-        512usize
-            .saturating_add(json_bytes(&self.check))
-            .saturating_add(json_bytes(&self.key))
-            .saturating_add(self.ingress.as_ref().map_or(0, DetailCharge::detail_charge))
-            .saturating_add(self.egress.detail_charge())
-            .saturating_add(json_bytes(&self.expected))
-            .saturating_add(json_bytes(&self.actual))
-    }
-}
-
-impl DetailCharge for UnkeyedObservation {
-    fn detail_charge(&self) -> usize {
-        128usize
-            .saturating_add(self.evidence.detail_charge())
-            .saturating_add(json_bytes(&self.key))
-    }
-}
-
-impl DetailCharge for AmbiguousGroup {
-    fn detail_charge(&self) -> usize {
-        self.ingress.iter().chain(&self.egress).fold(
-            1024usize.saturating_add(json_bytes(&self.key)),
-            |bytes, evidence| bytes.saturating_add(evidence.detail_charge()),
-        )
-    }
+pub(super) fn evidence_charge(observation: &Observation) -> usize {
+    512usize.saturating_add(json_bytes(&observation.diagnostics))
 }
 
 pub(super) struct ScratchBudget {

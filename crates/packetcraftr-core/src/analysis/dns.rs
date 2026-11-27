@@ -55,6 +55,7 @@ pub struct Message {
 pub enum Event {
     Issue(StreamIssue),
     Message(Box<Message>),
+    /// Emitted at finalization, after all messages are available for capture-order correlation.
     Transaction(Transaction),
 }
 #[derive(Clone, Debug, Serialize)]
@@ -246,16 +247,16 @@ impl Collector {
                 self.flush(&flow, &mut direction, Status::Incomplete, events)
             },
         )?;
-        let transactions = self.transactions.finish(&mut check)?;
-        application::drain_batches(
-            transactions,
-            &mut check,
-            &mut emit,
-            |transaction, events| {
-                self.transaction(transaction, events);
-                Ok(())
-            },
-        )?;
+        self.transactions.finish(&mut check, |transaction| {
+            self.summary.transactions += 1;
+            match transaction.status {
+                TransactionStatus::Matched => self.summary.matched_transactions += 1,
+                TransactionStatus::Unanswered => self.summary.unanswered_transactions += 1,
+                TransactionStatus::OrphanResponse => self.summary.orphan_responses += 1,
+                TransactionStatus::DuplicateResponse => self.summary.duplicate_responses += 1,
+            }
+            emit(vec![Event::Transaction(transaction)])
+        })?;
         check()?;
         Ok(self.summary)
     }
@@ -432,22 +433,9 @@ impl Collector {
                 }
             }
         }
-        let transactions = self.transactions.observe(&message, &mut self.retained)?;
+        self.transactions.observe(&message, &mut self.retained)?;
         events.push(Event::Message(Box::new(message)));
-        for transaction in transactions {
-            self.transaction(transaction, events);
-        }
         Ok(())
-    }
-    fn transaction(&mut self, transaction: Transaction, events: &mut Vec<Event>) {
-        self.summary.transactions += 1;
-        match transaction.status {
-            TransactionStatus::Matched => self.summary.matched_transactions += 1,
-            TransactionStatus::Unanswered => self.summary.unanswered_transactions += 1,
-            TransactionStatus::OrphanResponse => self.summary.orphan_responses += 1,
-            TransactionStatus::DuplicateResponse => self.summary.duplicate_responses += 1,
-        }
-        events.push(Event::Transaction(transaction));
     }
 }
 

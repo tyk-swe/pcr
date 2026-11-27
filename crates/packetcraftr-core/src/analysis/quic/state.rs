@@ -65,6 +65,16 @@ pub(super) struct State {
     pub(super) report: Connection,
     pub(super) version: Version,
     pub(super) cids: Vec<Cid>,
+    pub(super) indexed_cids: usize,
+    pub(super) indexed_tokens: BTreeSet<[u8; 16]>,
+    pub(super) indexed_time: Option<SystemTime>,
+    pub(super) reset_index_dirty: bool,
+    pub(super) charged_memory: usize,
+    cid_bytes: usize,
+    pending_bytes: usize,
+    diagnostic_bytes: usize,
+    pub(super) stream_bytes: usize,
+    tls_bytes: usize,
     retire_before: [u64; 2],
     retired_sequences: BTreeSet<(Direction, u64)>,
     pub(super) original_dcid: Vec<u8>,
@@ -73,7 +83,7 @@ pub(super) struct State {
     pub(super) protections: [Protection; 2],
     pub(super) crypto: [[CryptoStream; 3]; 2],
     pub(super) streams: BTreeMap<(u64, Direction, bool), StreamState>,
-    pub(super) pending: VecDeque<Pending>,
+    pending: VecDeque<Pending>,
     pub(super) challenges: BTreeMap<[u8; 8], (Direction, FlowKey)>,
     pub(super) last_time: SystemTime,
     pub(super) hello_time: Option<SystemTime>,
@@ -83,6 +93,7 @@ pub(super) struct State {
     pub(super) retry_seen: bool,
     pub(super) early_acceptance: Option<bool>,
     pub(super) source_frames: BTreeSet<u64>,
+    last_datagram: Option<u64>,
 }
 impl State {
     pub(super) fn new(
@@ -162,6 +173,16 @@ impl State {
                     retired: false,
                 },
             ],
+            indexed_cids: 0,
+            indexed_tokens: BTreeSet::new(),
+            indexed_time: None,
+            reset_index_dirty: false,
+            charged_memory: 0,
+            cid_bytes: 256 + dcid.len() + scid.len(),
+            pending_bytes: 0,
+            diagnostic_bytes: 0,
+            stream_bytes: 0,
+            tls_bytes: 0,
             original_dcid: dcid.to_vec(),
             retire_before: [0; 2],
             retired_sequences: BTreeSet::new(),
@@ -180,9 +201,17 @@ impl State {
             retry_seen: false,
             early_acceptance: None,
             source_frames: BTreeSet::new(),
+            last_datagram: None,
         }
     }
     pub(super) fn record_datagram(&mut self, input: &Datagram<'_>, limits: &Limits) {
+        if self.last_datagram == Some(input.number) {
+            return;
+        }
+        self.last_datagram = Some(input.number);
+        self.record_sources(input, limits);
+    }
+    pub(super) fn record_sources(&mut self, input: &Datagram<'_>, limits: &Limits) {
         self.report.last_frame = self.report.last_frame.max(input.number);
         self.last_time = self.last_time.max(input.timestamp);
         for &frame in input.source_frames {
@@ -220,6 +249,7 @@ impl State {
         }) {
             return Err(super::Error::Invalid);
         }
+        self.reset_index_dirty = true;
         let retire_before = retire_before.max(self.retire_before[issued.owner.index()]);
         self.retire_before[issued.owner.index()] = retire_before;
         for cid in &mut self.cids {
@@ -248,6 +278,7 @@ impl State {
             if self.cids.len() >= limits.max_connection_ids {
                 return Err(super::Error::Limit);
             }
+            self.cid_bytes += 128 + issued.id.len();
             self.cids.push(Cid {
                 id: issued.id.to_vec(),
                 owner: issued.owner,
@@ -272,6 +303,7 @@ impl State {
             .iter_mut()
             .find(|cid| cid.owner == owner && cid.sequence == Some(sequence))
         {
+            self.reset_index_dirty |= !cid.retired && cid.token.is_some();
             cid.retired = true;
             return Ok(());
         }
@@ -306,23 +338,54 @@ impl State {
             }
             message.truncate(end);
         }
+        let code = code.to_owned();
+        self.diagnostic_bytes += 128 + code.capacity() + message.capacity();
         self.report.diagnostics.push(Diagnostic {
             frame,
-            code: code.to_owned(),
+            code,
             message,
         });
     }
-    pub(super) fn memory(&self) -> usize {
-        8192 + self
-            .pending
+    pub(super) fn pending_len(&self) -> usize {
+        self.pending.len()
+    }
+
+    pub(super) fn discard_pending(&mut self) {
+        if let Some(pending) = self.pending.pop_front() {
+            self.pending_bytes -= 256 + pending.bytes.len();
+        }
+    }
+
+    pub(super) fn push_pending(&mut self, pending: Pending) {
+        self.pending_bytes += 256 + pending.bytes.len();
+        self.pending.push_back(pending);
+    }
+
+    pub(super) fn take_pending(&mut self) -> VecDeque<Pending> {
+        self.pending_bytes = 0;
+        std::mem::take(&mut self.pending)
+    }
+
+    pub(super) fn charge_tls(&mut self) {
+        self.tls_bytes = self
+            .report
+            .offered_alpn
             .iter()
-            .map(|p| 256 + p.bytes.len())
+            .map(|s| s.capacity() + 32)
             .sum::<usize>()
+            + self.report.sni.as_ref().map_or(0, String::capacity)
             + self
-                .streams
-                .values()
-                .map(|s| 264 + s.ranges.memory())
-                .sum::<usize>()
+                .report
+                .client_transport_parameters
+                .iter()
+                .chain(&self.report.server_transport_parameters)
+                .map(|p| p.value_hex.capacity() + 64)
+                .sum::<usize>();
+    }
+
+    pub(super) fn memory(&self) -> usize {
+        8192 + self.pending_bytes
+            + self.stream_bytes
             + self
                 .crypto
                 .iter()
@@ -337,35 +400,13 @@ impl State {
                         + p.sent.iter().map(|s| s.len() * 80).sum::<usize>()
                 })
                 .sum::<usize>()
-            + self
-                .cids
-                .iter()
-                .map(|c| 128 + c.id.capacity())
-                .sum::<usize>()
+            + self.cid_bytes
             + self.report.paths.len() * 256
             + self.challenges.len() * 256
             + self.source_frames.len() * 64
             + self.retired_sequences.len() * 64
-            + self
-                .report
-                .diagnostics
-                .iter()
-                .map(|d| 128 + d.code.capacity() + d.message.capacity())
-                .sum::<usize>()
-            + self
-                .report
-                .offered_alpn
-                .iter()
-                .map(|s| s.capacity() + 32)
-                .sum::<usize>()
-            + self.report.sni.as_ref().map_or(0, String::capacity)
-            + self
-                .report
-                .client_transport_parameters
-                .iter()
-                .chain(&self.report.server_transport_parameters)
-                .map(|p| p.value_hex.capacity() + 64)
-                .sum::<usize>()
+            + self.diagnostic_bytes
+            + self.tls_bytes
     }
     pub(super) fn finish(mut self, reason: &str, limits: &Limits) -> Connection {
         self.report.end_reason = reason.to_owned();
@@ -432,10 +473,12 @@ impl State {
             .find(|c| c.id == id && c.owner == owner)
         {
             cid.sequence = cid.sequence.or(sequence);
+            let was_retired = cid.retired;
             cid.retired |= cid.sequence.is_some_and(|sequence| {
                 sequence < self.retire_before[owner.index()]
                     || self.retired_sequences.contains(&(owner, sequence))
             });
+            self.reset_index_dirty |= !was_retired && cid.retired && cid.token.is_some();
             return;
         }
         if self.cids.len() >= limits.max_connection_ids {
@@ -447,6 +490,7 @@ impl State {
             );
             return;
         }
+        self.cid_bytes += 128 + id.len();
         self.cids.push(Cid {
             id: id.to_vec(),
             owner,

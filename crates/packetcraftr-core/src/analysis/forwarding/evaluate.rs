@@ -3,13 +3,15 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::limits::{DetailBudget, DetailCharge, ScratchBudget};
+use serde::Serialize;
+
+use super::limits::{DetailBudget, ScratchBudget, evidence_charge, json_bytes};
 use super::report::{
     ASSUMPTIONS, AmbiguousGroup, Check, CheckEvaluation, CheckKind, Evidence, Match, Omissions,
     Outcome, Report, RequestedRules, SideSummary, Sided, Summary, UnkeyedObservation, Verdict,
     Violation,
 };
-use super::{Error, ExpectationOutcome, Limits, Observation, Rules, Side, ValueState};
+use super::{Error, Expectation, ExpectationOutcome, Limits, Observation, Rules, Side, ValueState};
 use crate::budget::{Cancellation, Deadline};
 use crate::field;
 
@@ -124,27 +126,31 @@ pub fn verify_with_limits(
             (0, 0) => unreachable!("identity keys always index at least one member"),
             (1, 1) => {
                 summary.unique_matches += 1;
-                let mut pair = evaluate_pair(
-                    rules,
-                    &ingress[ingress_members[0]],
-                    &egress[egress_members[0]],
-                    ingress_rank[ingress_members[0]],
-                    egress_rank[egress_members[0]],
-                    &mut summary,
-                    &mut sink,
-                );
-                pair.reordered = reordered[ingress_members[0]];
-                push_bounded(&mut matches, &mut omitted.matches, &mut sink.budget, pair);
+                let pair = Pair {
+                    ingress: &ingress[ingress_members[0]],
+                    egress: &egress[egress_members[0]],
+                    ingress_order: ingress_rank[ingress_members[0]],
+                    egress_order: egress_rank[egress_members[0]],
+                    reordered: reordered[ingress_members[0]],
+                    key_bytes: key.len(),
+                };
+                if let Some(detail) =
+                    evaluate_pair(rules, pair, &mut summary, &mut sink, matches.len())
+                {
+                    matches.push(detail);
+                } else {
+                    omitted.matches += 1;
+                }
             }
             (ingress_count, 0) => {
                 summary.ingress_only += ingress_count as u64;
                 for member in ingress_members {
                     check()?;
-                    push_bounded(
+                    push_evidence(
                         &mut unmatched.ingress,
                         &mut omitted.unmatched_ingress,
                         &mut sink.budget,
-                        Evidence::from(&ingress[*member]),
+                        &ingress[*member],
                     );
                 }
             }
@@ -154,11 +160,11 @@ pub fn verify_with_limits(
                     check()?;
                     let observation = &egress[*member];
                     record_egress_expectations(rules, observation, &mut summary, &mut sink);
-                    push_bounded(
+                    push_evidence(
                         &mut unmatched.egress,
                         &mut omitted.unmatched_egress,
                         &mut sink.budget,
-                        Evidence::from(observation),
+                        observation,
                     );
                 }
             }
@@ -177,11 +183,11 @@ pub fn verify_with_limits(
                             let mut kept = Vec::new();
                             for member in members {
                                 check()?;
-                                push_bounded(
+                                push_evidence(
                                     &mut kept,
                                     &mut omitted.group_members,
                                     &mut sink.budget,
-                                    Evidence::from(&pool[*member]),
+                                    &pool[*member],
                                 );
                             }
                             Ok(kept)
@@ -233,7 +239,12 @@ pub fn verify_with_limits(
                 list,
                 omitted_count,
                 &mut sink.budget,
-                UnkeyedObservation {
+                || {
+                    128usize
+                        .saturating_add(evidence_charge(observation))
+                        .saturating_add(json_bytes(&observation.key_cells))
+                },
+                || UnkeyedObservation {
                     evidence: Evidence::from(observation),
                     key: observation.key_cells.clone(),
                 },
@@ -337,6 +348,49 @@ fn indistinguishable(
     Ok(true)
 }
 
+#[derive(Clone, Copy, Serialize)]
+struct CheckRef<'a> {
+    kind: CheckKind,
+    field: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    value: Option<&'a str>,
+}
+
+impl From<CheckRef<'_>> for Check {
+    fn from(check: CheckRef<'_>) -> Self {
+        Self {
+            kind: check.kind,
+            field: check.field.to_owned(),
+            value: check.value.map(str::to_owned),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Serialize)]
+struct Evaluation<'a> {
+    check: CheckRef<'a>,
+    outcome: Outcome,
+    expected_state: Option<ValueState>,
+    actual_state: ValueState,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    expected: Option<&'a field::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    actual: Option<&'a field::Value>,
+}
+
+impl From<Evaluation<'_>> for CheckEvaluation {
+    fn from(evaluation: Evaluation<'_>) -> Self {
+        Self {
+            check: evaluation.check.into(),
+            outcome: evaluation.outcome,
+            expected_state: evaluation.expected_state,
+            actual_state: evaluation.actual_state,
+            expected: evaluation.expected.cloned(),
+            actual: evaluation.actual.cloned(),
+        }
+    }
+}
+
 struct ViolationSink {
     items: Vec<Violation>,
     omitted: u64,
@@ -346,24 +400,39 @@ struct ViolationSink {
 impl ViolationSink {
     fn record(
         &mut self,
-        outcome: Outcome,
+        evaluation: Evaluation<'_>,
         summary: &mut Summary,
-        violation: impl FnOnce() -> Violation,
+        key: &Observation,
+        ingress: Option<&Observation>,
+        egress: &Observation,
     ) {
-        match outcome {
+        match evaluation.outcome {
             Outcome::Violated => {
                 summary.checks_evaluated += 1;
                 summary.checks_violated += 1;
-                if self.budget.has_slot(self.items.len()) {
-                    push_bounded(
-                        &mut self.items,
-                        &mut self.omitted,
-                        &mut self.budget,
-                        violation(),
-                    );
-                } else {
-                    self.omitted += 1;
-                }
+                push_bounded(
+                    &mut self.items,
+                    &mut self.omitted,
+                    &mut self.budget,
+                    || {
+                        let key = key.is_keyed().then_some(key.key_cells.as_slice());
+                        512usize
+                            .saturating_add(json_bytes(&evaluation.check))
+                            .saturating_add(json_bytes(&key))
+                            .saturating_add(ingress.map_or(0, evidence_charge))
+                            .saturating_add(evidence_charge(egress))
+                            .saturating_add(json_bytes(&evaluation.expected))
+                            .saturating_add(json_bytes(&evaluation.actual))
+                    },
+                    || Violation {
+                        check: evaluation.check.into(),
+                        key: key.key(),
+                        ingress: ingress.map(Evidence::from),
+                        egress: Evidence::from(egress),
+                        expected: evaluation.expected.cloned(),
+                        actual: evaluation.actual.cloned(),
+                    },
+                );
             }
             Outcome::Satisfied => {
                 summary.checks_evaluated += 1;
@@ -374,86 +443,82 @@ impl ViolationSink {
     }
 }
 
-fn evaluate_pair(
-    rules: &Rules,
-    ingress: &Observation,
-    egress: &Observation,
+struct Pair<'a> {
+    ingress: &'a Observation,
+    egress: &'a Observation,
     ingress_order: u64,
     egress_order: u64,
+    reordered: bool,
+    key_bytes: usize,
+}
+
+fn evaluate_pair(
+    rules: &Rules,
+    pair: Pair<'_>,
     summary: &mut Summary,
     sink: &mut ViolationSink,
-) -> Match {
-    let mut checks = Vec::with_capacity(rules.preserve.len() + rules.expectations.len());
+    retained_matches: usize,
+) -> Option<Match> {
+    let Pair {
+        ingress,
+        egress,
+        ingress_order,
+        egress_order,
+        reordered,
+        key_bytes,
+    } = pair;
+    let minimum_charge = 1536usize.saturating_add(key_bytes);
+    let mut checks = sink
+        .budget
+        .can_fit(retained_matches, minimum_charge)
+        .then(Vec::new);
     for (index, (kind, field)) in rules.preservation_specs().enumerate() {
-        let expected = ingress.preserved[index].clone();
-        let actual = egress.preserved[index].clone();
+        let expected = ingress.preserved[index].as_ref();
+        let actual = egress.preserved[index].as_ref();
         let expected_state = ingress.preserved_states[index];
         let actual_state = egress.preserved_states[index];
-        let outcome = preservation_outcome(kind, expected_state, actual_state, &expected, &actual);
-        checks.push(CheckEvaluation {
-            check: Check {
+        let evaluation = Evaluation {
+            check: CheckRef {
                 kind,
-                field: field.to_owned(),
+                field,
                 value: None,
             },
-            outcome,
+            outcome: preservation_outcome(kind, expected_state, actual_state, expected, actual),
             expected_state: Some(expected_state),
             actual_state,
-            expected: expected.clone(),
-            actual: actual.clone(),
-        });
-        sink.record(outcome, summary, || Violation {
-            check: Check {
-                kind,
-                field: field.to_owned(),
-                value: None,
-            },
-            key: ingress.key(),
-            ingress: Some(Evidence::from(ingress)),
-            egress: Evidence::from(egress),
             expected,
             actual,
-        });
+        };
+        if let Some(checks) = &mut checks {
+            checks.push(evaluation);
+        }
+        sink.record(evaluation, summary, ingress, Some(ingress), egress);
     }
     for (expectation, stored) in rules.expectations.iter().zip(&egress.expectations) {
-        let kind = expectation.kind();
-        let field = &expectation.field;
-        let declared = &expectation.declared;
-        let (outcome, actual) = evaluate_expectation(kind, stored);
-        checks.push(CheckEvaluation {
-            check: Check {
-                kind,
-                field: field.to_owned(),
-                value: (kind == CheckKind::Expect).then(|| declared.to_owned()),
-            },
-            outcome,
-            expected_state: None,
-            actual_state: stored.state,
-            expected: None,
-            actual: actual.clone(),
-        });
-        sink.record(outcome, summary, || Violation {
-            check: Check {
-                kind,
-                field: field.to_owned(),
-                value: (kind == CheckKind::Expect).then(|| declared.to_owned()),
-            },
-            key: egress.key(),
-            ingress: Some(Evidence::from(ingress)),
-            egress: Evidence::from(egress),
-            expected: None,
-            actual,
-        });
+        let evaluation = evaluate_expectation(expectation, stored);
+        if let Some(checks) = &mut checks {
+            checks.push(evaluation);
+        }
+        sink.record(evaluation, summary, egress, Some(ingress), egress);
     }
-    Match {
+    let checks = checks?;
+    if !sink.budget.can_fit(retained_matches, minimum_charge) {
+        return None;
+    }
+    let charge = 512usize
+        .saturating_add(key_bytes)
+        .saturating_add(evidence_charge(ingress))
+        .saturating_add(evidence_charge(egress))
+        .saturating_add(json_bytes(&checks));
+    sink.budget.reserve(charge).then(|| Match {
         key: ingress.key().expect("a paired observation is keyed"),
         ingress: Evidence::from(ingress),
         egress: Evidence::from(egress),
         ingress_order,
         egress_order,
-        reordered: false,
-        checks,
-    }
+        reordered,
+        checks: checks.into_iter().map(CheckEvaluation::from).collect(),
+    })
 }
 
 fn record_egress_expectations(
@@ -463,20 +528,13 @@ fn record_egress_expectations(
     sink: &mut ViolationSink,
 ) {
     for (expectation, stored) in rules.expectations.iter().zip(&egress.expectations) {
-        let kind = expectation.kind();
-        let (outcome, actual) = evaluate_expectation(kind, stored);
-        sink.record(outcome, summary, || Violation {
-            check: Check {
-                kind,
-                field: expectation.field.clone(),
-                value: (kind == CheckKind::Expect).then(|| expectation.declared.clone()),
-            },
-            key: egress.key(),
-            ingress: None,
-            egress: Evidence::from(egress),
-            expected: None,
-            actual,
-        });
+        sink.record(
+            evaluate_expectation(expectation, stored),
+            summary,
+            egress,
+            None,
+            egress,
+        );
     }
 }
 
@@ -484,8 +542,8 @@ fn preservation_outcome(
     kind: CheckKind,
     expected_state: ValueState,
     actual_state: ValueState,
-    expected: &Option<field::Value>,
-    actual: &Option<field::Value>,
+    expected: Option<&field::Value>,
+    actual: Option<&field::Value>,
 ) -> Outcome {
     let equal = if kind == CheckKind::PreservePresence {
         expected_state
@@ -493,7 +551,7 @@ fn preservation_outcome(
             .zip(actual_state.presence())
             .map(|(a, b)| a == b)
     } else if expected_state == ValueState::Observed && actual_state == ValueState::Observed {
-        expected.as_ref().zip(actual.as_ref()).map(|(a, b)| a == b)
+        expected.zip(actual).map(|(a, b)| a == b)
     } else {
         None
     };
@@ -504,10 +562,11 @@ fn preservation_outcome(
     }
 }
 
-fn evaluate_expectation(
-    kind: CheckKind,
-    stored: &ExpectationOutcome,
-) -> (Outcome, Option<field::Value>) {
+fn evaluate_expectation<'a>(
+    expectation: &'a Expectation,
+    stored: &'a ExpectationOutcome,
+) -> Evaluation<'a> {
+    let kind = expectation.kind();
     let available = if kind == CheckKind::ExpectAbsent {
         stored.state.presence().is_some()
     } else {
@@ -520,17 +579,44 @@ fn evaluate_expectation(
     } else {
         Outcome::Violated
     };
-    (outcome, stored.actual.clone())
+    Evaluation {
+        check: CheckRef {
+            kind,
+            field: &expectation.field,
+            value: (kind == CheckKind::Expect).then_some(expectation.declared.as_str()),
+        },
+        outcome,
+        expected_state: None,
+        actual_state: stored.state,
+        expected: None,
+        actual: stored.actual.as_ref(),
+    }
 }
 
-fn push_bounded<T: DetailCharge>(
+fn push_evidence(
+    list: &mut Vec<Evidence>,
+    omitted: &mut u64,
+    budget: &mut DetailBudget,
+    observation: &Observation,
+) {
+    push_bounded(
+        list,
+        omitted,
+        budget,
+        || evidence_charge(observation),
+        || Evidence::from(observation),
+    );
+}
+
+fn push_bounded<T>(
     list: &mut Vec<T>,
     omitted: &mut u64,
     budget: &mut DetailBudget,
-    item: T,
+    charge: impl FnOnce() -> usize,
+    item: impl FnOnce() -> T,
 ) {
-    if budget.has_slot(list.len()) && budget.reserve(item.detail_charge()) {
-        list.push(item);
+    if budget.can_fit(list.len(), 1) && budget.reserve(charge()) {
+        list.push(item());
     } else {
         *omitted += 1;
     }

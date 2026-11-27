@@ -439,6 +439,51 @@ fn forwarding_rule_warnings_are_printed_as_coded_warning_lines() {
 }
 
 #[test]
+fn forwarding_detail_limits_preserve_the_verdict_and_check_counts() {
+    let capture = sourced_ipv4_capture(vec![sourced_tcp_packet(80, false, 101, 24, b"x")]);
+    let args = [
+        "--output",
+        "json",
+        "analyze",
+        "verify-forwarding",
+        capture.path().to_str().unwrap(),
+        capture.path().to_str().unwrap(),
+        "--identity",
+        "tcp.sequence",
+        "--preserve",
+        "tcp.source_port",
+        "--expect",
+        "tcp.destination_port=81",
+    ];
+    let report = |extra: &[&str]| {
+        let output = run(&[args.as_slice(), extra].concat());
+        assert_eq!(output.status.code(), Some(1));
+        let json: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+        json["result"].clone()
+    };
+    let full = report(&[]);
+    assert_eq!(full["verdict"], "fail", "{full}");
+    assert_eq!(
+        full["matches"][0]["checks"][0]["outcome"], "satisfied",
+        "{full}"
+    );
+    assert_eq!(full["violations"][0]["check"]["kind"], "expect", "{full}");
+    for limit in ["--max-details", "--max-detail-bytes"] {
+        let bounded = report(&[limit, "0"]);
+        assert_eq!(bounded["verdict"], full["verdict"], "{bounded}");
+        assert_eq!(bounded["summary"], full["summary"], "{bounded}");
+        for list in ["matches", "violations"] {
+            assert_eq!(bounded[list], serde_json::json!([]), "{bounded}");
+            assert_eq!(
+                bounded["omitted"][list],
+                full[list].as_array().unwrap().len(),
+                "{bounded}"
+            );
+        }
+    }
+}
+
+#[test]
 fn http_text_prints_the_published_start_line_and_headers() {
     let path = capture_path("http-stream.pcap");
     let capture = path.to_string_lossy().into_owned();
@@ -725,6 +770,107 @@ fn read_and_dissect_resource_diagnostics_report_active_rendering_limits() {
             }
         }
     }
+}
+
+#[test]
+fn capture_read_preserves_complete_ip_headers_at_snaplen() {
+    use packetcraftr_core::capture_file::{Format, Writer};
+    use packetcraftr_core::frame::{Frame, Lengths, LinkType};
+
+    let ethernet = capture_frames(&capture_path("protocol-stun.pcap"));
+    let ipv4 = &ethernet[0][14..34];
+    let ipv4_length = u32::from(u16::from_be_bytes([ipv4[2], ipv4[3]]));
+    let mut ipv6 = [0; 40];
+    ipv6[..8].copy_from_slice(&[0x60, 0, 0, 0, 0, 8, 17, 64]);
+    ipv6[8..24].copy_from_slice(
+        &"2001:db8::1"
+            .parse::<std::net::Ipv6Addr>()
+            .unwrap()
+            .octets(),
+    );
+    ipv6[24..].copy_from_slice(
+        &"2001:db8::2"
+            .parse::<std::net::Ipv6Addr>()
+            .unwrap()
+            .octets(),
+    );
+
+    for (link, header, original, filter) in [
+        (LinkType::IPV4, ipv4, ipv4_length, "ipv4.src == 192.0.2.1"),
+        (
+            LinkType::IPV6,
+            ipv6.as_slice(),
+            48,
+            "ipv6.src == 2001:db8::1",
+        ),
+    ] {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("snaplen.pcap");
+        let mut writer =
+            Writer::new(std::fs::File::create(&path).unwrap(), Format::Pcap, link).unwrap();
+        let captured = u32::try_from(header.len()).unwrap();
+        for original in [original, captured, captured + 1] {
+            let frame = Frame::try_with_optional_timestamp(
+                Some(std::time::UNIX_EPOCH),
+                link,
+                Lengths { captured, original },
+                header.to_vec(),
+            )
+            .unwrap();
+            writer.write_frame(&frame).unwrap();
+        }
+        drop(writer);
+        let args = [
+            "files",
+            "read",
+            path.to_str().unwrap(),
+            "--filter",
+            filter,
+            "--field",
+            "frame.number",
+        ];
+        assert_eq!(assert_success(&run(&args), &args), "frame.number\n1\n");
+    }
+}
+
+#[test]
+fn capture_read_does_not_extend_a_complete_8023_payload_past_snaplen() {
+    use packetcraftr_core::capture_file::{Format, Writer};
+    use packetcraftr_core::frame::{Frame, Lengths, LinkType};
+
+    let ethernet = capture_frames(&capture_path("protocol-stun.pcap"));
+    let ip = &ethernet[0][14..34];
+    let snap = [0xaa, 0xaa, 0x03, 0, 0, 0, 0x08, 0];
+    let mut header = [0; 14];
+    header[12..].copy_from_slice(&u16::try_from(snap.len() + ip.len()).unwrap().to_be_bytes());
+    let payload = [header.as_slice(), &snap, ip].concat();
+    let captured = u32::try_from(payload.len()).unwrap();
+    let ip_length = u32::from(u16::from_be_bytes([ip[2], ip[3]]));
+    let file = tempfile::NamedTempFile::new().unwrap();
+    let frame = Frame::try_with_optional_timestamp(
+        Some(std::time::UNIX_EPOCH),
+        LinkType::ETHERNET,
+        Lengths {
+            captured,
+            original: captured + ip_length - 20,
+        },
+        payload,
+    )
+    .unwrap();
+    Writer::new(file.reopen().unwrap(), Format::Pcap, LinkType::ETHERNET)
+        .unwrap()
+        .write_frame(&frame)
+        .unwrap();
+    let args = [
+        "files",
+        "read",
+        file.path().to_str().unwrap(),
+        "--filter",
+        "ipv4.src == 192.0.2.1",
+        "--field",
+        "frame.number",
+    ];
+    assert_eq!(assert_success(&run(&args), &args), "frame.number\n");
 }
 
 #[test]
@@ -1160,6 +1306,102 @@ fn merge_rejects_clock_regression_before_publication() {
         assert_error(&run(&args), "packet.capture_merge_order");
         assert!(!destination.exists());
     }
+}
+
+#[test]
+fn capture_selection_rejects_unreadable_metadata_runs_before_writing_stdout() {
+    use packetcraftr_core::capture_file::ReaderLimits;
+
+    let frame = first_frame("dns-response.pcap");
+    let mut writer = little_endian_pcapng(&frame);
+    let mut bytes = writer.get_ref().clone();
+    let interface_end = bytes.len();
+    writer.write_frame(&frame).unwrap();
+    let packet_capture = writer.into_inner();
+    let packet = &packet_capture[interface_end..];
+    let metadata = [0x50, 0x0c, 0, 0, 12, 0, 0, 0, 12, 0, 0, 0];
+    bytes.extend(metadata.repeat(ReaderLimits::default().max_metadata_blocks_per_frame - 1));
+    bytes.extend_from_slice(packet);
+    bytes.extend_from_slice(&metadata);
+    bytes.extend_from_slice(packet);
+
+    let dir = tempfile::tempdir().unwrap();
+    let capture = dir.path().join("metadata.pcapng");
+    std::fs::write(&capture, bytes).unwrap();
+    let source = capture.to_str().unwrap();
+    let args = [
+        "--output",
+        "pcapng",
+        "files",
+        "read",
+        source,
+        "--compression",
+        "gzip",
+    ];
+    assert!(run(&args).status.success());
+    let args = [&args[..], &["--frames", "2"]].concat();
+    let output = run(&args);
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("metadata block"));
+}
+
+#[test]
+fn merge_append_preserves_timestampless_frames_on_their_own_interface() {
+    use packetcraftr_core::capture_file::Reader;
+    use packetcraftr_core::frame::{Frame, LinkType};
+    use std::time::UNIX_EPOCH;
+
+    let dir = tempfile::tempdir().unwrap();
+    let first = dir.path().join("timed.pcapng");
+    let second = dir.path().join("untimed.pcapng");
+    let destination = dir.path().join("merged.pcapng");
+
+    let expected_first =
+        Frame::new(Some(UNIX_EPOCH), LinkType::ETHERNET, vec![1, 2, 3, 4]).unwrap();
+    let mut timed = little_endian_pcapng(&expected_first);
+    timed.write_frame(&expected_first).unwrap();
+    std::fs::write(&first, timed.into_inner()).unwrap();
+
+    let expected_second = Frame::new(None, LinkType::RAW, vec![5, 6, 7]).unwrap();
+    let mut untimed = little_endian_pcapng(&expected_second).into_inner();
+    untimed.extend(untimed_pcapng_block(&expected_second));
+    std::fs::write(&second, untimed).unwrap();
+    let args = [
+        "--output",
+        "json",
+        "files",
+        "merge",
+        first.to_str().unwrap(),
+        second.to_str().unwrap(),
+        "--write",
+        destination.to_str().unwrap(),
+    ];
+    assert!(!run(&args).status.success());
+    assert!(!destination.exists());
+
+    let args = [&args[..], &["--order", "append"]].concat();
+    let report: serde_json::Value =
+        serde_json::from_str(&assert_success(&run(&args), &args)).unwrap();
+    let mut reader = Reader::with_limits(
+        std::fs::File::open(destination).unwrap(),
+        Default::default(),
+    )
+    .unwrap();
+    for (index, expected) in [expected_first, expected_second].into_iter().enumerate() {
+        let actual = reader.next_frame().unwrap().unwrap();
+        assert_eq!(actual.timestamp, expected.timestamp);
+        assert_eq!(actual.link_type, expected.link_type);
+        assert_eq!(actual.bytes(), expected.bytes());
+        assert_eq!(actual.original_length(), expected.original_length());
+        assert_eq!(
+            u64::from(actual.interface.unwrap()),
+            report["result"]["interfaces"][index]["output_interface"]
+                .as_u64()
+                .unwrap()
+        );
+    }
+    assert!(reader.next_frame().unwrap().is_none());
 }
 
 fn merge_source<'a>(
@@ -3842,47 +4084,224 @@ fn http3_streaming_summary_reports_capture_loss_separately_from_recovered_exchan
     assert_eq!(terminal["result"]["summary"]["input_incomplete"], true);
 }
 
-#[test]
-fn dns_transactions_follow_first_captured_bytes_not_completion_order() {
+fn sourced_tcp_packet(
+    server_port: u16,
+    reverse: bool,
+    sequence: u32,
+    flags: u8,
+    payload: &[u8],
+) -> Vec<u8> {
+    use packetcraftr_core::protocol::checksum_parts;
+
+    let (src, dst, sport, dport) = if reverse {
+        ([192, 0, 2, 2], [192, 0, 2, 1], server_port, 40000u16)
+    } else {
+        ([192, 0, 2, 1], [192, 0, 2, 2], 40000u16, server_port)
+    };
+    let mut wire = vec![0u8; 40];
+    wire[0] = 0x45;
+    wire[2..4].copy_from_slice(&u16::try_from(40 + payload.len()).unwrap().to_be_bytes());
+    wire[8] = 64;
+    wire[9] = 6;
+    wire[12..16].copy_from_slice(&src);
+    wire[16..20].copy_from_slice(&dst);
+    wire[20..22].copy_from_slice(&sport.to_be_bytes());
+    wire[22..24].copy_from_slice(&dport.to_be_bytes());
+    wire[24..28].copy_from_slice(&sequence.to_be_bytes());
+    if flags & 0x10 != 0 {
+        wire[28..32].copy_from_slice(&(if reverse { 101u32 } else { 501 }).to_be_bytes());
+    }
+    wire[32] = 0x50;
+    wire[33] = flags;
+    wire[34..36].copy_from_slice(&65535u16.to_be_bytes());
+    wire.extend_from_slice(payload);
+    let length = u16::try_from(wire.len() - 20).unwrap().to_be_bytes();
+    let sum = checksum_parts(&[&src, &dst, &[0, 6], &length, &wire[20..]]);
+    wire[36..38].copy_from_slice(&sum.to_be_bytes());
+    let sum = checksum_parts(&[&wire[..20]]);
+    wire[10..12].copy_from_slice(&sum.to_be_bytes());
+    wire
+}
+
+fn sourced_ipv4_capture(frames: Vec<Vec<u8>>) -> tempfile::NamedTempFile {
     use packetcraftr_core::capture_file::{Format, Writer};
     use packetcraftr_core::frame::{Frame, LinkType};
-    use packetcraftr_core::protocol::checksum_parts;
     use std::time::{Duration, UNIX_EPOCH};
 
-    fn segment(reverse: bool, sequence: u32, flags: u8, payload: &[u8]) -> Vec<u8> {
-        let (src, dst, sport, dport) = if reverse {
-            ([192, 0, 2, 2], [192, 0, 2, 1], 53u16, 40000u16)
-        } else {
-            ([192, 0, 2, 1], [192, 0, 2, 2], 40000u16, 53u16)
-        };
-        let mut wire = vec![0u8; 40];
-        wire[0] = 0x45;
-        wire[2..4].copy_from_slice(&u16::try_from(40 + payload.len()).unwrap().to_be_bytes());
-        wire[8] = 64;
-        wire[9] = 6;
-        wire[12..16].copy_from_slice(&src);
-        wire[16..20].copy_from_slice(&dst);
-        wire[20..22].copy_from_slice(&sport.to_be_bytes());
-        wire[22..24].copy_from_slice(&dport.to_be_bytes());
-        wire[24..28].copy_from_slice(&sequence.to_be_bytes());
-        if flags & 0x10 != 0 {
-            wire[28..32].copy_from_slice(&(if reverse { 101u32 } else { 501 }).to_be_bytes());
-        }
-        wire[32] = 0x50;
-        wire[33] = flags;
-        wire[34..36].copy_from_slice(&65535u16.to_be_bytes());
-        wire.extend_from_slice(payload);
-        let length = u16::try_from(wire.len() - 20).unwrap().to_be_bytes();
-        let sum = checksum_parts(&[&src, &dst, &[0, 6], &length, &wire[20..]]);
-        wire[36..38].copy_from_slice(&sum.to_be_bytes());
-        let sum = checksum_parts(&[&wire[..20]]);
-        wire[10..12].copy_from_slice(&sum.to_be_bytes());
-        wire
+    let capture = tempfile::NamedTempFile::new().unwrap();
+    let mut writer = Writer::new(capture.reopen().unwrap(), Format::Pcap, LinkType::IPV4).unwrap();
+    for (index, bytes) in frames.into_iter().enumerate() {
+        let frame = Frame::new(
+            Some(UNIX_EPOCH + Duration::from_secs(index as u64)),
+            LinkType::IPV4,
+            bytes,
+        )
+        .unwrap();
+        writer.write_frame(&frame).unwrap();
     }
+    writer.flush().unwrap();
+    capture
+}
+
+fn ipv4_fragment_packet(
+    endpoints: (u8, u8),
+    protocol: u8,
+    id: u16,
+    fragment: u16,
+    payload: &[u8],
+) -> Vec<u8> {
+    use packetcraftr_core::protocol::checksum_parts;
+
+    let mut wire = vec![0u8; 20];
+    wire[0] = 0x45;
+    wire[2..4].copy_from_slice(&u16::try_from(20 + payload.len()).unwrap().to_be_bytes());
+    wire[4..6].copy_from_slice(&id.to_be_bytes());
+    wire[6..8].copy_from_slice(&fragment.to_be_bytes());
+    wire[8] = 64;
+    wire[9] = protocol;
+    wire[12..16].copy_from_slice(&[192, 0, 2, endpoints.0]);
+    wire[16..20].copy_from_slice(&[192, 0, 2, endpoints.1]);
+    let sum = checksum_parts(&[&wire]);
+    wire[10..12].copy_from_slice(&sum.to_be_bytes());
+    wire.extend_from_slice(payload);
+    wire
+}
+
+#[test]
+fn analysis_counts_nested_fragments_without_inflating_physical_counts() {
+    use packetcraftr_core::{analysis, capture_file::Reader, protocol::builtin};
+
+    let inner = ipv4_fragment_packet((3, 4), 17, 1, 0x2000, &[0; 16]);
+    let capture = sourced_ipv4_capture(vec![
+        ipv4_fragment_packet((1, 2), 4, 2, 0x2000, &inner[..24]),
+        ipv4_fragment_packet((1, 2), 4, 2, 3, &inner[24..]),
+    ]);
+    let mut reader = Reader::with_limits(capture.reopen().unwrap(), Default::default()).unwrap();
+    let mut options = analysis::Options::default();
+    options.limits.ip.max_retained_outcomes = 1;
+    let summary = analysis::run(&mut reader, builtin::registry(), &options, |_| Ok(())).unwrap();
+    let report = &summary.ip_reassembly;
+    assert_eq!(report.counters.ipv4.physical_fragments, summary.frames_read);
+    assert_eq!(
+        report.counters.ipv4.admitted_fragments,
+        summary.frames_read + 1
+    );
+    assert_eq!(report.counters.ipv4.completed_datagrams, 1);
+    assert_eq!(report.counters.ipv4.incomplete_datagrams, 1);
+    assert_eq!(report.outcomes_omitted, 1);
+    assert!(summary.incomplete_sources.is_empty());
+    assert!(summary.input_incomplete());
+}
+
+#[test]
+fn http_waits_for_a_reordered_head_request_before_framing_responses() {
+    let packet = |reverse, sequence, flags, payload: &[u8]| {
+        sourced_tcp_packet(80, reverse, sequence, flags, payload)
+    };
+    let head = b"HEAD /metadata HTTP/1.1\r\nHost: example.test\r\n\r\n";
+    let get = b"GET /data HTTP/1.1\r\nHost: example.test\r\n\r\n";
+    let metadata = b"HTTP/1.1 200 OK\r\nContent-Length: 777\r\n\r\n";
+    let data = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok";
+    let capture = sourced_ipv4_capture(vec![
+        packet(false, 100, 2, &[]),
+        packet(true, 500, 18, &[]),
+        packet(false, 101, 16, &[]),
+        packet(false, 101, 24, &head[..10]),
+        packet(true, 501, 24, metadata),
+        packet(false, 101 + head.len() as u32, 24, get),
+        packet(true, 501 + metadata.len() as u32, 24, data),
+        packet(false, 111, 24, &head[10..]),
+    ]);
+    let args = [
+        "--output",
+        "json",
+        "analyze",
+        "http",
+        capture.path().to_str().unwrap(),
+    ];
+    let result: serde_json::Value =
+        serde_json::from_str(&assert_success(&run(&args), &args)).unwrap();
+    let messages = result["result"]["messages"].as_array().unwrap();
+    assert_eq!(messages.len(), 4, "{result}");
+    for (method, length) in [("HEAD", 0), ("GET", 2)] {
+        let request = messages
+            .iter()
+            .find(|message| message["start"]["method"] == method)
+            .unwrap();
+        let response = messages
+            .iter()
+            .find(|message| message["request"] == request["index"])
+            .unwrap();
+        assert_eq!(response["status"], "complete", "{response}");
+        assert_eq!(response["body_bytes"], length, "{response}");
+        let frame = if method == "HEAD" { 5 } else { 7 };
+        let sources = response["sources"].as_array().unwrap();
+        assert_eq!(sources.len(), 1, "{response}");
+        assert_eq!(sources[0]["number"], frame, "{response}");
+    }
+    assert_eq!(
+        result["result"]["summary"]["responses_without_request"], 0,
+        "{result}"
+    );
+}
+
+#[test]
+fn http_deferred_connect_response_stops_parsing_tunnel_bytes() {
+    let packet = |reverse, sequence, flags, payload: &[u8]| {
+        sourced_tcp_packet(80, reverse, sequence, flags, payload)
+    };
+    let connect = b"CONNECT example.test:443 HTTP/1.1\r\nHost: example.test\r\n\r\n";
+    let mut last = connect[10..].to_vec();
+    last.extend_from_slice(b"GET /tunneled HTTP/1.1\r\n\r\n");
+    let capture = sourced_ipv4_capture(vec![
+        packet(false, 100, 2, &[]),
+        packet(true, 500, 18, &[]),
+        packet(false, 101, 16, &[]),
+        packet(false, 101, 24, &connect[..10]),
+        packet(
+            true,
+            501,
+            24,
+            b"HTTP/1.1 200 Connected\r\n\r\nHTTP/1.1 204 No Content\r\n\r\n",
+        ),
+        packet(false, 111, 24, &last),
+    ]);
+    let args = [
+        "--output",
+        "json",
+        "analyze",
+        "http",
+        capture.path().to_str().unwrap(),
+    ];
+    let result: serde_json::Value =
+        serde_json::from_str(&assert_success(&run(&args), &args)).unwrap();
+    let messages = result["result"]["messages"].as_array().unwrap();
+    assert_eq!(messages.len(), 2, "{result}");
+    let request = messages
+        .iter()
+        .find(|message| message["start"]["method"] == "CONNECT")
+        .unwrap();
+    let response = messages
+        .iter()
+        .find(|message| message["request"] == request["index"])
+        .unwrap();
+    assert_eq!(response["status"], "upgrade", "{response}");
+    assert_eq!(response["framing"]["type"], "tunnel", "{response}");
+    assert_eq!(
+        result["result"]["summary"]["upgraded_connections"], 1,
+        "{result}"
+    );
+}
+
+#[test]
+fn dns_transactions_follow_first_captured_bytes_not_completion_order() {
+    let segment = |reverse, sequence, flags, payload: &[u8]| {
+        sourced_tcp_packet(53, reverse, sequence, flags, payload)
+    };
     let query = b"\x00\x1d\x12\x34\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00\x07example\x03com\x00\x00\x01\x00\x01";
     let mut response = query.to_vec();
     response[4..6].copy_from_slice(&0x8180u16.to_be_bytes());
-    for response_started_first in [true, false] {
+    for (response_started_first, later_retry) in [(true, false), (false, false), (false, true)] {
         let mut frames = vec![
             segment(false, 100, 2, &[]),
             segment(true, 500, 18, &[]),
@@ -3894,6 +4313,13 @@ fn dns_transactions_follow_first_captured_bytes_not_completion_order() {
                 segment(false, 101, 24, query),
                 segment(true, 511, 24, &response[10..]),
             ]);
+        } else if later_retry {
+            frames.extend([
+                segment(false, 101, 24, query),
+                segment(true, 501, 24, &response[..10]),
+                segment(false, 101 + query.len() as u32, 24, query),
+                segment(true, 511, 24, &response[10..]),
+            ]);
         } else {
             frames.extend([
                 segment(false, 101, 24, &query[..10]),
@@ -3901,19 +4327,7 @@ fn dns_transactions_follow_first_captured_bytes_not_completion_order() {
                 segment(false, 111, 24, &query[10..]),
             ]);
         }
-        let capture = tempfile::NamedTempFile::new().unwrap();
-        let mut writer =
-            Writer::new(capture.reopen().unwrap(), Format::Pcap, LinkType::IPV4).unwrap();
-        for (index, bytes) in frames.into_iter().enumerate() {
-            let frame = Frame::new(
-                Some(UNIX_EPOCH + Duration::from_secs(index as u64)),
-                LinkType::IPV4,
-                bytes,
-            )
-            .unwrap();
-            writer.write_frame(&frame).unwrap();
-        }
-        writer.flush().unwrap();
+        let capture = sourced_ipv4_capture(frames);
         let args = [
             "--output",
             "json",
@@ -3935,6 +4349,18 @@ fn dns_transactions_follow_first_captured_bytes_not_completion_order() {
                 statuses.contains(&"orphan_response") && statuses.contains(&"unanswered"),
                 "{result}"
             );
+        } else if later_retry {
+            assert_eq!(statuses, ["matched", "unanswered"], "{result}");
+            assert_eq!(
+                transactions[0]["queries"],
+                serde_json::json!([1]),
+                "{result}"
+            );
+            assert_eq!(
+                transactions[1]["queries"],
+                serde_json::json!([2]),
+                "{result}"
+            );
         } else {
             assert_eq!(statuses, ["matched"], "{result}");
             assert_eq!(
@@ -3943,4 +4369,86 @@ fn dns_transactions_follow_first_captured_bytes_not_completion_order() {
             );
         }
     }
+}
+
+#[test]
+fn dns_does_not_classify_an_older_fragmented_response_as_a_duplicate() {
+    fn datagram(reverse: bool) -> Vec<u8> {
+        let (source, destination, flags) = if reverse {
+            (53u16, 40000u16, 0x8180u16)
+        } else {
+            (40000u16, 53u16, 0x0100u16)
+        };
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&source.to_be_bytes());
+        bytes.extend_from_slice(&destination.to_be_bytes());
+        bytes.extend_from_slice(&37u16.to_be_bytes());
+        bytes.extend_from_slice(&[0, 0, 0x12, 0x34]);
+        bytes.extend_from_slice(&flags.to_be_bytes());
+        bytes.extend_from_slice(
+            b"\x00\x01\x00\x00\x00\x00\x00\x00\x07example\x03com\x00\x00\x01\x00\x01",
+        );
+        bytes
+    }
+    let packet = |reverse: bool, id: u16, fragment: u16, payload: &[u8]| {
+        ipv4_fragment_packet(
+            if reverse { (2, 1) } else { (1, 2) },
+            17,
+            id,
+            fragment,
+            payload,
+        )
+    };
+    let response = datagram(true);
+    let capture = sourced_ipv4_capture(vec![
+        packet(true, 1, 0x2000, &response[..16]),
+        packet(false, 2, 0, &datagram(false)),
+        packet(true, 3, 0, &response),
+        packet(true, 1, 2, &response[16..]),
+        packet(true, 4, 0, &response),
+    ]);
+    let args = [
+        "--output",
+        "ndjson",
+        "analyze",
+        "dns",
+        capture.path().to_str().unwrap(),
+    ];
+    let output = assert_success(&run(&args), &args);
+    let records: Vec<serde_json::Value> = output
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    let events: Vec<_> = records
+        .iter()
+        .filter_map(|record| match record["event"].as_str() {
+            Some("dns_message" | "dns_transaction") => record["event"].as_str(),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        events,
+        [
+            "dns_message",
+            "dns_message",
+            "dns_message",
+            "dns_message",
+            "dns_transaction",
+            "dns_transaction",
+            "dns_transaction"
+        ],
+        "{output}"
+    );
+    let transactions: Vec<_> = records
+        .iter()
+        .filter(|record| record["event"] == "dns_transaction")
+        .map(|record| &record["result"])
+        .collect();
+    assert_eq!(transactions[0]["status"], "orphan_response", "{output}");
+    assert_eq!(transactions[1]["status"], "matched", "{output}");
+    assert_eq!(transactions[2]["status"], "duplicate_response", "{output}");
+    assert_eq!(
+        transactions[2]["original_response"], transactions[1]["response"],
+        "{output}"
+    );
 }

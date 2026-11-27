@@ -72,8 +72,10 @@ impl CaptureOutput {
 
         let io_error = |error| CliError::classified(capture::Error::from(error));
         let mut staged = tempfile::tempfile().map_err(io_error)?;
-        let mut output =
-            compression.writer(BufWriter::with_capacity(PUBLICATION_CHUNK_BYTES, &mut staged))?;
+        let mut output = compression.writer(BufWriter::with_capacity(
+            PUBLICATION_CHUNK_BYTES,
+            &mut staged,
+        ))?;
         let result = self.write(reader, limits, selection, &mut output);
         finish_compressed_output(result, output)?;
         staged.rewind().map_err(io_error)?;

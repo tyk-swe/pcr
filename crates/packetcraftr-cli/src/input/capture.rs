@@ -83,7 +83,6 @@ pub(crate) fn reopen_capture_snapshot(
     std::io::Seek::rewind(&mut snapshot)
         .map_err(capture_file::Error::from)
         .map_err(CliError::classified)?;
-    control.check()?;
     bounded_reader(
         control,
         io::BufReader::with_capacity(64 * 1024, snapshot),
@@ -109,9 +108,7 @@ fn capture_reader<R: Read + 'static>(
         )
         .map_err(|error| interrupted_or(control, CliError::classified(error)))?,
     );
-    let reader = bounded_reader(control, source, limits)?;
-    control.check()?;
-    Ok(reader)
+    bounded_reader(control, source, limits)
 }
 
 fn bounded_reader<R: Read>(

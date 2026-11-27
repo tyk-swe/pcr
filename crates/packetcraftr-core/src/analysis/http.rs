@@ -65,6 +65,7 @@ pub struct Summary {
 struct Pending {
     index: u64,
     method: String,
+    first_frame: u64,
 }
 struct Live {
     index: u64,
@@ -87,6 +88,10 @@ struct Direction {
     generation: u64,
     disabled: bool,
     live: Option<Live>,
+    deferred: VecDeque<Chunk>,
+    deferred_bytes: usize,
+    deferred_spans: usize,
+    clean_closed: bool,
 }
 impl Direction {
     fn new(stream: u64, generation: u64) -> Self {
@@ -95,11 +100,65 @@ impl Direction {
             generation,
             disabled: false,
             live: None,
+            deferred: VecDeque::new(),
+            deferred_bytes: 0,
+            deferred_spans: 0,
+            clean_closed: false,
         }
+    }
+
+    fn waiting(&self) -> bool {
+        self.waiting_response().is_some()
+    }
+
+    fn waiting_response(&self) -> Option<(u64, u16)> {
+        let live = self.live.as_ref()?;
+        if live.body.is_some() {
+            return None;
+        }
+        Some((live.sources.first()?.number, live.head.as_ref()?.status()?))
+    }
+
+    fn buffered(&self) -> usize {
+        self.live.as_ref().map_or(0, Live::buffered) + self.deferred_bytes
+    }
+
+    fn pop(&mut self) -> Option<Chunk> {
+        let chunk = self.deferred.pop_front()?;
+        self.deferred_bytes -= Chunk::charge(chunk.bytes.len());
+        self.deferred_spans -= chunk.sources.frames().len();
+        Some(chunk)
+    }
+
+    fn discard_deferred(&mut self) {
+        self.deferred.clear();
+        self.deferred_bytes = 0;
+        self.deferred_spans = 0;
+    }
+}
+struct Chunk {
+    bytes: Bytes,
+    sources: SourceSet,
+}
+impl Chunk {
+    fn charge(length: usize) -> usize {
+        length * 2 + 2 * std::mem::size_of::<Self>()
     }
 }
 type Connection = (u64, u64);
 type RequestKey = (Connection, ScopedFlowKey);
+enum Work {
+    Input(application::Delivery),
+    Replay {
+        flow: ScopedFlowKey,
+        connection: Connection,
+    },
+}
+enum Progress {
+    Done,
+    Wait(usize),
+    WakePeer(usize),
+}
 pub struct Collector {
     limits: Limits,
     max_body_bytes: u64,
@@ -172,7 +231,8 @@ impl Collector {
             &mut check,
             &mut emit,
             |(flow, mut direction), output| {
-                self.flush(&flow, &mut direction, Status::Incomplete, None, output)
+                self.buffered -= direction.buffered();
+                self.finish_direction(&flow, &mut direction, Status::Incomplete, output)
             },
         )?;
         for queue in self.requests.values() {
@@ -251,21 +311,137 @@ impl Collector {
             .directions
             .remove(&data.flow)
             .unwrap_or_else(|| Direction::new(data.stream, data.generation));
-        self.buffered -= direction.live.as_ref().map_or(0, Live::buffered);
+        self.buffered -= direction.buffered();
         if direction.generation != data.generation {
-            self.flush(&data.flow, &mut direction, Status::Evicted, None, output)?;
+            self.finish_direction(&data.flow, &mut direction, Status::Evicted, output)?;
             direction = Direction::new(data.stream, data.generation);
         }
         Ok(direction)
     }
 
     fn data(&mut self, data: application::Delivery, output: &mut Vec<Event>) -> Result<(), Error> {
-        let connection = (data.stream, data.generation);
-        let mut direction = self.direction_for(&data, output)?;
-        let mut input = data.bytes.as_ref();
+        let mut next = Some(Work::Input(data));
+        let mut work = Vec::new();
+        while let Some(next) = next.take().or_else(|| work.pop()) {
+            let (flow, connection, mut direction, chunk, replaying) = match next {
+                Work::Input(data) => {
+                    let direction = self.direction_for(&data, output)?;
+                    let chunk = Chunk {
+                        bytes: data.bytes,
+                        sources: data.sources,
+                    };
+                    (
+                        data.flow,
+                        (data.stream, data.generation),
+                        direction,
+                        Some(chunk),
+                        false,
+                    )
+                }
+                Work::Replay { flow, connection } => {
+                    let Some(mut direction) = self.directions.remove(&flow) else {
+                        continue;
+                    };
+                    if (direction.stream, direction.generation) != connection {
+                        self.directions.insert(flow, direction);
+                        continue;
+                    }
+                    self.buffered -= direction.buffered();
+                    if direction.waiting() {
+                        self.start_body(&flow, &mut direction, false, output)?;
+                    }
+                    let chunk = if direction.waiting() {
+                        None
+                    } else {
+                        direction.pop()
+                    };
+                    (flow, connection, direction, chunk, true)
+                }
+            };
+
+            let mut wake_peer = false;
+            if let Some(chunk) = chunk {
+                let progress = self.read(&flow, &mut direction, &chunk, false, output)?;
+                if let Progress::Wait(consumed) | Progress::WakePeer(consumed) = progress {
+                    wake_peer = matches!(progress, Progress::WakePeer(_));
+                    if consumed < chunk.bytes.len()
+                        && let Err(error) = self.defer(&mut direction, chunk, consumed, replaying)
+                    {
+                        if wake_peer {
+                            return Err(error);
+                        }
+                        direction.discard_deferred();
+                        self.flush(&flow, &mut direction, Status::Incomplete, None, output)?;
+                        direction.disabled = true;
+                    }
+                }
+            }
+
+            if direction.disabled || self.upgraded.contains(&connection) {
+                direction.discard_deferred();
+            } else if !direction.waiting() {
+                if !direction.deferred.is_empty() {
+                    work.push(Work::Replay {
+                        flow: flow.clone(),
+                        connection,
+                    });
+                } else if direction.clean_closed {
+                    self.close(&flow, &mut direction, output)?;
+                }
+            }
+            if wake_peer {
+                work.push(Work::Replay {
+                    flow: flow.reverse(),
+                    connection,
+                });
+            }
+            self.check_buffer(direction.buffered())?;
+            self.buffered += direction.buffered();
+            self.directions.insert(flow, direction);
+        }
+        Ok(())
+    }
+
+    fn defer(
+        &self,
+        direction: &mut Direction,
+        chunk: Chunk,
+        consumed: usize,
+        replaying: bool,
+    ) -> Result<(), Error> {
+        let charge = Chunk::charge(chunk.bytes.len() - consumed);
+        let spans = direction.deferred_spans + chunk.sources.frames().len();
+        self.limits.check_source_spans(spans)?;
+        self.check_buffer(direction.buffered() + charge)?;
+        let chunk = Chunk {
+            bytes: Bytes::copy_from_slice(&chunk.bytes[consumed..]),
+            sources: chunk.sources,
+        };
+        direction.deferred_bytes += charge;
+        direction.deferred_spans = spans;
+        if replaying {
+            direction.deferred.push_front(chunk);
+        } else {
+            direction.deferred.push_back(chunk);
+        }
+        Ok(())
+    }
+
+    fn read(
+        &mut self,
+        flow: &ScopedFlowKey,
+        direction: &mut Direction,
+        chunk: &Chunk,
+        ending: bool,
+        output: &mut Vec<Event>,
+    ) -> Result<Progress, Error> {
+        let connection = (direction.stream, direction.generation);
+        let mut input = chunk.bytes.as_ref();
         let mut merged = direction.live.is_none();
-        let mut upgraded = self.upgraded.contains(&connection);
-        while !input.is_empty() && !direction.disabled && !upgraded {
+        while !input.is_empty() && !direction.disabled && !self.upgraded.contains(&connection) {
+            if direction.waiting() {
+                return Ok(Progress::Wait(chunk.bytes.len() - input.len()));
+            }
             if direction.live.is_none() {
                 self.limits.check_messages(self.summary.messages as usize)?;
                 self.summary.messages += 1;
@@ -276,141 +452,153 @@ impl Collector {
                     body: None,
                     framing: None,
                     request: None,
-                    sources: Accumulator::new(&data.sources)?,
+                    sources: Accumulator::new(&chunk.sources)?,
                 });
             }
             let live = direction.live.as_mut().expect("initialized live message");
             if !merged {
-                live.sources.insert(&data.sources)?;
+                live.sources.insert(&chunk.sources)?;
                 merged = true;
             }
             self.limits.check_source_spans(live.sources.len())?;
-            if live.head.is_none() {
-                // A run ends at the next LF (or consumes the input):
-                // CR/LF pairing and the CRLFCRLF terminator can only
-                // complete on an LF, so interior bytes append unchecked.
-                let run = &input[..memchr(b'\n', input).map_or(input.len(), |i| i + 1)];
-                let bare = bare_crlf_offset(live.header.last().copied(), run);
-                let room = (http::MAX_HEADER_BYTES + 1).saturating_sub(live.header.len());
-                let take = run.len().min(room).min(bare.map_or(usize::MAX, |i| i + 1));
-                self.check_buffer(live.buffered().saturating_add(take))?;
-                live.header.extend_from_slice(&run[..take]);
-                input = &input[take..];
-                if live.header.len() > http::MAX_HEADER_BYTES {
-                    self.reject(
-                        &data.flow,
-                        &mut direction,
-                        http::Error::Limit(http::Limit::HeaderBytes),
-                        output,
-                    )?;
-                    continue;
-                }
-                if bare.is_some_and(|i| i < take) {
-                    self.reject(
-                        &data.flow,
-                        &mut direction,
-                        http::Error::Invalid("header uses a bare CR or LF"),
-                        output,
-                    )?;
-                    continue;
-                }
-                if !live.header.ends_with(b"\r\n\r\n") {
-                    continue;
-                }
-                self.retained.charge(live.header.len())?;
-                let parsed = http::parse_head(&Bytes::copy_from_slice(&live.header));
-                let (head, _) = match parsed {
-                    Ok(Some(head)) => head,
-                    Ok(None) => unreachable!("terminator present"),
-                    Err(error) => {
-                        self.reject(&data.flow, &mut direction, error, output)?;
-                        continue;
-                    }
-                };
-                let request_method = self.pair_request(connection, &data.flow, &head, live);
-                let framing = head.body(request_method.as_deref());
-                live.header.clear();
-                live.head = Some(head);
-                let framing = match framing {
-                    Ok(framing) => framing,
-                    Err(error) => {
-                        self.reject(&data.flow, &mut direction, error, output)?;
-                        continue;
-                    }
-                };
-                live.framing = Some(framing);
-                live.body = Some(BodyDecoder::new(framing, self.max_body_bytes));
-                if let Body::Length(length) = framing
-                    && length > self.max_body_bytes
-                {
-                    self.reject(
-                        &data.flow,
-                        &mut direction,
-                        http::Error::Limit(http::Limit::BodyBytes),
-                        output,
-                    )?;
-                    continue;
-                }
-                if live.body.as_ref().is_some_and(BodyDecoder::complete) {
-                    let status = if framing == Body::Tunnel {
-                        upgraded = true;
-                        self.upgraded.insert(connection);
-                        self.summary.upgraded_connections += 1;
-                        Status::Upgrade
-                    } else {
-                        Status::Complete
-                    };
-                    self.flush(&data.flow, &mut direction, status, None, output)?;
-                }
-            } else {
-                let consumed = self.consume_body(&data.flow, &mut direction, input, output)?;
+            if live.head.is_some() {
+                let consumed = self.consume_body(flow, direction, input, output)?;
                 input = &input[consumed..];
+                continue;
+            }
+
+            let run = &input[..memchr(b'\n', input).map_or(input.len(), |i| i + 1)];
+            let bare = bare_crlf_offset(live.header.last().copied(), run);
+            let room = (http::MAX_HEADER_BYTES + 1).saturating_sub(live.header.len());
+            let take = run.len().min(room).min(bare.map_or(usize::MAX, |i| i + 1));
+            self.check_buffer(direction.deferred_bytes + live.buffered() + take)?;
+            live.header.extend_from_slice(&run[..take]);
+            input = &input[take..];
+            if live.header.len() > http::MAX_HEADER_BYTES {
+                self.reject(
+                    flow,
+                    direction,
+                    http::Error::Limit(http::Limit::HeaderBytes),
+                    output,
+                )?;
+                continue;
+            }
+            if bare.is_some_and(|i| i < take) {
+                self.reject(
+                    flow,
+                    direction,
+                    http::Error::Invalid("header uses a bare CR or LF"),
+                    output,
+                )?;
+                continue;
+            }
+            if !live.header.ends_with(b"\r\n\r\n") {
+                continue;
+            }
+            self.retained.charge(live.header.len())?;
+            let (head, _) = match http::parse_head(&Bytes::copy_from_slice(&live.header)) {
+                Ok(Some(head)) => head,
+                Ok(None) => unreachable!("terminator present"),
+                Err(error) => {
+                    self.reject(flow, direction, error, output)?;
+                    continue;
+                }
+            };
+            let mut wake_peer = false;
+            if let Some(method) = head.method() {
+                let first_frame = live.sources.first().expect("message has sources").number;
+                self.requests
+                    .entry((connection, flow.clone()))
+                    .or_default()
+                    .push_back(Pending {
+                        index: live.index,
+                        method: method.to_owned(),
+                        first_frame,
+                    });
+                wake_peer = !ending
+                    && self.directions.get(&flow.reverse()).is_some_and(|peer| {
+                        (peer.stream, peer.generation) == connection
+                            && peer.waiting_response().is_some_and(|(frame, status)| {
+                                first_frame < frame || can_frame_unpaired(status)
+                            })
+                    });
+            }
+            live.header = Vec::new();
+            live.head = Some(head);
+            self.start_body(flow, direction, ending, output)?;
+            if wake_peer {
+                return Ok(Progress::WakePeer(chunk.bytes.len() - input.len()));
             }
         }
-        self.check_buffer(direction.live.as_ref().map_or(0, Live::buffered))?;
-        self.buffered += direction.live.as_ref().map_or(0, Live::buffered);
-        self.directions.insert(data.flow, direction);
-        Ok(())
+        Ok(Progress::Done)
     }
 
-    fn pair_request(
+    fn start_body(
         &mut self,
-        connection: Connection,
         flow: &ScopedFlowKey,
-        head: &Head,
-        live: &mut Live,
-    ) -> Option<String> {
-        let mut request_method = None;
-        if head.status().is_some() {
-            let key = (connection, flow.reverse());
-            if let Some(queue) = self.requests.get_mut(&key) {
-                if let Some(request) = queue.front() {
-                    live.request = Some(request.index);
-                    request_method = Some(request.method.clone());
-                }
-                if head
-                    .status()
-                    .is_some_and(|status| status >= 200 || status == 101)
-                {
-                    queue.pop_front();
-                }
-                if queue.is_empty() {
-                    self.requests.remove(&key);
+        direction: &mut Direction,
+        ending: bool,
+        output: &mut Vec<Event>,
+    ) -> Result<(), Error> {
+        let connection = (direction.stream, direction.generation);
+        let live = direction.live.as_mut().expect("initialized live message");
+        let head = live.head.as_ref().expect("parsed head");
+        let method = match head.status() {
+            Some(status) => {
+                let key = (connection, flow.reverse());
+                let first_frame = live.sources.first().expect("message has sources").number;
+                match self.requests.get_mut(&key) {
+                    Some(queue)
+                        if queue
+                            .front()
+                            .is_some_and(|request| request.first_frame < first_frame) =>
+                    {
+                        let request = queue.front().expect("front request exists");
+                        live.request = Some(request.index);
+                        if status >= 200 || status == 101 {
+                            let method = queue.pop_front().expect("front request exists").method;
+                            if queue.is_empty() {
+                                self.requests.remove(&key);
+                            }
+                            Some(method)
+                        } else {
+                            Some(request.method.clone())
+                        }
+                    }
+                    None if !ending && status != 101 => return Ok(()),
+                    _ if !can_frame_unpaired(status) => return Ok(()),
+                    _ => None,
                 }
             }
-            if live.request.is_none() {
-                self.summary.responses_without_request += 1;
-            }
-        } else if let Some(method) = head.method() {
-            self.requests
-                .entry((connection, flow.clone()))
-                .or_default()
-                .push_back(Pending {
-                    index: live.index,
-                    method: method.to_owned(),
-                });
+            None => None,
+        };
+        let framing = match head.body(method.as_deref()) {
+            Ok(framing) => framing,
+            Err(error) => return self.reject(flow, direction, error, output),
+        };
+        live.framing = Some(framing);
+        live.body = Some(BodyDecoder::new(framing, self.max_body_bytes));
+        if let Body::Length(length) = framing
+            && length > self.max_body_bytes
+        {
+            return self.reject(
+                flow,
+                direction,
+                http::Error::Limit(http::Limit::BodyBytes),
+                output,
+            );
         }
-        request_method
+        if live.body.as_ref().is_some_and(BodyDecoder::complete) {
+            let status = if framing == Body::Tunnel {
+                self.upgraded.insert(connection);
+                self.summary.upgraded_connections += 1;
+                Status::Upgrade
+            } else {
+                Status::Complete
+            };
+            self.flush(flow, direction, status, None, output)?;
+        }
+        Ok(())
     }
 
     fn consume_body(
@@ -426,7 +614,7 @@ impl Collector {
             .as_ref()
             .expect("head has body state")
             .additional_buffer_bound(input.len());
-        self.check_buffer(live.buffered().saturating_add(growth))?;
+        self.check_buffer(direction.deferred_bytes + live.buffered().saturating_add(growth))?;
         match live
             .body
             .as_mut()
@@ -470,23 +658,65 @@ impl Collector {
         output: &mut Vec<Event>,
     ) -> Result<(), Error> {
         if let Some(mut direction) = self.directions.remove(flow) {
-            self.buffered -= direction.live.as_ref().map_or(0, Live::buffered);
-            let complete = clean
-                && direction
-                    .live
-                    .as_mut()
-                    .and_then(|live| live.body.as_mut())
-                    .is_some_and(BodyDecoder::close);
-            self.flush(
-                flow,
-                &mut direction,
-                if complete { Status::Complete } else { status },
-                None,
-                output,
-            )?;
-            direction.disabled = true;
+            self.buffered -= direction.buffered();
+            if clean && direction.waiting() {
+                direction.clean_closed = true;
+            } else if clean {
+                self.close(flow, &mut direction, output)?;
+            } else {
+                self.finish_direction(flow, &mut direction, status, output)?;
+            }
+            self.buffered += direction.buffered();
             self.directions.insert(flow.clone(), direction);
         }
+        Ok(())
+    }
+    fn finish_direction(
+        &mut self,
+        flow: &ScopedFlowKey,
+        direction: &mut Direction,
+        status: Status,
+        output: &mut Vec<Event>,
+    ) -> Result<(), Error> {
+        if direction.waiting() {
+            self.start_body(flow, direction, true, output)?;
+            let connection = (direction.stream, direction.generation);
+            while !direction.waiting()
+                && !direction.disabled
+                && !self.upgraded.contains(&connection)
+            {
+                let Some(chunk) = direction.pop() else {
+                    break;
+                };
+                self.read(flow, direction, &chunk, true, output)?;
+            }
+        }
+        direction.discard_deferred();
+        if status == Status::Incomplete && direction.clean_closed {
+            return self.close(flow, direction, output);
+        }
+        self.flush(flow, direction, status, None, output)?;
+        direction.disabled = true;
+        Ok(())
+    }
+    fn close(
+        &mut self,
+        flow: &ScopedFlowKey,
+        direction: &mut Direction,
+        output: &mut Vec<Event>,
+    ) -> Result<(), Error> {
+        let complete = direction
+            .live
+            .as_mut()
+            .and_then(|live| live.body.as_mut())
+            .is_some_and(BodyDecoder::close);
+        let status = if complete {
+            Status::Complete
+        } else {
+            Status::Incomplete
+        };
+        self.flush(flow, direction, status, None, output)?;
+        direction.disabled = true;
         Ok(())
     }
     fn flush(
@@ -500,6 +730,9 @@ impl Collector {
         let Some(live) = direction.live.take() else {
             return Ok(());
         };
+        if live.request.is_none() && live.head.as_ref().and_then(Head::status).is_some() {
+            self.summary.responses_without_request += 1;
+        }
         match status {
             Status::Complete | Status::Upgrade => self.summary.complete_messages += 1,
             Status::Malformed | Status::Limit => self.summary.malformed_messages += 1,
@@ -544,6 +777,11 @@ impl Collector {
 }
 
 session::application_collector!();
+
+fn can_frame_unpaired(status: u16) -> bool {
+    matches!(status, 100..=199 | 204 | 304)
+}
+
 fn bare_crlf_offset(prev: Option<u8>, run: &[u8]) -> Option<usize> {
     if prev == Some(b'\r') && run.first() != Some(&b'\n') {
         return Some(0);

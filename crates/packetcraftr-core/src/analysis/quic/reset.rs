@@ -104,13 +104,17 @@ impl Collector {
                 || self
                     .resets
                     .get(&(candidate.scope.id.get(), candidate.token))
-                    .is_some_and(|entries| !entries.is_empty())
+                    .is_some_and(|entries| {
+                        entries
+                            .iter()
+                            .any(|&index| index != state.report.connection)
+                    })
             {
                 self.reset_candidates.push_back(candidate);
                 continue;
             }
             self.reset_memory = self.reset_memory.saturating_sub(candidate.memory());
-            state.record_datagram(&candidate.input(), &self.limits);
+            state.record_sources(&candidate.input(), &self.limits);
             state.report.metrics.packets += 1;
             state.report.stateless_reset = true;
             state.report.closed = true;

@@ -203,17 +203,18 @@ impl ReassemblyDispatch {
             }
         }
 
+        let acknowledgment =
+            tcp_header.and_then(|tcp| (tcp.flags & Tcp::ACK != 0).then_some(tcp.acknowledgment));
         if pushable && let Some(segment) = segment {
             self.meta(&segment.flow, stream);
-            output.extend(
-                self.dispatch_segment(
-                    tcp_header
-                        .and_then(|tcp| (tcp.flags & Tcp::ACK != 0).then_some(tcp.acknowledgment)),
-                    segment,
-                    now,
-                    number,
-                )?,
-            );
+            output.extend(self.dispatch_segment(acknowledgment, segment, now, number)?);
+        } else if let Some(segment) = segment
+            && acknowledgment.is_some()
+        {
+            self.tcp_reassembler
+                .as_mut()
+                .expect("reassembler checked")
+                .refresh_activity(&segment.flow, segment.sequence, now);
         }
 
         Ok(output)
@@ -488,7 +489,7 @@ fn event_flow(event: &TcpEvent) -> &ScopedFlowKey {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Instant;
+    use std::time::{Duration, Instant};
 
     use super::*;
     use crate::analysis::FlowKey;
@@ -529,6 +530,80 @@ mod tests {
             TcpEvent::Data { .. } => Some(record.generation),
             _ => None,
         })
+    }
+
+    #[test]
+    fn acknowledgments_keep_an_established_direction_alive_until_it_is_idle() {
+        let client = flow();
+        let limits = Limits {
+            tcp: crate::analysis::reassembly::tcp::Limits {
+                idle_expiry: Duration::from_secs(4),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut dispatch = ReassemblyDispatch::new(true, &limits).unwrap();
+        let start = SystemTime::UNIX_EPOCH;
+        let acknowledgment = segment(&client, 1, &[], false, false);
+        let header = TcpHeader {
+            source_port: client.flow.source_port,
+            destination_port: client.flow.destination_port,
+            sequence: 1,
+            acknowledgment: 201,
+            flags: Tcp::ACK,
+            window: 8192,
+            options: &[],
+        };
+        dispatch
+            .dispatch(
+                None,
+                Some(&segment(&client, u32::MAX, b"ab", false, false)),
+                Some(0),
+                start,
+                1,
+            )
+            .unwrap();
+        for (number, seconds) in [(2, 3), (3, 6)] {
+            let events = dispatch
+                .dispatch(
+                    Some(header),
+                    Some(&acknowledgment),
+                    Some(0),
+                    start + Duration::from_secs(seconds),
+                    number,
+                )
+                .unwrap();
+            assert!(events.is_empty(), "active direction produced {events:?}");
+        }
+        let outside_window = 1 + limits.tcp.max_bytes_per_flow as u32 + 1;
+        assert!(
+            dispatch
+                .dispatch(
+                    Some(TcpHeader {
+                        sequence: outside_window,
+                        ..header
+                    }),
+                    Some(&segment(&client, outside_window, &[], false, false)),
+                    Some(0),
+                    start + Duration::from_secs(9),
+                    4,
+                )
+                .unwrap()
+                .is_empty()
+        );
+        let events = dispatch
+            .dispatch(
+                Some(header),
+                Some(&acknowledgment),
+                Some(0),
+                start + Duration::from_secs(10),
+                5,
+            )
+            .unwrap();
+        assert!(
+            matches!(events.as_slice(), [TcpEventRecord { event: TcpEvent::Evicted { flow, reason: EvictionReason::Idle, .. }, .. }] if flow == &client)
+        );
+        assert!(dispatch.flush().is_empty());
     }
 
     #[test]

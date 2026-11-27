@@ -8,9 +8,10 @@ use crate::capture_file::{
     error::Error,
     format::{Endianness, Format},
     header::{Interface, Section},
-    limits::ReaderLimits,
+    limits::{MetadataRun, ReaderLimits},
+    pcapng::packet::PacketRead,
     record::{CaptureRecord, MetadataBlockKind, RecordKind},
-    wire::{PCAPNG_SECTION_HEADER, Subnanosecond},
+    wire::PCAPNG_SECTION_HEADER,
 };
 
 mod framing;
@@ -21,8 +22,7 @@ pub(in crate::capture_file) struct PcapNgState {
     interface_base: u32,
     section_index: u64,
     remaining_in_section: Option<u64>,
-    metadata_blocks: usize,
-    metadata_bytes: usize,
+    metadata: MetadataRun,
 }
 
 impl PcapNgState {
@@ -32,8 +32,7 @@ impl PcapNgState {
             interface_base: 0,
             section_index: 0,
             remaining_in_section: header.length,
-            metadata_blocks: 0,
-            metadata_bytes: 0,
+            metadata: MetadataRun::default(),
         }
     }
 
@@ -75,25 +74,12 @@ impl PcapNgState {
     }
 
     fn account_metadata(&mut self, length: usize, limits: &ReaderLimits) -> Result<(), Error> {
-        self.metadata_blocks = self.metadata_blocks.saturating_add(1);
-        if self.metadata_blocks > limits.max_metadata_blocks_per_frame {
-            return Err(Error::MetadataBlockLimit {
-                limit: limits.max_metadata_blocks_per_frame,
-            });
-        }
-        self.metadata_bytes = self
-            .metadata_bytes
-            .checked_add(length)
-            .filter(|actual| *actual <= limits.max_metadata_bytes_per_frame)
-            .ok_or(Error::MetadataByteLimit {
-                limit: limits.max_metadata_bytes_per_frame,
-            })?;
+        self.metadata = self.metadata.after(length, *limits)?;
         Ok(())
     }
 
     fn reset_metadata(&mut self) {
-        self.metadata_blocks = 0;
-        self.metadata_bytes = 0;
+        self.metadata = MetadataRun::default();
     }
 
     fn add_interface(
@@ -140,7 +126,7 @@ fn read_section_record<R: Read>(
         raw_header[4..8].try_into().expect("four-byte slice"),
         limits.max_size,
         limits.max_options_per_block,
-        Some((state.metadata_bytes, limits.max_metadata_bytes_per_frame)),
+        Some((state.metadata.bytes(), limits.max_metadata_bytes_per_frame)),
         scratch,
     )?;
     state.account_metadata(header.block_length, limits)?;
@@ -156,6 +142,7 @@ fn read_section_record<R: Read>(
             raw: header.raw.clone(),
         })),
         frame: None,
+        packet_declares_fcs: false,
         format: Format::PcapNg,
         raw: header.raw,
     })
@@ -167,7 +154,7 @@ pub(in crate::capture_file) fn read_next_pcapng_record<R: Read>(
     all_interfaces: &mut Vec<Interface>,
     limits: &ReaderLimits,
     scratch: &mut Vec<u8>,
-    subnanosecond: Subnanosecond,
+    read: PacketRead,
 ) -> Result<Option<CaptureRecord>, Error> {
     let remaining_in_section = state.remaining_in_section;
     if let Some(remaining) = remaining_in_section
@@ -188,5 +175,5 @@ pub(in crate::capture_file) fn read_next_pcapng_record<R: Read>(
             .map(Some);
     }
     let block = framing::read(reader, raw_header, state, limits)?;
-    record::decode(block, state, all_interfaces, limits, subnanosecond).map(Some)
+    record::decode(block, state, all_interfaces, limits, read).map(Some)
 }

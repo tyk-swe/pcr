@@ -84,8 +84,9 @@ impl Reader {
                 source: None,
             })
         });
-        if let Err(error) = result {
-            terminal_shared.set_error(error);
+        match result {
+            Ok(()) => terminal_shared.close(),
+            Err(error) => terminal_shared.set_error(error),
         }
     }
 }
@@ -244,8 +245,16 @@ impl Session for NativeCaptureSession {
         self.join_until(&Deadline::new(crate::capture::CLEANUP_TIMEOUT))
     }
 
+    fn shutdown_pending(&self) -> bool {
+        matches!(self.shutdown, Shutdown::Incomplete) && self.running.is_some()
+    }
+
     fn stats(&self) -> Stats {
         self.shared.lock().statistics
+    }
+
+    fn final_stats_available(&self) -> bool {
+        self.shared.lock().final_statistics
     }
 
     fn observation_quality(&self) -> crate::capture::ObservationQuality {
@@ -266,6 +275,8 @@ impl NativeCaptureSession {
                 .clone()
                 .and(self.stop_result.clone().unwrap_or(Ok(())));
         }
+        let bounded = crate::deadline::wall_clock(deadline).ok();
+        let deadline = bounded.as_ref().unwrap_or(deadline);
         let interrupt_result = self.request_stop();
 
         let stopped = match self.running.take() {

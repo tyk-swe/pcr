@@ -7,7 +7,7 @@ use std::time::Instant;
 use crate::analysis::adapter::IpFragments;
 use crate::analysis::pipeline::DerivedDatagram;
 use crate::analysis::reassembly::ip::{
-    self, CompletedDatagram, DatagramKey, Family, FragmentDisposition, IncompleteReason,
+    self, CompletedDatagram, DatagramKey, Family, Fragment, FragmentDisposition, IncompleteReason,
     Limits as IpReassemblyLimits, OverlapPolicy, PushOutcome,
 };
 use crate::decode::DecodedPacket;
@@ -15,6 +15,7 @@ use crate::decode::DecodedPacket;
 /// Sub-counters are intentionally independent: a completing fragment may also resolve an overlap.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize)]
 pub struct IpFamilyCounters {
+    /// Fragment headers decoded directly from capture records.
     pub physical_fragments: u64,
     pub atomic_fragments: u64,
     pub admitted_fragments: u64,
@@ -187,6 +188,23 @@ impl IpDispatch {
         .into()
     }
 
+    pub(super) fn dispatch_physical(
+        &mut self,
+        fragments: IpFragments,
+        now: Instant,
+    ) -> Result<(Option<CompletedDatagram>, Vec<IpEvent>), ip::Error> {
+        for family in fragments
+            .atomic
+            .iter()
+            .copied()
+            .chain(fragments.non_atomic.iter().map(Fragment::family))
+        {
+            let counters = self.report.counters.family_mut(family);
+            counters.physical_fragments = counters.physical_fragments.saturating_add(1);
+        }
+        self.dispatch(fragments, now, 0)
+    }
+
     pub(super) fn dispatch(
         &mut self,
         fragments: IpFragments,
@@ -197,7 +215,6 @@ impl IpDispatch {
 
         for family in fragments.atomic {
             let counters = self.report.counters.family_mut(family);
-            counters.physical_fragments = counters.physical_fragments.saturating_add(1);
             counters.atomic_fragments = counters.atomic_fragments.saturating_add(1);
         }
 
@@ -205,8 +222,6 @@ impl IpDispatch {
             return Ok((None, events));
         };
         let family = fragment.family();
-        let counters = self.report.counters.family_mut(family);
-        counters.physical_fragments = counters.physical_fragments.saturating_add(1);
         let outcome =
             self.reassembler
                 .push_with_external_charge(fragment, now, external_memory_charge)?;

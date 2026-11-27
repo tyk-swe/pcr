@@ -5,7 +5,7 @@ use super::Message;
 use crate::analysis::{
     ScopedFlowKey, StreamTransport,
     application::{Error, Retained},
-    provenance::{Accumulator, SourceSet},
+    provenance::{Accumulator, SourceFrame, SourceSet},
 };
 use serde::Serialize;
 use std::{collections::BTreeMap, time::SystemTime};
@@ -108,38 +108,47 @@ struct Answered {
     response: u64,
     sources: SourceSet,
 }
-struct Waiting {
+struct Observation {
     index: u64,
+    response: bool,
     sources: SourceSet,
 }
+impl Observation {
+    fn first(&self) -> &SourceFrame {
+        &self.sources.frames()[0]
+    }
+
+    fn end_time(&self) -> SystemTime {
+        self.sources
+            .frames()
+            .last()
+            .expect("observation has sources")
+            .timestamp
+    }
+}
+
 pub(super) struct Tracker {
-    pending: BTreeMap<Key, Pending>,
-    answered: BTreeMap<Key, Answered>,
-    waiting: BTreeMap<Key, Vec<Waiting>>,
+    observations: BTreeMap<Key, Vec<Observation>>,
 }
 impl Tracker {
     pub(super) fn new() -> Self {
         Self {
-            pending: BTreeMap::new(),
-            answered: BTreeMap::new(),
-            waiting: BTreeMap::new(),
+            observations: BTreeMap::new(),
         }
     }
+
     pub(super) fn observe(
         &mut self,
         message: &Message,
         retained: &mut Retained,
-    ) -> Result<Vec<Transaction>, Error> {
+    ) -> Result<(), Error> {
         let Some(key) = Key::from(message) else {
-            return Ok(Vec::new());
+            return Ok(());
         };
         let dns = message.dns.as_ref().expect("key requires decoded DNS");
-        let last = message
-            .sources
-            .frames()
-            .last()
-            .ok_or(Error::Sources { number: 0 })?
-            .timestamp;
+        if message.sources.frames().is_empty() {
+            return Err(Error::Sources { number: 0 });
+        }
         retained.charge_amount(
             512 + key
                 .questions
@@ -149,127 +158,83 @@ impl Tracker {
                 })
                 .sum::<usize>(),
         )?;
-        if !dns.response {
-            self.answered.remove(&key);
-            if let Some(pending) = self.pending.get_mut(&key) {
-                pending.queries.push(message.index);
-                pending.last = last;
-                pending.sources.insert(&message.sources)?;
-            } else {
-                self.pending.insert(
-                    key.clone(),
-                    Pending {
-                        queries: vec![message.index],
-                        first: last,
-                        last,
-                        sources: Accumulator::new(&message.sources)?,
-                    },
-                );
-            }
-            // A query can finish reassembly after its response. Link it only
-            // when captured query bytes already preceded the response; a later
-            // independent query must not absorb an older orphan response.
-            let first_query_frame = self.pending[&key]
-                .sources
-                .first()
-                .expect("query has sources")
-                .number;
-            let mut waiting = self.waiting.remove(&key).unwrap_or_default();
-            waiting.sort_by_key(|response| response.sources.frames()[0].number);
-            let mut output = Vec::new();
-            let mut older = Vec::new();
-            for response in waiting {
-                if response.sources.frames()[0].number > first_query_frame {
-                    if let Some(pending) = self.pending.remove(&key) {
-                        output.push(self.matched(&key, pending, response)?);
-                    } else {
-                        output.push(self.duplicate(&key, response)?);
-                    }
-                } else {
-                    older.push(response);
-                }
-            }
-            if !older.is_empty() {
-                self.waiting.insert(key, older);
-            }
-            return Ok(output);
-        }
-        let response = Waiting {
+        self.observations.entry(key).or_default().push(Observation {
             index: message.index,
+            response: dns.response,
             sources: message.sources.clone(),
-        };
-        if self.pending.get(&key).is_some_and(|pending| {
-            response.sources.frames()[0].number
-                > pending.sources.first().expect("query has sources").number
-        }) {
-            let pending = self.pending.remove(&key).expect("matching query exists");
-            return Ok(vec![self.matched(&key, pending, response)?]);
-        }
-        if self.answered.contains_key(&key) {
-            return Ok(vec![self.duplicate(&key, response)?]);
-        }
-        self.waiting.entry(key).or_default().push(response);
-        Ok(Vec::new())
+        });
+        Ok(())
     }
-    fn response(key: &Key, response: Waiting) -> Transaction {
-        Transaction {
-            status: TransactionStatus::OrphanResponse,
-            transport: key.transport,
-            stream: key.stream,
-            generation: key.generation,
-            flow: key.flow.clone(),
-            dns_id: key.id,
-            queries: Vec::new(),
-            response: Some(response.index),
-            original_response: None,
-            first_query_latency: None,
-            latest_query_latency: None,
-            sources: response.sources,
-        }
-    }
-    fn matched(
-        &mut self,
-        key: &Key,
-        mut pending: Pending,
-        response: Waiting,
-    ) -> Result<Transaction, Error> {
-        let first = response.sources.frames()[0].timestamp;
-        let response_index = response.index;
-        let mut transaction = Self::response(key, response);
-        transaction.status = TransactionStatus::Matched;
-        transaction.queries = pending.queries.clone();
-        transaction.first_query_latency = Some(Latency::between(pending.first, first));
-        transaction.latest_query_latency = Some(Latency::between(pending.last, first));
-        pending.sources.insert(&transaction.sources)?;
-        transaction.sources = pending.sources.freeze()?;
-        self.answered.insert(
-            key.clone(),
-            Answered {
-                queries: pending.queries,
-                response: response_index,
-                sources: transaction.sources.clone(),
-            },
-        );
-        Ok(transaction)
-    }
-    fn duplicate(&self, key: &Key, response: Waiting) -> Result<Transaction, Error> {
-        let answered = &self.answered[key];
-        let mut transaction = Self::response(key, response);
-        transaction.status = TransactionStatus::DuplicateResponse;
-        transaction.queries = answered.queries.clone();
-        transaction.original_response = Some(answered.response);
-        transaction.sources = answered.sources.union(&transaction.sources)?;
-        Ok(transaction)
-    }
+
     pub(super) fn finish(
         &mut self,
-        check: &mut dyn FnMut() -> Result<(), Error>,
-    ) -> Result<Vec<Transaction>, Error> {
-        let mut transactions: Vec<_> = std::mem::take(&mut self.pending)
-            .into_iter()
-            .map(|(key, pending)| {
+        mut check: impl FnMut() -> Result<(), Error>,
+        mut emit: impl FnMut(Transaction) -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        for (key, mut observations) in std::mem::take(&mut self.observations) {
+            check()?;
+            // A query must start in a strictly earlier physical frame than its response.
+            observations
+                .sort_unstable_by_key(|entry| (entry.first().number, !entry.response, entry.index));
+            let mut pending: Option<Pending> = None;
+            let mut answered: Option<Answered> = None;
+            for entry in observations {
                 check()?;
-                Ok(Transaction {
+                if !entry.response {
+                    answered = None;
+                    let last = entry.end_time();
+                    if let Some(pending) = &mut pending {
+                        pending.queries.push(entry.index);
+                        pending.last = last;
+                        pending.sources.insert(&entry.sources)?;
+                    } else {
+                        pending = Some(Pending {
+                            queries: vec![entry.index],
+                            first: last,
+                            last,
+                            sources: Accumulator::new(&entry.sources)?,
+                        });
+                    }
+                    continue;
+                }
+                let first = entry.first().timestamp;
+                let mut transaction = Transaction {
+                    status: TransactionStatus::OrphanResponse,
+                    transport: key.transport,
+                    stream: key.stream,
+                    generation: key.generation,
+                    flow: key.flow.clone(),
+                    dns_id: key.id,
+                    queries: Vec::new(),
+                    response: Some(entry.index),
+                    original_response: None,
+                    first_query_latency: None,
+                    latest_query_latency: None,
+                    sources: entry.sources,
+                };
+                if let Some(mut pending) = pending.take() {
+                    pending.sources.insert(&transaction.sources)?;
+                    transaction.status = TransactionStatus::Matched;
+                    transaction.queries = pending.queries;
+                    transaction.first_query_latency = Some(Latency::between(pending.first, first));
+                    transaction.latest_query_latency = Some(Latency::between(pending.last, first));
+                    transaction.sources = pending.sources.freeze()?;
+                    answered = Some(Answered {
+                        queries: transaction.queries.clone(),
+                        response: entry.index,
+                        sources: transaction.sources.clone(),
+                    });
+                } else if let Some(answered) = &answered {
+                    transaction.status = TransactionStatus::DuplicateResponse;
+                    transaction.queries.clone_from(&answered.queries);
+                    transaction.original_response = Some(answered.response);
+                    transaction.sources = answered.sources.union(&transaction.sources)?;
+                }
+                emit(transaction)?;
+            }
+            if let Some(pending) = pending {
+                check()?;
+                emit(Transaction {
                     status: TransactionStatus::Unanswered,
                     transport: key.transport,
                     stream: key.stream,
@@ -282,22 +247,9 @@ impl Tracker {
                     first_query_latency: None,
                     latest_query_latency: None,
                     sources: pending.sources.freeze()?,
-                })
-            })
-            .collect::<Result<_, Error>>()?;
-        for (key, responses) in std::mem::take(&mut self.waiting) {
-            for response in responses {
-                check()?;
-                transactions.push(Self::response(&key, response));
+                })?;
             }
         }
-        check()?;
-        transactions.sort_by_key(|transaction| {
-            transaction
-                .response
-                .or_else(|| transaction.queries.first().copied())
-        });
-        check()?;
-        Ok(transactions)
+        Ok(())
     }
 }

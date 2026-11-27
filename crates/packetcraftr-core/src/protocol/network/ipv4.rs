@@ -202,83 +202,16 @@ impl Codec for Ipv4Codec {
         input: Bytes,
         _context: &DecodeContext<'_>,
     ) -> Result<Decoded, crate::codec::Error> {
-        let parsed = match crate::protocol::headers::Ipv4Header::walk(&input) {
-            Ok(parsed) => parsed,
-            Err(_) => return Err(ipv4_decode_error(&input)),
-        };
-        let header = input
-            .first_chunk::<IPV4_MIN_LEN>()
-            .expect("a walked header holds the fixed part");
-        let header_len = parsed.header_length();
-        let total_length = parsed.total_length();
-        let full_header = &input[..header_len];
-        let options = &input[IPV4_MIN_LEN..header_len];
-        let total_length_field =
-            u16::try_from(total_length).expect("a walked total length came from two bytes");
-        let flags_offset = parsed.flags_and_offset();
-        let next = parsed.protocol();
-        let source = Ipv4Addr::new(header[12], header[13], header[14], header[15]);
-        let destination = Ipv4Addr::new(header[16], header[17], header[18], header[19]);
-        let pseudo_header_destination = ipv4_source_route_destination(destination, options)
-            .map_err(|error| rejected(NAME, error))?;
-        let mut diagnostics = Vec::new();
-        if checksum_parts(&[full_header]) != 0 {
-            diagnostics.push(
-                Diagnostic::new(
-                    Severity::Warning,
-                    IPV4_CHECKSUM,
-                    "IPv4 header checksum mismatch",
-                )
-                .at_field("checksum"),
-            );
-        }
-        let fragment_offset = flags_offset & 0x1fff;
-        if parsed.reserved_flag() {
-            diagnostics.push(
-                Diagnostic::new(
-                    Severity::Warning,
-                    "decode.ipv4_reserved_flag",
-                    "reserved IPv4 flag bit is non-zero",
-                )
-                .at_field("reserved_flag"),
-            );
-        }
-        let payload_len = total_length.saturating_sub(header_len);
-        Ok(Decoded {
-            layer: Box::new(Ipv4 {
-                dscp_ecn: header[1],
-                total_length: WireValue::Exact(total_length_field),
-                identification: parsed.identification(),
-                reserved_flag: parsed.reserved_flag(),
-                dont_fragment: parsed.dont_fragment(),
-                more_fragments: (flags_offset & 0x2000) != 0,
-                fragment_offset,
-                ttl: header[8],
-                protocol: WireValue::Exact(next),
-                checksum: WireValue::Exact(u16::from_be_bytes([header[10], header[11]])),
-                source,
-                destination,
-                options: input.slice_ref(options),
-            }),
-            consumed: header_len,
-            payload_len,
-            next: if payload_len == 0 {
-                Vec::new()
-            } else if fragment_offset == 0 && (flags_offset & 0x2000) == 0 {
-                vec![Discriminator(u64::from(next))]
-            } else {
-                vec![Discriminator(u64::from(
-                    crate::protocol::network::ip_protocol::RESERVED,
-                ))]
-            },
-            fields: ipv4_layout(header_len),
-            diagnostics,
-            stop: payload_len == 0,
-            network: Some(network_from_addresses(
-                source.into(),
-                pseudo_header_destination.into(),
-            )),
-        })
+        decode_ip(input, 0)
+    }
+
+    fn decode_capture_prefix(
+        &self,
+        input: Bytes,
+        _context: &DecodeContext<'_>,
+        missing_tail: usize,
+    ) -> Result<Decoded, crate::codec::Error> {
+        decode_ip(input, missing_tail)
     }
 
     fn schema(&self) -> Option<&'static crate::layer::Schema> {
@@ -288,6 +221,90 @@ impl Codec for Ipv4Codec {
     fn new_layer(&self) -> Result<Box<dyn Layer>, crate::codec::Error> {
         Ok(Box::new(Ipv4::default()))
     }
+}
+
+fn decode_ip(input: Bytes, missing_tail: usize) -> Result<Decoded, crate::codec::Error> {
+    let parsed = match crate::protocol::headers::Ipv4Header::walk_prefix(&input) {
+        Ok(parsed) => parsed,
+        Err(_) => return Err(ipv4_decode_error(&input)),
+    };
+    let header = input
+        .first_chunk::<IPV4_MIN_LEN>()
+        .expect("a walked header holds the fixed part");
+    let header_len = parsed.header_length();
+    let total_length = parsed.total_length();
+    let missing = total_length.saturating_sub(input.len());
+    if missing > missing_tail {
+        return Err(truncated(NAME, total_length, input.len()));
+    }
+    let full_header = &input[..header_len];
+    let options = &input[IPV4_MIN_LEN..header_len];
+    let total_length_field =
+        u16::try_from(total_length).expect("a walked total length came from two bytes");
+    let flags_offset = parsed.flags_and_offset();
+    let next = parsed.protocol();
+    let source = Ipv4Addr::new(header[12], header[13], header[14], header[15]);
+    let destination = Ipv4Addr::new(header[16], header[17], header[18], header[19]);
+    let pseudo_header_destination = ipv4_source_route_destination(destination, options)
+        .map_err(|error| rejected(NAME, error))?;
+    let mut diagnostics = Vec::new();
+    if checksum_parts(&[full_header]) != 0 {
+        diagnostics.push(
+            Diagnostic::new(
+                Severity::Warning,
+                IPV4_CHECKSUM,
+                "IPv4 header checksum mismatch",
+            )
+            .at_field("checksum"),
+        );
+    }
+    let fragment_offset = flags_offset & 0x1fff;
+    if parsed.reserved_flag() {
+        diagnostics.push(
+            Diagnostic::new(
+                Severity::Warning,
+                "decode.ipv4_reserved_flag",
+                "reserved IPv4 flag bit is non-zero",
+            )
+            .at_field("reserved_flag"),
+        );
+    }
+    let payload_len = total_length.min(input.len()) - header_len;
+    Ok(Decoded {
+        layer: Box::new(Ipv4 {
+            dscp_ecn: header[1],
+            total_length: WireValue::Exact(total_length_field),
+            identification: parsed.identification(),
+            reserved_flag: parsed.reserved_flag(),
+            dont_fragment: parsed.dont_fragment(),
+            more_fragments: (flags_offset & 0x2000) != 0,
+            fragment_offset,
+            ttl: header[8],
+            protocol: WireValue::Exact(next),
+            checksum: WireValue::Exact(u16::from_be_bytes([header[10], header[11]])),
+            source,
+            destination,
+            options: input.slice_ref(options),
+        }),
+        consumed: header_len,
+        payload_len,
+        next: if payload_len == 0 || missing != 0 {
+            Vec::new()
+        } else if fragment_offset == 0 && (flags_offset & 0x2000) == 0 {
+            vec![Discriminator(u64::from(next))]
+        } else {
+            vec![Discriminator(u64::from(
+                crate::protocol::network::ip_protocol::RESERVED,
+            ))]
+        },
+        fields: ipv4_layout(header_len),
+        diagnostics,
+        stop: payload_len == 0 || missing != 0,
+        network: Some(network_from_addresses(
+            source.into(),
+            pseudo_header_destination.into(),
+        )),
+    })
 }
 
 fn prepare_payload(

@@ -101,14 +101,13 @@ struct Pending {
     frame: Frame,
     /// One-based physical position within its source.
     number: u64,
-    time: SystemTime,
     description: Interface,
     section: Option<u64>,
     local: Option<u32>,
     global: u32,
 }
 /// Orders a source's look-ahead window so the heap pops its earliest frame, oldest position first.
-struct Windowed(Pending);
+struct Windowed(SystemTime, Pending);
 impl PartialEq for Windowed {
     fn eq(&self, other: &Self) -> bool {
         self.cmp(other) == Ordering::Equal
@@ -122,7 +121,7 @@ impl PartialOrd for Windowed {
 }
 impl Ord for Windowed {
     fn cmp(&self, other: &Self) -> Ordering {
-        (other.0.time, other.0.number).cmp(&(self.0.time, self.0.number))
+        (other.0, other.1.number).cmp(&(self.0, self.1.number))
     }
 }
 struct State {
@@ -195,87 +194,132 @@ pub fn merge<R: Read, W: Write>(
         source_frames: vec![0; sources.len()],
         ..Default::default()
     };
-    let mut pending = Vec::with_capacity(sources.len());
-    for index in 0..sources.len() {
-        pending.push(advance(
-            index,
-            &mut sources[index],
-            &mut states[index],
-            &mut interface_count,
-            &mut report,
-            &mut budget,
-            limits,
-        )?);
-    }
-    let mut chronological = (limits.order == MergeOrder::Chronological).then(|| {
-        let mut heads = BinaryHeap::with_capacity(sources.len());
-        heads.extend(pending.iter().enumerate().filter_map(|(index, slot)| {
-            slot.as_ref().map(|pending| Reverse((pending.time, index)))
-        }));
-        heads
-    });
     let mut mappings = HashMap::new();
-    while let Some((index, mut current)) = take_next(&mut pending, &mut chronological) {
-        let key = (index, current.global);
-        let id = if let Some(id) = mappings.get(&key) {
-            *id
-        } else {
-            let mapping = MergedInterface {
-                source: index,
-                source_name: sources[index].name.clone(),
-                section: current.section,
-                local_interface: current.local,
-                global_interface: current.global,
-                output_interface: 0,
-            };
-            let provenance = serde_json::json!({
-                "schema": "packetcraftr.capture-source/v1", "source": mapping.source,
-                "source_name": mapping.source_name, "section": mapping.section,
-                "local_interface": mapping.local_interface, "global_interface": mapping.global_interface,
-            })
-            .to_string();
-            let id = output.add_interface_description_with_options(
-                current.description,
-                &[PcapNgOption {
-                    code: PCAPNG_OPTION_COMMENT,
-                    value: provenance.into(),
-                }],
+    if limits.order == MergeOrder::Append {
+        for (index, (source, state)) in sources.iter_mut().zip(&mut states).enumerate() {
+            while let Some(current) = read_frame(
+                index,
+                source,
+                state,
+                &mut interface_count,
+                &mut report,
+                &mut budget,
+                limits,
+            )? {
+                write_pending(
+                    output,
+                    &mut mappings,
+                    &mut report,
+                    index,
+                    &source.name,
+                    current,
+                )?;
+            }
+        }
+    } else {
+        let mut pending = Vec::with_capacity(sources.len());
+        let mut heads = BinaryHeap::with_capacity(sources.len());
+        for (index, (source, state)) in sources.iter_mut().zip(&mut states).enumerate() {
+            let next = advance(
+                index,
+                source,
+                state,
+                &mut interface_count,
+                &mut report,
+                &mut budget,
+                limits,
             )?;
-            report.interfaces.push(MergedInterface {
-                output_interface: id,
-                ..mapping
-            });
-            mappings.insert(key, id);
-            id
-        };
-        current.frame.interface = Some(id);
-        output.write_frame(&current.frame)?;
-        pending[index] = advance(
-            index,
-            &mut sources[index],
-            &mut states[index],
-            &mut interface_count,
-            &mut report,
-            &mut budget,
-            limits,
-        )?;
-        if let (Some(heads), Some(next)) = (&mut chronological, &pending[index]) {
-            heads.push(Reverse((next.time, index)));
+            if let Some(next) = &next {
+                heads.push(Reverse((next.0, index)));
+            }
+            pending.push(next);
+        }
+        while let Some(Reverse((_, index))) = heads.pop() {
+            let Windowed(_, current) = pending[index].take().expect("heap tracks pending frames");
+            let source = &mut sources[index];
+            write_pending(
+                output,
+                &mut mappings,
+                &mut report,
+                index,
+                &source.name,
+                current,
+            )?;
+            let next = advance(
+                index,
+                source,
+                &mut states[index],
+                &mut interface_count,
+                &mut report,
+                &mut budget,
+                limits,
+            )?;
+            if let Some(next) = &next {
+                heads.push(Reverse((next.0, index)));
+            }
+            pending[index] = next;
         }
     }
     output.flush()?;
     Ok(report)
 }
 
-fn take_next(
-    pending: &mut [Option<Pending>],
-    chronological: &mut Option<BinaryHeap<Reverse<(SystemTime, usize)>>>,
-) -> Option<(usize, Pending)> {
-    let index = match chronological {
-        Some(heads) => heads.pop()?.0.1,
-        None => pending.iter().position(Option::is_some)?,
+fn write_pending<W: Write>(
+    output: &mut Writer<W>,
+    mappings: &mut HashMap<(usize, u32), u32>,
+    report: &mut MergeReport,
+    index: usize,
+    source_name: &str,
+    mut current: Pending,
+) -> Result<(), Error> {
+    let key = (index, current.global);
+    let simple = current.frame.timestamp.is_none();
+    let existing = mappings.get(&key).copied();
+    let (base, section) = output.pcapng_section()?;
+    let full = existing.is_none() && section.len() >= output.section_interface_limit();
+    let needs_first_interface = simple && !section.is_empty() && existing != Some(base);
+    if full || needs_first_interface {
+        output.start_section()?;
+        mappings.clear();
+    }
+
+    let id = if let Some(id) = mappings.get(&key) {
+        *id
+    } else {
+        let mapping = MergedInterface {
+            source: index,
+            source_name: source_name.to_owned(),
+            section: current.section,
+            local_interface: current.local,
+            global_interface: current.global,
+            output_interface: 0,
+        };
+        let provenance = serde_json::json!({
+            "schema": "packetcraftr.capture-source/v1", "source": mapping.source,
+            "source_name": mapping.source_name, "section": mapping.section,
+            "local_interface": mapping.local_interface, "global_interface": mapping.global_interface,
+        })
+        .to_string();
+        let id = output.add_interface_description_with_options(
+            current.description,
+            &[PcapNgOption {
+                code: PCAPNG_OPTION_COMMENT,
+                value: provenance.into(),
+            }],
+        )?;
+        report.interfaces.push(MergedInterface {
+            output_interface: id,
+            ..mapping
+        });
+        mappings.insert(key, id);
+        id
     };
-    pending[index].take().map(|pending| (index, pending))
+    current.frame.interface = Some(id);
+    if simple {
+        output.write_simple_frame(&current.frame)
+    } else {
+        output.write_frame(&current.frame)
+    }
 }
 
 /// The next frame this source emits: the earliest of its look-ahead window, refilled first.
@@ -287,26 +331,33 @@ fn advance<R: Read>(
     report: &mut MergeReport,
     budget: &mut Budget,
     limits: MergeLimits,
-) -> Result<Option<Pending>, Error> {
+) -> Result<Option<Windowed>, Error> {
     let window = limits.max_reorder_frames.max(1);
     while !state.exhausted && state.window.len() < window {
-        match read_frame(index, source, state, interfaces, report, budget, limits)? {
-            Some(frame) => state.window.push(Windowed(frame)),
-            None => state.exhausted = true,
-        }
+        let Some(frame) = read_frame(index, source, state, interfaces, report, budget, limits)?
+        else {
+            state.exhausted = true;
+            break;
+        };
+        let time = frame.frame.timestamp.ok_or_else(|| Error::MergeSource {
+            input: index,
+            frame: frame.number,
+            source: Box::new(Error::TimestampUnavailable {
+                format: Format::PcapNg,
+            }),
+        })?;
+        state.window.push(Windowed(time, frame));
     }
-    let Some(Windowed(next)) = state.window.pop() else {
+    let Some(next) = state.window.pop() else {
         return Ok(None);
     };
-    if limits.order == MergeOrder::Chronological
-        && state.previous.is_some_and(|previous| next.time < previous)
-    {
+    if state.previous.is_some_and(|previous| next.0 < previous) {
         return Err(Error::MergeClockRegression {
             input: index,
-            frame: next.number,
+            frame: next.1.number,
         });
     }
-    state.previous = Some(next.time);
+    state.previous = Some(next.0);
     Ok(Some(next))
 }
 
@@ -382,13 +433,6 @@ fn read_frame<R: Read>(
             format: source.reader.format(),
             reason: "packet record has no frame",
         })?;
-        let time = frame.timestamp.ok_or_else(|| Error::MergeSource {
-            input: index,
-            frame: next,
-            source: Box::new(Error::TimestampUnavailable {
-                format: Format::PcapNg,
-            }),
-        })?;
         budget.charge(frame.captured_length())?;
         (report.frames, report.captured_bytes) = (budget.frames(), budget.captured_bytes());
         report.source_frames[index] = next;
@@ -405,7 +449,6 @@ fn read_frame<R: Read>(
         return Ok(Some(Pending {
             frame,
             number: next,
-            time,
             description,
             section,
             local,

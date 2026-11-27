@@ -52,8 +52,44 @@ pub(super) fn capture_worker(
     link_type: LinkType,
 ) -> Result<(), Error> {
     let mut native_statistics = source.stats()?;
-    let mut statistics_checked_at = SystemClock.now();
+    shared.add_native_drop_deltas(
+        source.initial_drop_baseline(native_statistics),
+        native_statistics,
+    )?;
     shared.set_ready();
+    let result = receive_frames(
+        source,
+        &shared,
+        &stop,
+        interface_index,
+        link_type,
+        &mut native_statistics,
+    );
+    let final_statistics = source
+        .stats()
+        .and_then(|current| shared.add_native_drop_deltas(native_statistics, current));
+    if final_statistics.is_ok() {
+        shared.mark_final_statistics();
+    }
+    match (result, final_statistics) {
+        (Err(first), Err(statistics)) => Err(Error::CaptureReadAndStatistics {
+            first: Box::new(first),
+            statistics: Box::new(statistics),
+        }),
+        (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
+        (Ok(()), Ok(())) => Ok(()),
+    }
+}
+
+fn receive_frames(
+    source: &mut dyn NativeCaptureSource,
+    shared: &CaptureQueue,
+    stop: &AtomicBool,
+    interface_index: u32,
+    link_type: LinkType,
+    native_statistics: &mut super::NativeCaptureStats,
+) -> Result<(), Error> {
+    let mut statistics_checked_at = SystemClock.now();
 
     while !stop.load(Ordering::Acquire) {
         match source.next_event()? {
@@ -86,13 +122,11 @@ pub(super) fn capture_worker(
 
         if statistics_checked_at.elapsed() >= STATISTICS_INTERVAL {
             let current = source.stats()?;
-            shared.add_native_drop_deltas(native_statistics, current)?;
-            native_statistics = current;
+            shared.add_native_drop_deltas(*native_statistics, current)?;
+            *native_statistics = current;
             statistics_checked_at = SystemClock.now();
         }
     }
 
-    shared.add_native_drop_deltas(native_statistics, source.stats()?)?;
-    shared.close();
     Ok(())
 }

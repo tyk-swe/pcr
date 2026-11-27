@@ -68,13 +68,21 @@ pub(crate) fn snapshot_capture<R: Read>(
         limits,
     )
     .map_err(|error| interrupted_or(control, CliError::classified(error)))?;
+    reopen_capture_snapshot(control, snapshot, capture_limits)
+}
+
+pub(crate) fn reopen_capture_snapshot(
+    control: &crate::invocation::Control,
+    snapshot: io::BufWriter<File>,
+    capture_limits: OfflineCaptureLimits,
+) -> Result<Reader<io::BufReader<File>>, CliError> {
+    use core::capture_file;
     let mut snapshot = snapshot
         .into_inner()
         .map_err(|error| CliError::classified(capture_file::Error::from(error.into_error())))?;
     std::io::Seek::rewind(&mut snapshot)
         .map_err(capture_file::Error::from)
         .map_err(CliError::classified)?;
-    control.check()?;
     bounded_reader(
         control,
         io::BufReader::with_capacity(64 * 1024, snapshot),
@@ -100,9 +108,7 @@ fn capture_reader<R: Read + 'static>(
         )
         .map_err(|error| interrupted_or(control, CliError::classified(error)))?,
     );
-    let reader = bounded_reader(control, source, limits)?;
-    control.check()?;
-    Ok(reader)
+    bounded_reader(control, source, limits)
 }
 
 fn bounded_reader<R: Read>(

@@ -5,7 +5,7 @@ use std::net::Ipv6Addr;
 
 use bytes::Bytes;
 
-use super::{Context, Error, Filter, Projection};
+use super::{Context, Error, Filter, FrameDecoder, Projection};
 use crate::{
     codec::Addresses,
     decode::DecodedPacket,
@@ -54,6 +54,40 @@ fn decoded_with(registry: &std::sync::Arc<Registry>, value: RespValue) -> Decode
             Default::default(),
         )
         .unwrap()
+}
+
+#[test]
+fn original_frame_evaluation_preserves_filter_and_projection_results() {
+    let registry = builtin::registry();
+    let decoded = decoded(&registry);
+    let context = Context::frame(&decoded, 7);
+    let decoder = FrameDecoder::new(registry.clone(), None, decoded.frame.bytes().len()).unwrap();
+    let original = decoder.evaluate(7, &decoded.frame);
+
+    for expression in [
+        "frame.number == 7 and frame.len > 0",
+        "tcp and tcp.destination_port == 6379",
+        "frame.layer_count > 0",
+        "frame.time_epoch > 0",
+    ] {
+        let filter = Filter::compile(expression, &registry, Default::default()).unwrap();
+        assert_eq!(
+            original.matches(&filter).map_err(|error| error.to_string()),
+            filter.matches(&context).map_err(|error| error.to_string()),
+            "{expression}"
+        );
+    }
+
+    let projection = Projection::compile(["frame.len", "frame.protocols"], &registry).unwrap();
+    assert_eq!(
+        original.values(&projection, usize::MAX).unwrap(),
+        projection.values(&context, usize::MAX).unwrap()
+    );
+    let decoder = FrameDecoder::new(registry, None, decoded.frame.bytes().len() - 1).unwrap();
+    assert!(matches!(
+        decoder.keep(7, &decoded.frame),
+        Err(Error::Decode(_))
+    ));
 }
 
 #[test]

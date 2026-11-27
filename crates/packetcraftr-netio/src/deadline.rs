@@ -4,9 +4,9 @@
 //! The one deadline and cancellation convention for provider calls.
 
 use packetcraftr_core::clock::{Clock, SystemClock};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-#[cfg(any(test, all(native_route, any(target_os = "linux", target_os = "macos"))))]
 use packetcraftr_core::budget::{Deadline, Interrupted};
 
 /// Longest slice an uninterruptible wait should take between checks of a cancellation signal.
@@ -22,11 +22,14 @@ pub fn remaining_before(deadline: Instant) -> Option<Duration> {
         .filter(|remaining| !remaining.is_zero())
 }
 
-#[cfg(any(test, all(native_route, any(target_os = "linux", target_os = "macos"))))]
 pub(crate) fn expires_at(deadline: &Deadline) -> Result<Instant, Interrupted> {
     let remaining = deadline.live_remaining()?.min(MAX_WAIT);
     let now = SystemClock.now();
     Ok(now.checked_add(remaining).unwrap_or(now))
+}
+
+pub(crate) fn wall_clock(caller: &Deadline) -> Result<Deadline, Interrupted> {
+    Ok(Deadline::until(expires_at(caller)?, None).with_parent(Some(Arc::new(caller.clone()))))
 }
 
 #[cfg(test)]
@@ -59,5 +62,18 @@ mod tests {
     #[test]
     fn expired_deadline_rejects_expiry_lookup() {
         assert!(expires_at(&Deadline::new(Duration::ZERO)).is_err());
+    }
+
+    #[test]
+    fn wall_wait_expires_even_when_the_caller_clock_is_frozen() {
+        let now = SystemClock.now();
+        let caller = Deadline::with_time_source(Duration::from_millis(5), move || now);
+        let control = wall_clock(&caller).unwrap();
+        std::thread::sleep(Duration::from_millis(10));
+        assert!(caller.live_remaining().is_ok());
+        assert!(matches!(
+            control.live_remaining(),
+            Err(Interrupted::Exceeded(_))
+        ));
     }
 }

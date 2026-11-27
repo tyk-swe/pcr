@@ -30,7 +30,10 @@ pub(super) fn parse(
     }
     let (mut field, mut index) = match parse_subject(tokens, start, registry)? {
         Subject::Field { field, index } => (field, index),
-        Subject::Predicate(predicate, index) => return Ok((predicate, index)),
+        Subject::Predicate(predicate, index) => {
+            requirements.layers = true;
+            return Ok((predicate, index));
+        }
     };
     if let Some(Spanned {
         token: Token::Slice(contents),
@@ -137,6 +140,11 @@ fn parse_subject(tokens: &[Spanned], start: usize, registry: &Registry) -> Resul
 }
 
 fn record_requirements(field: &FieldRef, requirements: &mut Requirements) {
+    requirements.layers |= matches!(
+        field.source,
+        FieldSource::Layer { .. }
+            | FieldSource::Frame(FrameField::Protocols | FrameField::LayerCount)
+    );
     if let FieldSource::Stream(transport) = &field.source {
         requirements.require_stream(*transport);
     }

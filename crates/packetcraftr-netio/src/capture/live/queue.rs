@@ -70,6 +70,10 @@ impl CaptureQueue {
         self.changed.notify_all();
     }
 
+    pub(super) fn mark_final_statistics(&self) {
+        self.lock().final_statistics = true;
+    }
+
     pub(super) fn enqueue(&self, captured: Captured) -> Result<(), Error> {
         let mut state = self.lock();
         let frame_bytes = captured.frame.bytes().len();
@@ -223,6 +227,7 @@ pub(super) struct CaptureState {
     pub(super) queue: VecDeque<Captured>,
     queued_bytes: usize,
     pub(super) statistics: Stats,
+    pub(super) final_statistics: bool,
 }
 
 impl CaptureState {

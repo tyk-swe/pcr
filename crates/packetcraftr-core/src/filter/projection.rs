@@ -4,7 +4,8 @@
 use super::{
     Context, DEFAULT_MAX_FILTER_BYTES, Error, Limits, Requirements,
     ast::{Op, Predicate},
-    eval, parser,
+    eval::{self, Evaluation},
+    parser,
     path::{FieldRef, FieldSource, FrameField, LayerRead, Occurrence},
 };
 use crate::{field, registry::Registry};
@@ -129,6 +130,14 @@ impl Projection {
     pub(crate) fn values_with_budget(
         &self,
         context: &Context<'_>,
+        remaining: &mut usize,
+    ) -> Result<Vec<Option<field::Value>>, Error> {
+        self.evaluate(&Evaluation::from(context), remaining)
+    }
+
+    pub(super) fn evaluate(
+        &self,
+        context: &Evaluation<'_>,
         remaining: &mut usize,
     ) -> Result<Vec<Option<field::Value>>, Error> {
         let max_bytes = *remaining;

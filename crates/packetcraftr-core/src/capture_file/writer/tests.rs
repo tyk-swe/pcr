@@ -367,3 +367,70 @@ fn mapped_interface_speeds_reject_malformed_widths_when_converting_byte_order() 
         }
     }
 }
+
+#[test]
+fn mapped_sections_keep_global_interface_ids_and_full_interface_options() {
+    use crate::capture_file::{
+        DEFAULT_MAX_OPTIONS_PER_BLOCK, Endianness, Interface, MetadataBlockKind, PcapNgOption,
+        PcapNgOptions, RecordKind, TimestampResolution, map_frames,
+    };
+
+    let options = PcapNgOptions {
+        endianness: Endianness::Little,
+        max_interfaces: 1,
+        ..Default::default()
+    };
+    let interface = Interface {
+        link_type: LinkType::ETHERNET,
+        snap_len: 0,
+        timestamp_resolution: TimestampResolution::Decimal(6),
+        timestamp_offset: 0,
+    };
+    let comments = vec![
+        PcapNgOption {
+            code: 1,
+            value: bytes::Bytes::from_static(b"note")
+        };
+        DEFAULT_MAX_OPTIONS_PER_BLOCK
+    ];
+    let section = |value: u8| {
+        let mut writer = Writer::pcapng_with_options(Vec::new(), options).unwrap();
+        writer
+            .add_interface_description_with_options(interface.clone(), &comments)
+            .unwrap();
+        writer
+            .write_frame(&frame(u64::from(value), 0, value, 4))
+            .unwrap();
+        writer.into_inner()
+    };
+    let input = [section(1), section(2)].concat();
+    let mut source = Reader::with_limits(input.as_slice(), Default::default()).unwrap();
+    let mut output = Writer::pcapng_with_options(Vec::new(), options).unwrap();
+    map_frames(
+        &mut source,
+        &mut output,
+        Limits::default(),
+        Default::default(),
+        |_, frame| Ok(frame.clone()),
+    )
+    .unwrap();
+    let bytes = output.into_inner();
+    let mut reader = Reader::with_limits(bytes.as_slice(), Default::default()).unwrap();
+    let mut expected = 0;
+    while let Some(record) = reader.next_record().unwrap() {
+        match record.kind {
+            RecordKind::Metadata(MetadataBlockKind::InterfaceDescription { options, .. }) => {
+                assert_eq!(options, comments);
+            }
+            RecordKind::Packet { .. } => {
+                let frame = record.frame.unwrap();
+                assert_eq!(frame.interface, Some(expected));
+                assert_eq!(frame.bytes().as_ref(), &[expected as u8 + 1; 4]);
+                expected += 1;
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(reader.interfaces(), &[interface.clone(), interface]);
+    assert_eq!(expected, 2);
+}

@@ -11,6 +11,7 @@ pub struct Requirements {
     pub tcp_stream: bool,
     pub udp_stream: bool,
     pub timestamp: bool,
+    pub layers: bool,
 }
 
 impl Requirements {
@@ -22,6 +23,7 @@ impl Requirements {
             tcp_stream: self.tcp_stream || other.tcp_stream,
             udp_stream: self.udp_stream || other.udp_stream,
             timestamp: self.timestamp || other.timestamp,
+            layers: self.layers || other.layers,
         }
     }
 

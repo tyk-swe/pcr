@@ -61,6 +61,8 @@ pub struct Summary {
 impl Summary {
     pub fn input_incomplete(&self) -> bool {
         self.truncated_frames > 0
+            || self.ip_reassembly.counters.ipv4.incomplete_datagrams > 0
+            || self.ip_reassembly.counters.ipv6.incomplete_datagrams > 0
             || !self.incomplete_sources.is_empty()
             || self.source_outcomes_omitted > 0
     }
@@ -111,7 +113,15 @@ where
     I: FnMut(IpEventRecord) -> Result<(), crate::error::BoundaryError>,
     F: FnMut(FrameRecord<'_>, &Deadline) -> Result<(), crate::error::BoundaryError>,
 {
-    run_with_timestamp(reader, registry, options, ip_sink, sink, require_timestamp)
+    run_with_timestamp(
+        reader,
+        registry,
+        options,
+        ip_sink,
+        sink,
+        require_timestamp,
+        Reader::next_frame,
+    )
 }
 
 pub(super) fn run_observations<R, F>(
@@ -131,6 +141,7 @@ where
         |_| Ok(()),
         |record, _| sink(record),
         |timestamp, _| Ok(timestamp),
+        Reader::next_frame,
     )
     .map(|(summary, _)| summary)
 }
@@ -139,13 +150,37 @@ fn require_timestamp(timestamp: Option<SystemTime>, number: u64) -> Result<Syste
     timestamp.ok_or(Error::TimestampUnavailable { number })
 }
 
+pub(super) fn run_with_frames<R, F>(
+    reader: &mut Reader<R>,
+    registry: Arc<Registry>,
+    options: &Options<'_>,
+    mut sink: F,
+    next_frame: impl FnMut(&mut Reader<R>) -> Result<Option<Frame>, crate::capture_file::Error>,
+) -> Result<Summary, Error>
+where
+    R: Read,
+    F: FnMut(FrameRecord<'_>) -> Result<(), crate::error::BoundaryError>,
+{
+    run_with_timestamp(
+        reader,
+        registry,
+        options,
+        |_| Ok(()),
+        |record, _| sink(record),
+        require_timestamp,
+        next_frame,
+    )
+    .map(|(summary, _)| summary)
+}
+
 fn run_with_timestamp<R, I, F, T>(
     reader: &mut Reader<R>,
     registry: Arc<Registry>,
     options: &Options<'_>,
-    ip_sink: I,
+    mut ip_sink: I,
     mut sink: F,
     record_timestamp: impl Fn(Option<SystemTime>, u64) -> Result<T, Error>,
+    mut next_frame: impl FnMut(&mut Reader<R>) -> Result<Option<Frame>, crate::capture_file::Error>,
 ) -> Result<(Summary, Arc<Deadline>), Error>
 where
     R: Read,
@@ -170,15 +205,24 @@ where
     // record boundaries the same phase and invocation clocks as packet work.
     reader.replace_deadline(Some(deadline.clone()));
     let scope = ReaderDeadlineScope { reader, previous };
-    let summary = run_inner(
-        &mut *scope.reader,
-        registry,
-        options,
-        deadline.clone(),
-        ip_sink,
-        |record| sink(record, &deadline),
-        record_timestamp,
-    )?;
+    let mut processor = FramePipeline::start(registry, options.clone(), deadline.clone())?;
+    loop {
+        enforce_deadline(&deadline)?;
+        let number = processor.input.frames().saturating_add(1);
+        let Some(frame) =
+            next_frame(scope.reader).map_err(|source| Error::Capture { number, source })?
+        else {
+            break;
+        };
+        processor.push_with_timestamp(
+            number,
+            frame,
+            &mut ip_sink,
+            &mut |record: FrameRecord<'_, T>| sink(record, &deadline),
+            &record_timestamp,
+        )?;
+    }
+    let summary = processor.finish(scope.reader.interfaces().to_vec(), ip_sink)?;
     enforce_deadline(&deadline)?;
     Ok((summary, deadline))
 }
@@ -192,35 +236,6 @@ impl<R: Read> Drop for ReaderDeadlineScope<'_, R> {
     fn drop(&mut self) {
         self.reader.replace_deadline(self.previous.take());
     }
-}
-
-fn run_inner<R, I, F, T>(
-    reader: &mut Reader<R>,
-    registry: Arc<Registry>,
-    options: &Options<'_>,
-    deadline: Arc<Deadline>,
-    mut ip_sink: I,
-    mut sink: F,
-    record_timestamp: impl Fn(Option<SystemTime>, u64) -> Result<T, Error>,
-) -> Result<Summary, Error>
-where
-    R: Read,
-    I: FnMut(IpEventRecord) -> Result<(), crate::error::BoundaryError>,
-    F: FnMut(FrameRecord<'_, T>) -> Result<(), crate::error::BoundaryError>,
-{
-    let mut processor = FramePipeline::start(registry, options.clone(), deadline)?;
-    loop {
-        enforce_deadline(&processor.deadline)?;
-        let number = processor.input.frames().saturating_add(1);
-        let Some(frame) = reader
-            .next_frame()
-            .map_err(|source| Error::Capture { number, source })?
-        else {
-            break;
-        };
-        processor.push_with_timestamp(number, frame, &mut ip_sink, &mut sink, &record_timestamp)?;
-    }
-    processor.finish(reader.interfaces().to_vec(), ip_sink)
 }
 
 /// Incremental packet analysis with the same reconstruction and selection as capture-file runs.
@@ -619,7 +634,7 @@ where
         tracker.remember(&fragments, sources)?;
     }
     let (mut completed, events) = ip_dispatch
-        .dispatch(fragments, now, 0)
+        .dispatch_physical(fragments, now)
         .map_err(|source| Error::IpReassembly { number, source })?;
     emit(events, ip_sink)?;
 

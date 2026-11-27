@@ -114,16 +114,16 @@ impl Collector {
             self.mark_capture_incomplete();
         }
         let Some(view) = record.udp else {
-            return Ok(Vec::new());
+            return Ok(self.expire_without_datagram(record.timestamp));
         };
         let Some(conversation) = view.conversation else {
-            return Ok(Vec::new());
+            return Ok(self.expire_without_datagram(record.timestamp));
         };
         let Some(scope) = record.scope_definition(conversation.flow.scope) else {
             return Err(Error::Invalid);
         };
         let Some((range, expected)) = adapter::udp_payload(view.decoded, view.layer) else {
-            return Ok(Vec::new());
+            return Ok(self.expire_without_datagram(record.timestamp));
         };
         let payload = view
             .decoded
@@ -202,7 +202,7 @@ impl Collector {
                         self.summary.malformed_datagrams += 1;
                     }
                     if let Some((index, _, _)) = association
-                        && let Some(mut state) = self.take(index)
+                        && let Some(mut state) = self.states.remove(&index)
                     {
                         state.record_datagram(&input, &self.limits);
                         state.report.metrics.packets += 1;
@@ -282,7 +282,7 @@ impl Collector {
                 self.store(index, state);
                 (index, Direction::Client, packet.dcid.len())
             };
-            let mut state = self.take(index).ok_or(Error::Invalid)?;
+            let mut state = self.states.remove(&index).ok_or(Error::Invalid)?;
             self.summary.packets += 1;
             state.record_datagram(&input, &self.limits);
             let before = state.report.metrics.decrypted_packets;
@@ -371,8 +371,8 @@ impl Collector {
         }
     }
     fn defer(&self, state: &mut State, pending: Pending) {
-        if state.pending.len() >= self.limits.max_pending_packets {
-            state.pending.pop_front();
+        if state.pending_len() >= self.limits.max_pending_packets {
+            state.discard_pending();
             state.diagnostic(
                 pending.number,
                 "pending_limit",
@@ -380,7 +380,7 @@ impl Collector {
                 &self.limits,
             );
         }
-        state.pending.push_back(pending);
+        state.push_pending(pending);
     }
     fn retry(&self, state: &mut State) {
         if state.key_revision == self.keylog.revision() && !state.context_changed {
@@ -390,7 +390,7 @@ impl Collector {
         state.context_changed = false;
         for _ in 0..self.limits.max_pending_packets {
             let mut progressed = false;
-            let pending = std::mem::take(&mut state.pending);
+            let pending = state.take_pending();
             for mut item in pending {
                 let Ok(packet) = parse_packet(&item.bytes, Some(item.dcid_length)) else {
                     continue;
@@ -420,7 +420,7 @@ impl Collector {
                             PendingReason::MissingSecrets
                         };
                         item.keylog_revision = self.keylog.revision();
-                        state.pending.push_back(item);
+                        state.push_pending(item);
                     }
                     Ok(true) => progressed = true,
                     Err(error) => {
@@ -456,15 +456,15 @@ impl Collector {
         let indexes: Vec<_> = self.states.keys().copied().collect();
         for index in indexes {
             crate::analysis::session::check(deadline)?;
-            let Some(mut state) = self.take(index) else {
+            let Some(mut state) = self.states.remove(&index) else {
                 continue;
             };
             let before = state.report.metrics.decrypted_packets;
             self.retry(&mut state);
             self.replay_resets(&mut state);
-            crate::analysis::session::check(deadline)?;
             self.summary.decrypted_packets += state.report.metrics.decrypted_packets - before;
             self.store(index, state);
+            crate::analysis::session::check(deadline)?;
             let mut events = Vec::new();
             self.enforce_memory(&mut events);
             for event in events {
@@ -497,20 +497,57 @@ impl Collector {
         }
         Ok(self.summary)
     }
-    fn store(&mut self, index: u64, state: State) {
+    fn store(&mut self, index: u64, mut state: State) {
         let scope = state.report.scope.id.get();
-        for cid in &state.cids {
+        for cid in &state.cids[state.indexed_cids..] {
             index_cid(&mut self.cids, scope, &cid.id, (index, cid.owner.reverse()));
-            if !cid.retired
-                && let Some(token) = cid.token
-            {
-                self.resets.entry((scope, token)).or_default().insert(index);
-            }
         }
-        self.lru.insert((state.last_time, index));
-        self.memory = self.memory.saturating_add(state.memory());
+        state.indexed_cids = state.cids.len();
+        if state.reset_index_dirty {
+            let tokens: BTreeSet<_> = state
+                .cids
+                .iter()
+                .filter(|cid| !cid.retired)
+                .filter_map(|cid| cid.token)
+                .collect();
+            for token in state.indexed_tokens.difference(&tokens) {
+                self.unindex_reset(scope, *token, index);
+            }
+            for token in tokens.difference(&state.indexed_tokens) {
+                self.resets
+                    .entry((scope, *token))
+                    .or_default()
+                    .insert(index);
+            }
+            state.indexed_tokens = tokens;
+            state.reset_index_dirty = false;
+        }
+        if state.indexed_time != Some(state.last_time) {
+            if let Some(previous) = state.indexed_time {
+                self.lru.remove(&(previous, index));
+            }
+            self.lru.insert((state.last_time, index));
+            state.indexed_time = Some(state.last_time);
+        }
+        let charge = state.memory();
+        self.memory = self
+            .memory
+            .saturating_sub(state.charged_memory)
+            .saturating_add(charge);
+        state.charged_memory = charge;
         self.states.insert(index, state);
     }
+
+    fn unindex_reset(&mut self, scope: u32, token: [u8; 16], index: u64) {
+        let key = (scope, token);
+        if let Some(entries) = self.resets.get_mut(&key) {
+            entries.remove(&index);
+            if entries.is_empty() {
+                self.resets.remove(&key);
+            }
+        }
+    }
+
     fn take(&mut self, index: u64) -> Option<State> {
         let state = self.states.remove(&index)?;
         let scope = state.report.scope.id.get();
@@ -521,29 +558,30 @@ impl Collector {
                 &cid.id,
                 &(index, cid.owner.reverse()),
             );
-            if let Some(token) = cid.token {
-                let key = (scope, token);
-                if let Some(entries) = self.resets.get_mut(&key) {
-                    entries.remove(&index);
-                    if entries.is_empty() {
-                        self.resets.remove(&key);
-                    }
-                }
-            }
+        }
+        for &token in &state.indexed_tokens {
+            self.unindex_reset(scope, token, index);
         }
         self.lru.remove(&(state.last_time, index));
-        self.memory = self.memory.saturating_sub(state.memory());
+        self.memory = self.memory.saturating_sub(state.charged_memory);
         Some(state)
+    }
+    fn expire_without_datagram(&mut self, now: SystemTime) -> Vec<Event> {
+        let mut events = Vec::new();
+        if self.connection_expired(now) {
+            self.expire(now, &mut events);
+        }
+        events
+    }
+    fn connection_expired(&self, now: SystemTime) -> bool {
+        self.lru.first().is_some_and(|&(time, _)| {
+            now.duration_since(time)
+                .is_ok_and(|idle| idle >= self.limits.idle_expiry)
+        })
     }
     fn expire(&mut self, now: SystemTime, events: &mut Vec<Event>) {
         self.expire_resets(now);
-        while let Some(&(time, _)) = self.lru.first() {
-            if !now
-                .duration_since(time)
-                .is_ok_and(|idle| idle >= self.limits.idle_expiry)
-            {
-                break;
-            }
+        while self.connection_expired(now) {
             self.evict("idle_expiry", events);
         }
     }
@@ -710,7 +748,7 @@ impl Collector {
         let Some(&index) = entries.first() else {
             return false;
         };
-        let Some(mut state) = self.take(index) else {
+        let Some(mut state) = self.states.remove(&index) else {
             return false;
         };
         state.record_datagram(input, &self.limits);

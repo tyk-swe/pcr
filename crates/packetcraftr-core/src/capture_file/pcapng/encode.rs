@@ -3,18 +3,19 @@
 
 use std::io::{self, Write};
 
-use crate::frame::{Direction, Frame, LinkType};
+use crate::frame::{Direction, Frame};
 
 use crate::capture_file::{
     error::Error,
-    format::{Endianness, TimestampResolution},
+    format::Endianness,
     header::Interface,
     wire::{
-        PCAPNG_BYTE_ORDER_MAGIC, PCAPNG_ENHANCED_PACKET_BLOCK, PCAPNG_INTERFACE_DESCRIPTION_BLOCK,
-        PCAPNG_OPTION_END, PCAPNG_OPTION_EPB_FLAGS, PCAPNG_OPTION_IF_TSOFFSET,
-        PCAPNG_OPTION_IF_TSRESOL, PCAPNG_SECTION_HEADER_BLOCK, WRITER_TIMESTAMP_RESOLUTION,
-        usize_to_u32_limit, validate_timestamp_resolution, write_all_parts, write_i64,
-        write_padding, write_u16, write_u32,
+        DEFAULT_TIMESTAMP_RESOLUTION, PCAPNG_BYTE_ORDER_MAGIC, PCAPNG_ENHANCED_PACKET_BLOCK,
+        PCAPNG_INTERFACE_DESCRIPTION_BLOCK, PCAPNG_OPTION_END, PCAPNG_OPTION_EPB_FLAGS,
+        PCAPNG_OPTION_IF_TSOFFSET, PCAPNG_OPTION_IF_TSRESOL, PCAPNG_SECTION_HEADER_BLOCK,
+        PCAPNG_SIMPLE_PACKET_BLOCK, WRITER_TIMESTAMP_RESOLUTION, usize_to_u32_limit,
+        validate_timestamp_resolution, write_all_parts, write_i64, write_padding, write_u16,
+        write_u32,
     },
 };
 
@@ -28,15 +29,16 @@ pub(in crate::capture_file) struct InterfacePlan {
 impl InterfacePlan {
     pub(in crate::capture_file) fn description_block_length(&self) -> usize {
         if self.requires_description_block {
-            interface_description_base_length(self.description.timestamp_offset)
+            interface_description_base_length(&self.description)
         } else {
             0
         }
     }
 }
 
-pub(in crate::capture_file) fn interface_description_base_length(timestamp_offset: i64) -> usize {
-    if timestamp_offset == 0 { 32 } else { 44 }
+pub(in crate::capture_file) fn interface_description_base_length(description: &Interface) -> usize {
+    24 + 8 * usize::from(description.timestamp_resolution != DEFAULT_TIMESTAMP_RESOLUTION)
+        + 12 * usize::from(description.timestamp_offset != 0)
 }
 
 pub(in crate::capture_file) fn write_section_header<W: Write>(
@@ -56,34 +58,24 @@ pub(in crate::capture_file) fn write_section_header<W: Write>(
 pub(in crate::capture_file) fn write_interface_description<W: Write>(
     writer: &mut W,
     endianness: Endianness,
-    link_type: LinkType,
-    snap_len: u32,
-    timestamp_resolution: TimestampResolution,
-    timestamp_offset: i64,
+    description: &Interface,
     options: &[crate::capture_file::PcapNgOption],
+    block_length: u32,
 ) -> Result<(), Error> {
-    let base = interface_description_base_length(timestamp_offset);
-    let block_length = usize_to_u32_limit(
-        options
-            .iter()
-            .try_fold(base, |length, option| {
-                length.checked_add(4 + option.value.len().div_ceil(4) * 4)
-            })
-            .ok_or(Error::InvalidData {
-                format: crate::capture_file::Format::PcapNg,
-                reason: "interface option length overflow",
-            })?,
-    )?;
+    let resolution = (description.timestamp_resolution != DEFAULT_TIMESTAMP_RESOLUTION)
+        .then(|| description.timestamp_resolution.to_tsresol())
+        .transpose()?;
     write_u32(writer, endianness, PCAPNG_INTERFACE_DESCRIPTION_BLOCK)?;
     write_u32(writer, endianness, block_length)?;
-    // validate_new_interface rejects a link type above u16::MAX before any IDB is written
-    let link_type_field = link_type.0 as u16;
-    write_u16(writer, endianness, link_type_field)?;
+    write_u16(writer, endianness, description.link_type.0 as u16)?;
     write_u16(writer, endianness, 0)?;
-    write_u32(writer, endianness, snap_len)?;
-    write_u16(writer, endianness, PCAPNG_OPTION_IF_TSRESOL)?;
-    write_u16(writer, endianness, 1)?;
-    writer.write_all(&[timestamp_resolution.to_tsresol()?, 0, 0, 0])?;
+    write_u32(writer, endianness, description.snap_len)?;
+    if let Some(resolution) = resolution {
+        write_u16(writer, endianness, PCAPNG_OPTION_IF_TSRESOL)?;
+        write_u16(writer, endianness, 1)?;
+        writer.write_all(&[resolution, 0, 0, 0])?;
+    }
+    let timestamp_offset = description.timestamp_offset;
     if timestamp_offset != 0 {
         write_u16(writer, endianness, PCAPNG_OPTION_IF_TSOFFSET)?;
         write_u16(writer, endianness, 8)?;
@@ -156,6 +148,68 @@ pub(in crate::capture_file) fn write_enhanced_packet<W: Write>(
     Ok(())
 }
 
+pub(in crate::capture_file) fn write_mapped_packet(
+    writer: &mut impl Write,
+    endianness: Endianness,
+    header: &[u8],
+    options: &[u8],
+    length: u32,
+    frame: &Frame,
+) -> Result<(), Error> {
+    let mut lengths = [0; 12];
+    let mut fields = lengths.as_mut_slice();
+    for value in [frame.captured_length(), frame.original_length(), length] {
+        write_u32(&mut fields, endianness, value)?;
+    }
+    let padding = (4 - frame.bytes().len() % 4) % 4;
+    write_all_parts(
+        writer,
+        &mut [
+            io::IoSlice::new(&header[..4]),
+            io::IoSlice::new(&lengths[8..]),
+            io::IoSlice::new(&header[8..20]),
+            io::IoSlice::new(&lengths[..8]),
+            io::IoSlice::new(frame.bytes()),
+            io::IoSlice::new(&[0; 3][..padding]),
+            io::IoSlice::new(options),
+            io::IoSlice::new(&lengths[8..]),
+        ],
+    )?;
+    Ok(())
+}
+
+pub(in crate::capture_file) fn write_simple_packet<W: Write>(
+    writer: &mut W,
+    endianness: Endianness,
+    block_length: u32,
+    frame: &Frame,
+) -> Result<(), Error> {
+    let mut header = [0; 12];
+    let mut fields = header.as_mut_slice();
+    for value in [
+        PCAPNG_SIMPLE_PACKET_BLOCK,
+        block_length,
+        frame.original_length(),
+    ] {
+        write_u32(&mut fields, endianness, value)?;
+    }
+
+    let mut tail = [0; 7];
+    let mut fields = tail.as_mut_slice();
+    write_padding(&mut fields, frame.captured_length())?;
+    write_u32(&mut fields, endianness, block_length)?;
+    let tail_length = 7 - fields.len();
+    write_all_parts(
+        writer,
+        &mut [
+            io::IoSlice::new(&header),
+            io::IoSlice::new(frame.bytes()),
+            io::IoSlice::new(&tail[..tail_length]),
+        ],
+    )?;
+    Ok(())
+}
+
 pub(in crate::capture_file) fn validate_new_interface(
     description: &Interface,
     existing_interfaces: &[Interface],
@@ -163,7 +217,7 @@ pub(in crate::capture_file) fn validate_new_interface(
     max_interfaces: usize,
 ) -> Result<u32, Error> {
     validate_timestamp_resolution(description.timestamp_resolution)?;
-    let block_length = interface_description_base_length(description.timestamp_offset);
+    let block_length = interface_description_base_length(description);
     if max_size < block_length {
         return Err(Error::SizeLimitExceeded {
             kind: "pcapng interface description",
@@ -171,21 +225,7 @@ pub(in crate::capture_file) fn validate_new_interface(
             limit: max_size,
         });
     }
-    let next_count = existing_interfaces
-        .len()
-        .checked_add(1)
-        .ok_or(Error::InterfaceLimit {
-            limit: max_interfaces,
-        })?;
-    if next_count > max_interfaces {
-        return Err(Error::InterfaceLimit {
-            limit: max_interfaces,
-        });
-    }
-    let interface_id =
-        u32::try_from(existing_interfaces.len()).map_err(|_| Error::InterfaceLimit {
-            limit: max_interfaces.min(u32::MAX as usize),
-        })?;
+    let interface_id = next_interface_id(existing_interfaces, max_interfaces)?;
 
     if description.link_type.0 > u16::MAX as u32 {
         return Err(Error::LinkTypeOutOfRange {
@@ -196,19 +236,54 @@ pub(in crate::capture_file) fn validate_new_interface(
     Ok(interface_id)
 }
 
+pub(in crate::capture_file) fn next_interface_id(
+    existing_interfaces: &[Interface],
+    max_interfaces: usize,
+) -> Result<u32, Error> {
+    if existing_interfaces.len() >= max_interfaces {
+        return Err(Error::InterfaceLimit {
+            limit: max_interfaces,
+        });
+    }
+    u32::try_from(existing_interfaces.len()).map_err(|_| Error::InterfaceLimit {
+        limit: max_interfaces.min(u32::MAX as usize),
+    })
+}
+
+pub(in crate::capture_file) fn write_mapped_interface(
+    writer: &mut impl Write,
+    endianness: Endianness,
+    raw: &[u8],
+    snap_len: u32,
+) -> Result<(), Error> {
+    let mut bytes = [0; 4];
+    write_u32(&mut bytes.as_mut_slice(), endianness, snap_len)?;
+    write_all_parts(
+        writer,
+        &mut [
+            io::IoSlice::new(&raw[..12]),
+            io::IoSlice::new(&bytes),
+            io::IoSlice::new(&raw[16..]),
+        ],
+    )?;
+    Ok(())
+}
+
 pub(in crate::capture_file) fn select_interface(
     frame: &Frame,
     interfaces: &[Interface],
+    section_base: u32,
     max_size: usize,
     max_interfaces: usize,
 ) -> Result<InterfacePlan, Error> {
     if let Some(interface_id) = frame.interface {
-        let interface = interfaces
-            .get(interface_id as usize)
-            .ok_or(Error::UndefinedInterface {
+        let local_id = interface_id.checked_sub(section_base);
+        let interface = local_id.and_then(|id| interfaces.get(id as usize)).ok_or(
+            Error::UndefinedInterface {
                 interface: interface_id,
                 available: interfaces.len(),
-            })?;
+            },
+        )?;
         if interface.link_type != frame.link_type {
             return Err(Error::InterfaceLinkTypeMismatch {
                 interface: interface_id,
@@ -217,7 +292,7 @@ pub(in crate::capture_file) fn select_interface(
             });
         }
         return Ok(InterfacePlan {
-            id: interface_id,
+            id: interface_id - section_base,
             description: interface.clone(),
             requires_description_block: false,
         });

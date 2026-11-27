@@ -137,11 +137,7 @@ pub(crate) fn run(invocation: &crate::invocation::Invocation, args: Args) -> Res
         ));
     }
     let rules = rules.try_map_filters(|filter| {
-        filtering::frame_selector(
-            &filter,
-            &registry,
-            capture_limits.reader_bounds().max_frame_bytes,
-        )
+        filtering::compile(&filter, &registry, filtering::Capabilities::frames_only())
     })?;
     let growth = rules.maximum_growth();
     let mut staged = if args.dry_run {
@@ -170,23 +166,27 @@ pub(crate) fn run(invocation: &crate::invocation::Invocation, args: Args) -> Res
         )),
         None => Box::new(std::io::sink()),
     };
-    let mut writer = capture_file::Writer::pcapng_with_options(
+    let decoder = filtering::frame_decoder(
+        &registry,
+        None,
+        capture_limits.reader_bounds().max_frame_bytes,
+    )?;
+    let dissector = Dissector::new(registry);
+    let mut counts = vec![0u64; rules.len()];
+    let mut changes = Retained::new(MAX_REPORTED_CHANGES);
+    let (writer, report) = capture_file::map_frames_preserving_metadata(
+        &mut reader,
         args.compression.for_file().writer(inner)?,
         capture_file::PcapNgOptions {
             max_size: capture_limits.reader_bounds().max_frame_bytes,
-            // --max-interfaces bounds each input section, not the one output section.
-            max_interfaces: capture_file::DEFAULT_MAX_TOTAL_INTERFACES,
+            max_interfaces: capture_limits.reader_bounds().max_interfaces,
             stream_limits: limits,
             ..Default::default()
         },
-    )
-    .map_err(CliError::classified)?;
-    let dissector = Dissector::new(registry.clone());
-    let mut counts = vec![0u64; rules.len()];
-    let mut changes = Retained::new(MAX_REPORTED_CHANGES);
-    let report =
-        capture_file::map_frames(&mut reader, &mut writer, limits, growth, |number, frame| {
+        growth,
+        |number, frame| {
             check_deadline(&deadline)?;
+            let evaluation = decoder.evaluate(number, frame);
             let changed = rules.apply(
                 frame,
                 &dissector,
@@ -194,7 +194,7 @@ pub(crate) fn run(invocation: &crate::invocation::Invocation, args: Args) -> Res
                     max_output_bytes: capture_limits.reader_bounds().max_frame_bytes,
                 },
                 |filter| {
-                    filter.keep(number, frame).map_err(|error| {
+                    evaluation.matches(filter).map_err(|error| {
                         filtering::frame_error(number, error).into_boundary_error()
                     })
                 },
@@ -207,9 +207,10 @@ pub(crate) fn run(invocation: &crate::invocation::Invocation, args: Args) -> Res
             )?;
             check_deadline(&deadline)?;
             Ok(changed)
-        })
-        .map_err(CliError::classified)?;
-    let _ = writer.into_inner().finish().map_err(CliError::classified)?;
+        },
+    )
+    .map_err(CliError::classified)?;
+    let _ = writer.finish().map_err(CliError::classified)?;
     if let Some(staged) = staged {
         staged.sync()?;
         check_deadline(&deadline).map_err(CliError::classified)?;

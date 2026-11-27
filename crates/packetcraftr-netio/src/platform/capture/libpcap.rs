@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 mod bpf;
+#[cfg(any(test, target_os = "macos"))]
+mod idle;
 
 use packetcraftr_core::clock::{Clock, SystemClock};
 use std::{
@@ -16,8 +18,7 @@ use self::bpf::install_capture_filter;
 use crate::{
     Error, NativeCapability, Unsupported,
     capture::live::{
-        CaptureInterrupt, NativeCaptureEvent, NativeCaptureParts, NativeCaptureSource,
-        NativeCaptureStats,
+        NativeCaptureEvent, NativeCaptureParts, NativeCaptureSource, NativeCaptureStats,
     },
     capture::{Limits, Metadata, NativeSettings, TimestampPrecision, TimestampType},
     interface::Id as InterfaceId,
@@ -116,12 +117,30 @@ pub(crate) fn open_capture(
         native,
         (reported_precision >= 0).then_some(reported_precision),
     )?;
+    #[cfg(target_os = "macos")]
+    let (capture, idle, interrupt) = {
+        let capture = capture
+            .setnonblock()
+            .map_err(|error| map_open_error(interface, error))?;
+        // SAFETY: capture is active and owns the returned descriptor until dropped.
+        let descriptor = unsafe {
+            crate::platform::common::libpcap::pcap_get_selectable_fd(capture.as_ptr().cast())
+        };
+        let (idle, interrupt) = idle::Wake::pair(descriptor).map_err(|error| Error::Capture {
+            message: "could not open a libpcap shutdown wake channel".to_owned(),
+            source: Some(Source::new(error)),
+        })?;
+        (capture, idle, Arc::new(interrupt))
+    };
+    #[cfg(not(target_os = "macos"))]
     let interrupt = Arc::new(PcapInterrupt(capture.breakloop_handle()));
     Ok(NativeCaptureParts {
         source: Box::new(PcapCaptureSource {
             capture,
             snap_length,
             timestamp_precision,
+            #[cfg(target_os = "macos")]
+            idle,
         }),
         interrupt,
         metadata: Metadata {
@@ -169,9 +188,18 @@ struct PcapCaptureSource {
     capture: Capture<Active>,
     snap_length: usize,
     timestamp_precision: TimestampPrecision,
+    #[cfg(target_os = "macos")]
+    idle: idle::Wake,
 }
 
 impl NativeCaptureSource for PcapCaptureSource {
+    fn initial_drop_baseline(&self, first: NativeCaptureStats) -> NativeCaptureStats {
+        NativeCaptureStats {
+            capture_dropped_frames: 0,
+            ..first
+        }
+    }
+
     fn next_event(&mut self) -> Result<NativeCaptureEvent, Error> {
         match self.capture.next_packet() {
             Ok(packet) => {
@@ -198,7 +226,16 @@ impl NativeCaptureSource for PcapCaptureSource {
                 )?;
                 Ok(NativeCaptureEvent::Packet(packet))
             }
-            Err(PcapError::TimeoutExpired) => Ok(NativeCaptureEvent::Timeout),
+            Err(PcapError::TimeoutExpired) => {
+                #[cfg(target_os = "macos")]
+                if self.idle.wait().map_err(|error| Error::Capture {
+                    message: "could not wait for libpcap capture".to_owned(),
+                    source: Some(Source::new(error)),
+                })? {
+                    return Ok(NativeCaptureEvent::Closed);
+                }
+                Ok(NativeCaptureEvent::Timeout)
+            }
             Err(PcapError::NoMorePackets) => Ok(NativeCaptureEvent::Closed),
             Err(error) => Err(Error::Capture {
                 message: "libpcap receive failed".to_owned(),
@@ -222,9 +259,11 @@ impl NativeCaptureSource for PcapCaptureSource {
     }
 }
 
+#[cfg(not(target_os = "macos"))]
 struct PcapInterrupt(pcap::BreakLoop);
 
-impl CaptureInterrupt for PcapInterrupt {
+#[cfg(not(target_os = "macos"))]
+impl crate::capture::live::CaptureInterrupt for PcapInterrupt {
     fn interrupt(&self) {
         self.0.breakloop();
     }

@@ -55,7 +55,15 @@ fn convert_frame(
     source_frame: u64,
     decoding: Option<&Decoding>,
 ) -> Result<Option<Record>, CliError> {
-    let Some(decoding) = decoding else {
+    let Some(decoding) = decoding.filter(|decoding| decoding.publish_layers) else {
+        if let Some(decoding) = decoding
+            && !decoding
+                .frames
+                .keep(source_frame, &frame)
+                .map_err(|error| filtering::frame_error(source_frame, error))?
+        {
+            return Ok(None);
+        }
         return Record::try_from((source_frame, frame))
             .map(Some)
             .map_err(CliError::classified);
@@ -67,11 +75,7 @@ fn convert_frame(
     else {
         return Ok(None);
     };
-    if decoding.publish_layers {
-        Record::try_from((source_frame, frame, &decoded))
-    } else {
-        Record::try_from((source_frame, frame))
-    }
-    .map(Some)
-    .map_err(CliError::classified)
+    Record::try_from((source_frame, frame, &decoded))
+        .map(Some)
+        .map_err(CliError::classified)
 }

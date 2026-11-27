@@ -53,16 +53,12 @@ pub(in crate::platform) fn on_worker<T: Send + 'static>(
 ) -> Result<T, native::Error> {
     use crate::workers::Blocked;
 
-    let detached = deadline
-        .detach()
+    let wait = crate::deadline::wall_clock(deadline)
         .map_err(|interrupted| native::Error::interrupted(interrupted, operation))?;
-    // Native calls spend wall time even when the caller's clock is frozen.
-    let wait = detached
-        .detach()
-        .map_err(|interrupted| native::Error::interrupted(interrupted, operation))?;
+    let query_control = wait.clone();
     let permit = crate::workers::control().admit().map_err(refused)?;
     let blocked = permit
-        .call(&wait, move || query(&detached))
+        .call(&wait, move || query(&query_control))
         .map_err(|error| match wait.enforce() {
             Err(interrupted) => native::Error::interrupted(interrupted, operation),
             Ok(()) => native::Error::OperatingSystem {

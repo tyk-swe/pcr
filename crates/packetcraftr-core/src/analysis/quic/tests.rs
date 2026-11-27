@@ -707,6 +707,68 @@ fn quic_scope_isolation_and_idle_expiry_do_not_merge_identical_cids() {
 }
 
 #[test]
+fn quic_idle_expiry_advances_on_frames_without_datagrams() {
+    use crate::{
+        analysis,
+        frame::{Frame, LinkType},
+        protocol::builtin,
+    };
+
+    let idle = Duration::from_millis(100);
+    let mut h = Harness::new(Limits {
+        idle_expiry: idle,
+        ..Limits::default()
+    });
+    h.hellos(Version::V1, 0x1301);
+    let timestamp = SystemTime::UNIX_EPOCH + Duration::from_millis(h.frame) + idle;
+    let frame = Frame::new(Some(timestamp), LinkType::ETHERNET, vec![0; 14]).unwrap();
+    let mut events = Vec::new();
+    analysis::FramePipeline::new(builtin::registry(), Default::default())
+        .unwrap()
+        .push(
+            h.frame + 1,
+            frame,
+            |_| Ok(()),
+            |record| {
+                events.extend(h.collector.observe(&record).unwrap());
+                Ok(())
+            },
+        )
+        .unwrap();
+    assert!(
+        matches!(events.as_slice(), [Event::Connection { connection }] if connection.end_reason == "idle_expiry")
+    );
+}
+
+#[test]
+fn quic_coalesced_packets_count_an_omitted_frame_once() {
+    let mut h = Harness::new(Limits {
+        max_ranges: 2,
+        ..Limits::default()
+    });
+    let version = Version::V1;
+    h.hellos(version, 0x1301);
+    let keys = Keys::initial(version, &ORIGINAL, true).unwrap();
+    let datagram = [1, 2]
+        .map(|number| {
+            long_packet(
+                version,
+                PacketKind::Initial,
+                true,
+                number,
+                &[1, 0, 0],
+                &keys,
+            )
+        })
+        .concat();
+    h.feed(true, &datagram);
+    let (connections, _) = h.finish();
+    assert_eq!(connections[0].metrics.packets, 4);
+    assert_eq!(connections[0].source_frames, [1, 2]);
+    assert_eq!(connections[0].source_frames_omitted, 1);
+}
+
+#[test]
 fn quic_stateless_resets_preserve_packet_counts_and_source_frames() {
     for cid in [CLIENT_CID, [0x99; 8]] {
         let mut h = Harness::new(Limits::default());

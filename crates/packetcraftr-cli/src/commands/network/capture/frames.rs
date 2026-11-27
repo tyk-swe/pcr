@@ -82,23 +82,26 @@ impl Decoding {
 }
 
 /// Every place a captured frame goes: files, binary stdout, and projections.
-pub(super) struct Destinations {
+pub(super) struct Destinations<W: io::Write> {
+    pub(super) binary: Option<W>,
     pub(super) files: Option<Files>,
-    pub(super) writer: Option<capture_file::Writer<compression::Output<io::Stdout>>>,
+    pub(super) writer: Option<capture_file::Writer<compression::Output<W>>>,
     pub(super) projector: Option<crate::field_projection::Projector>,
     pub(super) format: Format,
     pub(super) compression: Compression,
     pub(super) limits: capture_file::Limits,
 }
 
-impl Destinations {
+impl<W: io::Write> Destinations<W> {
     pub(super) fn start(&mut self, sources: Vec<Source>) -> Result<(), BoundaryError> {
         if let Some(files) = &mut self.files {
             files
                 .initialize(sources)
                 .map_err(BoundaryError::from_error)?;
-        } else if matches!(self.format, Format::Pcap | Format::PcapNg) {
-            let destination = compression::Output::new(io::stdout(), self.compression.format())
+        } else if matches!(self.format, Format::Pcap | Format::PcapNg)
+            && let Some(binary) = self.binary.take()
+        {
+            let destination = compression::Output::new(binary, self.compression.format())
                 .map_err(BoundaryError::from_error)?;
             self.writer = Some(
                 writer::initialize(
@@ -124,17 +127,19 @@ impl Destinations {
         source_frame: u64,
         elapsed: Duration,
         frame: Frame,
+        control: &core::budget::Deadline,
     ) -> Result<Control, BoundaryError> {
-        let control = if let Some(files) = &mut self.files {
+        let acknowledgement = if let Some(files) = &mut self.files {
             files
                 .write(&frame, source_frame, elapsed)
                 .map_err(BoundaryError::from_error)?
         } else {
             Control::Continue
         };
-        if control == Control::StopBefore {
-            return Ok(control);
+        if acknowledgement == Control::StopBefore {
+            return Ok(acknowledgement);
         }
+        control.enforce().map_err(BoundaryError::from_error)?;
         let mut decoding = decoding.map(super::lock);
         emit_frame(
             invocation,
@@ -145,15 +150,10 @@ impl Destinations {
             frame,
         )
         .map_err(CliError::into_boundary_error)?;
-        Ok(control)
+        Ok(acknowledgement)
     }
 
-    /// Finalizes every initialized destination even when capture or a consumer
-    /// failed; finalization failures chain behind `error`.
-    pub(super) fn finish(
-        &mut self,
-        mut error: Option<CliError>,
-    ) -> (Option<CliError>, Option<output::capture::Files>) {
+    pub(super) fn finish(&mut self) -> (Option<CliError>, Option<output::capture::Files>) {
         let file_finish = self
             .files
             .as_mut()
@@ -167,24 +167,22 @@ impl Destinations {
             .transpose()
             .map_err(CliError::classified);
         let files = self.files.as_ref().map(Files::report);
-        for failure in [file_finish.err(), binary_finish.err()]
-            .into_iter()
-            .flatten()
-        {
-            error = Some(match error.take() {
-                Some(primary) => primary.with_secondary("output finalization", failure),
-                None => failure,
-            });
-        }
+        let error = match (file_finish.err(), binary_finish.err()) {
+            (Some(primary), Some(failure)) => {
+                Some(primary.with_secondary("output finalization", failure))
+            }
+            (Some(error), None) | (None, Some(error)) => Some(error),
+            (None, None) => None,
+        };
         (error, files)
     }
 }
 
-fn emit_frame(
+fn emit_frame<W: io::Write>(
     invocation: &crate::invocation::Invocation,
     decoding: Option<&mut Decoding>,
     projector: Option<&mut crate::field_projection::Projector>,
-    writer: &mut Option<capture_file::Writer<compression::Output<io::Stdout>>>,
+    writer: &mut Option<capture_file::Writer<compression::Output<W>>>,
     source_frame: u64,
     frame: Frame,
 ) -> Result<(), CliError> {

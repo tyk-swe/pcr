@@ -169,11 +169,15 @@ impl<R: Read> Reader<R> {
         &self.interfaces
     }
 
+    pub(super) fn limits(&self) -> ReaderLimits {
+        self.limits
+    }
+
     pub fn header(&self) -> &CaptureHeader {
         &self.header
     }
 
-    /// Fails with [`Error::TransformMetadata`] when the header or an interface read so far
+    /// Fails with [`Error::TransformMetadata`] when a record read so far
     /// declares a frame check sequence that frames still carry, which a PCAPNG re-encoding
     /// without that declaration would expose as payload.
     pub fn refuse_declared_fcs(&self) -> Result<(), Error> {
@@ -189,17 +193,17 @@ impl<R: Read> Reader<R> {
 
     /// Returns a source record, rejecting timestamps that cannot be represented exactly.
     pub fn next_record(&mut self) -> Result<Option<CaptureRecord>, Error> {
-        self.next_record_with(Subnanosecond::Reject)
+        self.next_record_with(super::pcapng::PacketRead::Record)
     }
 
     fn next_record_with(
         &mut self,
-        subnanosecond: Subnanosecond,
+        read: super::pcapng::PacketRead,
     ) -> Result<Option<CaptureRecord>, Error> {
         if self.finished {
             return Ok(None);
         }
-        let result = self.read_record(subnanosecond);
+        let result = self.read_record(read);
         match result {
             Ok(record) => {
                 if record.is_none() {
@@ -216,7 +220,7 @@ impl<R: Read> Reader<R> {
 
     fn read_record(
         &mut self,
-        subnanosecond: Subnanosecond,
+        read: super::pcapng::PacketRead,
     ) -> Result<Option<CaptureRecord>, Error> {
         self.check_interrupted()?;
         let record = match &mut self.state {
@@ -229,19 +233,19 @@ impl<R: Read> Reader<R> {
                 &mut self.interfaces,
                 &self.limits,
                 &mut self.scratch,
-                subnanosecond,
+                read,
             ),
         }
         .map_err(|error| self.check_interrupted().err().unwrap_or(error))?;
         self.check_interrupted()?;
-        if let Some(CaptureRecord {
-            kind: RecordKind::Metadata(MetadataBlockKind::InterfaceDescription { options, .. }),
-            ..
-        }) = &record
-            && options.iter().any(PcapNgOption::declares_fcs)
-        {
-            self.declares_fcs = true;
-        }
+        self.declares_fcs |= record.as_ref().is_some_and(|record| {
+            record.packet_declares_fcs
+                || matches!(
+                    &record.kind,
+                    RecordKind::Metadata(MetadataBlockKind::InterfaceDescription { options, .. })
+                        if options.iter().any(PcapNgOption::declares_fcs)
+                )
+        });
         Ok(record)
     }
 
@@ -257,7 +261,9 @@ impl<R: Read> Reader<R> {
     }
 
     fn next_frame_with(&mut self, subnanosecond: Subnanosecond) -> Result<Option<Frame>, Error> {
-        while let Some(record) = self.next_record_with(subnanosecond)? {
+        while let Some(record) =
+            self.next_record_with(super::pcapng::PacketRead::Frame(subnanosecond))?
+        {
             if let Some(frame) = record.frame {
                 return Ok(Some(frame));
             }

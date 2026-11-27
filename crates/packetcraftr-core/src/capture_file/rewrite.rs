@@ -5,6 +5,7 @@ use std::io::{Read, Write};
 
 use serde::{Deserialize, Serialize};
 
+use super::limits::MetadataRun;
 use super::{Budget, Error, Format, Limits, MetadataBlockKind, Reader, RecordKind};
 use crate::{error::BoundaryError, frame::Frame};
 
@@ -89,6 +90,7 @@ fn copy_records<R: Read, W: Write, E: From<Error>>(
             .write_all(reader.header().raw())
             .map_err(Error::from)?;
     }
+    let mut metadata = MetadataRun::default();
     while let Some(record) = reader.next_record()? {
         if let Some(frame) = record.frame.as_ref() {
             budget.charge(frame.captured_length())?;
@@ -97,11 +99,15 @@ fn copy_records<R: Read, W: Write, E: From<Error>>(
             if !predicate(report.frames_read, frame)? {
                 continue;
             }
+            metadata = MetadataRun::default();
             report.frames_selected = report.frames_selected.saturating_add(1);
             report.captured_bytes_selected = report
                 .captured_bytes_selected
                 .saturating_add(u64::from(frame.captured_length()));
         } else {
+            if selecting && report.format == Format::PcapNg {
+                metadata = metadata.after(record.raw_bytes().len(), reader.limits())?;
+            }
             report.metadata_records = report.metadata_records.saturating_add(1);
         }
         if selecting

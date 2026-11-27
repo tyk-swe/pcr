@@ -16,6 +16,8 @@ use packetcraftr_core::error::Source;
 #[link(name = "pcap")]
 #[expect(unsafe_code, reason = "declares libpcap C FFI symbols")]
 unsafe extern "C" {
+    #[cfg(target_os = "macos")]
+    pub(in crate::platform) fn pcap_get_selectable_fd(handle: *mut c_void) -> c_int;
     pub(in crate::platform) fn pcap_snapshot(handle: *mut c_void) -> c_int;
     pub(in crate::platform) fn pcap_set_buffer_size(handle: *mut c_void, size: c_int) -> c_int;
     pub(in crate::platform) fn pcap_set_tstamp_type(handle: *mut c_void, ttype: c_int) -> c_int;

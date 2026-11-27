@@ -70,9 +70,19 @@ pub trait Session: Send {
     fn shutdown_until(&mut self, _deadline: &Deadline) -> Result<(), Error> {
         self.shutdown()
     }
+    /// Whether a previous shutdown returned before the owned backend stopped.
+    /// A fresh shutdown deadline can retry unfinished work.
+    fn shutdown_pending(&self) -> bool {
+        false
+    }
     /// Stops and joins capture; errors leave cleanup unconfirmed.
     fn shutdown(&mut self) -> Result<(), Error>;
     fn stats(&self) -> Stats;
+    /// Whether the stopped source successfully collected its final counters.
+    /// Legacy providers report their final counters through `stats` alone.
+    fn final_stats_available(&self) -> bool {
+        true
+    }
     /// Quality of this source's local acquisition reporting. The default
     /// preserves unknown quality for legacy providers. A zero drop count alone
     /// does not opt a provider into reporting loss, or prove network visibility.
@@ -145,8 +155,16 @@ impl<T: Session + ?Sized> Session for Box<T> {
         (**self).shutdown()
     }
 
+    fn shutdown_pending(&self) -> bool {
+        (**self).shutdown_pending()
+    }
+
     fn stats(&self) -> Stats {
         (**self).stats()
+    }
+
+    fn final_stats_available(&self) -> bool {
+        (**self).final_stats_available()
     }
 
     fn observation_quality(&self) -> ObservationQuality {

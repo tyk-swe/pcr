@@ -78,20 +78,20 @@ pub(crate) fn run(invocation: &crate::invocation::Invocation, args: Args) -> Res
         &args.path,
         setup.capture_limits,
     )?;
-    let mut reader = crate::input::snapshot_capture(
-        &invocation.control,
+    let snapshot = tempfile::tempfile()
+        .map_err(capture_file::Error::from)
+        .map_err(CliError::classified)?;
+    let mut snapshot = std::io::BufWriter::with_capacity(64 * 1024, snapshot);
+    let plan = analysis::export::plan_with_snapshot(
         &mut source,
-        setup.capture_limits,
-        limits,
-    )?;
-    let plan = analysis::export::plan(
-        &mut reader,
         setup.registry.clone(),
         &setup.options(invocation),
         &selection,
+        &mut snapshot,
     )
     .map_err(CliError::classified)?;
-    reader.rewind().map_err(CliError::classified)?;
+    let mut reader =
+        crate::input::reopen_capture_snapshot(&invocation.control, snapshot, setup.capture_limits)?;
     let (writer, report) = capture_file::select(
         &mut reader,
         args.compression

@@ -216,6 +216,7 @@ impl State {
                 destination.reset_error = state.reset_error;
             }
         }
+        self.stream_bytes = self.streams.values().map(|s| 264 + s.ranges.memory()).sum();
         first_error.map_or(Ok(()), Err)
     }
     fn frame(
@@ -249,9 +250,14 @@ impl State {
                 {
                     return Err(Error::Limit);
                 }
-                let stream = self.streams.entry(key).or_insert_with(StreamState::new);
-                self.report.metrics.repeated_stream_bytes +=
-                    stream.insert(offset, data, fin, limits)?;
+                let stream = self.streams.entry(key).or_insert_with(|| {
+                    self.stream_bytes += 264;
+                    StreamState::new()
+                });
+                let previous = stream.ranges.memory();
+                let inserted = stream.insert(offset, data, fin, limits);
+                self.stream_bytes = self.stream_bytes - previous + stream.ranges.memory();
+                self.report.metrics.repeated_stream_bytes += inserted?;
             }
             Frame::ResetStream {
                 id,
@@ -269,7 +275,10 @@ impl State {
                 {
                     return Err(Error::Limit);
                 }
-                let stream = self.streams.entry(key).or_insert_with(StreamState::new);
+                let stream = self.streams.entry(key).or_insert_with(|| {
+                    self.stream_bytes += 264;
+                    StreamState::new()
+                });
                 stream.set_final(final_size)?;
                 stream.reset_error = Some(error);
             }

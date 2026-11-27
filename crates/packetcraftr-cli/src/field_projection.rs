@@ -9,12 +9,12 @@ use crate::output::{
 };
 use crate::{
     errors::CliError,
-    invocation::StreamEncoder,
+    invocation::{Invocation, StreamEncoder},
     publication::{BoundedJsonError, Limited, bounded_json_len, emit_published, write_raw},
 };
 use packetcraftr_core::{
     self as core,
-    filter::{Context, Projection, Requirements},
+    filter::{Context, FrameEvaluation, Projection, Requirements},
 };
 
 pub(crate) struct Projector {
@@ -34,6 +34,7 @@ enum Sink {
 struct Budget {
     remaining: usize,
     maximum: usize,
+    text_batch: Option<Invocation>,
 }
 
 impl Budget {
@@ -67,7 +68,10 @@ impl Budget {
             .map_err(|error| self.error(error))?;
         let (bytes, remaining) = line.finish();
         self.remaining = remaining;
-        write_raw(&bytes)
+        match &self.text_batch {
+            Some(invocation) => crate::terminal::write_raw_batch(invocation, &bytes),
+            None => write_raw(&bytes),
+        }
     }
 
     fn write_header(
@@ -119,6 +123,7 @@ impl Projector {
             budget: Budget {
                 remaining: maximum,
                 maximum,
+                text_batch: None,
             },
             count: 0,
         }))
@@ -126,6 +131,10 @@ impl Projector {
 
     pub(crate) fn requirements(&self) -> Requirements {
         self.projection.requirements()
+    }
+
+    pub(crate) fn batch_text(&mut self, invocation: &Invocation) {
+        self.budget.text_batch = Some(invocation.clone());
     }
 
     pub(crate) fn emit(
@@ -138,6 +147,27 @@ impl Projector {
             .projection
             .values(context, self.budget.remaining)
             .map_err(CliError::classified)?;
+        self.emit_values(source_frame, values, stream)
+    }
+
+    pub(crate) fn emit_frame(
+        &mut self,
+        source_frame: u64,
+        evaluation: &FrameEvaluation<'_>,
+        stream: &StreamEncoder,
+    ) -> Result<(), CliError> {
+        let values = evaluation
+            .values(&self.projection, self.budget.remaining)
+            .map_err(|error| crate::filtering::frame_error(source_frame, error))?;
+        self.emit_values(source_frame, values, stream)
+    }
+
+    fn emit_values(
+        &mut self,
+        source_frame: u64,
+        values: Vec<Option<core::field::Value>>,
+        stream: &StreamEncoder,
+    ) -> Result<(), CliError> {
         let row = Row::try_from((source_frame, values)).map_err(CliError::classified)?;
         match &mut self.sink {
             Sink::Text { header_written } => {

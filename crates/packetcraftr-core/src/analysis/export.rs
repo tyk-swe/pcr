@@ -6,12 +6,17 @@ use super::{
     provenance::{IncompleteSources, SourceSet},
 };
 use crate::{
-    capture_file::Reader,
+    capture_file::{self, Reader},
     error::{BoundaryError, Classification, Classified, Kind},
     filter::Filter,
+    frame::Frame,
     registry::Registry,
 };
-use std::{collections::BTreeSet, io::Read, sync::Arc};
+use std::{
+    collections::BTreeSet,
+    io::{Read, Write},
+    sync::Arc,
+};
 
 pub const MAX_SELECTORS: usize = 4096;
 pub const MAX_SELECTED_FRAMES: usize = 1_000_000;
@@ -111,6 +116,44 @@ pub fn plan<R: Read>(
     options: &Options<'_>,
     selection: &Selection<'_>,
 ) -> Result<Plan, Error> {
+    plan_with_frames(reader, registry, options, selection, Reader::next_frame)
+}
+
+/// Analyze a freshly opened reader while copying exact records into a snapshot.
+/// The reader must be positioned immediately after its initial capture header.
+/// Publish the snapshot only after the plan succeeds.
+pub fn plan_with_snapshot<R: Read>(
+    reader: &mut Reader<R>,
+    registry: Arc<Registry>,
+    options: &Options<'_>,
+    selection: &Selection<'_>,
+    snapshot: &mut impl Write,
+) -> Result<Plan, Error> {
+    selection.validate()?;
+    snapshot
+        .write_all(reader.header().raw())
+        .map_err(|source| super::Error::Capture {
+            number: 1,
+            source: source.into(),
+        })?;
+    plan_with_frames(reader, registry, options, selection, |reader| {
+        while let Some(record) = reader.next_record()? {
+            snapshot.write_all(record.raw_bytes())?;
+            if let Some(frame) = record.frame {
+                return Ok(Some(frame));
+            }
+        }
+        Ok(None)
+    })
+}
+
+fn plan_with_frames<R: Read>(
+    reader: &mut Reader<R>,
+    registry: Arc<Registry>,
+    options: &Options<'_>,
+    selection: &Selection<'_>,
+    next_frame: impl FnMut(&mut Reader<R>) -> Result<Option<Frame>, capture_file::Error>,
+) -> Result<Plan, Error> {
     selection.validate()?;
     let mut selected = Selected::new(selection);
     let run_options = Options {
@@ -121,9 +164,13 @@ pub fn plan<R: Read>(
         plan: super::Plan::default(),
         ..options.clone()
     };
-    let run = super::run(reader, registry, &run_options, |record| {
-        selected.visit(&record)
-    })?;
+    let run = super::pipeline::run_with_frames(
+        reader,
+        registry,
+        &run_options,
+        |record| selected.visit(&record),
+        next_frame,
+    )?;
     let mut selected_incomplete_datagrams = Vec::new();
     let mut unselected_incomplete_datagrams = 0;
     for group in run.incomplete_sources {

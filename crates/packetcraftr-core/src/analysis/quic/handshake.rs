@@ -38,7 +38,12 @@ impl State {
             let Some(message) = input.get(..length + 4) else {
                 break;
             };
-            self.handshake_message(direction, level, message, frame, timestamp, limits)?;
+            let result =
+                self.handshake_message(direction, level, message, frame, timestamp, limits);
+            if matches!(message[0], 1 | 8) {
+                self.charge_tls();
+            }
+            result?;
             self.crypto[direction.index()][level].consumed += message.len() as u64;
         }
         Ok(())
@@ -197,6 +202,7 @@ impl State {
                 let token: [u8; 16] = value.try_into().map_err(|_| Error::Invalid)?;
                 for cid in &mut self.cids {
                     if cid.owner == Direction::Server && cid.sequence == Some(0) {
+                        self.reset_index_dirty |= cid.token != Some(token) && !cid.retired;
                         cid.token = Some(token);
                         self.context_changed = true;
                     }

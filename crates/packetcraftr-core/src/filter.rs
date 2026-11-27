@@ -58,7 +58,7 @@ pub use projection::Projection;
 
 pub use error::Error;
 pub use eval::{Context, DerivedPacket};
-pub use frames::{FrameDecoder, FrameSelector};
+pub use frames::{FrameDecoder, FrameEvaluation, FrameSelector};
 pub use limits::{
     DEFAULT_MAX_FILTER_BYTES, Limits, MAX_FILTER_NESTING, MAX_FILTER_SET_MEMBERS, MAX_FILTER_TERMS,
 };

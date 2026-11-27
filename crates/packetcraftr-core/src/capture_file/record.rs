@@ -66,6 +66,7 @@ pub enum RecordKind {
 pub struct CaptureRecord {
     pub kind: RecordKind,
     pub frame: Option<crate::frame::Frame>,
+    pub(super) packet_declares_fcs: bool,
     pub(super) format: Format,
     pub(super) raw: Bytes,
 }

@@ -166,16 +166,6 @@ pub(crate) fn run(invocation: &crate::invocation::Invocation, args: Args) -> Res
         )),
         None => Box::new(std::io::sink()),
     };
-    let mut writer = capture_file::Writer::pcapng_with_options(
-        args.compression.for_file().writer(inner)?,
-        capture_file::PcapNgOptions {
-            max_size: capture_limits.reader_bounds().max_frame_bytes,
-            max_interfaces: capture_limits.reader_bounds().max_interfaces,
-            stream_limits: limits,
-            ..Default::default()
-        },
-    )
-    .map_err(CliError::classified)?;
     let decoder = filtering::frame_decoder(
         &registry,
         None,
@@ -184,8 +174,17 @@ pub(crate) fn run(invocation: &crate::invocation::Invocation, args: Args) -> Res
     let dissector = Dissector::new(registry);
     let mut counts = vec![0u64; rules.len()];
     let mut changes = Retained::new(MAX_REPORTED_CHANGES);
-    let report =
-        capture_file::map_frames(&mut reader, &mut writer, limits, growth, |number, frame| {
+    let (writer, report) = capture_file::map_frames_preserving_metadata(
+        &mut reader,
+        args.compression.for_file().writer(inner)?,
+        capture_file::PcapNgOptions {
+            max_size: capture_limits.reader_bounds().max_frame_bytes,
+            max_interfaces: capture_limits.reader_bounds().max_interfaces,
+            stream_limits: limits,
+            ..Default::default()
+        },
+        growth,
+        |number, frame| {
             check_deadline(&deadline)?;
             let evaluation = decoder.evaluate(number, frame);
             let changed = rules.apply(
@@ -208,9 +207,10 @@ pub(crate) fn run(invocation: &crate::invocation::Invocation, args: Args) -> Res
             )?;
             check_deadline(&deadline)?;
             Ok(changed)
-        })
-        .map_err(CliError::classified)?;
-    let _ = writer.into_inner().finish().map_err(CliError::classified)?;
+        },
+    )
+    .map_err(CliError::classified)?;
+    let _ = writer.finish().map_err(CliError::classified)?;
     if let Some(staged) = staged {
         staged.sync()?;
         check_deadline(&deadline).map_err(CliError::classified)?;

@@ -19,6 +19,11 @@ pub(crate) const AFTER_LONG_HELP: &str = r"Apply header edits, CIDR/MAC mappings
 assignments (--set), or ordered rules (--rules-file) to frames matching --filter
 (or all frames). Header edits and mappings repair checksums; field assignments
 repair covering checksums unless --checksum-mode preserve is set.
+
+PCAPNG output preserves section boundaries and compatible metadata. Rewrite
+rejects unsupported metadata, including options marked as non-copyable and
+hashes of packets whose bytes change.
+
 The destination is published only when all frames succeed; --dry-run reports
 field changes without writing.
 

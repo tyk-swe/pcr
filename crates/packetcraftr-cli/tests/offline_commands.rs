@@ -1309,6 +1309,157 @@ fn merge_rejects_clock_regression_before_publication() {
 }
 
 #[test]
+fn capture_rewrite_preserves_metadata_or_leaves_the_destination_unpublished() {
+    use packetcraftr_core::build::Builder;
+    use packetcraftr_core::capture_file::{
+        CaptureHeader, Endianness, PcapNgOptions, Reader, RecordKind, Writer,
+    };
+    use packetcraftr_core::frame::{Frame, LinkType};
+    use packetcraftr_core::packet::Packet;
+    use packetcraftr_core::protocol::{builtin, link::Ethernet, network::Ipv4};
+    use std::time::UNIX_EPOCH;
+
+    let mut packet = Packet::default();
+    packet.push(Ethernet::default());
+    packet.push(Ipv4 {
+        ttl: 64,
+        ..Default::default()
+    });
+    let built = Builder::new(builtin::registry())
+        .build(packet, Default::default(), Default::default())
+        .unwrap();
+    let frame = Frame::new(Some(UNIX_EPOCH), LinkType::ETHERNET, built.bytes).unwrap();
+    let block = |kind: u32, body: &[u8]| {
+        let length = u32::try_from(body.len() + 12).unwrap().to_be_bytes();
+        [&kind.to_be_bytes()[..], &length, body, &length].concat()
+    };
+    let section_comment = [0, 1, 0, 4, b's', b'i', b't', b'e', 0, 0, 0, 0];
+    let packet_comment = [0, 1, 0, 4, b'f', b'r', b'a', b'm'];
+    let hash = [
+        0,
+        3,
+        0,
+        2,
+        1,
+        frame.bytes().iter().fold(0, |value, byte| value ^ byte),
+        0,
+        0,
+    ];
+    let terminator = [0; 4];
+    let metadata = [
+        block(4, &terminator),
+        block(5, &[0; 12]),
+        block(0x0bad, &[0; 4]),
+    ];
+
+    let mut little = little_endian_pcapng(&frame).into_inner();
+    little.extend(untimed_pcapng_block(&frame));
+
+    let mut writer = Writer::pcapng_with_options(
+        Vec::new(),
+        PcapNgOptions {
+            endianness: Endianness::Big,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    writer.add_interface(frame.link_type).unwrap();
+    let first_packet = writer.get_ref().len();
+    writer.write_frame(&frame).unwrap();
+    let timed = writer.into_inner();
+    let mut source_bytes = little;
+    source_bytes.extend(block(
+        0x0a0d_0d0a,
+        &[&timed[8..24], &section_comment].concat(),
+    ));
+    source_bytes.extend_from_slice(&timed[28..first_packet]);
+    source_bytes.extend(metadata.concat());
+    let packet_body = &timed[first_packet + 8..timed.len() - 4];
+
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("source.pcapng");
+    let destination = dir.path().join("rewritten.pcapng");
+    let args = [
+        "--output",
+        "json",
+        "files",
+        "rewrite",
+        source.to_str().unwrap(),
+        "--write",
+        destination.to_str().unwrap(),
+        "--set",
+        "ipv4.ttl=61",
+        "--filter",
+        "frame.number == 2",
+    ];
+    let mut capture = source_bytes.clone();
+    capture.extend(block(
+        6,
+        &[packet_body, &packet_comment, &terminator].concat(),
+    ));
+    std::fs::write(&source, capture).unwrap();
+    let output = run(&args);
+    assert_success(&output, &args);
+
+    let mut reader = Reader::with_limits(
+        std::fs::File::open(&destination).unwrap(),
+        Default::default(),
+    )
+    .unwrap();
+    assert!(
+        matches!(reader.header(), CaptureHeader::PcapNg(section) if section.endianness == Endianness::Little)
+    );
+    let records = std::iter::from_fn(|| reader.next_record().unwrap()).collect::<Vec<_>>();
+    let packets = records
+        .iter()
+        .filter_map(|record| record.frame.as_ref())
+        .collect::<Vec<_>>();
+    assert_eq!(packets.len(), 2);
+    assert_eq!(packets[0].timestamp, None);
+    assert_eq!(packets[0].bytes(), frame.bytes());
+    assert_eq!(packets[1].timestamp, frame.timestamp);
+    assert_eq!(packets[1].interface, Some(1));
+    assert_eq!(packets[1].bytes()[22], 61);
+    assert!(records.iter().any(|record| matches!(&record.kind,
+        RecordKind::Metadata(packetcraftr_core::capture_file::MetadataBlockKind::Section(section))
+        if section.endianness == Endianness::Big && section.options[0].value == b"site"[..]
+    )));
+    for block in &metadata {
+        assert!(records.iter().any(|record| record.raw_bytes() == block));
+    }
+    assert!(
+        records
+            .iter()
+            .any(|record| record.raw_bytes() == &timed[28..first_packet])
+    );
+    assert!(matches!(&records.last().unwrap().kind,
+        RecordKind::Packet { options, .. } if options[0].value == b"fram"[..]
+    ));
+
+    let rejected = dir.path().join("rejected.pcapng");
+    let mut args = args;
+    args[6] = rejected.to_str().unwrap();
+    source_bytes.extend(block(
+        6,
+        &[packet_body, &packet_comment, &hash, &terminator].concat(),
+    ));
+    std::fs::write(&source, source_bytes).unwrap();
+    let output = run(&args);
+    assert_error(&output, "packet.capture_transform_metadata");
+    assert!(String::from_utf8_lossy(&output.stdout).contains("hash of an edited packet"));
+    assert!(!rejected.exists());
+
+    let no_copy = [0x4b, 0xad, 0, 4, 0, 0, 0, 0];
+    let mut capture = std::fs::read(&destination).unwrap();
+    capture.extend(block(5, &[&[0; 12][..], &no_copy, &terminator].concat()));
+    std::fs::write(&source, capture).unwrap();
+    let output = run(&args);
+    assert_error(&output, "packet.capture_transform_metadata");
+    assert!(String::from_utf8_lossy(&output.stdout).contains("non-copyable PCAPNG option"));
+    assert!(!rejected.exists());
+}
+
+#[test]
 fn capture_selection_rejects_unreadable_metadata_runs_before_writing_stdout() {
     use packetcraftr_core::capture_file::ReaderLimits;
 

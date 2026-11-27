@@ -148,6 +148,36 @@ pub(in crate::capture_file) fn write_enhanced_packet<W: Write>(
     Ok(())
 }
 
+pub(in crate::capture_file) fn write_mapped_packet(
+    writer: &mut impl Write,
+    endianness: Endianness,
+    header: &[u8],
+    options: &[u8],
+    length: u32,
+    frame: &Frame,
+) -> Result<(), Error> {
+    let mut lengths = [0; 12];
+    let mut fields = lengths.as_mut_slice();
+    for value in [frame.captured_length(), frame.original_length(), length] {
+        write_u32(&mut fields, endianness, value)?;
+    }
+    let padding = (4 - frame.bytes().len() % 4) % 4;
+    write_all_parts(
+        writer,
+        &mut [
+            io::IoSlice::new(&header[..4]),
+            io::IoSlice::new(&lengths[8..]),
+            io::IoSlice::new(&header[8..20]),
+            io::IoSlice::new(&lengths[..8]),
+            io::IoSlice::new(frame.bytes()),
+            io::IoSlice::new(&[0; 3][..padding]),
+            io::IoSlice::new(options),
+            io::IoSlice::new(&lengths[8..]),
+        ],
+    )?;
+    Ok(())
+}
+
 pub(in crate::capture_file) fn write_simple_packet<W: Write>(
     writer: &mut W,
     endianness: Endianness,
@@ -195,21 +225,7 @@ pub(in crate::capture_file) fn validate_new_interface(
             limit: max_size,
         });
     }
-    let next_count = existing_interfaces
-        .len()
-        .checked_add(1)
-        .ok_or(Error::InterfaceLimit {
-            limit: max_interfaces,
-        })?;
-    if next_count > max_interfaces {
-        return Err(Error::InterfaceLimit {
-            limit: max_interfaces,
-        });
-    }
-    let interface_id =
-        u32::try_from(existing_interfaces.len()).map_err(|_| Error::InterfaceLimit {
-            limit: max_interfaces.min(u32::MAX as usize),
-        })?;
+    let interface_id = next_interface_id(existing_interfaces, max_interfaces)?;
 
     if description.link_type.0 > u16::MAX as u32 {
         return Err(Error::LinkTypeOutOfRange {
@@ -218,6 +234,39 @@ pub(in crate::capture_file) fn validate_new_interface(
     }
 
     Ok(interface_id)
+}
+
+pub(in crate::capture_file) fn next_interface_id(
+    existing_interfaces: &[Interface],
+    max_interfaces: usize,
+) -> Result<u32, Error> {
+    if existing_interfaces.len() >= max_interfaces {
+        return Err(Error::InterfaceLimit {
+            limit: max_interfaces,
+        });
+    }
+    u32::try_from(existing_interfaces.len()).map_err(|_| Error::InterfaceLimit {
+        limit: max_interfaces.min(u32::MAX as usize),
+    })
+}
+
+pub(in crate::capture_file) fn write_mapped_interface(
+    writer: &mut impl Write,
+    endianness: Endianness,
+    raw: &[u8],
+    snap_len: u32,
+) -> Result<(), Error> {
+    let mut bytes = [0; 4];
+    write_u32(&mut bytes.as_mut_slice(), endianness, snap_len)?;
+    write_all_parts(
+        writer,
+        &mut [
+            io::IoSlice::new(&raw[..12]),
+            io::IoSlice::new(&bytes),
+            io::IoSlice::new(&raw[16..]),
+        ],
+    )?;
+    Ok(())
 }
 
 pub(in crate::capture_file) fn select_interface(

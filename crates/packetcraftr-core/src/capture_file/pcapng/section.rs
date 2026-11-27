@@ -179,3 +179,14 @@ pub(in crate::capture_file) fn write_selected_section(
     output.write_all(&raw[24..])?;
     Ok(())
 }
+
+pub(in crate::capture_file) fn write_rewritten_section(
+    output: &mut impl std::io::Write,
+    raw: &[u8],
+) -> Result<(), Error> {
+    output.write_all(&raw[..14])?;
+    output.write_all(&[0; 2])?;
+    output.write_all(&[0xff; 8])?;
+    output.write_all(&raw[24..])?;
+    Ok(())
+}

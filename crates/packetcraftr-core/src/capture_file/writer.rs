@@ -11,20 +11,21 @@ use crate::frame::{Frame, LinkType};
 use super::classic::{write_pcap_frame, write_pcap_header};
 use super::error::Error;
 use super::format::{Endianness, Format, TimestampPrecision, TimestampResolution};
-use super::header::Interface;
+use super::header::{Interface, Section};
 use super::limits::{
     Budget, DEFAULT_MAX_INTERFACES_PER_SECTION, DEFAULT_MAX_OPTIONS_PER_BLOCK,
     DEFAULT_MAX_TOTAL_INTERFACES, Limits, MetadataRun, ReaderLimits,
 };
 use super::pcapng::{
-    interface_description_base_length, select_interface, simple_packet_captured_length,
-    validate_new_interface, write_enhanced_packet, write_interface_description,
-    write_section_header, write_simple_packet,
+    interface_description_base_length, next_interface_id, select_interface,
+    simple_packet_captured_length, validate_new_interface, write_enhanced_packet,
+    write_interface_description, write_mapped_interface, write_mapped_packet,
+    write_rewritten_section, write_section_header, write_simple_packet,
 };
 use super::wire::{
     DEFAULT_TIMESTAMP_RESOLUTION, PCAP_RECORD_HEADER_LEN, PCAPNG_OPTION_END,
-    PCAPNG_OPTION_IF_TSOFFSET, PCAPNG_OPTION_IF_TSRESOL, align_to_u32, timestamp_to_ticks,
-    usize_to_u32_limit, validate_frame_size,
+    PCAPNG_OPTION_IF_TSOFFSET, PCAPNG_OPTION_IF_TSRESOL, align_to_u32, align_to_usize,
+    timestamp_to_ticks, usize_to_u32_limit, validate_frame_size,
 };
 use super::{PcapNgOptions, PcapOptions};
 
@@ -188,7 +189,15 @@ impl<W: Write> Writer<W> {
         ))
     }
 
-    pub fn pcapng_with_options(mut inner: W, options: PcapNgOptions) -> Result<Self, Error> {
+    pub fn pcapng_with_options(inner: W, options: PcapNgOptions) -> Result<Self, Error> {
+        Self::pcapng_with_section(inner, options, None)
+    }
+
+    pub(super) fn pcapng_with_section(
+        mut inner: W,
+        options: PcapNgOptions,
+        section: Option<&Section>,
+    ) -> Result<Self, Error> {
         let PcapNgOptions {
             endianness,
             max_size,
@@ -196,14 +205,10 @@ impl<W: Write> Writer<W> {
             stream_limits,
         } = options;
         let budget = Budget::new(stream_limits)?;
-        if max_size < 28 {
-            return Err(Error::SizeLimitExceeded {
-                kind: "pcapng section header",
-                declared: 28,
-                limit: max_size,
-            });
-        }
-        write_section_header(&mut inner, endianness)?;
+        let endianness = section.map_or(endianness, |section| section.endianness);
+        let length = section.map_or(28, |section| section.raw.len());
+        check_block_size(length, max_size, "pcapng section header")?;
+        write_section(&mut inner, endianness, section)?;
         Ok(Self::from_state(
             inner,
             WriterState::PcapNg {
@@ -325,12 +330,39 @@ impl<W: Write> Writer<W> {
         options: &[super::PcapNgOption],
         length: usize,
     ) -> Result<(), Error> {
-        let metadata = self.metadata.after(length, ReaderLimits::default())?;
         let block_length = usize_to_u32_limit(length)?;
         let endianness = self.endianness();
-        self.write_output(|inner| {
-            write_interface_description(inner, endianness, &description, options, block_length)
+        self.record_interface(description, length, |inner, description| {
+            write_interface_description(inner, endianness, description, options, block_length)
+        })
+    }
+
+    pub(super) fn copy_interface_block(
+        &mut self,
+        description: Interface,
+        raw: &[u8],
+    ) -> Result<u32, Error> {
+        check_block_size(raw.len(), self.max_size, "pcapng interface description")?;
+        let (section_base, interfaces) = self.pcapng_section()?;
+        let id = global_interface_id(
+            section_base,
+            next_interface_id(interfaces, self.max_interfaces)?,
+        )?;
+        let endianness = self.endianness();
+        self.record_interface(description, raw.len(), |inner, description| {
+            write_mapped_interface(inner, endianness, raw, description.snap_len)
         })?;
+        Ok(id)
+    }
+
+    fn record_interface(
+        &mut self,
+        description: Interface,
+        length: usize,
+        write: impl FnOnce(&mut W, &Interface) -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        let metadata = self.metadata.after(length, ReaderLimits::default())?;
+        self.write_output(|inner| write(inner, &description))?;
         if let WriterState::PcapNg { interfaces, .. } = &mut self.state {
             interfaces.push(description);
         }
@@ -357,17 +389,71 @@ impl<W: Write> Writer<W> {
     }
 
     pub(super) fn start_section(&mut self) -> Result<(), Error> {
+        self.start_section_with(None)
+    }
+
+    pub(super) fn start_section_with(&mut self, section: Option<&Section>) -> Result<(), Error> {
         let (section_base, interfaces) = self.pcapng_section()?;
         let next_base = section_base + interfaces.len() as u32;
-        let metadata = self.metadata.after(28, ReaderLimits::default())?;
-        let endianness = self.endianness();
-        self.write_output(|inner| write_section_header(inner, endianness))?;
+        let length = section.map_or(28, |section| section.raw.len());
+        check_block_size(length, self.max_size, "pcapng section header")?;
+        let metadata = self.metadata.after(length, ReaderLimits::default())?;
+        let endianness = section.map_or(self.endianness(), |section| section.endianness);
+        self.write_output(|inner| write_section(inner, endianness, section))?;
         self.state = WriterState::PcapNg {
             endianness,
             interfaces: Vec::new(),
             section_base: next_base,
         };
         self.metadata = metadata;
+        Ok(())
+    }
+
+    pub(super) fn copy_metadata_block(&mut self, raw: &[u8]) -> Result<(), Error> {
+        check_block_size(raw.len(), self.max_size, "pcapng metadata block")?;
+        let metadata = self.metadata.after(raw.len(), ReaderLimits::default())?;
+        self.write_output(|inner| inner.write_all(raw).map_err(Error::from))?;
+        self.metadata = metadata;
+        Ok(())
+    }
+
+    pub(super) fn write_mapped_frame(
+        &mut self,
+        frame: &Frame,
+        original: &Frame,
+        raw: &[u8],
+        changed: bool,
+    ) -> Result<(), Error> {
+        validate_frame_size(frame, self.max_size)?;
+        let (section_base, interfaces) = self.pcapng_section()?;
+        let interface = select_interface(
+            frame,
+            interfaces,
+            section_base,
+            self.max_size,
+            self.max_interfaces,
+        )?
+        .description;
+        validate_capture_length(frame, &interface)?;
+        let budget = self.budget.after(frame.captured_length())?;
+        if changed {
+            // The reader validated the shared fixed header and option offsets for both packet layouts.
+            let options = &raw[28 + align_to_usize(original.bytes().len())?..raw.len() - 4];
+            let length = 32_u32
+                .checked_add(align_to_u32(frame.captured_length())?)
+                .and_then(|length| length.checked_add(options.len() as u32))
+                .ok_or(Error::InvalidBlockLength { length: u32::MAX })?;
+            check_block_size(length as usize, self.max_size, "pcapng packet block")?;
+            let endianness = self.endianness();
+            self.write_output(|inner| {
+                write_mapped_packet(inner, endianness, raw, options, length, frame)
+            })?;
+        } else {
+            check_block_size(raw.len(), self.max_size, "pcapng packet block")?;
+            self.write_output(|inner| inner.write_all(raw).map_err(Error::from))?;
+        }
+        self.budget = budget;
+        self.metadata = MetadataRun::default();
         Ok(())
     }
 
@@ -492,13 +578,7 @@ impl<W: Write> Writer<W> {
                     self.metadata.after(prefix_size, ReaderLimits::default())?;
                 }
                 let interface = plan.description;
-                if interface.snap_len != 0 && frame.captured_length() > interface.snap_len {
-                    return Err(Error::SizeLimitExceeded {
-                        kind: "pcapng captured packet",
-                        declared: u64::from(frame.captured_length()),
-                        limit: interface.snap_len as usize,
-                    });
-                }
+                validate_capture_length(frame, &interface)?;
                 let captured_time = frame.timestamp.ok_or(Error::TimestampUnavailable {
                     format: Format::PcapNg,
                 })?;
@@ -584,6 +664,39 @@ impl<W: Write> Writer<W> {
     pub fn into_inner(self) -> W {
         self.inner
     }
+}
+
+fn write_section<W: Write>(
+    inner: &mut W,
+    endianness: Endianness,
+    source: Option<&Section>,
+) -> Result<(), Error> {
+    match source {
+        Some(section) => write_rewritten_section(inner, &section.raw),
+        None => write_section_header(inner, endianness),
+    }
+}
+
+fn check_block_size(length: usize, limit: usize, kind: &'static str) -> Result<(), Error> {
+    if length > limit {
+        return Err(Error::SizeLimitExceeded {
+            kind,
+            declared: u64::try_from(length).unwrap_or(u64::MAX),
+            limit,
+        });
+    }
+    Ok(())
+}
+
+fn validate_capture_length(frame: &Frame, interface: &Interface) -> Result<(), Error> {
+    if interface.snap_len != 0 && frame.captured_length() > interface.snap_len {
+        return Err(Error::SizeLimitExceeded {
+            kind: "pcapng captured packet",
+            declared: u64::from(frame.captured_length()),
+            limit: interface.snap_len as usize,
+        });
+    }
+    Ok(())
 }
 
 fn global_interface_id(section_base: u32, local_id: u32) -> Result<u32, Error> {

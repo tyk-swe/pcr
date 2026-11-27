@@ -4,10 +4,14 @@
 use bytes::Bytes;
 
 use crate::capture_file::{
+    DEFAULT_MAX_OPTIONS_PER_BLOCK,
     error::Error,
     format::{Endianness, Format},
     header::PcapNgOption,
-    wire::{PCAPNG_OPTION_END, align_to_usize, decode_u16},
+    wire::{
+        PCAPNG_OPTION_CUSTOM_BINARY_NO_COPY, PCAPNG_OPTION_CUSTOM_UTF8_NO_COPY, PCAPNG_OPTION_END,
+        align_to_usize, decode_u16,
+    },
 };
 
 /// Decodes a block's option list, retaining at most `max_options` entries.
@@ -95,6 +99,55 @@ pub(super) fn visit_options<'a>(
         offset = end;
     }
     Ok(())
+}
+
+pub(in crate::capture_file) fn validate_copyable_option(code: u16) -> Result<(), Error> {
+    if matches!(
+        code,
+        PCAPNG_OPTION_CUSTOM_UTF8_NO_COPY | PCAPNG_OPTION_CUSTOM_BINARY_NO_COPY
+    ) {
+        return Err(Error::TransformMetadata("non-copyable PCAPNG option"));
+    }
+    Ok(())
+}
+
+pub(in crate::capture_file) fn validate_metadata_options(
+    raw: &[u8],
+    endianness: Endianness,
+    name_resolution: bool,
+) -> Result<(), Error> {
+    let body = &raw[8..raw.len() - 4];
+    let malformed = Error::TransformMetadata("malformed PCAPNG metadata block");
+    let options = if name_resolution {
+        let mut remaining = body;
+        loop {
+            let (header, tail) = remaining
+                .split_at_checked(4)
+                .ok_or(Error::TransformMetadata(
+                    "malformed PCAPNG name resolution records",
+                ))?;
+            let kind = decode_u16(endianness, header)?;
+            let length = decode_u16(endianness, &header[2..])?;
+            if kind == 0 {
+                if length != 0 {
+                    return Err(malformed);
+                }
+                break tail;
+            }
+            remaining = tail.get(align_to_usize(usize::from(length))?..).ok_or(
+                Error::TransformMetadata("malformed PCAPNG name resolution record"),
+            )?;
+        }
+    } else {
+        body.get(12..).ok_or(malformed)?
+    };
+    visit_options(
+        options,
+        endianness,
+        "pcapng metadata options",
+        DEFAULT_MAX_OPTIONS_PER_BLOCK,
+        |code, _| validate_copyable_option(code),
+    )
 }
 
 pub(super) fn unique_option<'a>(

@@ -61,7 +61,10 @@ where
             RecordKind::Metadata(metadata) => {
                 report.source_metadata_records += 1;
                 match metadata {
-                    MetadataBlockKind::Section(section) => endianness = section.endianness,
+                    MetadataBlockKind::Section(section) => {
+                        endianness = section.endianness;
+                        output.start_section()?;
+                    }
                     MetadataBlockKind::InterfaceDescription {
                         global_id,
                         interface,

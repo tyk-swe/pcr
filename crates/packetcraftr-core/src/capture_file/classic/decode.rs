@@ -191,6 +191,7 @@ pub(in crate::capture_file) fn read_next_pcap_record<R: Read>(
             options: Vec::new(),
         },
         frame: Some(frame),
+        packet_declares_fcs: false,
         format: Format::Pcap,
         raw,
     }))

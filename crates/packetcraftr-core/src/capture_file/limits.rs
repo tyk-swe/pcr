@@ -195,3 +195,33 @@ impl Default for ReaderLimits {
         }
     }
 }
+
+#[derive(Clone, Copy, Default)]
+pub(super) struct MetadataRun {
+    blocks: usize,
+    bytes: usize,
+}
+
+impl MetadataRun {
+    pub(super) fn bytes(self) -> usize {
+        self.bytes
+    }
+
+    pub(super) fn after(self, length: usize, limits: ReaderLimits) -> Result<Self, Error> {
+        let blocks = self
+            .blocks
+            .checked_add(1)
+            .filter(|actual| *actual <= limits.max_metadata_blocks_per_frame)
+            .ok_or(Error::MetadataBlockLimit {
+                limit: limits.max_metadata_blocks_per_frame,
+            })?;
+        let bytes = self
+            .bytes
+            .checked_add(length)
+            .filter(|actual| *actual <= limits.max_metadata_bytes_per_frame)
+            .ok_or(Error::MetadataByteLimit {
+                limit: limits.max_metadata_bytes_per_frame,
+            })?;
+        Ok(Self { blocks, bytes })
+    }
+}

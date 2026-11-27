@@ -8,7 +8,7 @@ use super::PcapNgState;
 use super::framing::{FramedBlock, packet_block_kind};
 use crate::capture_file::pcapng::{
     interface::parse_interface_description,
-    packet::{parse_simple_packet, parse_timestamped_packet},
+    packet::{PacketRead, parse_simple_packet, parse_timestamped_packet},
 };
 use crate::capture_file::{
     error::Error,
@@ -18,7 +18,7 @@ use crate::capture_file::{
     record::{CaptureRecord, MetadataBlockKind, PacketBlockKind, RecordKind},
     wire::{
         PCAPNG_CUSTOM_BLOCK, PCAPNG_CUSTOM_BLOCK_NO_COPY, PCAPNG_INTERFACE_DESCRIPTION_BLOCK,
-        PCAPNG_INTERFACE_STATISTICS_BLOCK, PCAPNG_NAME_RESOLUTION_BLOCK, Subnanosecond, decode_u32,
+        PCAPNG_INTERFACE_STATISTICS_BLOCK, PCAPNG_NAME_RESOLUTION_BLOCK, decode_u32,
     },
 };
 
@@ -27,7 +27,7 @@ pub(super) fn decode(
     state: &mut PcapNgState,
     all_interfaces: &mut Vec<Interface>,
     limits: &ReaderLimits,
-    subnanosecond: Subnanosecond,
+    read: PacketRead,
 ) -> Result<CaptureRecord, Error> {
     match block.block_type {
         PCAPNG_INTERFACE_DESCRIPTION_BLOCK => {
@@ -41,7 +41,7 @@ pub(super) fn decode(
                 state,
                 all_interfaces,
                 limits,
-                subnanosecond,
+                read,
             ),
             None => decode_metadata(block_type, &block.body, block.raw, state, all_interfaces),
         },
@@ -83,7 +83,7 @@ fn decode_packet(
     state: &mut PcapNgState,
     all_interfaces: &[Interface],
     limits: &ReaderLimits,
-    subnanosecond: Subnanosecond,
+    read: PacketRead,
 ) -> Result<CaptureRecord, Error> {
     let interfaces = state.section_interfaces(all_interfaces);
     let parsed = match kind {
@@ -94,7 +94,7 @@ fn decode_packet(
             state.interface_base,
             limits,
             kind == PacketBlockKind::Obsolete,
-            subnanosecond,
+            read,
         ),
         // A classic-PCAP record never reaches this decoder.
         PacketBlockKind::Simple | PacketBlockKind::Classic => parse_simple_packet(
@@ -106,16 +106,18 @@ fn decode_packet(
         ),
     }?;
     state.reset_metadata();
-    Ok(record(
-        RecordKind::Packet {
+    Ok(CaptureRecord {
+        kind: RecordKind::Packet {
             block: kind,
             section: Some(state.section_index),
             interface_id: Some(parsed.interface_id),
             options: parsed.options,
         },
-        Some(parsed.frame),
+        frame: Some(parsed.frame),
+        packet_declares_fcs: parsed.declares_fcs,
+        format: Format::PcapNg,
         raw,
-    ))
+    })
 }
 
 fn decode_metadata(
@@ -164,6 +166,7 @@ fn record(kind: RecordKind, frame: Option<Frame>, raw: Bytes) -> CaptureRecord {
     CaptureRecord {
         kind,
         frame,
+        packet_declares_fcs: false,
         format: Format::PcapNg,
         raw,
     }

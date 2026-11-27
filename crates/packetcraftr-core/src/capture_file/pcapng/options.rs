@@ -18,6 +18,24 @@ pub(super) fn parse_options(
     max_options: usize,
 ) -> Result<Vec<PcapNgOption>, Error> {
     let mut parsed = Vec::new();
+    visit_options(options, endianness, context, max_options, |code, value| {
+        parsed.push(PcapNgOption {
+            code,
+            value: Bytes::copy_from_slice(value),
+        });
+        Ok(())
+    })?;
+    Ok(parsed)
+}
+
+pub(super) fn visit_options<'a>(
+    options: &'a [u8],
+    endianness: Endianness,
+    context: &'static str,
+    max_options: usize,
+    mut visit: impl FnMut(u16, &'a [u8]) -> Result<(), Error>,
+) -> Result<(), Error> {
+    let mut count = 0;
     let mut offset = 0_usize;
     while offset < options.len() {
         let header_end = offset.checked_add(4).ok_or(Error::InvalidData {
@@ -51,7 +69,7 @@ pub(super) fn parse_options(
                     reason: "non-zero bytes follow the end-of-options marker",
                 });
             }
-            return Ok(parsed);
+            return Ok(());
         }
         let padded_length = align_to_usize(length)?;
         let end = offset
@@ -67,18 +85,16 @@ pub(super) fn parse_options(
                 actual: options.len(),
             });
         }
-        if parsed.len() >= max_options {
+        if count >= max_options {
             return Err(Error::OptionLimit { limit: max_options });
         }
         // `length <= padded_length`, so the value ends at or before `end`, within `options`
         let value = &options[offset..offset + length];
-        parsed.push(PcapNgOption {
-            code,
-            value: Bytes::copy_from_slice(value),
-        });
+        visit(code, value)?;
+        count += 1;
         offset = end;
     }
-    Ok(parsed)
+    Ok(())
 }
 
 pub(super) fn unique_option<'a>(

@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::io::{Read, Write};
+use std::io::{self, BufWriter, Read, Seek, Write};
 
 use packetcraftr_core::capture_file as capture;
 use packetcraftr_core::capture_file::Reader;
@@ -9,7 +9,8 @@ use packetcraftr_core::error::Classification;
 use packetcraftr_core::error::Kind;
 
 use super::selection::Selection;
-use crate::command_options::OfflineCaptureLimits;
+use crate::capture_output::finish_compressed_output;
+use crate::command_options::{Compression, OfflineCaptureLimits};
 use crate::errors::CliError;
 use crate::output::contract::Format;
 
@@ -51,7 +52,31 @@ impl CaptureOutput {
         }
     }
 
-    pub(super) fn write(
+    pub(super) fn write_stdout(
+        self,
+        reader: &mut Reader<impl Read>,
+        limits: OfflineCaptureLimits,
+        selection: Selection<'_>,
+        compression: Compression,
+        mut destination: impl Write,
+    ) -> Result<(), CliError> {
+        if matches!(self, Self::Verbatim(_)) && selection.is_unrestricted() {
+            let mut output = compression.writer(destination)?;
+            let result = self.write(reader, limits, selection, &mut output);
+            return finish_compressed_output(result, output);
+        }
+
+        let io_error = |error| CliError::classified(capture::Error::from(error));
+        let mut staged = tempfile::tempfile().map_err(io_error)?;
+        let mut output = compression.writer(BufWriter::with_capacity(64 * 1024, &mut staged))?;
+        let result = self.write(reader, limits, selection, &mut output);
+        finish_compressed_output(result, output)?;
+        staged.rewind().map_err(io_error)?;
+        io::copy(&mut staged, &mut destination).map_err(io_error)?;
+        destination.flush().map_err(io_error)
+    }
+
+    fn write(
         self,
         reader: &mut Reader<impl Read>,
         limits: OfflineCaptureLimits,

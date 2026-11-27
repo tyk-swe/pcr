@@ -7,7 +7,7 @@ use std::io::{Read, Write};
 use serde::{Deserialize, Serialize};
 
 use super::{
-    Budget, DEFAULT_MAX_TOTAL_INTERFACES, Error, Format, Interface, Limits, PcapNgOptions,
+    Budget, DEFAULT_MAX_INTERFACES_PER_SECTION, Error, Format, Interface, Limits, PcapNgOptions,
     PcapOptions, Reader, TimestampResolution, Writer,
 };
 use crate::error::BoundaryError;
@@ -24,7 +24,7 @@ impl Default for NormalizeOptions {
     fn default() -> Self {
         Self {
             max_size: DEFAULT_MAX_SIZE,
-            max_interfaces: DEFAULT_MAX_TOTAL_INTERFACES,
+            max_interfaces: DEFAULT_MAX_INTERFACES_PER_SECTION,
             stream_limits: Limits::default(),
         }
     }
@@ -284,6 +284,61 @@ mod tests {
             writer.write_frame(&frame).unwrap();
         }
         writer.into_inner()
+    }
+
+    #[test]
+    fn normalization_rejects_per_packet_fcs_before_selection() {
+        use crate::capture_file::{Endianness, reader::DECLARED_FCS};
+
+        for endianness in [Endianness::Little, Endianness::Big] {
+            let mut writer = Writer::pcapng_with_options(
+                Vec::new(),
+                PcapNgOptions {
+                    endianness,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            let mut frame =
+                Frame::new(Some(UNIX_EPOCH), LinkType::ETHERNET, vec![1, 2, 3, 4]).unwrap();
+            frame.direction = Some(Direction::Inbound);
+            writer.write_frame(&frame).unwrap();
+            let mut input = writer.into_inner();
+            let mut reader = Reader::with_limits(input.as_slice(), Default::default()).unwrap();
+            let (plain, report) = normalize(
+                &mut reader,
+                Vec::new(),
+                Format::PcapNg,
+                NormalizeOptions::default(),
+                |_, _| Ok(true),
+            )
+            .unwrap();
+            assert_eq!(report.frames_selected, 1);
+            let mut reader = Reader::with_limits(plain.as_slice(), Default::default()).unwrap();
+            assert_eq!(
+                reader.next_frame().unwrap().unwrap().direction,
+                Some(Direction::Inbound)
+            );
+
+            let flags = 1_u32 | (4 << 5);
+            let encoded = match endianness {
+                Endianness::Little => flags.to_le_bytes(),
+                Endianness::Big => flags.to_be_bytes(),
+            };
+            let offset = input.len() - 12;
+            input[offset..offset + 4].copy_from_slice(&encoded);
+            let mut reader = Reader::with_limits(input.as_slice(), Default::default()).unwrap();
+            assert!(matches!(
+                normalize(
+                    &mut reader,
+                    Vec::new(),
+                    Format::PcapNg,
+                    NormalizeOptions::default(),
+                    |_, _| Ok(false)
+                ),
+                Err(Error::TransformMetadata(DECLARED_FCS))
+            ));
+        }
     }
 
     #[test]

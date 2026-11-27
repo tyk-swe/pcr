@@ -375,3 +375,71 @@ fn rewind_preserves_independent_cancellation_and_stays_terminal_on_failure() {
         assert!(reader.next_record().unwrap().is_none());
     }
 }
+
+#[test]
+fn selection_checks_metadata_runs_after_skipping_packets() {
+    use crate::capture_file::{Limits, select};
+
+    let first = capture(Format::PcapNg, &[frame(1, 0, 1, 32)]);
+    let second = capture(Format::PcapNg, &[frame(2, 0, 2, 32)]);
+    let bytes = [first, second].concat();
+    let mut input = Reader::with_limits(bytes.as_slice(), ReaderLimits::default()).unwrap();
+    let first_interface = input.next_record().unwrap().unwrap().raw_bytes().len();
+    input.next_record().unwrap().unwrap();
+    let second_section = input.next_record().unwrap().unwrap().raw_bytes().len();
+    let second_interface = input.next_record().unwrap().unwrap().raw_bytes().len();
+    let input_run = second_section + second_interface;
+
+    for limits in [
+        ReaderLimits {
+            max_metadata_blocks_per_frame: 2,
+            ..Default::default()
+        },
+        ReaderLimits {
+            max_metadata_bytes_per_frame: input_run,
+            ..Default::default()
+        },
+    ] {
+        let mut input = Reader::with_limits(bytes.as_slice(), limits).unwrap();
+        let (full, report) =
+            select(&mut input, Vec::new(), Limits::default(), |_, _| Ok(true)).unwrap();
+        assert_eq!(report.frames_selected, 2);
+        let mut copied = Reader::with_limits(full.as_slice(), limits).unwrap();
+        assert!(copied.next_frame().unwrap().is_some());
+        assert!(copied.next_frame().unwrap().is_some());
+        assert!(copied.next_frame().unwrap().is_none());
+
+        let mut input = Reader::with_limits(bytes.as_slice(), limits).unwrap();
+        let error = select(&mut input, Vec::new(), Limits::default(), |number, _| {
+            Ok(number == 2)
+        })
+        .unwrap_err();
+        match error {
+            Error::MetadataBlockLimit { limit } => {
+                assert_eq!(limit, limits.max_metadata_blocks_per_frame);
+            }
+            Error::MetadataByteLimit { limit } => {
+                assert_eq!(limit, limits.max_metadata_bytes_per_frame);
+            }
+            other => panic!("unexpected selection error {other}"),
+        }
+    }
+
+    let limits = ReaderLimits {
+        max_metadata_blocks_per_frame: 3,
+        max_metadata_bytes_per_frame: first_interface + input_run,
+        ..Default::default()
+    };
+    let mut input = Reader::with_limits(bytes.as_slice(), limits).unwrap();
+    let (subset, report) = select(&mut input, Vec::new(), Limits::default(), |number, _| {
+        Ok(number == 2)
+    })
+    .unwrap();
+    let mut copied = Reader::with_limits(subset.as_slice(), limits).unwrap();
+    assert_eq!(report.metadata_records, 3);
+    assert_eq!(
+        copied.next_frame().unwrap().unwrap().bytes().as_ref(),
+        &[2; 32]
+    );
+    assert!(copied.next_frame().unwrap().is_none());
+}

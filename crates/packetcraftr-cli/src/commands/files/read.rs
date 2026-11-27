@@ -18,7 +18,6 @@ use packetcraftr_core::error::Classification;
 use packetcraftr_core::error::Kind;
 
 use self::arguments::Args;
-use crate::capture_output::finish_compressed_output;
 use crate::errors::CliError;
 use crate::input::open_capture;
 use crate::packet_text::FieldTree;
@@ -147,9 +146,7 @@ pub(super) fn run(
     if let Some(output) = capture_output {
         output.validate_input(reader.format())?;
         let stdout = io::stdout();
-        let mut destination = compression.writer(stdout.lock())?;
-        let result = output.write(&mut reader, limits, selection, &mut destination);
-        return finish_compressed_output(result, destination);
+        return output.write_stdout(&mut reader, limits, selection, compression, stdout.lock());
     }
     let mut run = || {
         records::run(

@@ -5,7 +5,7 @@ use bytes::Bytes;
 
 use crate::frame::{Direction, Frame, Lengths};
 
-use super::options::{parse_options, unique_option};
+use super::options::{unique_option, visit_options};
 use crate::capture_file::error::Error;
 use crate::capture_file::format::{Endianness, Format};
 use crate::capture_file::header::{Interface, PcapNgOption};
@@ -19,7 +19,25 @@ pub(in crate::capture_file) struct ParsedPacket {
     pub(in crate::capture_file) frame: Frame,
     pub(in crate::capture_file) interface_id: u32,
     pub(in crate::capture_file) options: Vec<PcapNgOption>,
+    pub(in crate::capture_file) declares_fcs: bool,
 }
+
+#[derive(Clone, Copy)]
+pub(in crate::capture_file) enum PacketRead {
+    Record,
+    Frame(Subnanosecond),
+}
+
+impl PacketRead {
+    fn subnanosecond(self) -> Subnanosecond {
+        match self {
+            Self::Record => Subnanosecond::Reject,
+            Self::Frame(subnanosecond) => subnanosecond,
+        }
+    }
+}
+
+const DUPLICATE_FLAGS: &str = "packet flags option appears more than once";
 
 pub(in crate::capture_file) fn parse_timestamped_packet(
     body: &Bytes,
@@ -28,7 +46,7 @@ pub(in crate::capture_file) fn parse_timestamped_packet(
     interface_base: u32,
     limits: &ReaderLimits,
     obsolete_layout: bool,
-    subnanosecond: Subnanosecond,
+    read: PacketRead,
 ) -> Result<ParsedPacket, Error> {
     const HEADER_LENGTH: usize = 20;
 
@@ -87,18 +105,37 @@ pub(in crate::capture_file) fn parse_timestamped_packet(
         });
     }
     // `captured_length <= padded_length`, so the data ends at or before `data_end <= body.len()`
-    let options = parse_options(
+    let mut options = Vec::new();
+    let mut flags = None;
+    visit_options(
         &body[data_end..],
         endianness,
         "pcapng packet options",
         limits.max_options_per_block,
+        |code, value| {
+            if code == PCAPNG_OPTION_EPB_FLAGS && flags.replace(value).is_some() {
+                return Err(Error::InvalidData {
+                    format: Format::PcapNg,
+                    reason: DUPLICATE_FLAGS,
+                });
+            }
+            if matches!(read, PacketRead::Record) {
+                options.push(PcapNgOption {
+                    code,
+                    value: Bytes::copy_from_slice(value),
+                });
+            }
+            Ok(())
+        },
     )?;
-    let direction = packet_direction(&options, endianness)?;
+    let flags = flags
+        .map(|value| decode_packet_flags(value, endianness))
+        .transpose()?;
     let timestamp = timestamp_from_ticks(
         timestamp_ticks,
         interface.timestamp_resolution,
         interface.timestamp_offset,
-        subnanosecond,
+        read.subnanosecond(),
     )?;
     let global_interface = interface_base
         .checked_add(interface_id)
@@ -117,12 +154,28 @@ pub(in crate::capture_file) fn parse_timestamped_packet(
         )?,
     )?;
     frame.interface = Some(global_interface);
-    frame.direction = direction;
+    frame.direction = flags.map(|flags| match flags & 0b11 {
+        1 => Direction::Inbound,
+        2 => Direction::Outbound,
+        _ => Direction::Unknown,
+    });
     Ok(ParsedPacket {
         frame,
         interface_id,
         options,
+        declares_fcs: flags.is_some_and(|flags| flags & (0b1111 << 5) != 0),
     })
+}
+
+pub(in crate::capture_file) fn simple_packet_captured_length(
+    original_length: u32,
+    snap_len: u32,
+) -> u32 {
+    if snap_len == 0 {
+        original_length
+    } else {
+        original_length.min(snap_len)
+    }
 }
 
 pub(in crate::capture_file) fn parse_simple_packet(
@@ -143,11 +196,7 @@ pub(in crate::capture_file) fn parse_simple_packet(
         available: 0,
     })?;
     let original_length = decode_u32(endianness, body)?;
-    let captured_length = if interface.snap_len == 0 {
-        original_length
-    } else {
-        original_length.min(interface.snap_len)
-    };
+    let captured_length = simple_packet_captured_length(original_length, interface.snap_len);
     validate_declared_lengths(
         captured_length,
         original_length,
@@ -182,59 +231,38 @@ pub(in crate::capture_file) fn parse_simple_packet(
         frame,
         interface_id: 0,
         options: Vec::new(),
+        declares_fcs: false,
     })
 }
 
-fn packet_direction(
-    options: &[PcapNgOption],
-    endianness: Endianness,
-) -> Result<Option<Direction>, Error> {
-    let Some(flags) = unique_option(
-        options,
-        PCAPNG_OPTION_EPB_FLAGS,
-        "packet flags option appears more than once",
-    )?
-    else {
-        return Ok(None);
-    };
+fn decode_packet_flags(flags: &[u8], endianness: Endianness) -> Result<u32, Error> {
     if flags.len() != 4 {
         return Err(Error::InvalidData {
             format: Format::PcapNg,
             reason: "epb_flags option must contain four bytes",
         });
     }
-    Ok(Some(match decode_u32(endianness, flags)? & 0b11 {
-        1 => Direction::Inbound,
-        2 => Direction::Outbound,
-        _ => Direction::Unknown,
-    }))
+    decode_u32(endianness, flags)
 }
 
-/// Only a defined inbound/outbound `epb_flags` direction survives a rewrite; the rest is refused.
 pub(in crate::capture_file) fn validate_rewritable_packet_flags(
     options: &[PcapNgOption],
     endianness: Endianness,
     malformed_reason: &'static str,
 ) -> Result<(), &'static str> {
-    for option in options
-        .iter()
-        .filter(|option| option.code == PCAPNG_OPTION_EPB_FLAGS)
-    {
-        let bytes: [u8; 4] = option
-            .value
-            .as_ref()
-            .try_into()
-            .map_err(|_| malformed_reason)?;
-        let flags = match endianness {
-            Endianness::Little => u32::from_le_bytes(bytes),
-            Endianness::Big => u32::from_be_bytes(bytes),
-        };
-        if flags & !3 != 0 {
-            return Err("extended packet flags");
-        }
-        if flags == 3 {
-            return Err("undefined packet direction");
-        }
+    let flags = unique_option(options, PCAPNG_OPTION_EPB_FLAGS, DUPLICATE_FLAGS)
+        .and_then(|value| {
+            value
+                .map(|value| decode_packet_flags(value, endianness))
+                .transpose()
+        })
+        .map_err(|_| malformed_reason)?
+        .unwrap_or_default();
+    if flags & !3 != 0 {
+        return Err("extended packet flags");
+    }
+    if flags == 3 {
+        return Err("undefined packet direction");
     }
     Ok(())
 }

@@ -98,8 +98,6 @@ pub(crate) fn run(invocation: &crate::invocation::Invocation, args: Args) -> Res
             ))?,
         capture_file::PcapNgOptions {
             max_size: limits.reader_bounds().max_frame_bytes,
-            // --max-interfaces bounds each input section, not the one output section.
-            max_interfaces: capture_file::DEFAULT_MAX_TOTAL_INTERFACES,
             stream_limits: limits.stream_limits(),
             ..Default::default()
         },

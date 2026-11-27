@@ -91,7 +91,7 @@ impl CaptureHeader {
         }
     }
 
-    pub(super) fn raw(&self) -> &[u8] {
+    pub(crate) fn raw(&self) -> &[u8] {
         match self {
             Self::Pcap(header) => &header.raw,
             Self::PcapNg(section) => &section.raw,

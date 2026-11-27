@@ -302,6 +302,8 @@ impl<C: Session> Group<C> {
     }
 
     fn shutdown_all_until(&mut self, deadline: &Deadline) {
+        let bounded = crate::deadline::wall_clock(deadline).ok();
+        let deadline = bounded.as_ref().unwrap_or(deadline);
         self.stop_all();
         self.shutdown_attempted = true;
         for owned in &mut self.sources {

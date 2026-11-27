@@ -204,6 +204,55 @@ fn group_retries_pending_native_shutdown_and_refreshes_statistics() {
 }
 
 #[test]
+fn native_shutdown_bounds_a_frozen_clock_and_allows_retry() {
+    let pool = Arc::new(Pool::new(1));
+    let gate = Arc::new(Gate::default());
+    let mut session = Backend {
+        pool: Arc::clone(&pool),
+        gate: Arc::clone(&gate),
+    }
+    .arm_capture(
+        &capture::Request::new(
+            Id {
+                index: 1,
+                name: "controlled".into(),
+            },
+            Limits::default(),
+        ),
+        &Deadline::new(Duration::from_secs(5)),
+    )
+    .unwrap();
+    until(|| gate.entered.load(Ordering::SeqCst) == 1);
+
+    let origin = Instant::now();
+    let expired = Deadline::with_time_source(Duration::ZERO, move || origin);
+    let frozen = Deadline::with_time_source(Duration::from_millis(5), move || origin);
+    let (returned, result) = mpsc::sync_channel(1);
+    let caller = std::thread::spawn(move || {
+        let polled = session.shutdown_until(&expired);
+        let waited = session.shutdown_until(&frozen);
+        returned.send((session, polled, waited)).unwrap();
+    });
+    let shutdown = result.recv_timeout(Duration::from_secs(5));
+    let retained = pool.snapshot();
+    *gate.released.lock().unwrap() = true;
+    gate.changed.notify_all();
+    caller.join().unwrap();
+
+    let (mut session, polled, waited) = shutdown.expect("native shutdown ignored wall time");
+    assert!(matches!(polled, Err(Error::DeadlineExceeded { .. })));
+    assert!(matches!(waited, Err(Error::DeadlineExceeded { .. })));
+    assert!(session.shutdown_pending());
+    assert_eq!(retained.cleanup_retaining_capacity, 1);
+    session
+        .shutdown_until(&Deadline::new(Duration::from_secs(5)))
+        .unwrap();
+    assert!(!session.shutdown_pending());
+    assert!(session.final_stats_available());
+    assert_eq!(pool.snapshot().active, 0);
+}
+
+#[test]
 fn already_reported_reader_error_does_not_make_final_statistics_valid() {
     let pool = Arc::new(Pool::new(1));
     let gate = Arc::new(Gate {

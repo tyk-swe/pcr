@@ -275,6 +275,8 @@ impl NativeCaptureSession {
                 .clone()
                 .and(self.stop_result.clone().unwrap_or(Ok(())));
         }
+        let bounded = crate::deadline::wall_clock(deadline).ok();
+        let deadline = bounded.as_ref().unwrap_or(deadline);
         let interrupt_result = self.request_stop();
 
         let stopped = match self.running.take() {

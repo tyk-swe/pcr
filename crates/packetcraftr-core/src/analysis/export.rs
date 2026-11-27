@@ -119,7 +119,8 @@ pub fn plan<R: Read>(
     plan_with_frames(reader, registry, options, selection, Reader::next_frame)
 }
 
-/// Analyze the input while copying its exact original records into a snapshot.
+/// Analyze a freshly opened reader while copying exact records into a snapshot.
+/// The reader must be positioned immediately after its initial capture header.
 /// Publish the snapshot only after the plan succeeds.
 pub fn plan_with_snapshot<R: Read>(
     reader: &mut Reader<R>,

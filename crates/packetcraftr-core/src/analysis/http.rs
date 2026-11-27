@@ -108,16 +108,15 @@ impl Direction {
     }
 
     fn waiting(&self) -> bool {
-        self.waiting_frame().is_some()
+        self.waiting_response().is_some()
     }
 
-    fn waiting_frame(&self) -> Option<u64> {
+    fn waiting_response(&self) -> Option<(u64, u16)> {
         let live = self.live.as_ref()?;
-        if live.head.is_some() && live.body.is_none() {
-            live.sources.first().map(|source| source.number)
-        } else {
-            None
+        if live.body.is_some() {
+            return None;
         }
+        Some((live.sources.first()?.number, live.head.as_ref()?.status()?))
     }
 
     fn buffered(&self) -> usize {
@@ -232,7 +231,8 @@ impl Collector {
             &mut check,
             &mut emit,
             |(flow, mut direction), output| {
-                self.flush(&flow, &mut direction, Status::Incomplete, None, output)
+                self.buffered -= direction.buffered();
+                self.finish_direction(&flow, &mut direction, Status::Incomplete, output)
             },
         )?;
         for queue in self.requests.values() {
@@ -313,7 +313,7 @@ impl Collector {
             .unwrap_or_else(|| Direction::new(data.stream, data.generation));
         self.buffered -= direction.buffered();
         if direction.generation != data.generation {
-            self.flush(&data.flow, &mut direction, Status::Evicted, None, output)?;
+            self.finish_direction(&data.flow, &mut direction, Status::Evicted, output)?;
             direction = Direction::new(data.stream, data.generation);
         }
         Ok(direction)
@@ -348,7 +348,7 @@ impl Collector {
                     }
                     self.buffered -= direction.buffered();
                     if direction.waiting() {
-                        self.start_body(&flow, &mut direction, output)?;
+                        self.start_body(&flow, &mut direction, false, output)?;
                     }
                     let chunk = if direction.waiting() {
                         None
@@ -361,11 +361,18 @@ impl Collector {
 
             let mut wake_peer = false;
             if let Some(chunk) = chunk {
-                let progress = self.read(&flow, &mut direction, &chunk, output)?;
+                let progress = self.read(&flow, &mut direction, &chunk, false, output)?;
                 if let Progress::Wait(consumed) | Progress::WakePeer(consumed) = progress {
                     wake_peer = matches!(progress, Progress::WakePeer(_));
-                    if consumed < chunk.bytes.len() {
-                        self.defer(&mut direction, chunk, consumed, replaying)?;
+                    if consumed < chunk.bytes.len()
+                        && let Err(error) = self.defer(&mut direction, chunk, consumed, replaying)
+                    {
+                        if wake_peer {
+                            return Err(error);
+                        }
+                        direction.discard_deferred();
+                        self.flush(&flow, &mut direction, Status::Incomplete, None, output)?;
+                        direction.disabled = true;
                     }
                 }
             }
@@ -425,6 +432,7 @@ impl Collector {
         flow: &ScopedFlowKey,
         direction: &mut Direction,
         chunk: &Chunk,
+        ending: bool,
         output: &mut Vec<Event>,
     ) -> Result<Progress, Error> {
         let connection = (direction.stream, direction.generation);
@@ -507,16 +515,17 @@ impl Collector {
                         method: method.to_owned(),
                         first_frame,
                     });
-                wake_peer = self.directions.get(&flow.reverse()).is_some_and(|peer| {
-                    (peer.stream, peer.generation) == connection
-                        && peer
-                            .waiting_frame()
-                            .is_some_and(|frame| first_frame < frame)
-                });
+                wake_peer = !ending
+                    && self.directions.get(&flow.reverse()).is_some_and(|peer| {
+                        (peer.stream, peer.generation) == connection
+                            && peer.waiting_response().is_some_and(|(frame, status)| {
+                                first_frame < frame || has_independent_framing(status)
+                            })
+                    });
             }
             live.header = Vec::new();
             live.head = Some(head);
-            self.start_body(flow, direction, output)?;
+            self.start_body(flow, direction, ending, output)?;
             if wake_peer {
                 return Ok(Progress::WakePeer(chunk.bytes.len() - input.len()));
             }
@@ -528,6 +537,7 @@ impl Collector {
         &mut self,
         flow: &ScopedFlowKey,
         direction: &mut Direction,
+        ending: bool,
         output: &mut Vec<Event>,
     ) -> Result<(), Error> {
         let connection = (direction.stream, direction.generation);
@@ -537,26 +547,28 @@ impl Collector {
             Some(status) => {
                 let key = (connection, flow.reverse());
                 let first_frame = live.sources.first().expect("message has sources").number;
-                let Some(queue) = self.requests.get_mut(&key) else {
-                    return Ok(());
-                };
-                let Some(request) = queue
-                    .front()
-                    .filter(|request| request.first_frame < first_frame)
-                else {
-                    return Ok(());
-                };
-                live.request = Some(request.index);
-                let method = if status >= 200 || status == 101 {
-                    let method = queue.pop_front().expect("front request exists").method;
-                    if queue.is_empty() {
-                        self.requests.remove(&key);
+                match self.requests.get_mut(&key) {
+                    Some(queue)
+                        if queue
+                            .front()
+                            .is_some_and(|request| request.first_frame < first_frame) =>
+                    {
+                        let request = queue.front().expect("front request exists");
+                        live.request = Some(request.index);
+                        if status >= 200 || status == 101 {
+                            let method = queue.pop_front().expect("front request exists").method;
+                            if queue.is_empty() {
+                                self.requests.remove(&key);
+                            }
+                            Some(method)
+                        } else {
+                            Some(request.method.clone())
+                        }
                     }
-                    method
-                } else {
-                    request.method.clone()
-                };
-                Some(method)
+                    None if !ending && status != 101 => return Ok(()),
+                    _ if !has_independent_framing(status) => return Ok(()),
+                    _ => None,
+                }
             }
             None => None,
         };
@@ -652,13 +664,39 @@ impl Collector {
             } else if clean {
                 self.close(flow, &mut direction, output)?;
             } else {
-                self.flush(flow, &mut direction, status, None, output)?;
-                direction.discard_deferred();
-                direction.disabled = true;
+                self.finish_direction(flow, &mut direction, status, output)?;
             }
             self.buffered += direction.buffered();
             self.directions.insert(flow.clone(), direction);
         }
+        Ok(())
+    }
+    fn finish_direction(
+        &mut self,
+        flow: &ScopedFlowKey,
+        direction: &mut Direction,
+        status: Status,
+        output: &mut Vec<Event>,
+    ) -> Result<(), Error> {
+        if direction.waiting() {
+            self.start_body(flow, direction, true, output)?;
+            let connection = (direction.stream, direction.generation);
+            while !direction.waiting()
+                && !direction.disabled
+                && !self.upgraded.contains(&connection)
+            {
+                let Some(chunk) = direction.pop() else {
+                    break;
+                };
+                self.read(flow, direction, &chunk, true, output)?;
+            }
+        }
+        direction.discard_deferred();
+        if status == Status::Incomplete && direction.clean_closed {
+            return self.close(flow, direction, output);
+        }
+        self.flush(flow, direction, status, None, output)?;
+        direction.disabled = true;
         Ok(())
     }
     fn close(
@@ -689,33 +727,12 @@ impl Collector {
         error: Option<http::Error>,
         output: &mut Vec<Event>,
     ) -> Result<(), Error> {
-        let Some(mut live) = direction.live.take() else {
+        let Some(live) = direction.live.take() else {
             return Ok(());
         };
-        let status = if let Some(response) = live.head.as_ref().and_then(Head::status)
-            && live.request.is_none()
-        {
+        if live.request.is_none() && live.head.as_ref().and_then(Head::status).is_some() {
             self.summary.responses_without_request += 1;
-            match (status, response) {
-                (Status::Incomplete, 101) => {
-                    live.framing = Some(Body::Tunnel);
-                    if self
-                        .upgraded
-                        .insert((direction.stream, direction.generation))
-                    {
-                        self.summary.upgraded_connections += 1;
-                    }
-                    Status::Upgrade
-                }
-                (Status::Incomplete, 100..=199 | 304) => {
-                    live.framing = Some(Body::None);
-                    Status::Complete
-                }
-                _ => status,
-            }
-        } else {
-            status
-        };
+        }
         match status {
             Status::Complete | Status::Upgrade => self.summary.complete_messages += 1,
             Status::Malformed | Status::Limit => self.summary.malformed_messages += 1,
@@ -760,6 +777,11 @@ impl Collector {
 }
 
 session::application_collector!();
+
+fn has_independent_framing(status: u16) -> bool {
+    matches!(status, 100..=199 | 304)
+}
+
 fn bare_crlf_offset(prev: Option<u8>, run: &[u8]) -> Option<usize> {
     if prev == Some(b'\r') && run.first() != Some(&b'\n') {
         return Some(0);

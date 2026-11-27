@@ -4246,6 +4246,108 @@ fn http_waits_for_a_reordered_head_request_before_framing_responses() {
 }
 
 #[test]
+fn http_unpaired_bodyless_response_does_not_block_a_later_exchange() {
+    let packet = |reverse, sequence, flags, payload: &[u8]| {
+        sourced_tcp_packet(80, reverse, sequence, flags, payload)
+    };
+    let older = b"HTTP/1.1 304 Not Modified\r\n\r\n";
+    let request = b"GET /data HTTP/1.1\r\nHost: example.test\r\n\r\n";
+    let response = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok";
+    let capture = sourced_ipv4_capture(vec![
+        packet(false, 100, 2, &[]),
+        packet(true, 500, 18, &[]),
+        packet(false, 101, 16, &[]),
+        packet(true, 501, 24, older),
+        packet(false, 101, 24, &request[..10]),
+        packet(true, 501 + older.len() as u32, 24, response),
+        packet(false, 111, 24, &request[10..]),
+    ]);
+    let args = [
+        "--output",
+        "json",
+        "analyze",
+        "http",
+        capture.path().to_str().unwrap(),
+    ];
+    let report: serde_json::Value =
+        serde_json::from_str(&assert_success(&run(&args), &args)).unwrap();
+    let result = &report["result"];
+    let messages = result["messages"].as_array().unwrap();
+    assert_eq!(messages.len(), 3, "{result}");
+    let request = messages
+        .iter()
+        .find(|message| message["start"]["method"] == "GET")
+        .unwrap();
+    let older = messages
+        .iter()
+        .find(|message| message["start"]["status"] == 304)
+        .unwrap();
+    let response = messages
+        .iter()
+        .find(|message| message["start"]["status"] == 200)
+        .unwrap();
+    assert!(older["request"].is_null(), "{older}");
+    assert_eq!(older["status"], "complete", "{older}");
+    assert_eq!(older["sources"][0]["number"], 4, "{older}");
+    assert_eq!(response["request"], request["index"], "{response}");
+    assert_eq!(response["status"], "complete", "{response}");
+    assert_eq!(response["body_bytes"], 2, "{response}");
+    assert_eq!(response["sources"][0]["number"], 6, "{response}");
+    assert_eq!(
+        result["summary"]["responses_without_request"], 1,
+        "{result}"
+    );
+    assert_eq!(
+        result["summary"]["requests_without_final_response"], 0,
+        "{result}"
+    );
+}
+
+#[test]
+fn http_deferral_limits_preserve_an_incomplete_response() {
+    let head = b"HTTP/1.1 200 OK\r\nContent-Length: 256\r\n\r\n";
+    let body = [b'x'; 128];
+    let capture = sourced_ipv4_capture(vec![
+        sourced_tcp_packet(80, true, 501, 24, head),
+        sourced_tcp_packet(80, true, 501 + head.len() as u32, 24, &body),
+        sourced_tcp_packet(80, true, 501 + (head.len() + body.len()) as u32, 24, &body),
+    ]);
+    for (flag, limit) in [
+        ("--max-application-buffer-bytes", "64"),
+        ("--max-application-source-spans", "1"),
+    ] {
+        let args = [
+            "--output",
+            "json",
+            "analyze",
+            "http",
+            capture.path().to_str().unwrap(),
+            flag,
+            limit,
+        ];
+        let report: serde_json::Value =
+            serde_json::from_str(&assert_success(&run(&args), &args)).unwrap();
+        let result = &report["result"];
+        let messages = result["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 1, "{result}");
+        let response = &messages[0];
+        assert_eq!(response["start"]["status"], 200, "{response}");
+        assert_eq!(response["status"], "incomplete", "{response}");
+        assert!(response["framing"].is_null(), "{response}");
+        assert_eq!(response["body_bytes"], 0, "{response}");
+        assert_eq!(
+            response["sources"].as_array().unwrap().len(),
+            1,
+            "{response}"
+        );
+        assert_eq!(
+            result["summary"]["responses_without_request"], 1,
+            "{result}"
+        );
+    }
+}
+
+#[test]
 fn http_deferred_connect_response_stops_parsing_tunnel_bytes() {
     let packet = |reverse, sequence, flags, payload: &[u8]| {
         sourced_tcp_packet(80, reverse, sequence, flags, payload)

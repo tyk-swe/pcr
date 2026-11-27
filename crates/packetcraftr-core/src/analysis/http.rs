@@ -519,7 +519,7 @@ impl Collector {
                     && self.directions.get(&flow.reverse()).is_some_and(|peer| {
                         (peer.stream, peer.generation) == connection
                             && peer.waiting_response().is_some_and(|(frame, status)| {
-                                first_frame < frame || has_independent_framing(status)
+                                first_frame < frame || can_frame_unpaired(status)
                             })
                     });
             }
@@ -566,7 +566,7 @@ impl Collector {
                         }
                     }
                     None if !ending && status != 101 => return Ok(()),
-                    _ if !has_independent_framing(status) => return Ok(()),
+                    _ if !can_frame_unpaired(status) => return Ok(()),
                     _ => None,
                 }
             }
@@ -778,8 +778,8 @@ impl Collector {
 
 session::application_collector!();
 
-fn has_independent_framing(status: u16) -> bool {
-    matches!(status, 100..=199 | 304)
+fn can_frame_unpaired(status: u16) -> bool {
+    matches!(status, 100..=199 | 204 | 304)
 }
 
 fn bare_crlf_offset(prev: Option<u8>, run: &[u8]) -> Option<usize> {

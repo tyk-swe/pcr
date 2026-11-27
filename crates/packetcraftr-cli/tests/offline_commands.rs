@@ -4348,26 +4348,14 @@ fn http_deferral_limits_preserve_an_incomplete_response() {
 }
 
 #[test]
-fn http_deferred_connect_response_stops_parsing_tunnel_bytes() {
-    let packet = |reverse, sequence, flags, payload: &[u8]| {
-        sourced_tcp_packet(80, reverse, sequence, flags, payload)
-    };
-    let connect = b"CONNECT example.test:443 HTTP/1.1\r\nHost: example.test\r\n\r\n";
-    let mut last = connect[10..].to_vec();
-    last.extend_from_slice(b"GET /tunneled HTTP/1.1\r\n\r\n");
-    let capture = sourced_ipv4_capture(vec![
-        packet(false, 100, 2, &[]),
-        packet(true, 500, 18, &[]),
-        packet(false, 101, 16, &[]),
-        packet(false, 101, 24, &connect[..10]),
-        packet(
-            true,
-            501,
-            24,
-            b"HTTP/1.1 200 Connected\r\n\r\nHTTP/1.1 204 No Content\r\n\r\n",
-        ),
-        packet(false, 111, 24, &last),
-    ]);
+fn http_response_only_no_content_completes_at_end_of_capture() {
+    let capture = sourced_ipv4_capture(vec![sourced_tcp_packet(
+        80,
+        true,
+        501,
+        24,
+        b"HTTP/1.1 204 No Content\r\n\r\n",
+    )]);
     let args = [
         "--output",
         "json",
@@ -4375,24 +4363,69 @@ fn http_deferred_connect_response_stops_parsing_tunnel_bytes() {
         "http",
         capture.path().to_str().unwrap(),
     ];
-    let result: serde_json::Value =
+    let report: serde_json::Value =
         serde_json::from_str(&assert_success(&run(&args), &args)).unwrap();
-    let messages = result["result"]["messages"].as_array().unwrap();
-    assert_eq!(messages.len(), 2, "{result}");
-    let request = messages
-        .iter()
-        .find(|message| message["start"]["method"] == "CONNECT")
-        .unwrap();
-    let response = messages
-        .iter()
-        .find(|message| message["request"] == request["index"])
-        .unwrap();
-    assert_eq!(response["status"], "upgrade", "{response}");
-    assert_eq!(response["framing"]["type"], "tunnel", "{response}");
+    let result = &report["result"];
+    let messages = result["messages"].as_array().unwrap();
+    assert_eq!(messages.len(), 1, "{result}");
+    let response = &messages[0];
+    assert_eq!(response["start"]["status"], 204, "{response}");
+    assert_eq!(response["status"], "complete", "{response}");
+    assert_eq!(response["framing"]["type"], "none", "{response}");
+    assert_eq!(response["body_bytes"], 0, "{response}");
+    assert!(response["request"].is_null(), "{response}");
     assert_eq!(
-        result["result"]["summary"]["upgraded_connections"], 1,
+        result["summary"]["responses_without_request"], 1,
         "{result}"
     );
+}
+
+#[test]
+fn http_deferred_connect_response_stops_parsing_tunnel_bytes() {
+    let packet = |reverse, sequence, flags, payload: &[u8]| {
+        sourced_tcp_packet(80, reverse, sequence, flags, payload)
+    };
+    let connect = b"CONNECT example.test:443 HTTP/1.1\r\nHost: example.test\r\n\r\n";
+    let mut last = connect[10..].to_vec();
+    last.extend_from_slice(b"GET /tunneled HTTP/1.1\r\n\r\n");
+    for status in [200, 204] {
+        let response =
+            format!("HTTP/1.1 {status} Connected\r\n\r\nHTTP/1.1 204 No Content\r\n\r\n");
+        let capture = sourced_ipv4_capture(vec![
+            packet(false, 100, 2, &[]),
+            packet(true, 500, 18, &[]),
+            packet(false, 101, 16, &[]),
+            packet(false, 101, 24, &connect[..10]),
+            packet(true, 501, 24, response.as_bytes()),
+            packet(false, 111, 24, &last),
+        ]);
+        let args = [
+            "--output",
+            "json",
+            "analyze",
+            "http",
+            capture.path().to_str().unwrap(),
+        ];
+        let result: serde_json::Value =
+            serde_json::from_str(&assert_success(&run(&args), &args)).unwrap();
+        let messages = result["result"]["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 2, "{result}");
+        let request = messages
+            .iter()
+            .find(|message| message["start"]["method"] == "CONNECT")
+            .unwrap();
+        let response = messages
+            .iter()
+            .find(|message| message["request"] == request["index"])
+            .unwrap();
+        assert_eq!(response["start"]["status"], status, "{response}");
+        assert_eq!(response["status"], "upgrade", "{response}");
+        assert_eq!(response["framing"]["type"], "tunnel", "{response}");
+        assert_eq!(
+            result["result"]["summary"]["upgraded_connections"], 1,
+            "{result}"
+        );
+    }
 }
 
 #[test]

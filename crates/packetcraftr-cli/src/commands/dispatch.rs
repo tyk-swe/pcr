@@ -31,6 +31,7 @@ pub(crate) struct Launch<'a> {
     pub(crate) force_binary_stdout: bool,
     pub(crate) matches: &'a ArgMatches,
     pub(crate) definition: &'a clap::Command,
+    pub(crate) command_factory: fn() -> clap::Command,
 }
 
 impl Launch<'_> {
@@ -48,7 +49,7 @@ impl Launch<'_> {
             Ok(())
         }
         .and_then(|()| crate::cancellation::install())
-        .and_then(|()| arguments.generate(&invocation, self.format))
+        .and_then(|()| arguments.generate(&invocation, self.command_factory))
         .and_then(|()| {
             invocation
                 .control

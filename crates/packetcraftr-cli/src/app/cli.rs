@@ -7,26 +7,13 @@ mod parsing;
 pub(crate) use context::{Context, MachineFormat, parse as error_context};
 pub(crate) use parsing::{Parsed, parse_from};
 
-use std::fmt::Write as _;
 use std::sync::LazyLock;
 
 use clap::{Parser, ValueEnum};
 
 use crate::commands::CommandLine;
-use crate::errors::{CANCELLED_EXIT_CODE, KINDS, exit_code_description, exit_code_for};
-use crate::output::contract::Format;
-
-const ROOT_HELP_FORMATS: &str = r"Output formats:
-  text    Human-readable summaries and diagnostics.
-  json    One aggregate JSON document.
-  csv     Flat statistics tables with a header (excluding overview/fragments).
-  ndjson  One JSON record per streamed event.
-  hex     Exact frame bytes as hexadecimal text.
-  raw     Exact frame bytes without text framing.
-  pcap    Classic PCAP capture bytes.
-  pcapng  PCAPNG capture bytes.
-
-Output availability is command-specific. Machine formats never contain terminal colour codes.";
+use crate::errors::exit_codes_help;
+use crate::output::contract::{Format, OUTPUT_FORMATS_HELP};
 
 const ROOT_HELP_EXAMPLES: &str = r"For codes 2 through 70, the word after the code is the `error.kind` of the same failure in JSON and NDJSON output; a cancellation reports kind `io`.
 
@@ -37,34 +24,11 @@ Examples:
 
 Run `packetcraftr <group> <command> --help` for command-specific options and examples.";
 
-/// The output formats every command draws from, as `--help` describes them.
-pub(crate) const fn output_formats_help() -> &'static str {
-    ROOT_HELP_FORMATS
-}
-
-/// One line per process exit status, shared by `--help` and `topics exit-codes`.
-pub(crate) fn exit_codes_help() -> String {
-    let mut help = String::from(
-        "  0   Success.\n  1   verdict: forwarding verification failed or was inconclusive, or a security --fail-on/--fail-incomplete threshold was met.\n",
-    );
-    for kind in KINDS {
-        let _ = writeln!(
-            help,
-            "  {:<3} {}: {}",
-            exit_code_for(kind),
-            kind.as_str(),
-            exit_code_description(kind)
-        );
-    }
-    let _ = writeln!(
-        help,
-        "  {CANCELLED_EXIT_CODE} cancelled: the operation was interrupted before it completed."
-    );
-    help
-}
-
 fn root_after_help() -> String {
-    let mut help = format!("{ROOT_HELP_FORMATS}\n\nExit codes:\n{}", exit_codes_help());
+    let mut help = format!(
+        "{OUTPUT_FORMATS_HELP}\n\nExit codes:\n{}",
+        exit_codes_help()
+    );
     help.push('\n');
     help.push_str(ROOT_HELP_EXAMPLES);
     help

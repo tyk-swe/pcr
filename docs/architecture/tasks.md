@@ -4,8 +4,8 @@ Candidates need a real caller and contract audit before implementation. Keep eac
 
 | Area | Evidence or question | Status |
 | --- | --- | --- |
-| CLI reference rendering | Documentation generation calls the application parser factory. Help text and exit code references also read the app directly. Dispatch already has the root definition and can supply the document generator through its execution interface. | Next |
-| Published command metadata | The command registry owns IDs, parser paths, output formats, and dispatch. Its output-facing API creates an upward dependency. Compare a metadata-only declaration with the current registry macro and preserve one declaration per command. | Investigate after reference rendering |
+| CLI reference rendering | [Dispatch provides a fresh Clap definition](decisions/0002-inject-reference-command-factory.md). Output and error contracts own the shared help text. The former layer exception is gone. | Implemented, review pending |
+| Published command metadata | The command registry owns IDs, parser paths, output formats, and dispatch. Its output-facing API creates an upward dependency. Compare a metadata-only declaration with the current registry macro and preserve one declaration per command. | Next |
 | Layer graph | The direction check permits same-layer dependencies and does not expose a reference graph. Reuse its source extraction to surface cycles at documented boundaries and distinguish deliberate groups from new edges. | Investigate |
 | CLI input and output | Compare the bounded reader entry points and text, JSON, NDJSON, and staged-file paths. Separate genuine repetitions from format-specific byte budgets, deadlines, and persistence guarantees. | Investigate |
 | Offline analysis | Check how collectors apply a session, time and scope selection, provenance, and resource accounting. Review any collector-specific reimplementation before adopting a shared primitive. | Investigate |

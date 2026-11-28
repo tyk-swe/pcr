@@ -32,8 +32,9 @@ impl Generate for Args {
     fn generate(
         self,
         invocation: &crate::invocation::Invocation,
-        format: Format,
+        _command_factory: fn() -> clap::Command,
     ) -> Result<(), CliError> {
+        let format = invocation.format;
         if format != Format::Text {
             return Err(CliError::new(
                 Kind::Usage,

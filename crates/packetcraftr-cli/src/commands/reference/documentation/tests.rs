@@ -1,14 +1,21 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use clap::CommandFactory;
+
 use super::*;
+use crate::app::cli::Cli;
 use crate::commands::{Command, Generate};
 use crate::output::stream::StreamEncoder;
 use packetcraftr_core::budget::Cancellation;
 
 fn invocation() -> Invocation {
+    invocation_with_format(Format::Text)
+}
+
+fn invocation_with_format(format: Format) -> Invocation {
     Invocation::new(
-        Format::Text,
+        format,
         StreamEncoder::new(Command::Read, io::sink()).into(),
         None,
         Cancellation::default(),
@@ -35,7 +42,7 @@ fn new_documentation_uses_normal_creation_permissions() {
     Args {
         directory: temporary.path().into(),
     }
-    .generate(&invocation(), Format::Text)
+    .generate(&invocation(), Cli::command)
     .unwrap();
 
     for directory in ["completions", "man"] {
@@ -111,7 +118,7 @@ fn render_errors_create_no_directories() {
             Args {
                 directory: destination.clone()
             }
-            .generate(&invocation(), format)
+            .generate(&invocation_with_format(format), Cli::command)
             .is_err()
         );
     }
@@ -220,7 +227,10 @@ fn publication_cancellation_reports_partial_progress() {
 
 #[test]
 fn rendering_includes_completions_and_grouped_manuals() {
-    let files = render(Path::new("docs")).unwrap();
+    let definition = Cli::command().subcommand(
+        clap::Command::new("reference-example").subcommand(clap::Command::new("nested")),
+    );
+    let files = render(definition, Path::new("docs")).unwrap();
     assert!(files.iter().any(|(path, bytes)| path
         == Path::new("docs/completions/packetcraftr.bash")
         && !bytes.is_empty()));
@@ -229,7 +239,9 @@ fn rendering_includes_completions_and_grouped_manuals() {
             .iter()
             .any(|(path, bytes)| path == Path::new("docs/man/packetcraftr.1") && !bytes.is_empty())
     );
-    assert!(files.len() > 10);
+    assert!(files.iter().any(|(path, bytes)| {
+        path == Path::new("docs/man/packetcraftr-reference-example-nested.1") && !bytes.is_empty()
+    }));
     let unique: std::collections::BTreeSet<_> = files.iter().map(|(path, _)| path).collect();
     assert_eq!(unique.len(), files.len());
 }

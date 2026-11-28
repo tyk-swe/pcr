@@ -65,7 +65,7 @@ pub(crate) trait Generate: Sized {
     fn generate(
         self,
         invocation: &crate::invocation::Invocation,
-        format: Format,
+        command_factory: fn() -> clap::Command,
     ) -> Result<(), CliError>;
 }
 

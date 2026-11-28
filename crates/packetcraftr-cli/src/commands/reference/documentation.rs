@@ -4,11 +4,10 @@
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
-use clap::{CommandFactory, ValueEnum};
+use clap::ValueEnum;
 use clap_complete::{Generator, Shell};
 use packetcraftr_core::error::{Classification, Kind};
 
-use crate::app::cli::Cli;
 use crate::errors::CliError;
 use crate::invocation::Invocation;
 use crate::output::contract::Format;
@@ -23,7 +22,12 @@ pub(crate) struct Args {
 }
 
 impl crate::commands::Generate for Args {
-    fn generate(self, invocation: &Invocation, format: Format) -> Result<(), CliError> {
+    fn generate(
+        self,
+        invocation: &Invocation,
+        command_factory: fn() -> clap::Command,
+    ) -> Result<(), CliError> {
+        let format = invocation.format;
         if format != Format::Text {
             return Err(CliError::from_classification(
                 Classification::new(
@@ -35,7 +39,12 @@ impl crate::commands::Generate for Args {
                 Vec::new(),
             ));
         }
-        run_with(&self, invocation, render, |_, _| Ok(()))
+        run_with(
+            &self,
+            invocation,
+            |directory| render(command_factory(), directory),
+            |_, _| Ok(()),
+        )
     }
 }
 
@@ -88,8 +97,7 @@ fn run_with(
     Ok(())
 }
 
-fn render(directory: &Path) -> Result<Rendered, CliError> {
-    let mut command = Cli::command();
+fn render(mut command: clap::Command, directory: &Path) -> Result<Rendered, CliError> {
     command.build();
     let mut rendered = Vec::new();
     for shell in Shell::value_variants() {

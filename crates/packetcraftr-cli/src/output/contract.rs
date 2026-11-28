@@ -99,6 +99,18 @@ impl fmt::Display for Command {
     }
 }
 
+pub(crate) const OUTPUT_FORMATS_HELP: &str = r"Output formats:
+  text    Human-readable summaries and diagnostics.
+  json    One aggregate JSON document.
+  csv     Flat statistics tables with a header (excluding overview/fragments).
+  ndjson  One JSON record per streamed event.
+  hex     Exact frame bytes as hexadecimal text.
+  raw     Exact frame bytes without text framing.
+  pcap    Classic PCAP capture bytes.
+  pcapng  PCAPNG capture bytes.
+
+Output availability is command-specific. Machine formats never contain terminal colour codes.";
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, clap::ValueEnum)]
 pub enum Format {
     Text,

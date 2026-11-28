@@ -18,7 +18,7 @@ impl crate::commands::Spec for Args {
             command: "export",
             rust_types: &["crate::commands::files::export::output::Report"],
             events: &[],
-            example: "examples/documents/output-export-complete.json",
+            example: "examples/documents/output-export-success.json",
         },
         PublishedType {
             definition: "exportStreamSuccess",

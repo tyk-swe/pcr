@@ -2,6 +2,7 @@ use super::crypto::Keys;
 use super::ranges::{Ranges, StreamState};
 use super::{Connection, Datagram, Diagnostic, Direction, EarlyData, Limits, Metrics};
 use crate::analysis::{Endpoint, FlowKey};
+use crate::field::hex::compact_hex;
 use crate::protocol::application::quic::{Packet, PacketKind, Version};
 use bytes::Bytes;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -438,11 +439,7 @@ impl State {
         if !self.report.closed {
             self.report.incomplete = true;
         }
-        self.report.connection_ids = self
-            .cids
-            .iter()
-            .map(|c| super::keylog::hex(&c.id))
-            .collect();
+        self.report.connection_ids = self.cids.iter().map(|c| compact_hex(&c.id)).collect();
         self.report.source_frames = self.source_frames.into_iter().collect();
         self.report.streams = self
             .streams

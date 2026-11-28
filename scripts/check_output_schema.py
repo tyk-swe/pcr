@@ -14,7 +14,7 @@ import sys
 from typing import Any, Iterable, Literal, NamedTuple
 
 from release_assets import validate_manifest
-from rust_source import blank_comments, is_test_path, without_test_items
+from rust_source import blank_comments, blank_comments_and_strings, production_sources
 from script_support import read_json, strict_json
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -132,12 +132,15 @@ def load_validator(schema: Any) -> Any:
     return jsonschema.Draft202012Validator(schema)
 
 
+class RegistrySchema(NamedTuple):
+    definitions: dict[str, Any]
+    modes: dict[str, dict[str, set[str]]]
+
+
 class SchemaSet(NamedTuple):
     envelope_schema: Any
-    common_schema: Any
-    command_schemas: dict[str, Any]
     validator: Any
-    merged_schema: Any
+    registry: RegistrySchema
     required_assets: tuple[str, ...]
 
 
@@ -201,28 +204,23 @@ def load_schema_set(root: Path, identity: Identity) -> SchemaSet:
             if name in merged_definitions:
                 raise CheckError(f'schemas/output: duplicate definition {name!r}')
             merged_definitions[name] = _localize_common_refs(definition)
-    aggregate_refs = []
-    stream_refs = []
-    for schema in commands.values():
-        for variant in schema.get('allOf', [{}])[-1].get('oneOf', []):
-            refs = variant.get('allOf', [])
-            if len(refs) != 2:
-                continue
-            shell = refs[0].get('$ref', '')
-            payloads = refs[1].get('oneOf', [])
-            target = aggregate_refs if 'aggregateSuccessEnvelope' in shell else stream_refs
-            target.extend(ref.get('$ref', '').rsplit('/', 1)[-1] for ref in payloads)
-    if aggregate_refs:
-        merged_definitions['aggregateSuccess'] = {
-            'allOf': [{'$ref': '#/$defs/aggregateSuccessEnvelope'},
-                      {'oneOf': [{'$ref': f'#/$defs/{name}'} for name in sorted(set(aggregate_refs))]}],
-        }
-    if stream_refs:
-        merged_definitions['streamSuccess'] = {
-            'allOf': [{'$ref': '#/$defs/streamSuccessEnvelope'},
-                      {'oneOf': [{'$ref': f'#/$defs/{name}'} for name in sorted(set(stream_refs))]}],
-        }
-    merged = {'$defs': merged_definitions}
+    modes: dict[str, dict[str, set[str]]] = {}
+    shells = {f'{COMMON_URN}#/$defs/{mode}SuccessEnvelope': mode for mode in ('aggregate', 'stream')}
+    for command, schema in commands.items():
+        path = f'{OUTPUT_SCHEMA_DIR}/{command}.v1.schema.json'
+        try:
+            for variant in schema.get('allOf', [{}])[-1].get('oneOf', []):
+                envelope_ref, payloads = variant['allOf']
+                mode = shells[envelope_ref['$ref']]
+                for payload in payloads['oneOf']:
+                    ref = payload['$ref']
+                    uri, separator, name = ref.partition('#/$defs/')
+                    owner = common if uri == COMMON_URN else schema
+                    if not separator or uri not in ('', COMMON_URN) or name not in owner.get('$defs', {}):
+                        raise CheckError(f'{path}: unknown payload definition {ref!r}')
+                    modes.setdefault(name, {}).setdefault(command, set()).add(mode)
+        except (AttributeError, IndexError, KeyError, TypeError, ValueError) as error:
+            raise CheckError(f'{path}: invalid success branch: {error}') from error
 
     def standalone(schema):
         localized = _localize_common_refs(schema)
@@ -256,7 +254,7 @@ def load_schema_set(root: Path, identity: Identity) -> SchemaSet:
 
     required = (COMMON_SCHEMA,
                 *(f'{OUTPUT_SCHEMA_DIR}/{path.name}' for path in command_paths))
-    return SchemaSet(envelope, common, commands, Validator(), merged, required)
+    return SchemaSet(envelope, Validator(), RegistrySchema(merged_definitions, modes), required)
 
 
 def document_problems(validator: Any, label: str, document: Any) -> list[str]:
@@ -286,7 +284,7 @@ HTTP3_CODE_ENUM = re.compile(r'published_enum!\s*\{[^{}]*\benum Code from http3:
 ENUM_VALUE = re.compile(r'=>\s*"([a-z][a-z0-9_]*)"')
 
 
-def published_codes(root: Path) -> set[str]:
+def published_codes(sources: Iterable[str]) -> set[str]:
     """Every machine-readable code the Rust sources can publish.
 
     Classification codes come from the typed `Code` enum; diagnostic and
@@ -294,10 +292,7 @@ def published_codes(root: Path) -> set[str]:
     Output carrying a code outside this closed set is unpublished surface.
     """
     codes: set[str] = set()
-    for path in (root / 'crates').rglob('*.rs'):
-        if is_test_path(path.relative_to(root)):
-            continue
-        text = blank_comments(without_test_items(path.read_text(encoding='utf-8', errors='replace')))
+    for text in sources:
         codes.update(CODE_LITERAL.findall(text))
         if declaration := HTTP3_CODE_ENUM.search(text):
             codes.update(ENUM_VALUE.findall(declaration[1]))
@@ -416,23 +411,6 @@ def read_registry(source: str) -> list[PublishedRow]:
     return rows
 
 
-def _refs(node: Any) -> list[str]:
-    if isinstance(node, dict):
-        found = []
-        for key, value in node.items():
-            if key == '$ref':
-                found.append(value.split('/')[-1])
-            else:
-                found += _refs(value)
-        return found
-    if isinstance(node, list):
-        found = []
-        for value in node:
-            found += _refs(value)
-        return found
-    return []
-
-
 def _consts(node: Any, key: str) -> list[str]:
     if isinstance(node, dict):
         found = []
@@ -455,51 +433,60 @@ def _consts(node: Any, key: str) -> list[str]:
     return []
 
 
-def _production_sources(root: Path) -> list[Path]:
-    base = root / CLI_SRC
-    return [path for path in sorted(base.rglob('*.rs'))
-            if not is_test_path(path.relative_to(root))]
+RUST_PATH = r'[A-Za-z_]\w*(?:::[A-Za-z_]\w*)*'
+TYPE_OR_SCOPE = re.compile(
+    r'\bmod\s+([A-Za-z_]\w*)\s*\{|\b(?:struct|enum|type)\s+([A-Za-z_]\w*)'
+    rf"|\bStreamRecord\s+for\s+(?:&\s*(?:'\w+\s+)?(?:mut\s+)?)?({RUST_PATH})|[{{}}]")
 
 
-def _stream_record_types(root: Path, sources: dict[Path, str]) -> set[str]:
-    types = set()
+def _source_module(path: Path) -> str:
+    parts = path.relative_to(CLI_SRC).with_suffix('').parts
+    if parts == ('lib',) or parts[-1] == 'mod':
+        parts = parts[:-1]
+    return '::'.join(('crate', *parts))
+
+
+def _record_path(owner: str, record: str) -> str:
+    if record.startswith('crate::'):
+        return record
+    while record.startswith('super::'):
+        owner = owner.rpartition('::')[0]
+        record = record.removeprefix('super::')
+    return f"{owner}::{record.removeprefix('self::')}"
+
+
+def _source_types(sources: dict[Path, str]) -> tuple[set[str], set[str]]:
+    declared = set()
+    streams: set[str] = set()
     for path, source in sources.items():
-        lines = source.splitlines()
-        for index, line in enumerate(lines):
-            if 'fn event_name' not in line:
-                continue
-            for back in range(index - 1, max(-1, index - 8), -1):
-                match = re.search(r'StreamRecord for\s+(&?\w+(?:::\w+)*(?:<[^>]*>)?)', lines[back])
-                if match:
-                    name = match.group(1).lstrip('&').split('<')[0]
-                    relative = str(path.relative_to(root / CLI_SRC)).removesuffix('.rs')
-                    types.add(f'crate::{relative.replace("/", "::")}::{name}'
-                              if '::' not in name else f'crate::{name}')
-                    break
-    return types
+        scopes: list[str | None] = [_source_module(path)]
+        for token in TYPE_OR_SCOPE.finditer(blank_comments_and_strings(source)):
+            module, name, record = token.groups()
+            owner = scopes[-1]
+            if name is not None:
+                if owner is not None:
+                    declared.add(f'{owner}::{name}')
+            elif record is not None:
+                if owner is not None:
+                    streams.add(_record_path(owner, record))
+            elif token[0] == '}':
+                if len(scopes) > 1:
+                    scopes.pop()
+            else:
+                scopes.append(f'{owner}::{module}' if owner is not None and module else None)
+    return declared, streams
 
 
-def _type_defined(root: Path, rust_type: str, sources: dict[Path, str]) -> bool:
-    parts = rust_type.split('::')
-    if len(parts) < 3 or parts[0] != 'crate':
-        return False
-    name, module = parts[-1], parts[1:-1]
-    base = root / CLI_SRC
-    candidates = [base / ('/'.join(module) + '.rs')]
-    candidates += sorted((base / '/'.join(module)).rglob('*.rs')) if (base / '/'.join(module)).is_dir() else []
-    pattern = re.compile(rf'(?:struct|enum|type)\s+{re.escape(name)}\b')
-    return any(pattern.search(sources.get(path, '')) for path in candidates)
-
-
-def registry_problems(root: Path, schema: Any, jsonschema: Any, published: set[str]) -> list[str]:
+def registry_problems(root: Path, schema: RegistrySchema, jsonschema: Any, published: set[str],
+                      sources: dict[Path, str]) -> list[str]:
     """The contract registry must agree with the schema, sources, and examples."""
     problems: list[str] = []
-    sources = {path: blank_comments(without_test_items(path.read_text(encoding='utf-8')))
-               for path in _production_sources(root)}
+    sources = {path: text for path, text in sources.items() if path.is_relative_to(CLI_SRC)}
+    declared, streams = _source_types(sources)
     rows = read_registry('\n'.join(sources.values()))
     if not rows:
         return [f'{REGISTRY}: no PublishedType rows found']
-    definitions = schema.get('$defs', {})
+    definitions = schema.definitions
     examples: dict[str, list[Any]] = {}
     output_examples = set(output_example_paths(root))
 
@@ -537,29 +524,34 @@ def registry_problems(root: Path, schema: Any, jsonschema: Any, published: set[s
         if list(row.events) != _consts(definition, 'event'):
             problems.append(f'{label}: events disagree with the definition')
         for rust_type in row.rust_types:
-            if not _type_defined(root, rust_type, sources):
+            if rust_type not in declared:
                 problems.append(f'{label}: rust type {rust_type} is not defined')
             if 'output' not in rust_type.split('::'):
                 problems.append(f'{label}: rust type {rust_type} is outside an output module')
         if not (root / row.example).is_file():
             problems.append(f'{label}: example {row.example} does not exist')
             continue
+        modes = sorted(schema.modes.get(row.definition, {}).get(row.command, ()))
+        if not modes:
+            problems.append(f'{label}: no success branch for this command')
+            continue
         validator = jsonschema.Draft202012Validator(
             {'$ref': f'#/$defs/{row.definition}', '$defs': definitions})
-        if not any(validator.is_valid(record) for record in example_records(row.example)
-                   if isinstance(record, dict) and record.get('status') == 'success'):
-            problems.append(f'{label}: no record in {row.example} validates '
-                            f'against {row.definition}')
+        if not any(isinstance(record, dict) and record.get('status') == 'success'
+                   and record.get('command') == row.command and record.get('mode') in modes
+                   and validator.is_valid(record) for record in example_records(row.example)):
+            problems.append(f'{label}: {row.example} has no successful {"/".join(modes)} '
+                            f'record for {row.command!r} matching {row.definition}')
 
-    for root_name in ('aggregateSuccess', 'streamSuccess'):
-        for name in _refs(definitions.get(root_name, {})):
-            if name in ('baseEnvelope', 'aggregateSuccessEnvelope', 'streamSuccessEnvelope'):
-                continue
-            expected = set(_consts(definitions.get(name, {}), 'command'))
-            if claimed.get(name, set()) != expected:
-                problems.append(f'{REGISTRY}: {name} claims '
-                                f'{sorted(claimed.get(name, set()))}, schema pins {sorted(expected)}')
-    for stream_type in sorted(_stream_record_types(root, sources) - registered_types):
+    for name, by_command in sorted(schema.modes.items()):
+        referenced = set(by_command)
+        pinned = set(_consts(definitions.get(name, {}), 'command'))
+        if referenced != pinned:
+            problems.append(f'{REGISTRY}: {name} referenced by {sorted(referenced)}, schema pins {sorted(pinned)}')
+        actual = claimed.get(name, set())
+        if actual != referenced:
+            problems.append(f'{REGISTRY}: {name} claims {sorted(actual)}, schema references {sorted(referenced)}')
+    for stream_type in sorted(streams - registered_types):
         problems.append(f'{REGISTRY}: stream record type {stream_type} is not registered')
     return problems
 
@@ -573,9 +565,10 @@ def check(root: Path, binary: Path | None = None) -> list[str]:
         raise CheckError(f'{RELEASE_ASSETS}: {error}') from error
     problems = check_identity(schema_set.envelope_schema, identity)
     problems.extend(check_release_assets(inventory.source_assets, identity, schema_set.required_assets))
-    published = published_codes(root)
+    sources = production_sources(root)
+    published = published_codes(sources.values())
     try:
-        problems.extend(registry_problems(root, schema_set.merged_schema, load_jsonschema(), published))
+        problems.extend(registry_problems(root, schema_set.registry, load_jsonschema(), published, sources))
     except CheckError as error:
         raise CheckError(f'{identity.schema_path}: {error}') from error
     problems.extend(example_problems(root, schema_set.validator, published))

@@ -23,7 +23,7 @@ impl crate::commands::Spec for Args {
         PublishedType {
             definition: "dnsSuccess",
             command: "dns",
-            rust_types: &["crate::commands::network::dns::output::BatchResult"],
+            rust_types: &["crate::commands::network::dns::output::report::BatchResult"],
             events: &[],
             example: "examples/documents/output-dns-any-success.json",
         },

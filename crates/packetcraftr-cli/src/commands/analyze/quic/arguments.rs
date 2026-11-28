@@ -84,27 +84,27 @@ pub(crate) struct Args {
         help = "Export raw contiguous ranges and a gap-aware manifest into an existing directory"
     )]
     pub write: Option<PathBuf>,
-    #[arg(long, default_value_t = 8192, help = "Maximum active QUIC connections")]
+    #[arg(long, default_value_t = quic::Limits::default().max_connections, help = "Maximum active QUIC connections")]
     pub max_connections: usize,
-    #[arg(long,default_value_t=64*1024*1024,help="Maximum charged QUIC state bytes")]
+    #[arg(long,default_value_t=quic::Limits::default().max_buffered_bytes,help="Maximum charged QUIC state bytes")]
     pub max_quic_buffered_bytes: usize,
     #[command(flatten)]
     pub stream_retention: StreamRetentionArgs,
     #[arg(
         long,
-        default_value_t = 64,
+        default_value_t = quic::Limits::default().max_pending_packets,
         help = "Maximum pending encrypted packets per connection"
     )]
     pub max_pending_packets: usize,
     #[arg(
         long,
-        default_value_t = 4096,
+        default_value_t = quic::Limits::default().max_streams_per_connection,
         help = "Maximum stream directions per connection"
     )]
     pub max_quic_streams: usize,
     #[arg(
         long,
-        default_value_t = 120000,
+        default_value_t = u64::try_from(quic::Limits::default().idle_expiry.as_millis()).unwrap_or(u64::MAX),
         help = "Connection idle expiry in capture milliseconds"
     )]
     pub quic_idle_expiry_ms: u64,

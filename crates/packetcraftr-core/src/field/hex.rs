@@ -67,3 +67,35 @@ impl Serialize for CompactHex<'_> {
 pub fn compact_hex(bytes: &[u8]) -> String {
     CompactHex(bytes).to_string()
 }
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum DecodeError {
+    #[error("hex value must contain an even number of digits")]
+    OddLength,
+    #[error("invalid hex at byte {0}")]
+    InvalidPair(usize),
+}
+
+pub(crate) fn decode_pairs(text: &str) -> Result<Vec<u8>, DecodeError> {
+    let (pairs, remainder) = text.as_bytes().as_chunks::<2>();
+    if !remainder.is_empty() {
+        return Err(DecodeError::OddLength);
+    }
+    let mut bytes = Vec::with_capacity(pairs.len());
+    for (index, &[high, low]) in pairs.iter().enumerate() {
+        let (Some(high), Some(low)) = (hex_nibble(high), hex_nibble(low)) else {
+            return Err(DecodeError::InvalidPair(index));
+        };
+        bytes.push((high << 4) | low);
+    }
+    Ok(bytes)
+}
+
+fn hex_nibble(value: u8) -> Option<u8> {
+    match value {
+        b'0'..=b'9' => Some(value - b'0'),
+        b'a'..=b'f' => Some(value - b'a' + 10),
+        b'A'..=b'F' => Some(value - b'A' + 10),
+        _ => None,
+    }
+}

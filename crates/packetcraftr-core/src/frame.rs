@@ -152,7 +152,8 @@ impl Frame {
 }
 
 /// Splits `time` into whole Unix seconds, floored, and the nanoseconds past that second.
-pub(crate) fn unix_floor(time: SystemTime) -> (i128, u32) {
+#[must_use]
+pub fn unix_floor(time: SystemTime) -> (i128, u32) {
     // seconds come from a `u64` and `subsec_nanos` is below one billion, so nothing can overflow
     match time.duration_since(UNIX_EPOCH) {
         Ok(elapsed) => (i128::from(elapsed.as_secs()), elapsed.subsec_nanos()),

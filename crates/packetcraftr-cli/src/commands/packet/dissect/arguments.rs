@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use packetcraftr_core::frame::LinkType;
 
 use crate::command_options::{DecodeArgs, PacketBudgetArgs, TreeArgs, link_type};
+use crate::field_projection;
 
 pub(crate) const AFTER_LONG_HELP: &str = r"Reads raw bytes from stdin when none of --hex, --hex-file, or --file is given.
 Hex input accepts an optional 0x prefix and whitespace, colon, or dash separators.
@@ -33,8 +34,7 @@ pub(crate) struct Args {
     /// Select a registered field; repeat to preserve the requested column order.
     #[arg(long = "field", value_name = "PATH", conflicts_with = "tree")]
     pub(crate) fields: Vec<String>,
-    /// Maximum encoded projection data bytes across all rows (excluding envelopes).
-    #[arg(long, default_value_t = 16 * 1024 * 1024)]
+    #[arg(long, default_value_t = field_projection::DEFAULT_MAX_BYTES, help = field_projection::MAX_BYTES_HELP)]
     pub(crate) max_projection_bytes: usize,
 
     /// Whole-frame hexadecimal bytes; - reads hexadecimal text from redirected stdin.
@@ -50,11 +50,11 @@ pub(crate) struct Args {
         long,
         value_name = "NAME|NUMBER",
         value_parser = link_type::parse,
-        default_value = "1",
-        help = concat!(
-            "Link type of the input frame, ",
-            link_type::names_help!(),
-            ". Defaults to Ethernet (1).",
+        default_value_t = LinkType::ETHERNET,
+        help = format!(
+            "Link type of the input frame, {}. Defaults to Ethernet ({}).",
+            link_type::names_help(),
+            LinkType::ETHERNET
         ),
     )]
     pub(crate) link_type: LinkType,

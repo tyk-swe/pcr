@@ -217,6 +217,32 @@ fn raw_build_outputs_packet_bytes() {
 }
 
 #[test]
+fn raw_hex_accepts_separators_but_expression_hex_requires_digit_pairs() {
+    for recipe in [r#"raw(hex="0x00:80-Af")"#, r#"raw(bytes=hex("0080aF"))"#] {
+        let args = ["--output", "hex", "packet", "build", "--packet", recipe];
+        assert_eq!(assert_success(&run(&args), &args).trim(), "0080af");
+    }
+    let args = [
+        "--output",
+        "json",
+        "packet",
+        "build",
+        "--packet",
+        r#"raw(bytes=hex("00:80"))"#,
+    ];
+    let rejected = run(&args);
+    assert!(!rejected.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&rejected.stdout).unwrap();
+    assert!(
+        report["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("hex literal requires pairs"),
+        "{report}"
+    );
+}
+
+#[test]
 fn dns_capture_dissects_successfully() {
     let capture = capture_path("dns-response.pcap");
     let capture = capture.to_string_lossy().into_owned();
@@ -974,6 +1000,7 @@ fn files_read_floors_fractional_pcapng_timestamps_only_for_display() {
     for (resolution, offset, ticks, expected_nanos, exact) in [
         (TimestampResolution::Binary(10), 123, 1_u64, 976_562, false),
         (TimestampResolution::Binary(10), 123, 128, 125_000_000, true),
+        (TimestampResolution::Binary(10), -1, 0, 0, true),
         (TimestampResolution::Binary(10), -1, 1, 976_562, false),
         (TimestampResolution::Decimal(10), 123, 19, 1, false),
         (TimestampResolution::Decimal(127), 123, u64::MAX, 0, false),
@@ -3320,10 +3347,34 @@ fn security_modes_observe_each_frame_and_finish_their_run() {
         reasons(&anomalies),
         serde_json::json!(["DNS transactions include unanswered, orphan, or duplicate messages"])
     );
-    assert_eq!(
-        anomalies["measurements"]["thresholds"]["window_seconds"],
-        60
-    );
+    let dns = packetcraftr_core::security::capture::DnsOptions::default();
+    let beacon = packetcraftr_core::security::capture::BeaconOptions::default();
+    for (key, expected) in [
+        ("window_seconds", serde_json::json!(dns.window_seconds)),
+        ("min_responses", serde_json::json!(dns.min_responses)),
+        ("nxdomain_ratio", serde_json::json!(dns.nxdomain_ratio)),
+        ("min_labels", serde_json::json!(dns.min_labels)),
+        ("min_label_length", serde_json::json!(dns.min_label_length)),
+        ("min_entropy", serde_json::json!(dns.min_entropy)),
+    ] {
+        assert_eq!(
+            anomalies["measurements"]["thresholds"][key], expected,
+            "{key}"
+        );
+    }
+    for (key, expected) in [
+        ("min_attempts", serde_json::json!(beacon.min_attempts)),
+        (
+            "min_interval_seconds",
+            serde_json::json!(beacon.min_interval_seconds),
+        ),
+        ("max_cv", serde_json::json!(beacon.max_cv)),
+    ] {
+        assert_eq!(
+            beacons["measurements"]["thresholds"][key], expected,
+            "{key}"
+        );
+    }
 }
 
 #[test]

@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::num::NonZeroU64;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::SystemTime;
 
 use bytes::Bytes;
 use serde::{Serialize, Serializer};
 
-use packetcraftr_core::frame::Frame;
+use packetcraftr_core::frame::{Frame, unix_floor};
 use packetcraftr_core::{decode::DecodedPacket, layout};
 
 use super::contract::Error;
@@ -93,24 +93,7 @@ impl TryFrom<SystemTime> for Timestamp {
     type Error = Error;
 
     fn try_from(value: SystemTime) -> Result<Self, Self::Error> {
-        match value.duration_since(UNIX_EPOCH) {
-            Ok(duration) => Ok(Self {
-                unix_seconds: i64::try_from(duration.as_secs())
-                    .map_err(|_| Error::TimestampOutOfRange)?,
-                nanoseconds: duration.subsec_nanos(),
-            }),
-            Err(source) => Self::from_pre_epoch_duration(source.duration()),
-        }
-    }
-}
-
-impl Timestamp {
-    fn from_pre_epoch_duration(before: Duration) -> Result<Self, Error> {
-        let whole = i128::from(before.as_secs());
-        let (seconds, nanoseconds) = match before.subsec_nanos() {
-            0 => (-whole, 0),
-            nanos => (-whole - 1, NANOS_PER_SECOND - nanos),
-        };
+        let (seconds, nanoseconds) = unix_floor(value);
         Ok(Self {
             unix_seconds: i64::try_from(seconds).map_err(|_| Error::TimestampOutOfRange)?,
             nanoseconds,

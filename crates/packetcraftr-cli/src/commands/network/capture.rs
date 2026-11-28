@@ -43,7 +43,7 @@ impl crate::commands::Spec for Args {
             command: "capture",
             rust_types: &["crate::output::capture::Summary"],
             events: &[],
-            example: "examples/documents/output-capture-complete.json",
+            example: "examples/documents/output-capture-success.json",
         },
         PublishedType {
             definition: "captureSuccess",
@@ -63,7 +63,7 @@ impl crate::commands::Spec for Args {
                 "crate::output::projection::RowEvent",
             ],
             events: &["complete", "fields"],
-            example: "examples/documents/output-dissect-complete.json",
+            example: "examples/documents/output-capture-fields-event.json",
         },
     ];
 

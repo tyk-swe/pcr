@@ -1,6 +1,6 @@
-use super::keylog::hex;
 use super::state::{IssuedCid, Observation, State};
 use super::{Direction, EarlyData, Limits, TransportParameter};
+use crate::field::hex::compact_hex;
 use crate::protocol::application::{
     quic::{Error, Reader},
     tls,
@@ -236,7 +236,7 @@ impl State {
             }
             parameters.push(TransportParameter {
                 id,
-                value_hex: hex(value),
+                value_hex: compact_hex(value),
             });
         }
         Ok(parameters)

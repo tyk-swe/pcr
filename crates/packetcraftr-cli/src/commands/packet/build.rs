@@ -34,7 +34,7 @@ impl crate::commands::Spec for Args {
             command: "build",
             rust_types: &["crate::commands::packet::build::output::Report"],
             events: &[],
-            example: "examples/documents/output-build-event.json",
+            example: "examples/documents/output-build-success.json",
         },
         PublishedType {
             definition: "buildStreamSuccess",

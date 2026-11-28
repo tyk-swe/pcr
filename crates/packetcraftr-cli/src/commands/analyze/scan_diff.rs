@@ -208,7 +208,7 @@ impl Spec for ScanDiff {
             command: "scan-diff",
             rust_types: &["crate::commands::security::output::Report"],
             events: &[],
-            example: "examples/documents/output-scan-diff-complete.json",
+            example: "examples/documents/output-scan-diff-success.json",
         },
         PublishedType {
             definition: "securityStreamSuccess",

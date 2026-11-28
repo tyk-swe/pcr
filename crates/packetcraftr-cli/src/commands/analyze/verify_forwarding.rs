@@ -31,7 +31,7 @@ impl crate::commands::Spec for Args {
             command: "verify-forwarding",
             rust_types: &["crate::commands::analyze::verify_forwarding::output::Report"],
             events: &[],
-            example: "examples/documents/output-verify-forwarding-complete.json",
+            example: "examples/documents/output-verify-forwarding-success.json",
         },
         PublishedType {
             definition: "verifyForwardingStreamSuccess",

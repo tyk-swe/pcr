@@ -10,9 +10,11 @@ from pathlib import Path
 import re
 import sys
 
-from rust_source import blank_comments, blank_comments_and_strings, is_test_path, without_test_items
+from rust_source import blank_comments_and_strings, production_sources
 
 ROOT = Path(__file__).resolve().parent.parent
+CORE = Path('crates/packetcraftr-core/src')
+CLI = Path('crates/packetcraftr-cli/src')
 
 
 CEILINGS = {
@@ -92,7 +94,7 @@ def cancellation_polls(sources: dict[Path, str]) -> int:
     """
     total = 0
     for path, text in sources.items():
-        if "packetcraftr-cli" not in str(path) or path.name == "invocation.rs":
+        if not path.is_relative_to(CLI) or path == CLI / 'invocation.rs':
             continue
         total += len(POLL_PATTERN.findall(blank_comments_and_strings(text)))
     return total
@@ -119,11 +121,11 @@ CODE_NEW_PATTERN = re.compile(r'\bCode::new\(\s*"([^"]+)"\s*,?\s*\)')
 CORE_CODE_NEW_PATTERN = re.compile(r'\b(?:Code|Self)::new\(\s*"([^"]+)"\s*,?\s*\)')
 
 
-def duplicate_wire_codes(root: Path, sources: dict[Path, str]) -> dict[str, list[str]]:
+def duplicate_wire_codes(sources: dict[Path, str]) -> dict[str, list[str]]:
     """Wire error code literals constructed more than once across the workspace."""
     seen: dict[str, list[str]] = {}
     for path, text in sources.items():
-        relative = path.relative_to(root).as_posix()
+        relative = path.as_posix()
         pattern = CORE_CODE_NEW_PATTERN if relative == WIRE_CODE_SOURCE else CODE_NEW_PATTERN
         for code in pattern.findall(text):
             seen.setdefault(code, []).append(relative)
@@ -141,16 +143,16 @@ CRATE_ROOTS = {
 }
 
 
-def public_items(root: Path, sources: dict[Path, str]) -> dict[str, int]:
+def public_items(sources: dict[Path, str]) -> dict[str, int]:
     return {
-        name: len(PUBLIC_ITEM_PATTERN.findall(sources.get(root / relative, "")))
+        name: len(PUBLIC_ITEM_PATTERN.findall(sources.get(Path(relative), '')))
         for name, relative in CRATE_ROOTS.items()
     }
 
 
-def cast_counts(root: Path, sources: dict[Path, str]) -> dict[str, int]:
+def cast_counts(sources: dict[Path, str]) -> dict[str, int]:
     return {
-        str(path.relative_to(root)): len(CAST_PATTERN.findall(text))
+        path.as_posix(): len(CAST_PATTERN.findall(text))
         for path, text in sources.items()
     }
 
@@ -160,44 +162,28 @@ DYNAMIC_FIELD_PATTERN = re.compile(
 )
 
 
-def allowlist_problems(root: Path = ROOT) -> list[str]:
-    sources = production_sources(root)
-    counts = cast_counts(root, sources)
+def allowlist_problems(sources: dict[Path, str]) -> list[str]:
+    counts = cast_counts(sources)
     problems = []
     for relative in LAYER_CAST_FILES + ERROR_CAST_FILES:
         if counts.get(relative, 0) == 0:
             problems.append(f"stale cast allowlist entry: {relative}")
-    for module in BOUNDARY_MODULES:
-        shielded = sum(
-            len(DYNAMIC_FIELD_PATTERN.findall(text))
-            for path, text in sources.items()
-            if module in str(path.relative_to(root))
-        )
-        if shielded == 0:
-            problems.append(f"stale boundary exemption: {module}")
+    used = {boundary for path, text in sources.items()
+            if (boundary := field_boundary(path)) is not None and DYNAMIC_FIELD_PATTERN.search(text)}
+    problems.extend(f'stale boundary exemption: {boundary.as_posix()}'
+                    for boundary in BOUNDARY_MODULES if boundary not in used)
     return problems
 
 
 BOUNDARY_MODULES = (
-    "examples/",
-    "fuzz/",
-    "document/",
-    "filter/",
-    "layer/model.rs",
-    "layer/selector.rs",
-    "codec.rs",
-    "build.rs",
-    "input/",
-    "template.rs",
+    CORE.parent / 'examples', CORE / 'fuzz', CORE / 'document', CORE / 'filter',
+    CORE / 'layer/model.rs', CORE / 'layer/selector.rs', CORE / 'codec.rs',
+    CORE / 'build.rs', CLI / 'input', CORE / 'template.rs',
 )
 
 
-def production_sources(root: Path = ROOT) -> dict[Path, str]:
-    return {
-        path: blank_comments(without_test_items(path.read_text(encoding='utf-8')))
-        for path in sorted((root / "crates").rglob("*.rs"))
-        if not is_test_path(path.relative_to(root))
-    }
+def field_boundary(path: Path) -> Path | None:
+    return next((boundary for boundary in BOUNDARY_MODULES if path.is_relative_to(boundary)), None)
 
 
 def count(pattern: str, sources: Iterable[str], flags: int = 0) -> int:
@@ -205,9 +191,8 @@ def count(pattern: str, sources: Iterable[str], flags: int = 0) -> int:
     return sum(len(regex.findall(text)) for text in sources)
 
 
-def inventory(root: Path = ROOT) -> dict[str, int]:
-    sources = production_sources(root)
-    catalog = root / "crates/packetcraftr-core/src/protocol/catalog.rs"
+def inventory(sources: dict[Path, str]) -> dict[str, int]:
+    catalog = CORE / 'protocol/catalog.rs'
     builtin_names = set(re.findall(
         r'canonical: "([a-z0-9_]+)"',
         sources.get(catalog, ""),
@@ -215,23 +200,22 @@ def inventory(root: Path = ROOT) -> dict[str, int]:
     id_literals = 0
     dynamic = 0
     for path, text in sources.items():
-        if path.name != "catalog.rs" and "layer/opaque.rs" not in str(path):
+        if path not in (catalog, CORE / 'layer/opaque.rs'):
             for literal in re.findall(r'Id::new\("([a-z0-9_]+)"\)', text):
                 if literal in builtin_names:
                     id_literals += 1
-        relative = str(path.relative_to(root))
-        if not any(module in relative for module in BOUNDARY_MODULES):
+        if field_boundary(path) is None:
             # Layer dynamic field access only: one-argument field reads by
             # name plus every path-based access. Two-argument DebugStruct
             # .field(name, value) calls are formatting, not layer access.
             dynamic += len(DYNAMIC_FIELD_PATTERN.findall(text))
     non_clock = [
-        text for path, text in sources.items() if str(path.relative_to(root)) != CLOCK_SEAM
+        text for path, text in sources.items() if path.as_posix() != CLOCK_SEAM
     ]
     non_entropy = [
-        text for path, text in sources.items() if str(path.relative_to(root)) != ENTROPY_SEAM
+        text for path, text in sources.items() if path.as_posix() != ENTROPY_SEAM
     ]
-    casts = cast_counts(root, sources)
+    casts = cast_counts(sources)
     layer_casts = sum(casts.get(relative, 0) for relative in LAYER_CAST_FILES)
     error_casts = sum(casts.get(relative, 0) for relative in ERROR_CAST_FILES)
     outside = sum(
@@ -243,7 +227,7 @@ def inventory(root: Path = ROOT) -> dict[str, int]:
         "make_layer_impls": count(r"fn make_layer", sources.values()),
         "field_layout_literals": count(
             r"FieldLayout\s*\{[^}]*?name:",
-            [text for path, text in sources.items() if "packetcraftr-core" in str(path)],
+            [text for path, text in sources.items() if path.is_relative_to(CORE.parent)],
             re.S,
         ),
         "hand_layout_fns": count(r"fn [a-z0-9_]+_layout_wire\(", sources.values()),
@@ -263,8 +247,8 @@ def inventory(root: Path = ROOT) -> dict[str, int]:
             re.M,
         ),
         "duplicate_constants": duplicate_constants(sources),
-        "duplicate_wire_codes": len(duplicate_wire_codes(root, sources)),
-        **public_items(root, sources),
+        "duplicate_wire_codes": len(duplicate_wire_codes(sources)),
+        **public_items(sources),
     }
 
 
@@ -272,8 +256,9 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--report", action="store_true", help="print counts without failing")
     args = parser.parse_args()
-    measured = inventory()
-    failures = allowlist_problems()
+    sources = production_sources(ROOT)
+    measured = inventory(sources)
+    failures = allowlist_problems(sources)
     print(f"{'metric':28} {'measured':>8} {'ceiling':>8}")
     for name, value in measured.items():
         ceiling = CEILINGS[name]
@@ -281,7 +266,7 @@ def main() -> int:
         if value > ceiling:
             failures.append(f"{name}: {value} exceeds ceiling {ceiling}")
     if measured["duplicate_wire_codes"] > CEILINGS["duplicate_wire_codes"]:
-        for code, paths in duplicate_wire_codes(ROOT, production_sources()).items():
+        for code, paths in duplicate_wire_codes(sources).items():
             failures.append(f"duplicate wire code {code!r}: {', '.join(paths)}")
     if failures and not args.report:
         for failure in failures:

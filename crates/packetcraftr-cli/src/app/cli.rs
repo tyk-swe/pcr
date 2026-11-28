@@ -11,9 +11,11 @@ use std::sync::LazyLock;
 
 use clap::{Parser, ValueEnum};
 
+use crate::command_options::MAX_MILLISECONDS;
 use crate::commands::CommandLine;
 use crate::errors::exit_codes_help;
 use crate::output::contract::{Format, OUTPUT_FORMATS_HELP};
+use crate::resources::OUTPUT_TIMEOUT_MS;
 
 const ROOT_HELP_EXAMPLES: &str = r"For codes 2 through 70, the word after the code is the `error.kind` of the same failure in JSON and NDJSON output; a cancellation reports kind `io`.
 
@@ -114,8 +116,14 @@ pub(crate) struct Cli {
     )]
     #[arg(hide_short_help = true)]
     pub(crate) resource_preset: Option<crate::resources::Preset>,
-    /// NDJSON per-write wait in milliseconds (default 1000; range 1..=3600000).
-    #[arg(long, global = true, value_parser = clap::value_parser!(u64).range(1..=3_600_000), help_heading = "Global options", display_order = 10000)]
+    #[arg(
+        long,
+        global = true,
+        value_parser = clap::value_parser!(u64).range(1..=MAX_MILLISECONDS),
+        help = format!("NDJSON per-write wait in milliseconds (default {OUTPUT_TIMEOUT_MS}; range 1..={MAX_MILLISECONDS})"),
+        help_heading = "Global options",
+        display_order = 10000
+    )]
     #[arg(hide_short_help = true)]
     pub(crate) output_timeout_ms: Option<u64>,
     /// Allow binary raw/PCAP/PCAPNG bytes to be written to an interactive terminal.

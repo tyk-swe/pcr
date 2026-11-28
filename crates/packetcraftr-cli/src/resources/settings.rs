@@ -17,15 +17,6 @@ pub(crate) enum Preset {
     WorkstationV1,
 }
 
-impl Preset {
-    pub(crate) const fn name(self) -> &'static str {
-        match self {
-            Self::CiV1 => "ci-v1",
-            Self::WorkstationV1 => "workstation-v1",
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Unit {
     Count,
@@ -273,7 +264,8 @@ impl Diagnostics<'_> {
         let source = if matches.value_source(id) == Some(ValueSource::CommandLine) {
             "override".to_owned()
         } else if let Some(preset) = self.preset.filter(|_| defaults.is_some()) {
-            format!("preset:{}", preset.name())
+            let name = preset.to_possible_value().expect("resource preset value");
+            format!("preset:{}", name.get_name())
         } else {
             "default".to_owned()
         };

@@ -195,11 +195,27 @@ fn mapping_reports_wire_length_changes_without_packet_byte_changes() {
     )
     .unwrap();
 
+    let empty = Writer::pcapng_with_options(Vec::new(), Default::default()).unwrap();
+    let mut empty =
+        Reader::with_limits(Cursor::new(empty.into_inner()), Default::default()).unwrap();
+    let empty_report = map_frames(&mut empty, &mut output, Limits::default(), 0, |_, frame| {
+        Ok(frame.clone())
+    })
+    .unwrap();
+
     let (_, written) = read_frames(output.into_inner());
     assert_eq!(written.len(), 2);
     assert_same_packet(&written[0], &adjusted);
     assert_same_packet(&written[1], &second);
     assert_eq!(report.frames_changed, 1);
+    assert_eq!(
+        report.captured_bytes_written,
+        written
+            .iter()
+            .map(|frame| u64::from(frame.captured_length()))
+            .sum::<u64>()
+    );
+    assert_eq!(empty_report.captured_bytes_written, 0);
 }
 
 #[test]

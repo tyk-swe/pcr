@@ -11,7 +11,7 @@ use crate::{
         ApplicationLimitsArgs, DecodeArgs, OfflineLimitsArgs, Selector, stream_selector,
     },
     errors::CliError,
-    output::contract::{Command, Format},
+    output::contract::Command,
     terminal::write_stdout_line,
 };
 use packetcraftr_core::{
@@ -76,7 +76,6 @@ impl crate::commands::Spec for Args {
             example: "examples/documents/output-messages-complete.json",
         },
     ];
-    const FORMATS: &'static [Format] = crate::output::contract::TEXT_JSON_NDJSON;
     const OFFLINE: bool = true;
     fn run_time(&self) -> Option<&dyn crate::command_options::Bounded> {
         Some(&self.limits)

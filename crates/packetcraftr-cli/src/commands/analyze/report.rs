@@ -4,7 +4,7 @@
 use crate::commands::security::{Bounds, check_result_size, input, invalid, publish, read, source};
 use crate::commands::{CommandExit, Spec};
 use crate::invocation::Invocation;
-use crate::output::contract::{Command, Format};
+use crate::output::contract::Command;
 use crate::{errors::CliError, resources::Settings};
 use clap::Args;
 use packetcraftr_core::security::{Report, Source};
@@ -41,7 +41,6 @@ impl Spec for Assessment {
         events: &[],
         example: "examples/documents/output-report-success.json",
     }];
-    const FORMATS: &'static [Format] = crate::output::contract::TEXT_JSON;
     const OFFLINE: bool = true;
     fn resources(&self, s: &mut Settings<'_>) {
         self.bounds.resources(s);

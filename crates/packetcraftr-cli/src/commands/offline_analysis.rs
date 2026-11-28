@@ -75,19 +75,7 @@ impl AnalysisSetup {
         &self,
         invocation: &crate::invocation::Invocation,
     ) -> analysis::Options<'_> {
-        let session = self.session_options(invocation);
-        analysis::Options {
-            plan: analysis::Plan::default(),
-            deadline: session.deadline,
-            track_sources: false,
-            cancellation: session.cancellation,
-            filter: session.filter,
-            stream: session.stream,
-            time_bounds: session.time_bounds,
-            tcp_events: false,
-            ip_overlap: session.ip_overlap,
-            limits: session.limits,
-        }
+        self.session_options(invocation).into()
     }
 
     fn session_options(

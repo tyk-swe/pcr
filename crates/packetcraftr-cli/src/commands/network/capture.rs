@@ -16,7 +16,6 @@ use crate::output::{
 use crate::{
     errors::CliError,
     filtering,
-    invocation::StreamEncoder,
     system::{Runtime, client, resolve_unique},
 };
 use packetcraftr_core::clock::{Clock, SystemClock};
@@ -67,14 +66,6 @@ impl crate::commands::Spec for Args {
             example: "examples/documents/output-dissect-complete.json",
         },
     ];
-    const FORMATS: &'static [crate::output::contract::Format] = &[
-        crate::output::contract::Format::Text,
-        crate::output::contract::Format::Json,
-        crate::output::contract::Format::Ndjson,
-        crate::output::contract::Format::Hex,
-        crate::output::contract::Format::Pcap,
-        crate::output::contract::Format::PcapNg,
-    ];
 
     fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
         crate::resources::declare!(settings, self, [
@@ -100,7 +91,6 @@ impl crate::commands::Spec for Args {
 
 pub(super) fn run(invocation: &crate::invocation::Invocation, args: Args) -> Result<(), CliError> {
     let format = invocation.format;
-    let stream = &invocation.output;
     let timeout = args.timeout.timeout();
     if timeout > net::deadline::MAX_WAIT || SystemClock.now().checked_add(timeout).is_none() {
         return Err(CliError::classified(net::Error::InvalidCaptureTimeout {
@@ -207,7 +197,6 @@ pub(super) fn run(invocation: &crate::invocation::Invocation, args: Args) -> Res
             decoding,
             projector,
             files,
-            stream,
         },
     )
 }
@@ -268,7 +257,7 @@ fn validate_output(args: &Args, format: Format) -> Result<Compression, CliError>
     Ok(compression)
 }
 
-struct Output<'a, W> {
+struct Output<W> {
     binary: W,
     format: Format,
     compression: Compression,
@@ -276,7 +265,6 @@ struct Output<'a, W> {
     decoding: Option<Decoding>,
     projector: Option<crate::field_projection::Projector>,
     files: Option<Files>,
-    stream: &'a StreamEncoder,
 }
 fn file_limits(policy: &Policy) -> capture_file::Limits {
     let budget = CaptureBudget::new(policy);
@@ -290,7 +278,7 @@ fn drive<P: packetcraftr::CaptureProviders, W: io::Write + Send + 'static>(
     invocation: &crate::invocation::Invocation,
     client: &packetcraftr::Client<P>,
     request: workflow::Request,
-    rendering: Output<'_, W>,
+    rendering: Output<W>,
 ) -> Result<(), CliError> {
     let Output {
         binary,
@@ -300,7 +288,6 @@ fn drive<P: packetcraftr::CaptureProviders, W: io::Write + Send + 'static>(
         decoding,
         projector,
         files,
-        stream,
     } = rendering;
     // The selector runs on the capture's thread and the sink on its worker;
     // the capture waits for each answer, so they never contend.
@@ -385,12 +372,7 @@ fn drive<P: packetcraftr::CaptureProviders, W: io::Write + Send + 'static>(
         && let Some(projector) = projector
     {
         projector
-            .finish(
-                invocation,
-                report.frames_delivered,
-                report.stats.bytes,
-                stream,
-            )
+            .finish(invocation, report.frames_delivered, report.stats.bytes)
             .map_err(|error| error.with_capture(snapshot.clone()))?;
     }
     rendering::render_complete(

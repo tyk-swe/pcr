@@ -5,9 +5,8 @@ pub(in crate::commands) mod arguments;
 pub(in crate::commands) mod output;
 
 use self::arguments::{Args, OrderArg};
-use crate::{errors::CliError, terminal::write_summary_line};
+use crate::{errors::CliError, input::is_stdin_path, terminal::write_summary_line};
 use packetcraftr_core::{capture_file, error::Kind};
-use std::path::Path;
 
 use crate::output::contract::PublishedType;
 
@@ -28,8 +27,6 @@ impl crate::commands::Spec for Args {
             example: "examples/documents/output-merge-complete.json",
         },
     ];
-    const FORMATS: &'static [crate::output::contract::Format] =
-        crate::output::contract::TEXT_JSON_NDJSON;
     const OFFLINE: bool = true;
 
     fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
@@ -63,7 +60,13 @@ pub(crate) fn run(invocation: &crate::invocation::Invocation, args: Args) -> Res
         ));
     }
     if args.paths.len() > capture_file::MAX_MERGE_SOURCES
-        || args.paths.iter().filter(|p| *p == Path::new("-")).count() > 1
+        || args
+            .paths
+            .iter()
+            .filter(|path| is_stdin_path(path))
+            .take(2)
+            .count()
+            > 1
     {
         return Err(CliError::new(
             Kind::Usage,

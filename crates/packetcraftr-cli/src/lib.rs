@@ -11,7 +11,7 @@
 //!
 //! | Layer | Modules |
 //! | --- | --- |
-//! | 1. Error codes and shared published contract | `code`, `output` |
+//! | 1. Error codes and shared published contract | `code`, `output`, `command_catalog` |
 //! | 2. Foundation | `errors`, `filtering`, `cancellation`, `resources` |
 //! | 3. Options | `command_options` |
 //! | 4. Invocation | `invocation`: one command's output stream, deadline, cancellation, and diagnostics |
@@ -19,10 +19,7 @@
 //! | 6. Commands | `commands`: implementations by `--help` group, each with its own published `output` types, plus the registry and dispatch |
 //! | 7. Application shell | `app`: process entry, argument parsing, and help |
 //!
-//! Two upward edges are deliberate. `output::contract::Command` is generated
-//! by the command registry, so published identifiers and the parser come from
-//! one declaration. `commands::reference` reads `app::cli` because it
-//! documents the application itself.
+//! The command catalog supplies the parser and the published output contract.
 //!
 //! Unit tests stay beside the implementations they exercise.
 #![forbid(unsafe_code)]
@@ -31,6 +28,7 @@ mod app;
 mod cancellation;
 mod capture_output;
 mod code;
+mod command_catalog;
 mod command_options;
 mod commands;
 mod errors;

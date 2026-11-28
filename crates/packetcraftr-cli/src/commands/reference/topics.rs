@@ -7,9 +7,9 @@ use std::fmt::Write as _;
 
 use packetcraftr_core::error::{Classification, Kind};
 
-use crate::commands::{Command, Generate};
-use crate::errors::CliError;
-use crate::output::contract::Format;
+use crate::commands::Generate;
+use crate::errors::{CliError, exit_codes_help};
+use crate::output::contract::{Command, Format, OUTPUT_FORMATS_HELP};
 use crate::terminal::emit_stdout_document;
 
 pub(crate) const AFTER_LONG_HELP: &str = r"Without NAME, lists the topics. Topics print text only and need no capture, network, or privileges.
@@ -68,8 +68,9 @@ impl Generate for Args {
     fn generate(
         self,
         invocation: &crate::invocation::Invocation,
-        format: Format,
+        _command_factory: fn() -> clap::Command,
     ) -> Result<(), CliError> {
+        let format = invocation.format;
         if format != Format::Text {
             return Err(CliError::new(
                 Kind::Usage,
@@ -131,7 +132,7 @@ fn formats() -> String {
         })
         .max()
         .unwrap_or(0);
-    let mut help = String::from(crate::app::cli::output_formats_help());
+    let mut help = String::from(OUTPUT_FORMATS_HELP);
     help.push_str(
         "\n\nSelect one with --output FORMAT, before or after the subcommand. Binary formats \
          (raw, pcap, pcapng) refuse an interactive terminal unless --force-binary-stdout is \
@@ -168,6 +169,6 @@ fn exit_codes() -> String {
     format!(
         "Exit codes\n\n{}\nFor codes 2 through 70, the word after the code is the `error.kind` of the same \
          failure in JSON and NDJSON output, and a cancellation reports kind `io`.\n",
-        crate::app::cli::exit_codes_help()
+        exit_codes_help()
     )
 }

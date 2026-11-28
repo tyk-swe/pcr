@@ -9,8 +9,8 @@ use crate::output::{
 };
 use crate::{
     errors::CliError,
-    invocation::{Invocation, StreamEncoder},
-    publication::{BoundedJsonError, Limited, bounded_json_len, emit_published, write_raw},
+    invocation::Invocation,
+    publication::{BoundedJsonError, Limited, bounded_json_len, emit_published},
 };
 use packetcraftr_core::{
     self as core,
@@ -34,7 +34,6 @@ enum Sink {
 struct Budget {
     remaining: usize,
     maximum: usize,
-    text_batch: Option<Invocation>,
 }
 
 impl Budget {
@@ -51,6 +50,7 @@ impl Budget {
 
     fn write_line<C>(
         &mut self,
+        invocation: &Invocation,
         cells: impl IntoIterator<Item = C>,
         push: impl Fn(&mut Limited<Vec<u8>>, C) -> Result<(), BoundedJsonError>,
     ) -> Result<(), CliError> {
@@ -68,21 +68,19 @@ impl Budget {
             .map_err(|error| self.error(error))?;
         let (bytes, remaining) = line.finish();
         self.remaining = remaining;
-        match &self.text_batch {
-            Some(invocation) => crate::terminal::write_raw_batch(invocation, &bytes),
-            None => write_raw(&bytes),
-        }
+        crate::terminal::write_raw_line(invocation, &bytes)
     }
 
     fn write_header(
         &mut self,
+        invocation: &Invocation,
         header_written: &mut bool,
         projection: &Projection,
     ) -> Result<(), CliError> {
         if *header_written {
             return Ok(());
         }
-        self.write_line(projection.columns(), |line, column| {
+        self.write_line(invocation, projection.columns(), |line, column| {
             line.push(column.as_bytes())
         })?;
         *header_written = true;
@@ -123,7 +121,6 @@ impl Projector {
             budget: Budget {
                 remaining: maximum,
                 maximum,
-                text_batch: None,
             },
             count: 0,
         }))
@@ -133,48 +130,46 @@ impl Projector {
         self.projection.requirements()
     }
 
-    pub(crate) fn batch_text(&mut self, invocation: &Invocation) {
-        self.budget.text_batch = Some(invocation.clone());
-    }
-
     pub(crate) fn emit(
         &mut self,
         source_frame: u64,
         context: &Context<'_>,
-        stream: &StreamEncoder,
+        invocation: &Invocation,
     ) -> Result<(), CliError> {
         let values = self
             .projection
             .values(context, self.budget.remaining)
             .map_err(CliError::classified)?;
-        self.emit_values(source_frame, values, stream)
+        self.emit_values(source_frame, values, invocation)
     }
 
     pub(crate) fn emit_frame(
         &mut self,
         source_frame: u64,
         evaluation: &FrameEvaluation<'_>,
-        stream: &StreamEncoder,
+        invocation: &Invocation,
     ) -> Result<(), CliError> {
         let values = evaluation
             .values(&self.projection, self.budget.remaining)
             .map_err(|error| crate::filtering::frame_error(source_frame, error))?;
-        self.emit_values(source_frame, values, stream)
+        self.emit_values(source_frame, values, invocation)
     }
 
     fn emit_values(
         &mut self,
         source_frame: u64,
         values: Vec<Option<core::field::Value>>,
-        stream: &StreamEncoder,
+        invocation: &Invocation,
     ) -> Result<(), CliError> {
         let row = Row::try_from((source_frame, values)).map_err(CliError::classified)?;
         match &mut self.sink {
             Sink::Text { header_written } => {
-                self.budget.write_header(header_written, &self.projection)?;
-                self.budget.write_line(&row.values, |line, value| {
-                    line.push_json(&value.as_ref().map(Cell))
-                })?;
+                self.budget
+                    .write_header(invocation, header_written, &self.projection)?;
+                self.budget
+                    .write_line(invocation, &row.values, |line, value| {
+                        line.push_json(&value.as_ref().map(Cell))
+                    })?;
             }
             Sink::Json { rows } => {
                 let bytes = bounded_json_len(
@@ -188,7 +183,8 @@ impl Projector {
             }
             Sink::Ndjson => {
                 let event = || output::projection::RowEvent::from((&self.projection, &row));
-                stream
+                invocation
+                    .output
                     .emit_data_counted(event(), Vec::new(), &mut self.budget.remaining)
                     .map_err(|error| match error {
                         output::stream::MeteredError::Encode(
@@ -217,10 +213,9 @@ impl Projector {
 
     pub(crate) fn finish(
         mut self,
-        invocation: &crate::invocation::Invocation,
+        invocation: &Invocation,
         frames_read: u64,
         captured_bytes_read: u64,
-        stream: &StreamEncoder,
     ) -> Result<(), CliError> {
         let summary = output::projection::Complete::from((
             &self.projection,
@@ -229,9 +224,10 @@ impl Projector {
             captured_bytes_read,
         ));
         match self.sink {
-            Sink::Text { mut header_written } => self
-                .budget
-                .write_header(&mut header_written, &self.projection),
+            Sink::Text { mut header_written } => {
+                self.budget
+                    .write_header(invocation, &mut header_written, &self.projection)
+            }
             Sink::Json { rows } => emit_published(
                 invocation,
                 self.command,
@@ -240,7 +236,8 @@ impl Projector {
                     Vec::new(),
                 ),
             ),
-            Sink::Ndjson => stream
+            Sink::Ndjson => invocation
+                .output
                 .complete_published(Published::new(summary, Vec::new()))
                 .map_err(Into::into),
         }
@@ -257,6 +254,7 @@ pub(crate) fn missing_fields_error() -> CliError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::invocation::StreamEncoder;
     use std::io;
 
     #[test]
@@ -309,8 +307,14 @@ mod tests {
             )
             .unwrap()
             .unwrap();
-            let stream = StreamEncoder::new(Command::Dissect, io::sink());
-            let error = projector.emit(1, &context, &stream).unwrap_err();
+            let invocation = Invocation::new(
+                Format::Ndjson,
+                StreamEncoder::new(Command::Dissect, io::sink()),
+                None,
+                Default::default(),
+                None,
+            );
+            let error = projector.emit(1, &context, &invocation).unwrap_err();
             assert_eq!(error.classification.code, expected);
         }
     }

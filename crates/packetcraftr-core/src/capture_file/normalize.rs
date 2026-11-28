@@ -111,8 +111,6 @@ fn normalize_to_pcapng<R: Read, W: Write>(
     )?;
     let mut budget = Budget::new(options.stream_limits)?;
     let mut interface_map: BTreeMap<u32, u32> = BTreeMap::new();
-    let mut frames_selected = 0_u64;
-    let mut captured_bytes_selected = 0_u64;
     while let Some((_, mut frame)) = next_selected(reader, &mut budget, &mut predicate)? {
         // Classic PCAP exposes its single interface at zero; PCAPNG frame IDs are global.
         let source_interface = frame.interface.unwrap_or(0);
@@ -127,22 +125,8 @@ fn normalize_to_pcapng<R: Read, W: Write>(
         };
         frame.interface = Some(output_interface);
         writer.write_frame(&frame)?;
-        frames_selected = frames_selected.saturating_add(1);
-        captured_bytes_selected =
-            captured_bytes_selected.saturating_add(u64::from(frame.captured_length()));
     }
-    writer.flush()?;
-    Ok((
-        writer.into_inner(),
-        NormalizeReport {
-            format: Format::PcapNg,
-            frames_read: budget.frames(),
-            frames_selected,
-            captured_bytes_read: budget.captured_bytes(),
-            captured_bytes_selected,
-            interfaces: interface_map.len(),
-        },
-    ))
+    finish(writer, &budget, interface_map.len())
 }
 
 /// Classic PCAP fixes its header before the first record, so the writer opens at the first
@@ -156,8 +140,6 @@ fn normalize_to_pcap<R: Read, W: Write>(
     let mut budget = Budget::new(options.stream_limits)?;
     let mut destination = Some(destination);
     let mut open: Option<(u32, Writer<W>)> = None;
-    let mut frames_selected = 0_u64;
-    let mut captured_bytes_selected = 0_u64;
     while let Some((source_frame, mut frame)) = next_selected(reader, &mut budget, &mut predicate)?
     {
         let source_interface = frame.interface.unwrap_or(0);
@@ -191,27 +173,26 @@ fn normalize_to_pcap<R: Read, W: Write>(
         }
         frame.interface = None;
         writer.write_frame(&frame)?;
-        frames_selected = frames_selected.saturating_add(1);
-        captured_bytes_selected =
-            captured_bytes_selected.saturating_add(u64::from(frame.captured_length()));
     }
-    match open {
-        Some((_, mut writer)) => {
-            writer.flush()?;
-            Ok((
-                writer.into_inner(),
-                NormalizeReport {
-                    format: Format::Pcap,
-                    frames_read: budget.frames(),
-                    frames_selected,
-                    captured_bytes_read: budget.captured_bytes(),
-                    captured_bytes_selected,
-                    interfaces: 1,
-                },
-            ))
-        }
-        None => Err(Error::EmptyPcapNormalization),
-    }
+    let (_, writer) = open.ok_or(Error::EmptyPcapNormalization)?;
+    finish(writer, &budget, 1)
+}
+
+fn finish<W: Write>(
+    mut writer: Writer<W>,
+    input: &Budget,
+    interfaces: usize,
+) -> Result<(W, NormalizeReport), Error> {
+    writer.flush()?;
+    let report = NormalizeReport {
+        format: writer.format(),
+        frames_read: input.frames(),
+        frames_selected: writer.frames_written(),
+        captured_bytes_read: input.captured_bytes(),
+        captured_bytes_selected: writer.captured_bytes_written(),
+        interfaces,
+    };
+    Ok((writer.into_inner(), report))
 }
 
 fn open_classic_writer<W: Write>(
@@ -353,7 +334,7 @@ mod tests {
             ),
             (1, LinkType::IPV4, None, TimestampResolution::Decimal(9)),
         ]);
-        let mut reader = Reader::with_limits(Cursor::new(input), Default::default()).unwrap();
+        let mut reader = Reader::with_limits(input.as_slice(), Default::default()).unwrap();
         let (out, report) = normalize(
             &mut reader,
             Vec::new(),
@@ -373,6 +354,19 @@ mod tests {
         assert_eq!(first.interface, Some(0));
         assert_eq!(first.link_type, LinkType::IPV4);
         assert_eq!(first.direction, Some(Direction::Inbound));
+        let second = check.next_exact_frame().unwrap().unwrap();
+        assert!(check.next_exact_frame().unwrap().is_none());
+        let selected_bytes = u64::from(first.captured_length() + second.captured_length());
+        assert_eq!(report.captured_bytes_selected, selected_bytes);
+        let skipped = Reader::with_limits(input.as_slice(), Default::default())
+            .unwrap()
+            .next_exact_frame()
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            report.captured_bytes_read,
+            selected_bytes + u64::from(skipped.captured_length())
+        );
     }
 
     #[test]
@@ -396,7 +390,14 @@ mod tests {
         assert_eq!(report.frames_selected, 1);
         let mut check = Reader::with_limits(Cursor::new(out), Default::default()).unwrap();
         assert_eq!(check.format(), Format::Pcap);
-        assert_eq!(check.next_exact_frame().unwrap().unwrap().direction, None);
+        let written = check.next_exact_frame().unwrap().unwrap();
+        assert_eq!(written.direction, None);
+        assert!(check.next_exact_frame().unwrap().is_none());
+        assert_eq!(
+            report.captured_bytes_selected,
+            u64::from(written.captured_length())
+        );
+        assert_eq!(report.captured_bytes_read, report.captured_bytes_selected);
 
         let empty_input =
             pcapng_capture(&[(0, LinkType::IPV4, None, TimestampResolution::Decimal(6))]);

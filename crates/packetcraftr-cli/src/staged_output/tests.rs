@@ -10,8 +10,8 @@ use std::path::{Path, PathBuf};
 use packetcraftr_core::budget::Cancellation;
 
 use super::*;
-use crate::commands::Command;
 use crate::invocation::Invocation;
+use crate::output::contract::Command;
 use crate::output::contract::Format;
 use crate::output::stream::StreamEncoder;
 

@@ -22,7 +22,6 @@ impl crate::commands::Spec for Args {
         events: &[],
         example: "examples/documents/output-inventory-success.json",
     }];
-    const FORMATS: &'static [Format] = crate::output::contract::TEXT_JSON;
     const OFFLINE: bool = true;
 
     fn run_time(&self) -> Option<&dyn crate::command_options::Bounded> {

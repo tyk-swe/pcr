@@ -11,7 +11,7 @@ use packetcraftr_core::{
 };
 
 use super::*;
-use crate::invocation::Invocation;
+use crate::invocation::{Invocation, StreamEncoder};
 
 const TEST_WAIT: Duration = Duration::from_secs(10);
 
@@ -119,7 +119,6 @@ fn capture_with_output(
             decoding: None,
             projector: None,
             files: None,
-            stream: &invocation.output,
         },
     )
 }

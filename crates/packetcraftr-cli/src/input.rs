@@ -17,3 +17,4 @@ pub(crate) use capture::{
     open_capture, open_capture_file, open_capture_hashed, reopen_capture_snapshot, snapshot_capture,
 };
 pub(crate) use recipe::{apply_overrides, read_recipe};
+pub(crate) use source::{is_stdin_argument, is_stdin_path};

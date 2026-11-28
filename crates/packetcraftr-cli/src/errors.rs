@@ -1,6 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use std::fmt::Write as _;
+
 use packetcraftr_core::error::Classification;
 use packetcraftr_core::error::Classified;
 use packetcraftr_core::error::Coordinate;
@@ -207,6 +209,27 @@ pub(crate) const fn exit_code_description(kind: Kind) -> &'static str {
         Kind::Policy => "the traffic policy denied the operation.",
         Kind::Internal => "an invariant failed; please report it.",
     }
+}
+
+/// One line per process exit status, shared by `--help` and `topics exit-codes`.
+pub(crate) fn exit_codes_help() -> String {
+    let mut help = String::from(
+        "  0   Success.\n  1   verdict: forwarding verification failed or was inconclusive, or a security --fail-on/--fail-incomplete threshold was met.\n",
+    );
+    for kind in KINDS {
+        let _ = writeln!(
+            help,
+            "  {:<3} {}: {}",
+            exit_code_for(kind),
+            kind.as_str(),
+            exit_code_description(kind)
+        );
+    }
+    let _ = writeln!(
+        help,
+        "  {CANCELLED_EXIT_CODE} cancelled: the operation was interrupted before it completed."
+    );
+    help
 }
 
 #[cfg(test)]

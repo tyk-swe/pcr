@@ -62,7 +62,6 @@ pub(crate) struct Args {
 
 impl Spec for Args {
     const OFFLINE: bool = true;
-    const FORMATS: &'static [Format] = crate::output::contract::TEXT_JSON_NDJSON;
     const PUBLISHED: &'static [PublishedType] = &[
         PublishedType {
             definition: "http3Success",

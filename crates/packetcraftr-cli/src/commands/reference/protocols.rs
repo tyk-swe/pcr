@@ -36,7 +36,6 @@ impl crate::commands::Spec for Args {
         events: &[],
         example: "examples/documents/output-protocols-detail-success.json",
     }];
-    const FORMATS: &'static [crate::output::contract::Format] = crate::output::contract::TEXT_JSON;
     const CANCELLATION: bool = false;
 
     fn run(

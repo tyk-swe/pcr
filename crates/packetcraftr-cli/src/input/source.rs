@@ -13,6 +13,14 @@ use std::path::Path;
 use crate::errors::CliError;
 use crate::invocation::Control;
 
+pub(crate) fn is_stdin_argument(path: &Path) -> bool {
+    path.as_os_str() == "-"
+}
+
+pub(crate) fn is_stdin_path(path: &Path) -> bool {
+    path == Path::new("-")
+}
+
 pub(super) enum Source {
     File(File),
     #[cfg(unix)]
@@ -42,7 +50,6 @@ pub(super) fn interrupted_or(control: &Control, error: CliError) -> CliError {
 /// On Linux, opening never waits for a FIFO writer.
 #[cfg(unix)]
 pub(super) fn open(control: &Control, path: &Path) -> io::Result<Source> {
-    use std::os::unix::fs::OpenOptionsExt;
     // FIFO readiness is only verified on Linux. On macOS, polling a FIFO
     // opened this way never delivered the written data or EOF, so FIFOs keep
     // the ordinary blocking open and reads there, decided by stat before
@@ -51,11 +58,21 @@ pub(super) fn open(control: &Control, path: &Path) -> io::Result<Source> {
     if std::os::unix::fs::FileTypeExt::is_fifo(&std::fs::metadata(path)?.file_type()) {
         return File::open(path).map(Source::File);
     }
-    let file = std::fs::OpenOptions::new()
+    classify(control, open_nonblocking(path)?)
+}
+
+#[cfg(unix)]
+pub(super) fn open_nonblocking(path: &Path) -> io::Result<File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    std::fs::OpenOptions::new()
         .read(true)
         .custom_flags(rustix::fs::OFlags::NONBLOCK.bits().cast_signed())
-        .open(path)?;
-    classify(control, file)
+        .open(path)
+}
+
+#[cfg(not(unix))]
+pub(super) fn open_nonblocking(path: &Path) -> io::Result<File> {
+    File::open(path)
 }
 
 /// Reads a duplicate of standard input, leaving the shared descriptor's flags untouched.
@@ -85,7 +102,7 @@ fn classify(control: &Control, file: File) -> io::Result<Source> {
 
 #[cfg(not(unix))]
 pub(super) fn open(_: &Control, path: &Path) -> io::Result<Source> {
-    File::open(path).map(Source::File)
+    open_nonblocking(path).map(Source::File)
 }
 
 #[cfg(not(unix))]

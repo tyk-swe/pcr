@@ -101,42 +101,39 @@ pub(crate) fn write_details(
 /// time, flushing what is left even when `run` fails.
 pub(crate) fn batched<T>(
     invocation: &Invocation,
-    run: impl FnOnce() -> Result<T, CliError>,
+    run: impl FnOnce(&Invocation) -> Result<T, CliError>,
 ) -> Result<T, CliError> {
     batch(invocation, run, styled_stdout)
 }
 
 pub(crate) fn batched_raw<T>(
     invocation: &Invocation,
-    run: impl FnOnce() -> Result<T, CliError>,
+    run: impl FnOnce(&Invocation) -> Result<T, CliError>,
 ) -> Result<T, CliError> {
     batch(invocation, run, || io::stdout().lock())
 }
 
 fn batch<T, W: Write>(
     invocation: &Invocation,
-    run: impl FnOnce() -> Result<T, CliError>,
+    run: impl FnOnce(&Invocation) -> Result<T, CliError>,
     stdout: impl FnOnce() -> W,
 ) -> Result<T, CliError> {
-    invocation.batch_stdout();
-    let result = run();
-    let flushed = match invocation.stdout_batch().take() {
-        Some(mut pending) => write_batch(&mut pending, stdout()),
-        None => Ok(()),
-    };
+    let invocation = invocation.with_stdout_batch();
+    let result = run(&invocation);
+    let mut pending = invocation.stdout_batch().expect("batch installed");
+    let flushed = write_batch(&mut pending, stdout());
     let value = result?;
     flushed.map_err(|source| CliError::stdout("write stdout failed", &source))?;
     Ok(value)
 }
 
-pub(crate) fn write_raw_batch(invocation: &Invocation, bytes: &[u8]) -> Result<(), CliError> {
-    let mut batch = invocation.stdout_batch();
-    let Some(pending) = batch.as_mut() else {
+pub(crate) fn write_raw_line(invocation: &Invocation, bytes: &[u8]) -> Result<(), CliError> {
+    let Some(mut pending) = invocation.stdout_batch() else {
         return crate::publication::write_raw(bytes);
     };
     pending.extend_from_slice(bytes);
     if pending.len() >= BATCH_BYTES {
-        write_batch(pending, io::stdout().lock())
+        write_batch(&mut pending, io::stdout().lock())
             .map_err(|source| CliError::stdout("write stdout failed", &source))?;
     }
     Ok(())
@@ -146,10 +143,9 @@ pub(super) fn write_rendered(invocation: &Invocation, rendered: &str) -> Result<
     invocation
         .check_interrupted()
         .map_err(WriteError::Interrupted)?;
-    let mut batch = invocation.stdout_batch();
-    let written = match batch.as_mut() {
+    let written = match invocation.stdout_batch() {
         None => write_terminated(&mut styled_stdout(), rendered),
-        Some(pending) => hold_line(pending, rendered, styled_stdout),
+        Some(mut pending) => hold_line(&mut pending, rendered, styled_stdout),
     };
     written.map_err(WriteError::Write)
 }

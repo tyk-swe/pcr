@@ -1,8 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Command implementations, grouped as in `--help`; the registry that
-//! declares every command once; and the dispatch that launches one.
+//! Grouped command implementations, parser construction, and dispatch.
 
 use std::time::Duration;
 
@@ -10,11 +9,9 @@ use packetcraftr_core::error::Kind;
 
 use crate::command_options::Bounded;
 use crate::errors::CliError;
-use crate::output::contract::Format;
 use crate::resources::Settings;
 
 pub(crate) use dispatch::Launch;
-pub use registry::Command;
 pub(crate) use registry::CommandLine;
 
 mod aggregate;
@@ -31,8 +28,6 @@ mod retained;
 mod security;
 
 pub(crate) trait Spec: Sized {
-    const FORMATS: &'static [Format];
-
     /// The output-schema definitions this command publishes, beside the
     /// types that serialize to them.
     #[allow(
@@ -65,7 +60,7 @@ pub(crate) trait Generate: Sized {
     fn generate(
         self,
         invocation: &crate::invocation::Invocation,
-        format: Format,
+        command_factory: fn() -> clap::Command,
     ) -> Result<(), CliError>;
 }
 

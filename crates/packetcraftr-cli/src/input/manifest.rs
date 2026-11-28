@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use packetcraftr_core::error::Kind;
 
 use super::bounded::{InputKind, read_file_capped, read_stdin_capped};
+use super::source::is_stdin_argument;
 use crate::errors::CliError;
 use crate::invocation::Control;
 
@@ -65,10 +66,6 @@ impl ManifestBounds {
     }
 }
 
-pub(crate) fn is_stdin(path: &Path) -> bool {
-    path.as_os_str() == "-"
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Declaration {
     pub(crate) token: String,
@@ -111,7 +108,7 @@ pub(crate) enum ManifestSource {
 
 impl ManifestSource {
     pub(crate) fn open(path: &Path) -> Self {
-        if is_stdin(path) {
+        if is_stdin_argument(path) {
             Self::Stdin
         } else {
             Self::File(path.to_path_buf())

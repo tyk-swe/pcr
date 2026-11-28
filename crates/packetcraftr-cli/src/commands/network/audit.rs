@@ -4,7 +4,7 @@
 use crate::commands::security::{Bounds, invalid, publish, read};
 use crate::commands::{CommandExit, Spec};
 use crate::invocation::Invocation;
-use crate::output::contract::{Command, Format};
+use crate::output::contract::Command;
 use crate::{
     command_options::{Bounded, EndpointPolicyArgs},
     errors::CliError,
@@ -109,7 +109,6 @@ impl Spec for AuditTls {
             example: "examples/documents/output-audit-tls-complete.json",
         },
     ];
-    const FORMATS: &'static [Format] = crate::output::contract::TEXT_JSON_NDJSON;
     fn run_time(&self) -> Option<&dyn Bounded> {
         Some(&self.connection)
     }
@@ -155,7 +154,6 @@ impl Spec for AuditHttp {
             example: "examples/documents/output-audit-http-complete.json",
         },
     ];
-    const FORMATS: &'static [Format] = crate::output::contract::TEXT_JSON_NDJSON;
     fn run_time(&self) -> Option<&dyn Bounded> {
         Some(&self.connection)
     }

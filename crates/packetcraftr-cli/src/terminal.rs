@@ -19,7 +19,7 @@ pub(crate) use stderr::{
 };
 pub(crate) use stdout::{
     WriteError, batched, batched_raw, emit_stdout_document, push_stdout_line,
-    try_write_stdout_line, write_details, write_raw_batch, write_stdout_block, write_stdout_line,
+    try_write_stdout_line, write_details, write_raw_line, write_stdout_block, write_stdout_line,
     write_summary_line, write_warning,
 };
 pub(crate) use table::table_row;

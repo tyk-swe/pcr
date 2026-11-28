@@ -3,6 +3,7 @@
 
 use std::process::ExitCode;
 
+use clap::CommandFactory;
 use packetcraftr_core::error::Kind;
 
 use super::cli::{self, Context, MachineFormat, Parsed};
@@ -44,6 +45,7 @@ fn launch(parsed: Parsed) -> ExitCode {
         force_binary_stdout: cli.force_binary_stdout,
         matches: &matches,
         definition: &definition,
+        command_factory: cli::Cli::command,
     })
 }
 

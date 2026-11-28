@@ -4,7 +4,7 @@
 use crate::commands::security::{Bounds, input, publish, read, source};
 use crate::commands::{CommandExit, Spec};
 use crate::invocation::Invocation;
-use crate::output::contract::{Command, Format};
+use crate::output::contract::Command;
 use crate::{errors::CliError, resources::Settings};
 use clap::Args;
 use packetcraftr_core::security;
@@ -221,7 +221,6 @@ impl Spec for ScanDiff {
             example: "examples/documents/output-scan-diff-complete.json",
         },
     ];
-    const FORMATS: &'static [Format] = crate::output::contract::TEXT_JSON_NDJSON;
     const OFFLINE: bool = true;
     fn resources(&self, s: &mut Settings<'_>) {
         self.bounds.resources(s);

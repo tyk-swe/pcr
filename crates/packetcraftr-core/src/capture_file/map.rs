@@ -94,6 +94,7 @@ where
             "more than 256 growth bytes per frame",
         ));
     }
+    let starting_bytes = output.captured_bytes_written();
     let mut report = MapReport::default();
     let mut endianness = reader.endianness();
     reader.refuse_declared_fcs()?;
@@ -215,16 +216,10 @@ where
                 } else {
                     output.write_frame(&changed)?;
                 }
-                report.captured_bytes_written = report
-                    .captured_bytes_written
-                    .checked_add(u64::from(changed.captured_length()))
-                    .ok_or(Error::StreamByteLimitExceeded {
-                        actual: u64::MAX,
-                        limit: limits.max_bytes,
-                    })?;
             }
         }
     }
+    report.captured_bytes_written = output.captured_bytes_written() - starting_bytes;
     Ok(report)
 }
 fn validate_copyable_options(options: &[PcapNgOption]) -> Result<(), Error> {

@@ -7,7 +7,6 @@ use std::path::{Path, PathBuf};
 use packetcraftr_core as core;
 use packetcraftr_core::error::{Classification, Classified, Kind};
 
-use super::manifest;
 use super::source::{self, Source, interrupted_or};
 use crate::errors::CliError;
 use crate::invocation::Control;
@@ -182,7 +181,8 @@ pub(crate) fn open_regular_file(
     if !metadata.is_file() {
         return Err(non_regular());
     }
-    let file = open_nonblocking(path).map_err(|source| file_io_error("open", path, source))?;
+    let file =
+        source::open_nonblocking(path).map_err(|source| file_io_error("open", path, source))?;
     if !file
         .metadata()
         .map_err(|source| file_io_error("inspect", path, source))?
@@ -191,20 +191,6 @@ pub(crate) fn open_regular_file(
         return Err(non_regular());
     }
     Ok(file)
-}
-
-#[cfg(unix)]
-fn open_nonblocking(path: &Path) -> io::Result<std::fs::File> {
-    use std::os::unix::fs::OpenOptionsExt;
-    std::fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(rustix::fs::OFlags::NONBLOCK.bits().cast_signed())
-        .open(path)
-}
-
-#[cfg(not(unix))]
-fn open_nonblocking(path: &Path) -> io::Result<std::fs::File> {
-    std::fs::File::open(path)
 }
 
 pub(crate) fn read_scope(
@@ -300,7 +286,7 @@ pub(crate) fn read_document(
     max_bytes: usize,
     kind: InputKind,
 ) -> Result<Vec<u8>, CliError> {
-    if manifest::is_stdin(path) {
+    if source::is_stdin_argument(path) {
         read_stdin_bounded(control, max_bytes, kind)
     } else {
         read_bounded_file(control, path, max_bytes, kind)
@@ -313,7 +299,7 @@ pub(crate) fn read_document_allow_empty(
     max_bytes: usize,
     kind: InputKind,
 ) -> Result<Vec<u8>, CliError> {
-    if manifest::is_stdin(path) {
+    if source::is_stdin_argument(path) {
         read_stdin_bounded_allow_empty(control, max_bytes, kind)
     } else {
         read_bounded_file_allow_empty(control, path, max_bytes, kind)

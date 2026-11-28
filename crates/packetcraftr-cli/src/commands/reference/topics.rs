@@ -7,9 +7,9 @@ use std::fmt::Write as _;
 
 use packetcraftr_core::error::{Classification, Kind};
 
-use crate::commands::{Command, Generate};
+use crate::commands::Generate;
 use crate::errors::{CliError, exit_codes_help};
-use crate::output::contract::{Format, OUTPUT_FORMATS_HELP};
+use crate::output::contract::{Command, Format, OUTPUT_FORMATS_HELP};
 use crate::terminal::emit_stdout_document;
 
 pub(crate) const AFTER_LONG_HELP: &str = r"Without NAME, lists the topics. Topics print text only and need no capture, network, or privileges.

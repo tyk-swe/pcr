@@ -56,13 +56,6 @@ impl crate::commands::Spec for Args {
             example: "examples/documents/output-dissect-complete.json",
         },
     ];
-    const FORMATS: &'static [crate::output::contract::Format] = &[
-        crate::output::contract::Format::Text,
-        crate::output::contract::Format::Json,
-        crate::output::contract::Format::Ndjson,
-        crate::output::contract::Format::Hex,
-        crate::output::contract::Format::Raw,
-    ];
     const CANCELLATION: bool = false;
 
     fn resources(&self, settings: &mut crate::resources::Settings<'_>) {

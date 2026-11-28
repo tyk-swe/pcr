@@ -28,8 +28,6 @@ impl crate::commands::Spec for Args {
             example: "examples/documents/output-merge-complete.json",
         },
     ];
-    const FORMATS: &'static [crate::output::contract::Format] =
-        crate::output::contract::TEXT_JSON_NDJSON;
     const OFFLINE: bool = true;
 
     fn resources(&self, settings: &mut crate::resources::Settings<'_>) {

@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use packetcraftr_core::error::{Classification, Classified, Kind};
 
+use crate::command_catalog::command_catalog;
+
 /// Current output contract identifier.
 pub const OUTPUT_SCHEMA: &str = "packetcraftr.output/v23";
 /// Releases 0.3.0 to 0.5.0-beta.2 and later unreleased builds each emitted this
@@ -78,7 +80,43 @@ pub(crate) fn aggregate_input<T: DeserializeOwned>(
     Ok(envelope)
 }
 
-pub use crate::commands::Command;
+macro_rules! published_commands {
+    (@variant $name:literal, $variant:expr) => { $variant };
+    (
+        $(
+            $(#[$attribute:meta])*
+            $variant:ident($arguments:ty) $(= $name:literal [$($format:ident),+])?
+                => ($group:literal, $canonical:literal),
+        )*
+    ) => {
+        /// CLI command identifier frozen into the output schema.
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
+        pub enum Command {
+            $( $( #[serde(rename = $name)] $variant, )? )*
+        }
+
+        impl Command {
+            pub const ALL: &'static [Self] = &[
+                $( $( published_commands!(@variant $name, Self::$variant), )? )*
+            ];
+
+            pub const fn as_str(self) -> &'static str {
+                match self {
+                    $( $( Self::$variant => $name, )? )*
+                }
+            }
+
+            pub const fn formats(self) -> &'static [Format] {
+                match self {
+                    $( $( Self::$variant => &[$(Format::$format),+], )? )*
+                }
+            }
+        }
+
+    };
+}
+
+command_catalog!(published_commands);
 
 impl Command {
     pub fn require_format(self, format: Format) -> Result<Format, Error> {
@@ -148,9 +186,6 @@ impl fmt::Display for Format {
         formatter.write_str(self.as_str())
     }
 }
-
-pub(crate) const TEXT_JSON: &[Format] = &[Format::Text, Format::Json];
-pub(crate) const TEXT_JSON_NDJSON: &[Format] = &[Format::Text, Format::Json, Format::Ndjson];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]

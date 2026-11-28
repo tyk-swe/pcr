@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use super::invalid;
-use crate::commands::Command;
 use crate::errors::CliError;
+use crate::output::contract::Command;
 use packetcraftr_core::security::{Report, Source};
 use sha2::{Digest, Sha256};
 use std::path::Path;

@@ -5,8 +5,8 @@ Candidates need a real caller and contract audit before implementation. Keep eac
 | Area | Evidence or question | Status |
 | --- | --- | --- |
 | CLI reference rendering | [Dispatch provides a fresh Clap definition](decisions/0002-inject-reference-command-factory.md). Output and error contracts own the shared help text. The former layer exception is gone. | Implemented, review pending |
-| Published command metadata | The command registry owns IDs, parser paths, output formats, and dispatch. Its output-facing API creates an upward dependency. Compare a metadata-only declaration with the current registry macro and preserve one declaration per command. | Next |
-| Layer graph | The direction check permits same-layer dependencies and does not expose a reference graph. Reuse its source extraction to surface cycles at documented boundaries and distinguish deliberate groups from new edges. | Investigate |
+| Published command metadata | [Parser and output consume one command catalog](decisions/0003-share-command-declarations.md). The final CLI layer exception is gone. | Implemented, review pending |
+| Layer graph | The direction check permits same-layer dependencies and does not expose a reference graph. Reuse its source extraction to surface cycles at documented boundaries and distinguish deliberate groups from new edges. | Next |
 | CLI input and output | Compare the bounded reader entry points and text, JSON, NDJSON, and staged-file paths. Separate genuine repetitions from format-specific byte budgets, deadlines, and persistence guarantees. | Investigate |
 | Offline analysis | Check how collectors apply a session, time and scope selection, provenance, and resource accounting. Review any collector-specific reimplementation before adopting a shared primitive. | Investigate |
 | Capture files | Trace selection, normalization, merge, and rewrite through record and metadata ownership. Keep original timestamp precision and section/interface scope where promised. | Investigate |

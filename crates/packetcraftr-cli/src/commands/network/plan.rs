@@ -65,7 +65,6 @@ impl crate::commands::Spec for Args {
         events: &[],
         example: "examples/documents/output-plan-success.json",
     }];
-    const FORMATS: &'static [crate::output::contract::Format] = crate::output::contract::TEXT_JSON;
     const CANCELLATION: bool = false;
 
     fn resources(&self, settings: &mut crate::resources::Settings<'_>) {

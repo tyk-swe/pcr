@@ -295,7 +295,10 @@ fn quic_exports_remain_in_the_directory_selected_before_input() {
     std::fs::create_dir(&requested).unwrap();
     let invocation = Invocation::new(
         crate::output::contract::Format::Text,
-        crate::invocation::StreamEncoder::new(crate::commands::Command::Quic, std::io::sink()),
+        crate::invocation::StreamEncoder::new(
+            crate::output::contract::Command::Quic,
+            std::io::sink(),
+        ),
         None,
         Cancellation::default(),
         None,

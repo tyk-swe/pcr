@@ -42,8 +42,6 @@ impl crate::commands::Spec for Args {
             example: "examples/documents/output-expert-complete.json",
         },
     ];
-    const FORMATS: &'static [crate::output::contract::Format] =
-        crate::output::contract::TEXT_JSON_NDJSON;
     const OFFLINE: bool = true;
 
     fn run_time(&self) -> Option<&dyn crate::command_options::Bounded> {

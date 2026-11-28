@@ -35,7 +35,6 @@ impl crate::commands::Spec for Args {
         events: &[],
         example: "examples/documents/output-differential-join-success.json",
     }];
-    const FORMATS: &'static [Format] = crate::output::contract::TEXT_JSON;
     const OFFLINE: bool = true;
 
     fn run(

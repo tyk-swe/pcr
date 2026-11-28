@@ -5,7 +5,8 @@ use clap::CommandFactory;
 
 use super::*;
 use crate::app::cli::Cli;
-use crate::commands::{Command, Generate};
+use crate::commands::Generate;
+use crate::output::contract::Command;
 use crate::output::stream::StreamEncoder;
 use packetcraftr_core::budget::Cancellation;
 

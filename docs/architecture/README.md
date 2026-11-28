@@ -22,7 +22,7 @@ flowchart TD
 | [Core](../../crates/packetcraftr-core/src/lib.rs) | Protocol definitions and the built-in registry, packet fields and codecs, expression and document parsing, packet construction and dissection, filtering and transforms, PCAP and PCAPNG, offline stream reconstruction and analysis. Runtime-neutral. |
 | [Network providers](../../crates/packetcraftr-netio/src/lib.rs) | Resolver, interface and route queries, native capture and transmission, bounded socket and TLS I/O. Provider traits expose contracts. Platform modules select and implement native backends and contain the FFI. |
 | [Workflows](../../crates/packetcraftr/src/lib.rs) | `Client` composes provider traits, registry, clock, and policy. Operation modules own live workflows and typed requests, events, reports, and evidence. |
-| [CLI](../../crates/packetcraftr-cli/src/lib.rs) | The command registry defines grouped syntax and published command IDs. The application parses global options, dispatch initiates execution, and commands adapt inputs and results to terminal and machine output. |
+| [CLI](../../crates/packetcraftr-cli/src/lib.rs) | The shared command catalog defines grouped paths, published IDs, and supported formats. The application parses global options, dispatch initiates execution, and commands adapt inputs and results to terminal and machine output. |
 | [Schemas](../../schemas) and [examples](../../examples) | Versioned request and output contracts and consumable examples. Machine output uses the v23 envelope and per-command payload schemas. Historical schema IDs remain reserved. |
 | [Tooling](../../scripts) and [CI](../../.github/workflows) | Document and schema validation, architecture and dependency gates, release packaging, fixtures, portable and native Rust profiles, fuzzing, and mutation and coverage checks. |
 
@@ -43,7 +43,7 @@ flowchart TD
 
 ## Existing architecture constraints
 
-The documented layer graph has three groups with mutual references. The core kernel types `codec`, `field`, `layer`, `layout`, `matcher`, `packet`, and `registry` form one packet model. Netio's `capture`, `interface`, `route`, and `transmit` system providers call into `platform`, whose backends implement those provider contracts. In the CLI, `output` reads published command metadata from `commands`. Reference generation receives the command factory from the application through dispatch. The workflow crate has no cycle at its documented module boundaries in the production source scan.
+The documented layer graph has two groups with mutual references. The core kernel types `codec`, `field`, `layer`, `layout`, `matcher`, `packet`, and `registry` form one packet model. Netio's `capture`, `interface`, `route`, and `transmit` system providers call into `platform`, whose backends implement those provider contracts. The CLI and workflow crate have no cycles at their documented module boundaries in the production source scan.
 
 The source scanner follows explicit `crate`, `self`, and `super` references. It does not resolve all Rust imports or infer method call dependencies. Nested modules are grouped under their closest documented boundary. The layer checker enforces direction and reports stale exceptions. The coupling checker limits clock and entropy reads, dynamic field access, casts, cancellation polls, duplicate constants and codes, and crate root exports. Cargo prevents crate cycles and the current workflow checks schema examples, CLI output, native and portable builds, and selected critical mutations.
 

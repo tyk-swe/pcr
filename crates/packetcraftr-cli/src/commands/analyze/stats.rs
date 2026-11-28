@@ -30,11 +30,6 @@ impl crate::commands::Spec for Args {
         events: &[],
         example: "examples/documents/output-stats-clock.json",
     }];
-    const FORMATS: &'static [crate::output::contract::Format] = &[
-        crate::output::contract::Format::Text,
-        crate::output::contract::Format::Json,
-        crate::output::contract::Format::Csv,
-    ];
     const OFFLINE: bool = true;
 
     fn run_time(&self) -> Option<&dyn crate::command_options::Bounded> {

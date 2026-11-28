@@ -4,7 +4,7 @@
 use crate::commands::security::{Bounds, input, publish, read, source};
 use crate::commands::{CommandExit, Spec};
 use crate::invocation::Invocation;
-use crate::output::contract::{Command, Format};
+use crate::output::contract::Command;
 use crate::{
     command_options::{ApplicationLimitsArgs, Bounded, DecodeArgs, OfflineLimitsArgs},
     errors::CliError,
@@ -136,7 +136,6 @@ macro_rules! capture_spec {
     ($ty:ty, $command:ident, $published:expr, $mode:expr) => {
         impl Spec for $ty {
             const PUBLISHED: &'static [PublishedType] = $published;
-            const FORMATS: &'static [Format] = crate::output::contract::TEXT_JSON_NDJSON;
             const OFFLINE: bool = true;
             fn run_time(&self) -> Option<&dyn Bounded> {
                 Some(&self.capture.limits)
@@ -234,7 +233,6 @@ impl Spec for Hunt {
             example: "examples/documents/output-hunt-complete.json",
         },
     ];
-    const FORMATS: &'static [Format] = crate::output::contract::TEXT_JSON_NDJSON;
     const OFFLINE: bool = true;
     fn run_time(&self) -> Option<&dyn Bounded> {
         Some(&self.capture.limits)

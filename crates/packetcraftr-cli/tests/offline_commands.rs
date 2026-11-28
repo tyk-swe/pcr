@@ -2808,6 +2808,18 @@ mod stalled_inputs {
     }
 
     #[test]
+    fn capture_stdin_accepts_normalized_dash_paths() {
+        let capture = std::fs::read(super::capture_path("dns-response.pcap")).unwrap();
+        let exact = ["files", "read", "-"];
+        let output = read_piped(&exact, capture.clone());
+        let expected = super::assert_success(&output, &exact);
+
+        let normalized = ["files", "read", "--", "-/."];
+        let output = read_piped(&normalized, capture);
+        assert_eq!(super::assert_success(&output, &normalized), expected);
+    }
+
+    #[test]
     fn regular_file_output_matches_piped_output_through_success_and_failure() {
         for truncated in [false, true] {
             let capture = synthetic_pcap(truncated);

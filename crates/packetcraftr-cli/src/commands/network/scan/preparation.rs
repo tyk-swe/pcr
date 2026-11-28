@@ -20,7 +20,7 @@ use super::inputs::ingest_targets;
 use super::selection::{EndpointRequest, transports};
 use super::{connect, list, raw, traceroute};
 use crate::errors::CliError;
-use crate::input::manifest;
+use crate::input::is_stdin_argument;
 use request::{
     DiscoveryInputs, EndpointInputs, LimitInputs, RequestInputs, ScheduleInputs, UdpInputs,
     build_request,
@@ -347,10 +347,10 @@ fn validate_stdin_consumers(
     let stdin_consumers = targets_file
         .iter()
         .chain(exclude_file)
-        .filter(|path| manifest::is_stdin(path))
+        .filter(|path| is_stdin_argument(path))
         .count()
-        + usize::from(udp_payload_file.is_some_and(manifest::is_stdin))
-        + usize::from(udp_profiles.is_some_and(manifest::is_stdin));
+        + usize::from(udp_payload_file.is_some_and(is_stdin_argument))
+        + usize::from(udp_profiles.is_some_and(is_stdin_argument));
     if stdin_consumers > 1 {
         return Err(CliError::new(
             Kind::Usage,

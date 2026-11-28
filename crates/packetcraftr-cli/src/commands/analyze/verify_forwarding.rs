@@ -17,7 +17,7 @@ use crate::commands::CommandExit;
 use crate::commands::offline_analysis::{self, AnalysisSetup};
 use crate::errors::CliError;
 use crate::filtering::{self, Capabilities};
-use crate::input::open_capture_hashed;
+use crate::input::{is_stdin_path, open_capture_hashed};
 use crate::output::capture::CaptureSource;
 
 const VERDICT_NOT_PASS: u8 = 1;
@@ -79,8 +79,7 @@ pub(super) fn run(
 ) -> Result<CommandExit, CliError> {
     let format = invocation.format;
     let stream = &invocation.output;
-    let stdin = Path::new("-");
-    if arguments.ingress == stdin && arguments.egress == stdin {
+    if is_stdin_path(&arguments.ingress) && is_stdin_path(&arguments.egress) {
         return Err(CliError::from_classification(
             Classification::new(
                 crate::code::CliInputSource,

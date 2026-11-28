@@ -10,13 +10,13 @@ use packetcraftr_core::capture_file::{Reader, ReaderLimits};
 
 use super::bounded::{InputKind, open_file, redirected_stdin};
 use super::fingerprint::{self, Fingerprint};
-use super::source::{Source, interrupted_or};
+use super::source::{Source, interrupted_or, is_stdin_path};
 use crate::command_options::OfflineCaptureLimits;
 use crate::errors::CliError;
 
 fn capture_source(control: &crate::invocation::Control, path: &Path) -> Result<Source, CliError> {
     control.check()?;
-    if path == Path::new("-") {
+    if is_stdin_path(path) {
         redirected_stdin(control, InputKind::Capture)
     } else {
         open_file(control, path)

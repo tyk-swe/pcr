@@ -31,6 +31,7 @@ flowchart TD
 | State or decision | Owner and handoff |
 | --- | --- |
 | Protocol identity, supported fields, framing, and decode binding | Core `protocol`, `registry`, `codec`, and `layer`. Callers pass a registry into build, decode, filters, and analysis. The built-in catalog owns protocol names and dispatch. |
+| CLI input sources | CLI `input::source` owns stdin recognition, platform opening, and interruptible reads. `input::bounded` applies byte and regular-file restrictions. Manifests own cumulative declaration limits. |
 | Packet inputs and bounded file decoding | Core `document`, `expression`, and `capture_file`. Capture readers own source section/interface metadata and timestamp precision; capture writers encode the selected output format. |
 | Analysis session, flow identity, reassembly, and provenance | Core `analysis::Session` drives collectors. Analysis `scope`, `stream`, `reassembly`, and `provenance` retain shared state. Individual analyzers own protocol state and report evidence with source references. |
 | Local evidence and findings | Core `security` owns finding, completeness, and evidence bundle types and offline collectors. The CLI selects inputs and publishes the report. |

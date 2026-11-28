@@ -50,11 +50,11 @@ pub(crate) struct Args {
         long,
         value_name = "NAME|NUMBER",
         value_parser = link_type::parse,
-        default_value = "1",
-        help = concat!(
-            "Link type of the input frame, ",
-            link_type::names_help!(),
-            ". Defaults to Ethernet (1).",
+        default_value_t = LinkType::ETHERNET,
+        help = format!(
+            "Link type of the input frame, {}. Defaults to Ethernet ({}).",
+            link_type::names_help(),
+            LinkType::ETHERNET
         ),
     )]
     pub(crate) link_type: LinkType,

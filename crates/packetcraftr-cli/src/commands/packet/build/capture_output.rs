@@ -20,11 +20,11 @@ pub(crate) struct CaptureOutputArgs {
         long,
         value_name = "NAME|NUMBER",
         value_parser = link_type::parse,
-        help = concat!(
-            "Capture link-layer type for generated frames, ",
-            link_type::names_help!(),
-            ". Required for PCAP and PCAPNG output; the recipe's first layer must \
-             decode under the selected link type.",
+        help = format!(
+            "Capture link-layer type for generated frames, {}. Required for PCAP and \
+             PCAPNG output; the recipe's first layer must decode under the selected link \
+             type.",
+            link_type::names_help()
         ),
     )]
     pub(crate) link_type: Option<LinkType>,

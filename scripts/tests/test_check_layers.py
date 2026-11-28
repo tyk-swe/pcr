@@ -34,19 +34,19 @@ class CheckLayersTests(unittest.TestCase):
     def check(self, files, allowlist=()):
         temporary, root = workspace(files)
         self.addCleanup(temporary.cleanup)
-        return layers.check_workspace(root, allowlist=allowlist)
+        return layers.check_workspace(root, allowlist=allowlist).problems
 
     def check_documented(self, files):
         temporary, root = workspace(files)
         self.addCleanup(temporary.cleanup)
-        return layers.check_workspace(root, allowlist=())
+        return layers.check_workspace(root, allowlist=()).problems
 
     def check_with_tests(self, files, allowlist=()):
         temporary, root = workspace(files)
         self.addCleanup(temporary.cleanup)
         return layers.check_workspace(
             root, allowlist=allowlist, include_tests=True
-        )
+        ).problems
 
     def test_downward_and_same_layer_dependencies_pass(self):
         problems = self.check({
@@ -54,6 +54,44 @@ class CheckLayersTests(unittest.TestCase):
             "high.rs": "use crate::low::Thing;\nuse crate::high::Other;",
         })
         self.assertEqual(problems, [])
+
+    def test_cycle_between_documented_boundaries_requires_approval(self):
+        files = {
+            "low.rs": "use crate::engine::stats::Counter;",
+            "engine/stats.rs": "use crate::low::Thing;",
+        }
+        self.assertEqual(self.check(files), [
+            "mini: undocumented dependency cycle among engine::stats, low",
+        ])
+        files["lib.rs"] = DOCUMENTED + "//! Allowed cycle: `low`, `engine::stats`.\n"
+        self.assertEqual(self.check(files), [])
+        files["engine/stats.rs"] = "use crate::low::{Thing}; use crate::peer::Other;"
+        files["peer.rs"] = "use crate::low::Thing;"
+        files["lib.rs"] = files["lib.rs"].replace("`low`, `engine::stats` |", "`low`, `engine::stats`, `peer` |")
+        self.assertIn(
+            "mini: undocumented dependency cycle among engine::stats, low, peer",
+            self.check(files),
+        )
+        files["engine/stats.rs"] = "pub struct Counter;"
+        self.assertEqual(self.check(files), [
+            "mini: stale allowed cycle among engine::stats, low",
+        ])
+
+    def test_graph_reports_distinct_production_boundaries(self):
+        temporary, root = workspace({
+            "high.rs": "use crate::engine::stats::{Counter, Duration};",
+            "low.rs": "#[cfg(test)] mod tests { use crate::high::Thing; }",
+        })
+        self.addCleanup(temporary.cleanup)
+        with io.StringIO() as out, redirect_stdout(out):
+            status = layers.main(["--root", str(root), "--graph"])
+            report = out.getvalue()
+        self.assertEqual(status, 0)
+        self.assertEqual(
+            [line.strip() for line in report.splitlines() if " -> " in line],
+            ['"mini::high" -> "mini::engine::stats";'],
+        )
+        self.assertIn('"mini::low";', report)
 
     def test_upward_dependencies_are_rejected(self):
         problems = self.check({
@@ -68,7 +106,7 @@ class CheckLayersTests(unittest.TestCase):
     def test_super_paths_resolve_from_owner(self):
         problems = self.check({
             "low/child.rs": "use super::super::high::Thing;",
-            "high/child.rs": "use super::super::low::Thing;",
+            "engine/child.rs": "use super::super::low::Thing;",
         })
         self.assertEqual(len(problems), 1)
         self.assertIn("low::child (layer 1) depends on high::Thing (layer 2)", problems[0])
@@ -284,7 +322,7 @@ class CheckLayersTests(unittest.TestCase):
             (extra / "src").mkdir(parents=True)
             (extra / "Cargo.toml").write_text('[package]\nname = "extra"\n')
             (extra / "src" / "lib.rs").write_text("pub struct Thing;")
-            problems = layers.check_workspace(root)
+            problems = layers.check_workspace(root).problems
         self.assertTrue(any("extra: lib.rs documents no layer table" in p
                             for p in problems))
 

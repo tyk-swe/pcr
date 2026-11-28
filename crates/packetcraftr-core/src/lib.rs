@@ -18,9 +18,10 @@
 //! | 3. Captures and filters | `capture_file`, `filter` |
 //! | 4. Offline analysis | `analysis`, `security`, `fuzz` |
 //!
-//! The kernel's data model is deliberately one unit because layers, codecs, fields,
-//! packets, and the registry refer to one another, so they are not ordered
-//! among themselves.
+//! The kernel's data model is one unit. These modules depend on each other
+//! to represent and interpret a packet.
+//!
+//! Allowed cycle: `codec`, `field`, `layer`, `layout`, `matcher`, `packet`, `registry`.
 //!
 //! Unit tests stay beside the implementations they exercise.
 

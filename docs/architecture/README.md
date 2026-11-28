@@ -43,8 +43,14 @@ flowchart TD
 
 ## Existing architecture constraints
 
-The documented layer graph has two groups with mutual references. The core kernel types `codec`, `field`, `layer`, `layout`, `matcher`, `packet`, and `registry` form one packet model. Netio's `capture`, `interface`, `route`, and `transmit` system providers call into `platform`, whose backends implement those provider contracts. The CLI and workflow crate have no cycles at their documented module boundaries in the production source scan.
+Generate the production module graph from the same source scan that runs in CI.
 
-The source scanner follows explicit `crate`, `self`, and `super` references. It does not resolve all Rust imports or infer method call dependencies. Nested modules are grouped under their closest documented boundary. The layer checker enforces direction and reports stale exceptions. The coupling checker limits clock and entropy reads, dynamic field access, casts, cancellation polls, duplicate constants and codes, and crate root exports. Cargo prevents crate cycles and the current workflow checks schema examples, CLI output, native and portable builds, and selected critical mutations.
+```sh
+python3 scripts/check_layers.py --graph > module-dependencies.dot
+```
+
+The source scan follows explicit `crate`, `self`, and `super` references across feature profiles. It does not resolve all Rust imports, expand macros, or infer method call dependencies. Nested modules are grouped under their closest documented boundary. The checker enforces dependency direction and requires every mutually reachable group to match an `Allowed cycle` entry in the crate root. Core documents its packet model as one unit. Netio documents its native provider dispatch group and the checker still limits the upward references to the specified dispatch edges. The CLI and workflow crate have no cycle groups.
+
+The coupling checker limits clock and entropy reads, dynamic field access, casts, cancellation polls, duplicate constants and codes, and crate root exports. Cargo prevents crate cycles and the current workflow checks schema examples, CLI output, native and portable builds, and selected critical mutations.
 
 The [task pool](tasks.md) tracks checks still needed before this map can support a repository-wide completion claim.

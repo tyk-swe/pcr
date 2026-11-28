@@ -24,6 +24,8 @@
 //! `platform` is the only module that may contain `unsafe` code. Every other
 //! module forbids it.
 //!
+//! Allowed cycle: `capture`, `interface`, `platform`, `route`, `transmit`.
+//!
 //! Unit tests stay beside the implementations they exercise.
 
 #[forbid(unsafe_code)]

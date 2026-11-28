@@ -1,18 +1,22 @@
 #!/usr/bin/env python3
 # Copyright (C) 2026 tyk-swe
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Check that crate modules only depend on their own layer or a lower one."""
+"""Check dependency direction and documented cycle groups at crate boundaries."""
 from __future__ import annotations
 
 import argparse
 from pathlib import Path
 import re
 import sys
+from typing import NamedTuple
 
 from rust_source import blank_comments_and_strings, is_test_path, without_test_items
 
-LayerTable = dict[tuple[str, ...], int]
-Allowlist = tuple[tuple[str, tuple[str, ...], tuple[str, ...], str], ...]
+Module = tuple[str, ...]
+LayerTable = dict[Module, int]
+Graph = dict[Module, set[Module]]
+Cycle = tuple[Module, ...]
+Allowlist = tuple[tuple[str, Module, Module, str], ...]
 
 ALLOWLIST: Allowlist = (
     ("packetcraftr-netio", ("capture", "system"), ("platform",),
@@ -173,10 +177,10 @@ def test_only_paths(
     return test
 
 
-def layer_of(table: dict[tuple[str, ...], int], path: tuple[str, ...]) -> int | None:
+def boundary(table: LayerTable, path: Module) -> Module | None:
     for length in range(len(path), 0, -1):
         if path[:length] in table:
-            return table[path[:length]]
+            return path[:length]
     return None
 
 
@@ -190,7 +194,7 @@ def owner_path(src: Path, path: Path) -> tuple[str, ...] | None:
 
 
 def allowlisted(
-    allowlist, crate: str, owner: tuple[str, ...], target: tuple[str, ...]
+    allowlist: Allowlist, crate: str, owner: Module, target: Module
 ) -> int | None:
     for index, (allowed_crate, owner_prefix, target_prefix, _reason) in enumerate(allowlist):
         if (
@@ -204,17 +208,18 @@ def allowlisted(
 
 def check_crate(
     crate: str, src: Path, table: LayerTable, allowlist: Allowlist,
-    used: set[int], include_tests: bool = False,
-) -> list[str]:
+    used: set[int], include_tests: bool,
+) -> tuple[list[str], Graph]:
     problems = []
+    graph: Graph = {module: set() for module in table}
     for path in sorted(src.rglob("*.rs")):
         owner = owner_path(src, path)
         test_file = owner is not None and is_test_path(path.relative_to(src))
         if owner is None or (test_file and not include_tests):
             continue
-        owner_layer = layer_of(table, owner)
+        owner_boundary = boundary(table, owner)
         shown = "::".join(owner)
-        if owner_layer is None:
+        if owner_boundary is None:
             if not include_tests:
                 problems.append(f"{crate}: {path} module {shown} is not in the layer table")
             continue
@@ -225,11 +230,13 @@ def check_crate(
             else crate_paths(text, owner)
         )
         for scoped_owner, target in pairs:
-            scoped_layer = layer_of(table, scoped_owner)
-            if scoped_layer is None:
-                scoped_layer = owner_layer
-            target_layer = layer_of(table, target)
-            if target_layer is None or target_layer <= scoped_layer:
+            source_module = boundary(table, scoped_owner) or owner_boundary
+            target_module = boundary(table, target)
+            if target_module is None or source_module == target_module:
+                continue
+            graph[source_module].add(target_module)
+            scoped_layer, target_layer = table[source_module], table[target_module]
+            if target_layer <= scoped_layer:
                 continue
             index = allowlisted(allowlist, crate, scoped_owner, target)
             if index is not None:
@@ -239,7 +246,38 @@ def check_crate(
                 f"{crate}: {path} {'::'.join(scoped_owner)} (layer {scoped_layer}) depends on "
                 f"{'::'.join(target)} (layer {target_layer})"
             )
-    return problems
+    return problems, graph
+
+
+def reachable(graph: Graph, source: Module) -> set[Module]:
+    visited = {source}
+    remaining = [source]
+    while remaining:
+        neighbors = graph[remaining.pop()] - visited
+        visited.update(neighbors)
+        remaining.extend(neighbors)
+    return visited
+
+
+def cycle_groups(graph: Graph) -> set[Cycle]:
+    reach = {module: reachable(graph, module) for module in graph}
+    groups = {
+        tuple(sorted(other for other in neighbors if module in reach[other]))
+        for module, neighbors in reach.items()
+    }
+    return {group for group in groups if len(group) > 1}
+
+
+def check_cycles(crate: str, graph: Graph, allowed: set[Cycle]) -> list[str]:
+    actual = cycle_groups(graph)
+    return [
+        f"{crate}: {label} {', '.join('::'.join(module) for module in group)}"
+        for label, groups in (
+            ("undocumented dependency cycle among", actual - allowed),
+            ("stale allowed cycle among", allowed - actual),
+        )
+        for group in sorted(groups)
+    ]
 
 
 TABLE_ROW = re.compile(r"^//! \| (\d+)\. [^|]*\| ([^|]*)\|", re.M)
@@ -272,27 +310,36 @@ def documented_layers(
     return layers, duplicates
 
 
-def crate_layers(crate: str, src: Path) -> tuple[LayerTable, list[str]]:
+def crate_policy(crate: str, src: Path) -> tuple[LayerTable, set[Cycle], list[str]]:
     root = src / "lib.rs"
-    if not root.is_file():
-        return {}, [f"{crate}: lib.rs documents no layer table"]
-    documented, duplicates = documented_layers(root.read_text(errors="replace"))
+    text = root.read_text(errors="replace") if root.is_file() else ""
+    documented, duplicates = documented_layers(text)
     if not documented:
-        return {}, [f"{crate}: lib.rs documents no layer table"]
+        return {}, set(), [f"{crate}: lib.rs documents no layer table"]
+    cycles = {
+        tuple(sorted(tuple(token.split("::")) for token in re.findall(r"`([^`]+)`", group)))
+        for group in re.findall(r"^//! Allowed cycle: (.*)$", text, re.M)
+    }
     problems = [
         f"{crate}: lib.rs documents {'::'.join(path)} at layers "
         f"{' and '.join(str(number) for number in numbers)}"
         for path, numbers in duplicates
     ]
-    return documented, problems
+    return documented, cycles, problems
+
+
+class WorkspaceCheck(NamedTuple):
+    problems: list[str]
+    graphs: dict[str, Graph]
 
 
 def check_workspace(
     root: Path,
     allowlist: Allowlist = ALLOWLIST,
     include_tests: bool = False,
-) -> list[str]:
+) -> WorkspaceCheck:
     problems = []
+    graphs = {}
     crates = tuple(path.parent for path in sorted((root / "crates").glob("*/Cargo.toml")))
     used: set[int] = set()
     for directory in crates:
@@ -301,20 +348,34 @@ def check_workspace(
         if not src.is_dir():
             problems.append(f"{crate}: missing source directory {src}")
             continue
-        table, invalid = crate_layers(crate, src)
+        table, cycles, invalid = crate_policy(crate, src)
         problems.extend(invalid)
         if not table:
             continue
-        problems.extend(check_crate(crate, src, table, allowlist, used, include_tests))
-    if include_tests:
-        return problems
-    for index, (crate, owner_prefix, target_prefix, _reason) in enumerate(allowlist):
-        if index not in used and any(directory.name == crate for directory in crates):
-            problems.append(
-                f"{crate}: stale allowlist entry {'::'.join(owner_prefix)} -> "
-                f"{'::'.join(target_prefix)}"
-            )
-    return problems
+        violations, graph = check_crate(crate, src, table, allowlist, used, include_tests)
+        problems.extend(violations)
+        graphs[crate] = graph
+        if not include_tests:
+            problems.extend(check_cycles(crate, graph, cycles))
+    if not include_tests:
+        for index, (crate, owner_prefix, target_prefix, _reason) in enumerate(allowlist):
+            if index not in used and any(directory.name == crate for directory in crates):
+                problems.append(
+                    f"{crate}: stale allowlist entry {'::'.join(owner_prefix)} -> "
+                    f"{'::'.join(target_prefix)}"
+                )
+    return WorkspaceCheck(problems, graphs)
+
+
+def print_graph(graphs: dict[str, Graph]) -> None:
+    print("digraph module_dependencies {")
+    for crate, graph in sorted(graphs.items()):
+        for source, targets in sorted(graph.items()):
+            node = f'"{crate}::{"::".join(source)}"'
+            print(f"  {node};")
+            for target in sorted(targets):
+                print(f'  {node} -> "{crate}::{"::".join(target)}";')
+    print("}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -322,28 +383,34 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--root", type=Path, default=Path(__file__).resolve().parents[1]
     )
-    parser.add_argument(
+    reports = parser.add_mutually_exclusive_group()
+    reports.add_argument(
         "--report-tests",
         action="store_true",
         help="report upward dependencies from test code without failing; "
         "test code stays exempt from the check itself",
     )
+    reports.add_argument(
+        "--graph",
+        action="store_true",
+        help="print production module dependencies in Graphviz DOT format",
+    )
     args = parser.parse_args(argv)
+    checked = check_workspace(args.root.resolve(), include_tests=args.report_tests)
     if args.report_tests:
-        couplings = check_workspace(
-            args.root.resolve(), include_tests=True
-        )
-        for coupling in couplings:
+        for coupling in checked.problems:
             print(coupling)
-        print(f"{len(couplings)} test layer coupling(s) (report only)")
+        print(f"{len(checked.problems)} test layer coupling(s) (report only)")
         return 0
-    problems = check_workspace(args.root.resolve())
-    for problem in problems:
+    if args.graph:
+        print_graph(checked.graphs)
+    for problem in checked.problems:
         print(problem, file=sys.stderr)
-    if problems:
-        print(f"{len(problems)} layer problem(s)", file=sys.stderr)
+    if checked.problems:
+        print(f"{len(checked.problems)} layer problem(s)", file=sys.stderr)
         return 1
-    print("all crate modules depend only on their own layer or a lower one")
+    if not args.graph:
+        print("production dependencies respect crate layers and documented cycle groups")
     return 0
 
 

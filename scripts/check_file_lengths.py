@@ -10,7 +10,7 @@ from pathlib import Path
 import sys
 from typing import TypedDict
 
-from rust_source import blank_comments_and_strings, is_test_path
+from rust_source import blank_comments_and_strings, is_build_output, is_test_path
 
 CLOSING_ONLY = {"}", ")", "]", "};", ");", "],", "},"}
 SOURCE_GLOBS = ("crates/**/*.rs", "scripts/**/*.py", "examples/**/*.rs", "fuzz/**/*.rs")
@@ -61,12 +61,10 @@ def rank_files(root: Path, globs: Iterable[str] = SOURCE_GLOBS) -> list[FileLeng
     for pattern in globs:
         for path in sorted(root.glob(pattern)):
             relative = path.relative_to(root)
-            if "target" in relative.parts and "src" not in relative.parts[
-                : relative.parts.index("target")
-            ]:
+            if is_build_output(relative):
                 continue
             rows.append({
-                "path": str(relative),
+                "path": relative.as_posix(),
                 "code_lines": code_lines(path),
                 "is_test": is_test_path(relative),
             })

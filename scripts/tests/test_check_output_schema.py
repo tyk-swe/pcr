@@ -12,6 +12,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from support import ROOT, load_script
+from rust_source import production_sources
 
 checker = load_script('check_output_schema')
 
@@ -133,7 +134,7 @@ class DocumentValidationTests(unittest.TestCase):
                 '    Known => "known_issue",\n'
                 '} }\n'
                 'const OTHER: &str = "unpublished_issue";\n')
-            published = checker.published_codes(root)
+            published = checker.published_codes(production_sources(root).values())
         document = dict(VALID, command='http3', result={
             'exchange': {'request': {'issues': [
                 {'code': 'known_issue'}, {'code': 'unpublished_issue'},
@@ -175,7 +176,16 @@ class DocumentValidationTests(unittest.TestCase):
             tests = root / 'crates/mini/tests/check.rs'
             tests.parent.mkdir(parents=True)
             tests.write_text('fn g() { let _ = "cli.test_file"; }\n')
-            self.assertEqual(checker.published_codes(root), {'cli.live', 'cli.after'})
+            artifact = root / 'crates/mini/target/debug/generated.rs'
+            artifact.parent.mkdir(parents=True)
+            artifact.write_text('fn g() { let _ = "cli.artifact"; }\n')
+            planning = root / 'crates/mini/src/target/planning.rs'
+            planning.parent.mkdir(parents=True)
+            planning.write_text('fn g() { let _ = "cli.planning"; }\n')
+            self.assertEqual(
+                checker.published_codes(production_sources(root).values()),
+                {'cli.live', 'cli.after', 'cli.planning'},
+            )
 
     def test_invalid_schema_is_rejected(self):
         with self.assertRaises(checker.CheckError):
@@ -260,7 +270,7 @@ class RuntimeValidationTests(unittest.TestCase):
             event: json.loads((examples / f'output-read-{event}.json').read_text(encoding='utf-8'))
             for event in ('event', 'error', 'complete')
         }
-        published = checker.published_codes(ROOT)
+        published = checker.published_codes(production_sources(ROOT).values())
         with tempfile.TemporaryDirectory() as directory:
             def problems(*events: str) -> list[str]:
                 stdout = ''.join(json.dumps(records[event]) + '\n' for event in events)
@@ -361,11 +371,16 @@ class RegistryTests(unittest.TestCase):
 
     def test_agreeing_registry_passes(self):
         root = self.workspace(REGISTRY_SOURCE)
-        self.assertEqual(checker.registry_problems(root, REGISTRY_SCHEMA, checker.load_jsonschema(), set()), [])
+        sources = production_sources(root)
+        self.assertEqual(
+            checker.registry_problems(root, REGISTRY_SCHEMA, checker.load_jsonschema(), set(), sources),
+            [],
+        )
 
     def test_non_string_command_and_event_declarations_are_diagnosed(self):
         root = self.workspace(REGISTRY_SOURCE)
         jsonschema = checker.load_jsonschema()
+        sources = production_sources(root)
         for definition, field, declaration in (
             ('buildSuccess', 'command', {'const': {}}),
             ('buildStreamSuccess', 'event', {'enum': ['complete', 1]}),
@@ -373,7 +388,7 @@ class RegistryTests(unittest.TestCase):
             schema = deepcopy(REGISTRY_SCHEMA)
             schema['$defs'][definition]['properties'][field] = declaration
             with self.subTest(field=field), self.assertRaisesRegex(checker.CheckError, field):
-                checker.registry_problems(root, schema, jsonschema, set())
+                checker.registry_problems(root, schema, jsonschema, set(), sources)
 
     def test_registered_examples_outside_output_glob_require_published_codes(self):
         relative = 'examples/documents/build.json'
@@ -381,9 +396,11 @@ class RegistryTests(unittest.TestCase):
         (root / relative).write_text(json.dumps({
             'command': 'build', 'status': 'success', 'result': {'code': 'cli.unpublished'},
         }))
-        self.assertEqual(checker.registry_problems(root, REGISTRY_SCHEMA, checker.load_jsonschema(), set()), [
-            f"{relative}: /result/code: unpublished code 'cli.unpublished'",
-        ])
+        sources = production_sources(root)
+        self.assertEqual(
+            checker.registry_problems(root, REGISTRY_SCHEMA, checker.load_jsonschema(), set(), sources),
+            [f"{relative}: /result/code: unpublished code 'cli.unpublished'"],
+        )
 
     def test_registry_ignores_comments_and_test_only_records(self):
         root = self.workspace(REGISTRY_SOURCE + '\n/*\n' + REGISTRY_SOURCE + '\n*/\n')
@@ -403,22 +420,27 @@ impl StreamRecord for CommentedRecord {
 }
 */
 ''')
-        self.assertEqual(checker.registry_problems(root, REGISTRY_SCHEMA, checker.load_jsonschema(), set()), [])
+        sources = production_sources(root)
+        self.assertEqual(
+            checker.registry_problems(root, REGISTRY_SCHEMA, checker.load_jsonschema(), set(), sources),
+            [],
+        )
         output.write_text(source.replace('pub struct Report {}', '/* pub struct Report {} */'))
-        problems = checker.registry_problems(root, REGISTRY_SCHEMA, checker.load_jsonschema(), set())
+        sources = production_sources(root)
+        problems = checker.registry_problems(root, REGISTRY_SCHEMA, checker.load_jsonschema(), set(), sources)
         self.assertEqual(len(problems), 1)
         self.assertIn('rust type crate::output::build::Report is not defined', problems[0])
 
     def test_reports_unused_schema_definitions(self):
         root = self.workspace(REGISTRY_SOURCE.replace('buildSuccess"', 'goneSuccess"'))
-        problems = checker.registry_problems(root, REGISTRY_SCHEMA, checker.load_jsonschema(), set())
+        problems = checker.registry_problems(root, REGISTRY_SCHEMA, checker.load_jsonschema(), set(), production_sources(root))
         self.assertTrue(any('no such schema definition' in problem for problem in problems))
         self.assertTrue(any('buildSuccess claims' in problem for problem in problems))
 
     def test_unregistered_stream_type_is_reported(self):
         source = REGISTRY_SOURCE.replace('"crate::output::build::PacketEvent", ', '')
         root = self.workspace(source)
-        problems = checker.registry_problems(root, REGISTRY_SCHEMA, checker.load_jsonschema(), set())
+        problems = checker.registry_problems(root, REGISTRY_SCHEMA, checker.load_jsonschema(), set(), production_sources(root))
         self.assertTrue(any('PacketEvent' in problem for problem in problems))
 
     def registered_at(self, module):
@@ -428,7 +450,7 @@ impl StreamRecord for CommentedRecord {
         path = root / checker.CLI_SRC / f'{relative}.rs'
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text('pub struct Report {}\n')
-        return checker.registry_problems(root, REGISTRY_SCHEMA, checker.load_jsonschema(), set())
+        return checker.registry_problems(root, REGISTRY_SCHEMA, checker.load_jsonschema(), set(), production_sources(root))
 
     def test_published_type_in_a_command_output_module_passes(self):
         self.assertEqual(self.registered_at('crate::commands::packet::build::output'), [])

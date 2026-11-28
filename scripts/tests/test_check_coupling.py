@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 from support import load_script
+from rust_source import production_sources
 
 coupling = load_script("check_coupling")
 
@@ -24,13 +25,13 @@ class CheckCouplingTests(unittest.TestCase):
         root = self.workspace({
             "crates/packetcraftr-core/src/protocol/catalog.rs":
                 'Foo { canonical: "foo", aliases: [] }',
-            "crates/mini/src/codec.rs":
+            "crates/packetcraftr-core/src/codec.rs":
                 "use crate::thing::*;\nfn make_layer() {}\n"
                 'fn f() { Id::new("foo"); layer.field("x"); Instant::now(); }',
             "crates/mini/src/tests.rs":
                 "fn make_layer() {}\nfn g() { Instant::now(); }",
         })
-        measured = coupling.inventory(root)
+        measured = coupling.inventory(production_sources(root))
         self.assertEqual(measured["make_layer_impls"], 1)
         self.assertEqual(measured["glob_imports"], 1)
         self.assertEqual(measured["builtin_id_literals"], 1)
@@ -45,7 +46,7 @@ class CheckCouplingTests(unittest.TestCase):
         }) / "tests" / "checkout"
 
         self.assertEqual(
-            [path.relative_to(root).as_posix() for path in coupling.production_sources(root)],
+            [path.as_posix() for path in production_sources(root)],
             ["crates/mini/src/lib.rs"],
         )
 
@@ -76,16 +77,18 @@ class CheckCouplingTests(unittest.TestCase):
             "crates/mini/src/plain.rs": 'fn live() { Id::new("fixture"); }',
         }
         root = self.workspace(files | {"crates/mini/src/tests.rs": fixtures})
-        expected_counts = coupling.inventory(root)
-        expected_problems = coupling.allowlist_problems(root)
+        sources = production_sources(root)
+        expected_counts = coupling.inventory(sources)
+        expected_problems = coupling.allowlist_problems(sources)
 
         for relative, source in files.items():
             (root / relative).write_text(
                 source + "\n#[cfg(all(test, unix))]\nmod tests {\n" + fixtures + "}\n"
             )
 
-        self.assertEqual(coupling.inventory(root), expected_counts)
-        self.assertEqual(coupling.allowlist_problems(root), expected_problems)
+        sources = production_sources(root)
+        self.assertEqual(coupling.inventory(sources), expected_counts)
+        self.assertEqual(coupling.allowlist_problems(sources), expected_problems)
 
     def test_cast_outside_allowlist_is_counted(self):
         root = self.workspace({
@@ -96,7 +99,7 @@ class CheckCouplingTests(unittest.TestCase):
             "crates/mini/src/codec.rs":
                 "fn f(layer: &dyn Layer) { layer.downcast_ref::<Tcp>(); }",
         })
-        measured = coupling.inventory(root)
+        measured = coupling.inventory(production_sources(root))
         self.assertEqual(measured["downcast_sites"], 1)
         self.assertEqual(measured["downcast_outside_allowlist"], 1)
 
@@ -105,7 +108,7 @@ class CheckCouplingTests(unittest.TestCase):
             "crates/packetcraftr-core/src/protocol/identity.rs":
                 "fn f(layer: &dyn Layer) { layer.downcast_ref::<Tcp>(); }",
         })
-        problems = coupling.allowlist_problems(root)
+        problems = coupling.allowlist_problems(production_sources(root))
         self.assertTrue(
             any("stale cast allowlist entry: crates/packetcraftr-core/src/packet.rs"
                 in problem for problem in problems)
@@ -114,30 +117,36 @@ class CheckCouplingTests(unittest.TestCase):
 
     def test_stale_boundary_exemption_is_reported(self):
         root = self.workspace({
-            "crates/mini/src/codec.rs": 'fn f() { layer.field("x"); }',
+            "crates/packetcraftr-core/src/codec.rs": 'fn f() { layer.field("x"); }',
         })
-        problems = coupling.allowlist_problems(root)
+        problems = coupling.allowlist_problems(production_sources(root))
         self.assertFalse(
-            any("stale boundary exemption: codec.rs" in problem for problem in problems)
+            any("stale boundary exemption: crates/packetcraftr-core/src/codec.rs" in problem for problem in problems)
         )
         self.assertTrue(
-            any("stale boundary exemption: template.rs" in problem for problem in problems)
+            any("stale boundary exemption: crates/packetcraftr-core/src/template.rs" in problem for problem in problems)
         )
+
+        root = self.workspace({
+            "crates/packetcraftr/src/orders/codec.rs": 'fn f() { layer.field("x"); }',
+        })
+        problems = coupling.allowlist_problems(production_sources(root))
+        self.assertIn("stale boundary exemption: crates/packetcraftr-core/src/codec.rs", problems)
 
     def test_comments_neither_count_as_coupling_nor_keep_exemptions_alive(self):
         root = self.workspace({
             "crates/packetcraftr-core/src/protocol/identity.rs":
                 "// layer.downcast_ref::<Tcp>();\n",
-            "crates/mini/src/codec.rs": '/* layer.field("x"); */',
+            "crates/packetcraftr-core/src/codec.rs": '/* layer.field("x"); */',
             "crates/mini/src/plain.rs": '/* layer.field("x"); Instant::now(); */',
         })
-        measured = coupling.inventory(root)
+        measured = coupling.inventory(production_sources(root))
         self.assertEqual(measured["downcast_sites"], 0)
         self.assertEqual(measured["dynamic_field_sites"], 0)
         self.assertEqual(measured["instant_now"], 0)
-        problems = coupling.allowlist_problems(root)
+        problems = coupling.allowlist_problems(production_sources(root))
         self.assertIn("stale cast allowlist entry: crates/packetcraftr-core/src/protocol/identity.rs", problems)
-        self.assertIn("stale boundary exemption: codec.rs", problems)
+        self.assertIn("stale boundary exemption: crates/packetcraftr-core/src/codec.rs", problems)
 
     def test_duplicate_constant_literals_are_counted(self):
         root = self.workspace({
@@ -148,7 +157,7 @@ class CheckCouplingTests(unittest.TestCase):
             "crates/mini/src/b.rs":
                 "pub const LIMIT: usize = 64;\npub const OTHER: usize = crate::a::LIMIT;\n",
         })
-        measured = coupling.inventory(root)
+        measured = coupling.inventory(production_sources(root))
         self.assertEqual(measured["duplicate_constants"], 1)
 
     def test_duplicate_wire_codes_detect_cross_crate_and_intra_file_collisions(self):
@@ -171,9 +180,9 @@ class CheckCouplingTests(unittest.TestCase):
                 'const A: OtherCode = OtherCode::new("io.unique");\n'
                 'impl Other { const B: Self = Self::new("io.unique"); }\n',
         })
-        sources = coupling.production_sources(root)
+        sources = production_sources(root)
         self.assertEqual(
-            coupling.duplicate_wire_codes(root, sources),
+            coupling.duplicate_wire_codes(sources),
             {
                 "cli.twice": [
                     "crates/packetcraftr/src/code.rs",
@@ -185,7 +194,7 @@ class CheckCouplingTests(unittest.TestCase):
                 ],
             },
         )
-        self.assertEqual(coupling.inventory(root)["duplicate_wire_codes"], 2)
+        self.assertEqual(coupling.inventory(sources)["duplicate_wire_codes"], 2)
 
     def test_cancellation_polls_count_every_receiver_spelling(self):
         root = self.workspace({
@@ -204,7 +213,7 @@ class CheckCouplingTests(unittest.TestCase):
             "crates/packetcraftr/src/b.rs":
                 "fn f() { invocation.check()?; }",
         })
-        measured = coupling.inventory(root)
+        measured = coupling.inventory(production_sources(root))
         self.assertEqual(measured["manual_cancellation_polls"], 6)
 
     def test_cancellation_polls_require_a_word_boundary(self):
@@ -221,7 +230,7 @@ class CheckCouplingTests(unittest.TestCase):
                 "fn first() { return invocation\n    .check(); }\n"
                 "fn second() { return control /* deadline */ . check_interrupted(); }\n",
         })
-        measured = coupling.inventory(root)
+        measured = coupling.inventory(production_sources(root))
         self.assertEqual(measured["manual_cancellation_polls"], 2)
 
     def test_cancellation_polls_ignore_comments_and_strings(self):
@@ -230,16 +239,30 @@ class CheckCouplingTests(unittest.TestCase):
                 '// invocation.check();\n'
                 'const EXAMPLE: &str = "cancellation.check()";\n',
         })
-        measured = coupling.inventory(root)
+        measured = coupling.inventory(production_sources(root))
         self.assertEqual(measured["manual_cancellation_polls"], 0)
 
+    def test_repository_relative_owners_are_independent_of_checkout_path(self):
+        files = {
+            'crates/packetcraftr-core/src/codec.rs': 'fn f() { layer.field("x"); control.check(); }',
+            'crates/packetcraftr/src/orders/codec.rs': 'fn f() { layer.field("y"); control.check(); }',
+            'crates/packetcraftr-cli/src/commands/run.rs': 'fn f() { control.check(); }',
+        }
+        for checkout in ('ordinary', 'packetcraftr-cli/tests/worktree'):
+            with self.subTest(checkout=checkout):
+                root = self.workspace({f'{checkout}/{path}': text for path, text in files.items()}) / checkout
+                counts = coupling.inventory(production_sources(root))
+                self.assertEqual(counts['dynamic_field_sites'], 1)
+                self.assertEqual(counts['manual_cancellation_polls'], 1)
+
     def test_repository_stays_under_ceilings(self):
-        measured = coupling.inventory()
+        sources = production_sources(coupling.ROOT)
+        measured = coupling.inventory(sources)
         for name, value in measured.items():
             self.assertLessEqual(value, coupling.CEILINGS[name], name)
         self.assertEqual(measured["make_layer_impls"], 0)
         self.assertEqual(measured["downcast_outside_allowlist"], 0)
-        self.assertEqual(coupling.allowlist_problems(), [])
+        self.assertEqual(coupling.allowlist_problems(sources), [])
 
 
 if __name__ == "__main__":

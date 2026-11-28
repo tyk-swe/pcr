@@ -14,7 +14,7 @@ import sys
 from typing import Any, Iterable, Literal, NamedTuple
 
 from release_assets import validate_manifest
-from rust_source import blank_comments, is_test_path, without_test_items
+from rust_source import blank_comments, production_sources
 from script_support import read_json, strict_json
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -286,7 +286,7 @@ HTTP3_CODE_ENUM = re.compile(r'published_enum!\s*\{[^{}]*\benum Code from http3:
 ENUM_VALUE = re.compile(r'=>\s*"([a-z][a-z0-9_]*)"')
 
 
-def published_codes(root: Path) -> set[str]:
+def published_codes(sources: Iterable[str]) -> set[str]:
     """Every machine-readable code the Rust sources can publish.
 
     Classification codes come from the typed `Code` enum; diagnostic and
@@ -294,10 +294,7 @@ def published_codes(root: Path) -> set[str]:
     Output carrying a code outside this closed set is unpublished surface.
     """
     codes: set[str] = set()
-    for path in (root / 'crates').rglob('*.rs'):
-        if is_test_path(path.relative_to(root)):
-            continue
-        text = blank_comments(without_test_items(path.read_text(encoding='utf-8', errors='replace')))
+    for text in sources:
         codes.update(CODE_LITERAL.findall(text))
         if declaration := HTTP3_CODE_ENUM.search(text):
             codes.update(ENUM_VALUE.findall(declaration[1]))
@@ -455,13 +452,7 @@ def _consts(node: Any, key: str) -> list[str]:
     return []
 
 
-def _production_sources(root: Path) -> list[Path]:
-    base = root / CLI_SRC
-    return [path for path in sorted(base.rglob('*.rs'))
-            if not is_test_path(path.relative_to(root))]
-
-
-def _stream_record_types(root: Path, sources: dict[Path, str]) -> set[str]:
+def _stream_record_types(sources: dict[Path, str]) -> set[str]:
     types = set()
     for path, source in sources.items():
         lines = source.splitlines()
@@ -472,30 +463,28 @@ def _stream_record_types(root: Path, sources: dict[Path, str]) -> set[str]:
                 match = re.search(r'StreamRecord for\s+(&?\w+(?:::\w+)*(?:<[^>]*>)?)', lines[back])
                 if match:
                     name = match.group(1).lstrip('&').split('<')[0]
-                    relative = str(path.relative_to(root / CLI_SRC)).removesuffix('.rs')
+                    relative = path.relative_to(CLI_SRC).with_suffix('').as_posix()
                     types.add(f'crate::{relative.replace("/", "::")}::{name}'
                               if '::' not in name else f'crate::{name}')
                     break
     return types
 
 
-def _type_defined(root: Path, rust_type: str, sources: dict[Path, str]) -> bool:
+def _type_defined(rust_type: str, sources: dict[Path, str]) -> bool:
     parts = rust_type.split('::')
     if len(parts) < 3 or parts[0] != 'crate':
         return False
-    name, module = parts[-1], parts[1:-1]
-    base = root / CLI_SRC
-    candidates = [base / ('/'.join(module) + '.rs')]
-    candidates += sorted((base / '/'.join(module)).rglob('*.rs')) if (base / '/'.join(module)).is_dir() else []
-    pattern = re.compile(rf'(?:struct|enum|type)\s+{re.escape(name)}\b')
-    return any(pattern.search(sources.get(path, '')) for path in candidates)
+    module = Path(CLI_SRC).joinpath(*parts[1:-1])
+    pattern = re.compile(rf'(?:struct|enum|type)\s+{re.escape(parts[-1])}\b')
+    return any(pattern.search(text) for path, text in sources.items()
+               if path == module.with_suffix('.rs') or path.is_relative_to(module))
 
 
-def registry_problems(root: Path, schema: Any, jsonschema: Any, published: set[str]) -> list[str]:
+def registry_problems(root: Path, schema: Any, jsonschema: Any, published: set[str],
+                      sources: dict[Path, str]) -> list[str]:
     """The contract registry must agree with the schema, sources, and examples."""
     problems: list[str] = []
-    sources = {path: blank_comments(without_test_items(path.read_text(encoding='utf-8')))
-               for path in _production_sources(root)}
+    sources = {path: text for path, text in sources.items() if path.is_relative_to(CLI_SRC)}
     rows = read_registry('\n'.join(sources.values()))
     if not rows:
         return [f'{REGISTRY}: no PublishedType rows found']
@@ -537,7 +526,7 @@ def registry_problems(root: Path, schema: Any, jsonschema: Any, published: set[s
         if list(row.events) != _consts(definition, 'event'):
             problems.append(f'{label}: events disagree with the definition')
         for rust_type in row.rust_types:
-            if not _type_defined(root, rust_type, sources):
+            if not _type_defined(rust_type, sources):
                 problems.append(f'{label}: rust type {rust_type} is not defined')
             if 'output' not in rust_type.split('::'):
                 problems.append(f'{label}: rust type {rust_type} is outside an output module')
@@ -559,7 +548,7 @@ def registry_problems(root: Path, schema: Any, jsonschema: Any, published: set[s
             if claimed.get(name, set()) != expected:
                 problems.append(f'{REGISTRY}: {name} claims '
                                 f'{sorted(claimed.get(name, set()))}, schema pins {sorted(expected)}')
-    for stream_type in sorted(_stream_record_types(root, sources) - registered_types):
+    for stream_type in sorted(_stream_record_types(sources) - registered_types):
         problems.append(f'{REGISTRY}: stream record type {stream_type} is not registered')
     return problems
 
@@ -573,9 +562,10 @@ def check(root: Path, binary: Path | None = None) -> list[str]:
         raise CheckError(f'{RELEASE_ASSETS}: {error}') from error
     problems = check_identity(schema_set.envelope_schema, identity)
     problems.extend(check_release_assets(inventory.source_assets, identity, schema_set.required_assets))
-    published = published_codes(root)
+    sources = production_sources(root)
+    published = published_codes(sources.values())
     try:
-        problems.extend(registry_problems(root, schema_set.merged_schema, load_jsonschema(), published))
+        problems.extend(registry_problems(root, schema_set.merged_schema, load_jsonschema(), published, sources))
     except CheckError as error:
         raise CheckError(f'{identity.schema_path}: {error}') from error
     problems.extend(example_problems(root, schema_set.validator, published))

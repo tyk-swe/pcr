@@ -12,6 +12,18 @@ def is_test_path(path: Path) -> bool:
     return path.name == "tests.rs" or "tests" in path.parts[:-1]
 
 
+def is_build_output(path: Path) -> bool:
+    return 'target' in path.parts and 'src' not in path.parts[:path.parts.index('target')]
+
+
+def production_sources(root: Path) -> dict[Path, str]:
+    return {
+        relative: blank_comments(without_test_items(path.read_text(encoding='utf-8')))
+        for path in sorted((root / 'crates').rglob('*.rs'))
+        if not is_test_path(relative := path.relative_to(root)) and not is_build_output(relative)
+    }
+
+
 CHAR_LITERAL = re.compile(r"'(?:\\.|[^\\'])'")
 RAW_PREFIX = re.compile(r'(?:br|cr|r)(#+)?"')
 

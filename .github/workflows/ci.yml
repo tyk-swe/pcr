@@ -46,10 +46,11 @@ jobs:
         run: sudo apt-get update && sudo apt-get install --yes libpcap-dev python3-jsonschema
       - name: Install the pinned toolchain
         run: rustup toolchain install
-      - name: Restore Cargo cache
+      - &restore-workspace-cache
+        name: Restore Cargo cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: |
+          path: &workspace-cache-paths |
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
@@ -88,7 +89,8 @@ jobs:
           cargo doc --locked --workspace --no-default-features --no-deps --document-private-items
           cargo doc --locked --workspace --no-default-features --features packetcraftr-cli/native-layer3 --no-deps --document-private-items
           cargo doc --locked --workspace --all-features --no-deps --document-private-items
-      - name: Drop workspace artifacts from the Cargo cache
+      - &drop-workspace-artifacts
+        name: Drop workspace artifacts from the Cargo cache
         shell: bash
         run: |
           if [ -d target ]; then
@@ -110,26 +112,12 @@ jobs:
           msrv="$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["rust-version"])')"
           rustup toolchain install "$msrv" --profile minimal
           echo "version=$msrv" >> "$GITHUB_OUTPUT"
-      - name: Restore Cargo cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target
-          key: ci-v1-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', '**/Cargo.toml', 'Cargo.lock') }}
+      - *restore-workspace-cache
       - name: Check every workspace target with portable and all features
         run: |
           cargo +${{ steps.msrv.outputs.version }} check --locked --workspace --all-targets --no-default-features
           cargo +${{ steps.msrv.outputs.version }} check --locked --workspace --all-targets --all-features
-      - name: Drop workspace artifacts from the Cargo cache
-        shell: bash
-        run: |
-          if [ -d target ]; then
-            rm -rf target/*/incremental
-            find target -maxdepth 3 -name '*packetcraftr*' -prune -exec rm -rf {} +
-          fi
+      - *drop-workspace-artifacts
 
   portable:
     name: Portable and pcap-free
@@ -139,15 +127,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install the pinned toolchain
         run: rustup toolchain install
-      - name: Restore Cargo cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target
-          key: ci-v1-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', '**/Cargo.toml', 'Cargo.lock') }}
+      - *restore-workspace-cache
       - name: Run workspace tests without default features
         run: cargo test --locked --workspace --no-default-features
       - name: Run library examples
@@ -159,13 +139,7 @@ jobs:
         run: cargo test --locked -p packetcraftr-cli -p packetcraftr-netio --no-default-features --features packetcraftr-cli/native-layer3,packetcraftr-netio/native-layer3
       - name: Build the pcap-free CLI
         run: cargo build --locked -p packetcraftr-cli --no-default-features --features native-layer3
-      - name: Drop workspace artifacts from the Cargo cache
-        shell: bash
-        run: |
-          if [ -d target ]; then
-            rm -rf target/*/incremental
-            find target -maxdepth 3 -name '*packetcraftr*' -prune -exec rm -rf {} +
-          fi
+      - *drop-workspace-artifacts
 
   platforms-clippy:
     name: Native clippy (${{ matrix.os }})
@@ -180,15 +154,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install the pinned toolchain
         run: rustup toolchain install
-      - name: Restore Cargo cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target
-          key: ci-v1-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', '**/Cargo.toml', 'Cargo.lock') }}
+      - *restore-workspace-cache
       - name: Clippy for supported feature profiles
         shell: bash
         run: |
@@ -197,13 +163,7 @@ jobs:
           cargo clippy --locked --workspace --all-targets --no-default-features --features packetcraftr-cli/native-layer2 -- -D warnings
           cargo clippy --locked --workspace --all-targets --no-default-features --features packetcraftr-cli/native-layer3 -- -D warnings
           cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
-      - name: Drop workspace artifacts from the Cargo cache
-        shell: bash
-        run: |
-          if [ -d target ]; then
-            rm -rf target/*/incremental
-            find target -maxdepth 3 -name '*packetcraftr*' -prune -exec rm -rf {} +
-          fi
+      - *drop-workspace-artifacts
 
   platforms-test:
     name: Native tests (${{ matrix.os }})
@@ -218,28 +178,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install the pinned toolchain
         run: rustup toolchain install
-      - name: Restore Cargo cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target
-          key: ci-v1-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', '**/Cargo.toml', 'Cargo.lock') }}
+      - *restore-workspace-cache
       - name: Run workspace tests with default features
         run: cargo test --locked --workspace
       - name: Run workspace tests with all features
         run: cargo test --locked --workspace --all-features
       - name: Run workspace tests without default features
         run: cargo test --locked --workspace --no-default-features
-      - name: Drop workspace artifacts from the Cargo cache
-        shell: bash
-        run: |
-          if [ -d target ]; then
-            rm -rf target/*/incremental
-            find target -maxdepth 3 -name '*packetcraftr*' -prune -exec rm -rf {} +
-          fi
+      - *drop-workspace-artifacts
 
   # Ratchet ledger: packetcraftr has blocking coverage and mutation gates in
   # test-quality-gate below. Other crates move to blocking gates one at a
@@ -258,15 +204,7 @@ jobs:
         run: |
           rustup toolchain install
           rustup component add llvm-tools-preview
-      - name: Restore Cargo cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target
-          key: ci-v1-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', '**/Cargo.toml', 'Cargo.lock') }}
+      - *restore-workspace-cache
       - uses: taiki-e/install-action@073e1fd0bc889c9aee68dbaaa927cde1b5653a83 # v2.90.11
         with:
           tool: cargo-llvm-cov
@@ -280,13 +218,7 @@ jobs:
             count="$(cargo mutants --list -p "$package" | wc -l)"
             echo "$package mutants: $count"
           done
-      - name: Drop workspace artifacts from the Cargo cache
-        shell: bash
-        run: |
-          if [ -d target ]; then
-            rm -rf target/*/incremental
-            find target -maxdepth 3 -name '*packetcraftr*' -prune -exec rm -rf {} +
-          fi
+      - *drop-workspace-artifacts
 
   test-quality-gate:
     name: Test quality gate (packetcraftr)
@@ -300,15 +232,7 @@ jobs:
         run: |
           rustup toolchain install
           rustup component add llvm-tools-preview
-      - name: Restore Cargo cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target
-          key: ci-v1-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', '**/Cargo.toml', 'Cargo.lock') }}
+      - *restore-workspace-cache
       - uses: taiki-e/install-action@073e1fd0bc889c9aee68dbaaa927cde1b5653a83 # v2.90.11
         with:
           tool: cargo-llvm-cov
@@ -327,13 +251,7 @@ jobs:
           -f 'crates/packetcraftr/src/dns/wire/name.rs'
           -f 'crates/packetcraftr/src/dns/wire/error.rs'
           -E 'replace \| with \^ in decode_response'
-      - name: Drop workspace artifacts from the Cargo cache
-        shell: bash
-        run: |
-          if [ -d target ]; then
-            rm -rf target/*/incremental
-            find target -maxdepth 3 -name '*packetcraftr*' -prune -exec rm -rf {} +
-          fi
+      - *drop-workspace-artifacts
 
   # Strict gates accept timeouts only when missed.txt is empty, since
   # cargo-mutants reports timeouts ahead of misses in its exit code.
@@ -354,11 +272,7 @@ jobs:
       - name: Restore Cargo cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target
+          path: *workspace-cache-paths
           key: ci-v1-${{ github.job }}-${{ matrix.gate }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', '**/Cargo.toml', 'Cargo.lock') }}
       - name: Install cargo-mutants
         run: cargo install --locked cargo-mutants
@@ -437,13 +351,7 @@ jobs:
           name: mutation-results-${{ matrix.gate }}
           path: mutants
           if-no-files-found: ignore
-      - name: Drop workspace artifacts from the Cargo cache
-        shell: bash
-        run: |
-          if [ -d target ]; then
-            rm -rf target/*/incremental
-            find target -maxdepth 3 -name '*packetcraftr*' -prune -exec rm -rf {} +
-          fi
+      - *drop-workspace-artifacts
 
   fuzz-smoke:
     name: Fuzz smoke run

@@ -339,8 +339,9 @@ jobs:
                 -f crates/packetcraftr-cli/src/input/source.rs \
                 -E 'replace \| with \^ in (Directory::open|Directory::stage|anchored)' \
                 -E 'unix.rs:65:76: replace \| with & in Directory::stage' \
-                -E 'source.rs:(88|93):5: replace (open|stdin) -> io::Result<Source>' \
-                -E 'source.rs:150:24: replace match guard .* with false' \
+                -E 'source.rs:75:5: replace open_nonblocking -> io::Result<File>' \
+                -E 'source.rs:(105:5: replace open|110:5: replace stdin) -> io::Result<Source>' \
+                -E 'source.rs:.*replace match guard .*io::ErrorKind::WouldBlock \| io::ErrorKind::Interrupted.* with false in <impl Read for Polled>::read' \
                 -E 'match guard \[Errno::INVAL, Errno::NOSYS, Errno::OPNOTSUPP, Errno::NOTSUP\]' \
                 -E 'replace <impl StagedEntry for StagingName>::remove with \(\)' ;;
           esac

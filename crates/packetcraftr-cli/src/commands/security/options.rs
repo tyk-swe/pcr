@@ -28,13 +28,13 @@ impl From<SeverityArg> for Severity {
 #[derive(Clone, Copy, Debug, Args)]
 pub(in crate::commands) struct Bounds {
     /// Maximum retained security findings.
-    #[arg(long, default_value_t = 4096)]
+    #[arg(long, default_value_t = security::Limits::default().max_findings)]
     pub(super) max_findings: usize,
     /// Maximum distinct security groups or compared endpoints.
-    #[arg(long, default_value_t = 4096)]
+    #[arg(long, default_value_t = security::Limits::default().max_groups)]
     pub(super) max_groups: usize,
     /// Maximum retained analysis observations.
-    #[arg(long, default_value_t = 100_000)]
+    #[arg(long, default_value_t = security::Limits::default().max_observations)]
     pub(super) max_observations: usize,
     /// Maximum serialized result bytes, in every output format.
     #[arg(long, default_value_t = 16 * 1024 * 1024)]

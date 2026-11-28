@@ -3347,10 +3347,34 @@ fn security_modes_observe_each_frame_and_finish_their_run() {
         reasons(&anomalies),
         serde_json::json!(["DNS transactions include unanswered, orphan, or duplicate messages"])
     );
-    assert_eq!(
-        anomalies["measurements"]["thresholds"]["window_seconds"],
-        60
-    );
+    let dns = packetcraftr_core::security::capture::DnsOptions::default();
+    let beacon = packetcraftr_core::security::capture::BeaconOptions::default();
+    for (key, expected) in [
+        ("window_seconds", serde_json::json!(dns.window_seconds)),
+        ("min_responses", serde_json::json!(dns.min_responses)),
+        ("nxdomain_ratio", serde_json::json!(dns.nxdomain_ratio)),
+        ("min_labels", serde_json::json!(dns.min_labels)),
+        ("min_label_length", serde_json::json!(dns.min_label_length)),
+        ("min_entropy", serde_json::json!(dns.min_entropy)),
+    ] {
+        assert_eq!(
+            anomalies["measurements"]["thresholds"][key], expected,
+            "{key}"
+        );
+    }
+    for (key, expected) in [
+        ("min_attempts", serde_json::json!(beacon.min_attempts)),
+        (
+            "min_interval_seconds",
+            serde_json::json!(beacon.min_interval_seconds),
+        ),
+        ("max_cv", serde_json::json!(beacon.max_cv)),
+    ] {
+        assert_eq!(
+            beacons["measurements"]["thresholds"][key], expected,
+            "{key}"
+        );
+    }
 }
 
 #[test]

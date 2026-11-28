@@ -12,6 +12,7 @@ use crate::{
 };
 use clap::Args;
 use packetcraftr_core::security;
+use packetcraftr_core::security::capture::{BeaconOptions, DnsOptions};
 use std::path::PathBuf;
 
 #[derive(Debug, Args)]
@@ -43,22 +44,22 @@ pub(crate) struct Dns {
     #[command(flatten)]
     capture: Capture,
     /// Epoch-aligned observation window in seconds; must be greater than zero.
-    #[arg(long, default_value_t = 60)]
+    #[arg(long, default_value_t = DnsOptions::default().window_seconds)]
     window_seconds: u64,
     /// Minimum matched responses per window; must be greater than zero.
-    #[arg(long, default_value_t = 20)]
+    #[arg(long, default_value_t = DnsOptions::default().min_responses)]
     min_responses: usize,
     /// Minimum NXDOMAIN ratio, from 0 through 1.
-    #[arg(long, default_value_t = 0.5)]
+    #[arg(long, default_value_t = DnsOptions::default().nxdomain_ratio)]
     nxdomain_ratio: f64,
     /// Minimum distinct high-entropy labels; must be greater than zero.
-    #[arg(long, default_value_t = 20)]
+    #[arg(long, default_value_t = DnsOptions::default().min_labels)]
     min_labels: usize,
     /// Minimum label length, from 1 through 63 bytes.
-    #[arg(long, default_value_t = 32)]
+    #[arg(long, default_value_t = DnsOptions::default().min_label_length)]
     min_label_length: usize,
     /// Minimum Shannon entropy, from 0 through 8 bits per byte.
-    #[arg(long, default_value_t = 4.0)]
+    #[arg(long, default_value_t = DnsOptions::default().min_entropy)]
     min_entropy: f64,
 }
 #[derive(Debug, Args)]
@@ -66,13 +67,13 @@ pub(crate) struct Beacons {
     #[command(flatten)]
     capture: Capture,
     /// Minimum distinct connection attempts; must be at least 3.
-    #[arg(long, default_value_t = 6)]
+    #[arg(long, default_value_t = BeaconOptions::default().min_attempts)]
     min_attempts: usize,
     /// Minimum mean attempt interval in seconds; must be finite and positive.
-    #[arg(long, default_value_t = 1.0)]
+    #[arg(long, default_value_t = BeaconOptions::default().min_interval_seconds)]
     min_interval_seconds: f64,
     /// Maximum interval coefficient of variation, from 0 through 1.
-    #[arg(long, default_value_t = 0.10)]
+    #[arg(long, default_value_t = BeaconOptions::default().max_cv)]
     max_cv: f64,
 }
 impl Capture {
@@ -172,7 +173,7 @@ capture_spec!(
             example: "examples/documents/output-dns-anomalies-complete.json",
         },
     ],
-    |s: &Dns| security::capture::Mode::Dns(security::capture::DnsOptions {
+    |s: &Dns| security::capture::Mode::Dns(DnsOptions {
         window_seconds: s.window_seconds,
         min_responses: s.min_responses,
         nxdomain_ratio: s.nxdomain_ratio,
@@ -204,7 +205,7 @@ capture_spec!(
         },
     ],
     |s: &Beacons| {
-        security::capture::Mode::Beacons(security::capture::BeaconOptions {
+        security::capture::Mode::Beacons(BeaconOptions {
             min_attempts: s.min_attempts,
             min_interval_seconds: s.min_interval_seconds,
             max_cv: s.max_cv,

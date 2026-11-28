@@ -112,10 +112,10 @@ macro_rules! command_catalog {
             #[command(after_long_help = "Example: packetcraftr analyze hunt capture.pcapng --indicators indicators.json")]
             Hunt(analyze::security::Hunt) = "hunt" [Text, Json, Ndjson] => ("analyze", "hunt"),
             /// Report high NXDOMAIN ratios and repeated high-entropy query labels.
-            #[command(after_long_help = "Defaults: 60-second windows, at least 20 matched responses and 50% NXDOMAIN, or 20 distinct leading labels of at least 32 bytes and 4 bits/byte entropy.\n\nExample: packetcraftr analyze dns-anomalies capture.pcapng")]
+            #[command(after_long_help = "Matched responses determine the NXDOMAIN ratio. The distinct-label threshold counts leading labels that meet both the length and entropy requirements.\n\nExample: packetcraftr analyze dns-anomalies capture.pcapng")]
             DnsAnomalies(analyze::security::Dns) = "dns-anomalies" [Text, Json, Ndjson] => ("analyze", "dns-anomalies"),
             /// Detect regularly spaced TCP connection attempts.
-            #[command(after_long_help = "Defaults: six distinct SYN attempts, mean interval at least one second, coefficient of variation at most 0.10. Retransmissions are deduplicated, and clock regressions suppress timing conclusions.\n\nExample: packetcraftr analyze beacons capture.pcapng")]
+            #[command(after_long_help = "Retransmissions are deduplicated, and clock regressions suppress timing conclusions.\n\nExample: packetcraftr analyze beacons capture.pcapng")]
             Beacons(analyze::security::Beacons) = "beacons" [Text, Json, Ndjson] => ("analyze", "beacons"),
             /// Compare scoped endpoint states and scan coverage from native aggregate JSON.
             #[command(after_long_help = "Requires successful aggregate JSON from matching native scan methods. Missing endpoints are coverage changes, never presumed closed.\n\nExample: packetcraftr analyze scan-diff before.json after.json")]

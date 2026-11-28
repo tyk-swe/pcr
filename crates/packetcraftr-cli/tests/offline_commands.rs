@@ -974,6 +974,7 @@ fn files_read_floors_fractional_pcapng_timestamps_only_for_display() {
     for (resolution, offset, ticks, expected_nanos, exact) in [
         (TimestampResolution::Binary(10), 123, 1_u64, 976_562, false),
         (TimestampResolution::Binary(10), 123, 128, 125_000_000, true),
+        (TimestampResolution::Binary(10), -1, 0, 0, true),
         (TimestampResolution::Binary(10), -1, 1, 976_562, false),
         (TimestampResolution::Decimal(10), 123, 19, 1, false),
         (TimestampResolution::Decimal(127), 123, u64::MAX, 0, false),

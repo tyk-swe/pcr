@@ -31,22 +31,15 @@ def workspace(files: dict[str, str]):
 
 
 class CheckLayersTests(unittest.TestCase):
-    def check(self, files, allowlist=()):
+    def check(self, files: dict[str, str]) -> list[str]:
         temporary, root = workspace(files)
         self.addCleanup(temporary.cleanup)
-        return layers.check_workspace(root, allowlist=allowlist).problems
+        return layers.check_workspace(root).problems
 
-    def check_documented(self, files):
+    def check_with_tests(self, files: dict[str, str]) -> list[str]:
         temporary, root = workspace(files)
         self.addCleanup(temporary.cleanup)
-        return layers.check_workspace(root, allowlist=()).problems
-
-    def check_with_tests(self, files, allowlist=()):
-        temporary, root = workspace(files)
-        self.addCleanup(temporary.cleanup)
-        return layers.check_workspace(
-            root, allowlist=allowlist, include_tests=True
-        ).problems
+        return layers.check_workspace(root, include_tests=True).problems
 
     def test_downward_and_same_layer_dependencies_pass(self):
         problems = self.check({
@@ -246,19 +239,29 @@ class CheckLayersTests(unittest.TestCase):
         self.assertIn("1 test layer coupling(s) (report only)", report)
 
     def test_allowlist_covers_only_the_named_edge(self):
-        allowlist = (("mini", ("low",), ("high", "Special"), "named edge"),)
-        problems = self.check(
-            {"low.rs": "use crate::high::{Other, Special};"},
-            allowlist=allowlist,
-        )
-        self.assertEqual(len(problems), 1)
-        self.assertIn("high::Other", problems[0])
+        problems = self.check({
+            "lib.rs": DOCUMENTED + "//! Allowed dependency: `low::system` -> `high::Special`.\n",
+            "low/system.rs": "use crate::high::{Other, Special};",
+            "low/custom.rs": "use crate::high::Special;",
+        })
+        self.assertEqual(len(problems), 2)
+        self.assertTrue(any("low::system (layer 1) depends on high::Other" in p for p in problems))
+        self.assertTrue(any("low::custom (layer 1) depends on high::Special" in p for p in problems))
 
     def test_stale_allowlist_entry_fails(self):
-        allowlist = (("mini", ("low",), ("high", "Special"), "named edge"),)
-        problems = self.check({"low.rs": "pub struct Thing;"}, allowlist=allowlist)
+        problems = self.check({
+            "lib.rs": DOCUMENTED + "//! Allowed dependency: `low` -> `high::Special`.\n",
+            "low.rs": "pub struct Thing;",
+        })
         self.assertEqual(len(problems), 1)
         self.assertIn("stale allowlist entry low -> high::Special", problems[0])
+
+    def test_malformed_dependency_approval_fails_even_without_references(self):
+        problems = self.check({
+            "lib.rs": DOCUMENTED + "//! Allowed dependency: `low` and `high`.\n",
+        })
+        self.assertEqual(len(problems), 1)
+        self.assertIn("malformed allowed dependency", problems[0])
 
     def test_unmapped_module_fails(self):
         problems = self.check({"mystery.rs": "pub struct Thing;"})
@@ -266,7 +269,7 @@ class CheckLayersTests(unittest.TestCase):
         self.assertIn("module mystery is not in the layer table", problems[0])
 
     def test_documented_table_matching_the_layers_passes(self):
-        problems = self.check_documented({
+        problems = self.check({
             "lib.rs": (
                 "//! | 1. Low | `low`, `engine::stats` |\n"
                 "//! | 2. High | `high` |\n"
@@ -277,7 +280,7 @@ class CheckLayersTests(unittest.TestCase):
         self.assertEqual(problems, [])
 
     def test_dependencies_follow_the_documented_policy(self):
-        problems = self.check_documented({
+        problems = self.check({
             "lib.rs": (
                 "//! | 1. Low | `engine::stats` |\n"
                 "//! | 2. High | `high`, `low` |\n"
@@ -298,14 +301,14 @@ class CheckLayersTests(unittest.TestCase):
         self.assertIn("engine::stats::new_child (layer 1)", problems[0])
 
     def test_missing_documented_table_fails(self):
-        problems = self.check_documented({
+        problems = self.check({
             "lib.rs": "//! Layers are described in prose only.\n",
             "low.rs": "pub struct Thing;",
         })
         self.assertTrue(any("documents no layer table" in p for p in problems))
 
     def test_conflicting_documented_layers_fail(self):
-        problems = self.check_documented({
+        problems = self.check({
             "lib.rs": (
                 "//! | 1. Low | `low`, `high`, `engine::stats` |\n"
                 "//! | 2. High | `high` |\n"

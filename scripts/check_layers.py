@@ -16,20 +16,10 @@ Module = tuple[str, ...]
 LayerTable = dict[Module, int]
 Graph = dict[Module, set[Module]]
 Cycle = tuple[Module, ...]
-Allowlist = tuple[tuple[str, Module, Module, str], ...]
-
-ALLOWLIST: Allowlist = (
-    ("packetcraftr-netio", ("capture", "system"), ("platform",),
-     "system provider dispatch documented in packetcraftr-netio lib.rs"),
-    ("packetcraftr-netio", ("route",), ("platform",),
-     "system provider dispatch documented in packetcraftr-netio lib.rs"),
-    ("packetcraftr-netio", ("interface",), ("platform",),
-     "system provider dispatch documented in packetcraftr-netio lib.rs"),
-    ("packetcraftr-netio", ("transmit",), ("platform",),
-     "system provider dispatch documented in packetcraftr-netio lib.rs"),
-)
+Allowlist = list[tuple[Module, Module]]
 
 SEGMENT = r"[A-Za-z_][A-Za-z0-9_]*"
+MODULE_PATH = rf"{SEGMENT}(?:::{SEGMENT})*"
 PATH_START = re.compile(rf"\b(crate|super|self)((?:::{SEGMENT})*)(::\{{)?")
 
 
@@ -194,12 +184,11 @@ def owner_path(src: Path, path: Path) -> tuple[str, ...] | None:
 
 
 def allowlisted(
-    allowlist: Allowlist, crate: str, owner: Module, target: Module
+    allowlist: Allowlist, owner: Module, target: Module
 ) -> int | None:
-    for index, (allowed_crate, owner_prefix, target_prefix, _reason) in enumerate(allowlist):
+    for index, (owner_prefix, target_prefix) in enumerate(allowlist):
         if (
-            allowed_crate == crate
-            and owner[: len(owner_prefix)] == owner_prefix
+            owner[: len(owner_prefix)] == owner_prefix
             and target[: len(target_prefix)] == target_prefix
         ):
             return index
@@ -208,9 +197,10 @@ def allowlisted(
 
 def check_crate(
     crate: str, src: Path, table: LayerTable, allowlist: Allowlist,
-    used: set[int], include_tests: bool,
+    include_tests: bool,
 ) -> tuple[list[str], Graph]:
     problems = []
+    used: set[int] = set()
     graph: Graph = {module: set() for module in table}
     for path in sorted(src.rglob("*.rs")):
         owner = owner_path(src, path)
@@ -238,7 +228,7 @@ def check_crate(
             scoped_layer, target_layer = table[source_module], table[target_module]
             if target_layer <= scoped_layer:
                 continue
-            index = allowlisted(allowlist, crate, scoped_owner, target)
+            index = allowlisted(allowlist, scoped_owner, target)
             if index is not None:
                 used.add(index)
                 continue
@@ -246,6 +236,12 @@ def check_crate(
                 f"{crate}: {path} {'::'.join(scoped_owner)} (layer {scoped_layer}) depends on "
                 f"{'::'.join(target)} (layer {target_layer})"
             )
+    if not include_tests:
+        problems.extend(
+            f"{crate}: stale allowlist entry {'::'.join(owner)} -> {'::'.join(target)}"
+            for index, (owner, target) in enumerate(allowlist)
+            if index not in used
+        )
     return problems, graph
 
 
@@ -281,6 +277,7 @@ def check_cycles(crate: str, graph: Graph, allowed: set[Cycle]) -> list[str]:
 
 
 TABLE_ROW = re.compile(r"^//! \| (\d+)\. [^|]*\| ([^|]*)\|", re.M)
+DEPENDENCY = re.compile(rf"`({MODULE_PATH})` -> `({MODULE_PATH})`\.")
 
 
 def documented_layers(
@@ -295,7 +292,7 @@ def documented_layers(
             if brace != -1 and token.endswith("}"):
                 head = tuple(token[:brace].split("::"))
                 paths = expand_group(head, token[brace + 3:-1])
-            elif re.fullmatch(rf"{SEGMENT}(::{SEGMENT})*", token):
+            elif re.fullmatch(MODULE_PATH, token):
                 paths = [tuple(token.split("::"))]
             else:
                 continue
@@ -310,12 +307,12 @@ def documented_layers(
     return layers, duplicates
 
 
-def crate_policy(crate: str, src: Path) -> tuple[LayerTable, set[Cycle], list[str]]:
+def crate_policy(crate: str, src: Path) -> tuple[LayerTable, set[Cycle], Allowlist, list[str]]:
     root = src / "lib.rs"
     text = root.read_text(errors="replace") if root.is_file() else ""
     documented, duplicates = documented_layers(text)
     if not documented:
-        return {}, set(), [f"{crate}: lib.rs documents no layer table"]
+        return {}, set(), [], [f"{crate}: lib.rs documents no layer table"]
     cycles = {
         tuple(sorted(tuple(token.split("::")) for token in re.findall(r"`([^`]+)`", group)))
         for group in re.findall(r"^//! Allowed cycle: (.*)$", text, re.M)
@@ -325,7 +322,15 @@ def crate_policy(crate: str, src: Path) -> tuple[LayerTable, set[Cycle], list[st
         f"{' and '.join(str(number) for number in numbers)}"
         for path, numbers in duplicates
     ]
-    return documented, cycles, problems
+    allowlist = []
+    for declaration in re.findall(r"^//! Allowed dependency:(.*)$", text, re.M):
+        match = DEPENDENCY.fullmatch(declaration.strip())
+        if match is None:
+            problems.append(f"{crate}: malformed allowed dependency {declaration.strip()!r}")
+            continue
+        owner, target = match.groups()
+        allowlist.append((tuple(owner.split("::")), tuple(target.split("::"))))
+    return documented, cycles, allowlist, problems
 
 
 class WorkspaceCheck(NamedTuple):
@@ -335,35 +340,26 @@ class WorkspaceCheck(NamedTuple):
 
 def check_workspace(
     root: Path,
-    allowlist: Allowlist = ALLOWLIST,
     include_tests: bool = False,
 ) -> WorkspaceCheck:
     problems = []
     graphs = {}
     crates = tuple(path.parent for path in sorted((root / "crates").glob("*/Cargo.toml")))
-    used: set[int] = set()
     for directory in crates:
         crate = directory.name
         src = directory / "src"
         if not src.is_dir():
             problems.append(f"{crate}: missing source directory {src}")
             continue
-        table, cycles, invalid = crate_policy(crate, src)
+        table, cycles, allowlist, invalid = crate_policy(crate, src)
         problems.extend(invalid)
         if not table:
             continue
-        violations, graph = check_crate(crate, src, table, allowlist, used, include_tests)
+        violations, graph = check_crate(crate, src, table, allowlist, include_tests)
         problems.extend(violations)
         graphs[crate] = graph
         if not include_tests:
             problems.extend(check_cycles(crate, graph, cycles))
-    if not include_tests:
-        for index, (crate, owner_prefix, target_prefix, _reason) in enumerate(allowlist):
-            if index not in used and any(directory.name == crate for directory in crates):
-                problems.append(
-                    f"{crate}: stale allowlist entry {'::'.join(owner_prefix)} -> "
-                    f"{'::'.join(target_prefix)}"
-                )
     return WorkspaceCheck(problems, graphs)
 
 

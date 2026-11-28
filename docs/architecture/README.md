@@ -52,7 +52,7 @@ flowchart TD
 | Provider waits and workers | Netio [`deadline`](../../crates/packetcraftr-netio/src/deadline.rs) caps native waits and bridges injected time to wall time. [Native workers](../../crates/packetcraftr-netio/src/workers.rs) retain provider admission leases while they reap work. [Thread cleanup](../../crates/packetcraftr-netio/src/resources/thread_cleanup.rs) retains join ownership for application threads used by workflow [`Runtime`](../../crates/packetcraftr/src/runtime.rs). The two lifecycles account against different capacities. |
 | Observability | Terminal diagnostics consume typed events and sanitize text for display. Machine output uses its versioned envelope and payload schemas. CLI resource snapshots report configured limits and worker use. Workflow evidence records policy-gated operation outcomes. Each path has its own delivery and compatibility contract. |
 | Output delivery | Text and field rows share scoped regular-file batching. JSON publishes a single aggregate with a bounded buffer. NDJSON owns per-record limits, terminal state, and worker deadlines. Staged files own atomic publication and cleanup. |
-| Platform and tooling | Cargo manifests expose offline, route-only, Layer 3, and Layer 2 profiles. Native IO is confined to netio. CI checks the pinned and minimum-supported Rust versions and native and portable profiles. Workspace builds, release builds, and the fuzz workspace use caches keyed to their own artifacts. |
+| Platform and tooling | Cargo manifests expose offline, route-only, Layer 3, and Layer 2 profiles. Native networking backends live in netio. CI checks the pinned and minimum-supported Rust versions and native and portable profiles. Workspace builds, release builds, and the fuzz workspace use caches keyed to their own artifacts. |
 
 ## Existing architecture constraints
 
@@ -62,8 +62,8 @@ Generate the production module graph from the same source scan that runs in CI.
 python3 scripts/check_layers.py --graph > module-dependencies.dot
 ```
 
-The source scan follows explicit `crate`, `self`, and `super` references across feature profiles. It does not resolve all Rust imports, expand macros, or infer method call dependencies. Nested modules are grouped under their closest documented boundary. The checker enforces dependency direction and requires every mutually reachable group to match an `Allowed cycle` entry in the crate root. Core documents its packet model as one unit. Netio documents its native provider dispatch group and the checker still limits the upward references to the specified dispatch edges. The CLI and workflow crate have no cycle groups.
+The source scan follows explicit `crate`, `self`, and `super` references across feature profiles. It does not resolve all Rust imports, expand macros, or infer method call dependencies. Nested modules are grouped under their closest documented boundary. The checker enforces dependency direction and requires every mutually reachable group to match an `Allowed cycle` entry in the crate root. Core documents its packet model as one unit. Netio documents its native provider dispatch group and the four permitted upward references as `Allowed dependency` entries. The checker rejects entries that no production reference uses. The CLI and workflow crate have no cycle groups.
 
 The coupling checker limits clock and entropy reads, dynamic field access, casts, cancellation polls, duplicate constants and codes, and crate root exports. Cargo prevents crate cycles and the current workflow checks schema examples, CLI output, native and portable builds, and selected critical mutations.
 
-The [task pool](tasks.md) tracks checks still needed before this map can support a repository-wide completion claim.
+The [task pool](tasks.md) tracks completed migrations, audited contracts, and proposals that need a compatibility review.

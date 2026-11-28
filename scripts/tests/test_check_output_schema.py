@@ -431,6 +431,46 @@ impl StreamRecord for CommentedRecord {
         self.assertEqual(len(problems), 1)
         self.assertIn('rust type crate::output::build::Report is not defined', problems[0])
 
+    def test_registered_type_must_be_declared_at_its_named_owner(self):
+        registry = REGISTRY_SOURCE.replace(
+            'crate::output::build::PacketEvent', 'crate::output::build::nested::PacketEvent')
+        root = self.workspace(registry)
+        output = root / checker.CLI_SRC / 'output/build.rs'
+        output.write_text("""
+mod child;
+const EXAMPLE: &str = "struct Report; impl StreamRecord for Ghost {}";
+mod nested {
+    pub struct Report;
+    pub struct PacketEvent;
+    impl StreamRecord for &PacketEvent {
+        fn event_name(&self) -> &'static str { "packet" }
+    }
+}
+fn local() { struct Report; }
+pub struct Complete;
+impl crate::output::stream::StreamRecord for Complete {
+    fn event_name(&self) -> &'static str { "complete" }
+}
+""")
+        child = root / checker.CLI_SRC / 'output/build/child.rs'
+        child.parent.mkdir(parents=True, exist_ok=True)
+        child.write_text('pub struct Report;\n')
+        problems = checker.registry_problems(
+            root, REGISTRY_SCHEMA, checker.load_jsonschema(), set(), production_sources(root))
+        self.assertEqual(problems, [
+            f'{checker.REGISTRY}: buildSuccess/build: rust type crate::output::build::Report is not defined',
+        ])
+        contract = root / checker.CONTRACT
+        for owner in ('child', 'nested'):
+            with self.subTest(owner=owner):
+                contract.write_text(registry.replace(
+                    'crate::output::build::Report', f'crate::output::build::{owner}::Report'))
+                self.assertEqual(
+                    checker.registry_problems(
+                        root, REGISTRY_SCHEMA, checker.load_jsonschema(), set(), production_sources(root)),
+                    [],
+                )
+
     def test_reports_unused_schema_definitions(self):
         root = self.workspace(REGISTRY_SOURCE.replace('buildSuccess"', 'goneSuccess"'))
         problems = checker.registry_problems(root, REGISTRY_SCHEMA, checker.load_jsonschema(), set(), production_sources(root))

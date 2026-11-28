@@ -14,7 +14,7 @@ import sys
 from typing import Any, Iterable, Literal, NamedTuple
 
 from release_assets import validate_manifest
-from rust_source import blank_comments, production_sources
+from rust_source import blank_comments, blank_comments_and_strings, production_sources
 from script_support import read_json, strict_json
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -452,32 +452,48 @@ def _consts(node: Any, key: str) -> list[str]:
     return []
 
 
-def _stream_record_types(sources: dict[Path, str]) -> set[str]:
-    types = set()
+RUST_PATH = r'[A-Za-z_]\w*(?:::[A-Za-z_]\w*)*'
+TYPE_OR_SCOPE = re.compile(
+    r'\bmod\s+([A-Za-z_]\w*)\s*\{|\b(?:struct|enum|type)\s+([A-Za-z_]\w*)'
+    rf"|\bStreamRecord\s+for\s+(?:&\s*(?:'\w+\s+)?(?:mut\s+)?)?({RUST_PATH})|[{{}}]")
+
+
+def _source_module(path: Path) -> str:
+    parts = path.relative_to(CLI_SRC).with_suffix('').parts
+    if parts == ('lib',) or parts[-1] == 'mod':
+        parts = parts[:-1]
+    return '::'.join(('crate', *parts))
+
+
+def _record_path(owner: str, record: str) -> str:
+    if record.startswith('crate::'):
+        return record
+    while record.startswith('super::'):
+        owner = owner.rpartition('::')[0]
+        record = record.removeprefix('super::')
+    return f"{owner}::{record.removeprefix('self::')}"
+
+
+def _source_types(sources: dict[Path, str]) -> tuple[set[str], set[str]]:
+    declared = set()
+    streams: set[str] = set()
     for path, source in sources.items():
-        lines = source.splitlines()
-        for index, line in enumerate(lines):
-            if 'fn event_name' not in line:
-                continue
-            for back in range(index - 1, max(-1, index - 8), -1):
-                match = re.search(r'StreamRecord for\s+(&?\w+(?:::\w+)*(?:<[^>]*>)?)', lines[back])
-                if match:
-                    name = match.group(1).lstrip('&').split('<')[0]
-                    relative = path.relative_to(CLI_SRC).with_suffix('').as_posix()
-                    types.add(f'crate::{relative.replace("/", "::")}::{name}'
-                              if '::' not in name else f'crate::{name}')
-                    break
-    return types
-
-
-def _type_defined(rust_type: str, sources: dict[Path, str]) -> bool:
-    parts = rust_type.split('::')
-    if len(parts) < 3 or parts[0] != 'crate':
-        return False
-    module = Path(CLI_SRC).joinpath(*parts[1:-1])
-    pattern = re.compile(rf'(?:struct|enum|type)\s+{re.escape(parts[-1])}\b')
-    return any(pattern.search(text) for path, text in sources.items()
-               if path == module.with_suffix('.rs') or path.is_relative_to(module))
+        scopes: list[str | None] = [_source_module(path)]
+        for token in TYPE_OR_SCOPE.finditer(blank_comments_and_strings(source)):
+            module, name, record = token.groups()
+            owner = scopes[-1]
+            if name is not None:
+                if owner is not None:
+                    declared.add(f'{owner}::{name}')
+            elif record is not None:
+                if owner is not None:
+                    streams.add(_record_path(owner, record))
+            elif token[0] == '}':
+                if len(scopes) > 1:
+                    scopes.pop()
+            else:
+                scopes.append(f'{owner}::{module}' if owner is not None and module else None)
+    return declared, streams
 
 
 def registry_problems(root: Path, schema: Any, jsonschema: Any, published: set[str],
@@ -485,6 +501,7 @@ def registry_problems(root: Path, schema: Any, jsonschema: Any, published: set[s
     """The contract registry must agree with the schema, sources, and examples."""
     problems: list[str] = []
     sources = {path: text for path, text in sources.items() if path.is_relative_to(CLI_SRC)}
+    declared, streams = _source_types(sources)
     rows = read_registry('\n'.join(sources.values()))
     if not rows:
         return [f'{REGISTRY}: no PublishedType rows found']
@@ -526,7 +543,7 @@ def registry_problems(root: Path, schema: Any, jsonschema: Any, published: set[s
         if list(row.events) != _consts(definition, 'event'):
             problems.append(f'{label}: events disagree with the definition')
         for rust_type in row.rust_types:
-            if not _type_defined(rust_type, sources):
+            if rust_type not in declared:
                 problems.append(f'{label}: rust type {rust_type} is not defined')
             if 'output' not in rust_type.split('::'):
                 problems.append(f'{label}: rust type {rust_type} is outside an output module')
@@ -548,7 +565,7 @@ def registry_problems(root: Path, schema: Any, jsonschema: Any, published: set[s
             if claimed.get(name, set()) != expected:
                 problems.append(f'{REGISTRY}: {name} claims '
                                 f'{sorted(claimed.get(name, set()))}, schema pins {sorted(expected)}')
-    for stream_type in sorted(_stream_record_types(sources) - registered_types):
+    for stream_type in sorted(streams - registered_types):
         problems.append(f'{REGISTRY}: stream record type {stream_type} is not registered')
     return problems
 

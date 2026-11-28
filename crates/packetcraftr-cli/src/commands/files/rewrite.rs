@@ -30,7 +30,7 @@ impl crate::commands::Spec for Args {
             command: "rewrite",
             rust_types: &["crate::commands::files::rewrite::output::Report"],
             events: &[],
-            example: "examples/documents/output-rewrite-complete.json",
+            example: "examples/documents/output-rewrite-success.json",
         },
         PublishedType {
             definition: "rewriteStreamSuccess",

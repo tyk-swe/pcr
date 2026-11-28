@@ -303,10 +303,8 @@ class RuntimeValidationTests(unittest.TestCase):
             self.assertIn('command changed within stream', problems(0, 1, 'dns')[0])
 
 
-REGISTRY_SCHEMA = {
-    '$defs': {
-        'aggregateSuccess': {'allOf': [{'$ref': '#/$defs/buildSuccess'}]},
-        'streamSuccess': {'allOf': [{'$ref': '#/$defs/buildStreamSuccess'}]},
+REGISTRY_SCHEMA = checker.RegistrySchema(
+    definitions={
         'buildSuccess': {
             'type': 'object',
             'properties': {'command': {'const': 'build'}, 'status': {'const': 'success'}},
@@ -322,7 +320,11 @@ REGISTRY_SCHEMA = {
             'required': ['command', 'status'],
         },
     },
-}
+    modes={
+        'buildSuccess': {'build': {'aggregate'}},
+        'buildStreamSuccess': {'build': {'stream'}},
+    },
+)
 
 REGISTRY_SOURCE = '''
 pub const PUBLISHED_TYPES: &[PublishedType] = &[
@@ -359,9 +361,9 @@ class RegistryTests(unittest.TestCase):
                 'impl StreamRecord for Complete {\n'
                 '    fn event_name(&self) -> &\'static str { "complete" }\n}\n',
             'examples/documents/output-build-success.json':
-                json.dumps({'command': 'build', 'status': 'success'}),
+                json.dumps({'command': 'build', 'mode': 'aggregate', 'status': 'success'}),
             'examples/documents/output-build-complete.json':
-                json.dumps({'command': 'build', 'event': 'complete', 'status': 'success'}),
+                json.dumps({'command': 'build', 'mode': 'stream', 'event': 'complete', 'status': 'success'}),
         }
         for relative, text in files.items():
             path = root / relative
@@ -377,6 +379,32 @@ class RegistryTests(unittest.TestCase):
             [],
         )
 
+    def test_shared_payload_example_must_match_row_command_and_mode(self):
+        relative = 'examples/documents/output-read-success.json'
+        read_row = f"""    PublishedType {{
+        definition: "buildSuccess",
+        command: "read",
+        rust_types: &["crate::output::build::Report"],
+        events: &[],
+        example: "{relative}",
+    }},
+"""
+        root = self.workspace(REGISTRY_SOURCE.replace('];', read_row + '];'))
+        schema = deepcopy(REGISTRY_SCHEMA)
+        schema.definitions['buildSuccess']['properties']['command'] = {'enum': ['build', 'read']}
+        schema.modes['buildSuccess']['read'] = {'aggregate'}
+        path = root / relative
+        sources = production_sources(root)
+        for command, mode, valid in [('build', 'aggregate', False), ('read', 'stream', False),
+                                     ('read', 'aggregate', True)]:
+            with self.subTest(command=command, mode=mode):
+                path.write_text(json.dumps({'command': command, 'mode': mode, 'status': 'success'}))
+                problems = checker.registry_problems(root, schema, checker.load_jsonschema(), set(), sources)
+                self.assertEqual(problems, [] if valid else [
+                    f'{checker.REGISTRY}: buildSuccess/read: {relative} has no successful aggregate '
+                    "record for 'read' matching buildSuccess",
+                ])
+
     def test_non_string_command_and_event_declarations_are_diagnosed(self):
         root = self.workspace(REGISTRY_SOURCE)
         jsonschema = checker.load_jsonschema()
@@ -386,7 +414,7 @@ class RegistryTests(unittest.TestCase):
             ('buildStreamSuccess', 'event', {'enum': ['complete', 1]}),
         ):
             schema = deepcopy(REGISTRY_SCHEMA)
-            schema['$defs'][definition]['properties'][field] = declaration
+            schema.definitions[definition]['properties'][field] = declaration
             with self.subTest(field=field), self.assertRaisesRegex(checker.CheckError, field):
                 checker.registry_problems(root, schema, jsonschema, set(), sources)
 
@@ -394,7 +422,7 @@ class RegistryTests(unittest.TestCase):
         relative = 'examples/documents/build.json'
         root = self.workspace(REGISTRY_SOURCE.replace('examples/documents/output-build-success.json', relative))
         (root / relative).write_text(json.dumps({
-            'command': 'build', 'status': 'success', 'result': {'code': 'cli.unpublished'},
+            'command': 'build', 'mode': 'aggregate', 'status': 'success', 'result': {'code': 'cli.unpublished'},
         }))
         sources = production_sources(root)
         self.assertEqual(

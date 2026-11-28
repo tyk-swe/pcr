@@ -22,7 +22,7 @@ impl crate::commands::Spec for Args {
             command: "expert",
             rust_types: &["crate::commands::analyze::expert::output::Report"],
             events: &[],
-            example: "examples/documents/output-expert-complete.json",
+            example: "examples/documents/output-expert-success.json",
         },
         PublishedType {
             definition: "expertStreamSuccess",

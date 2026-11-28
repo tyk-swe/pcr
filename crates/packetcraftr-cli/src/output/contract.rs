@@ -256,7 +256,8 @@ impl Classified for Error {
 /// One published output shape: the Rust types that serialize to a schema
 /// envelope definition for one command, the stream events they emit, and one
 /// checked-in example validating against that definition. Registry paths name
-/// type definitions, not re-exports. The output-schema checker fails on any
+/// type definitions, not re-exports. The example must demonstrate the row's
+/// command and success mode. The output-schema checker fails on any
 /// row whose definition, types, events, or example no longer agree with the
 /// schema, the sources, and the examples.
 pub struct PublishedType {

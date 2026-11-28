@@ -17,7 +17,7 @@ impl crate::commands::Spec for Args {
             command: "merge",
             rust_types: &["crate::commands::files::merge::output::Report"],
             events: &[],
-            example: "examples/documents/output-merge-complete.json",
+            example: "examples/documents/output-merge-success.json",
         },
         PublishedType {
             definition: "mergeStreamSuccess",

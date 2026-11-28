@@ -96,7 +96,7 @@ impl Spec for AuditTls {
             command: "audit-tls",
             rust_types: &["crate::commands::security::output::Report"],
             events: &[],
-            example: "examples/documents/output-audit-tls-complete.json",
+            example: "examples/documents/output-audit-tls-success.json",
         },
         PublishedType {
             definition: "securityStreamSuccess",
@@ -141,7 +141,7 @@ impl Spec for AuditHttp {
             command: "audit-http",
             rust_types: &["crate::commands::security::output::Report"],
             events: &[],
-            example: "examples/documents/output-audit-http-complete.json",
+            example: "examples/documents/output-audit-http-success.json",
         },
         PublishedType {
             definition: "securityStreamSuccess",

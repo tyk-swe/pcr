@@ -1,0 +1,19 @@
+{
+  "schema": "packetcraftr.output/v23",
+  "payload_schema": "packetcraftr.output.capture/v1",
+  "command": "capture",
+  "mode": "stream",
+  "seq": 0,
+  "event": "fields",
+  "status": "success",
+  "result": {
+    "columns": [
+      "frame.number"
+    ],
+    "source_frame": 1,
+    "values": [
+      1
+    ]
+  },
+  "diagnostics": []
+}

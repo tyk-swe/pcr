@@ -160,7 +160,7 @@ capture_spec!(
             command: "dns-anomalies",
             rust_types: &["crate::commands::security::output::Report"],
             events: &[],
-            example: "examples/documents/output-dns-anomalies-complete.json",
+            example: "examples/documents/output-dns-anomalies-success.json",
         },
         PublishedType {
             definition: "securityStreamSuccess",
@@ -191,7 +191,7 @@ capture_spec!(
             command: "beacons",
             rust_types: &["crate::commands::security::output::Report"],
             events: &[],
-            example: "examples/documents/output-beacons-complete.json",
+            example: "examples/documents/output-beacons-success.json",
         },
         PublishedType {
             definition: "securityStreamSuccess",
@@ -221,7 +221,7 @@ impl Spec for Hunt {
             command: "hunt",
             rust_types: &["crate::commands::security::output::Report"],
             events: &[],
-            example: "examples/documents/output-hunt-complete.json",
+            example: "examples/documents/output-hunt-success.json",
         },
         PublishedType {
             definition: "securityStreamSuccess",

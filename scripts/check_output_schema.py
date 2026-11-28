@@ -132,12 +132,15 @@ def load_validator(schema: Any) -> Any:
     return jsonschema.Draft202012Validator(schema)
 
 
+class RegistrySchema(NamedTuple):
+    definitions: dict[str, Any]
+    modes: dict[str, dict[str, set[str]]]
+
+
 class SchemaSet(NamedTuple):
     envelope_schema: Any
-    common_schema: Any
-    command_schemas: dict[str, Any]
     validator: Any
-    merged_schema: Any
+    registry: RegistrySchema
     required_assets: tuple[str, ...]
 
 
@@ -201,28 +204,23 @@ def load_schema_set(root: Path, identity: Identity) -> SchemaSet:
             if name in merged_definitions:
                 raise CheckError(f'schemas/output: duplicate definition {name!r}')
             merged_definitions[name] = _localize_common_refs(definition)
-    aggregate_refs = []
-    stream_refs = []
-    for schema in commands.values():
-        for variant in schema.get('allOf', [{}])[-1].get('oneOf', []):
-            refs = variant.get('allOf', [])
-            if len(refs) != 2:
-                continue
-            shell = refs[0].get('$ref', '')
-            payloads = refs[1].get('oneOf', [])
-            target = aggregate_refs if 'aggregateSuccessEnvelope' in shell else stream_refs
-            target.extend(ref.get('$ref', '').rsplit('/', 1)[-1] for ref in payloads)
-    if aggregate_refs:
-        merged_definitions['aggregateSuccess'] = {
-            'allOf': [{'$ref': '#/$defs/aggregateSuccessEnvelope'},
-                      {'oneOf': [{'$ref': f'#/$defs/{name}'} for name in sorted(set(aggregate_refs))]}],
-        }
-    if stream_refs:
-        merged_definitions['streamSuccess'] = {
-            'allOf': [{'$ref': '#/$defs/streamSuccessEnvelope'},
-                      {'oneOf': [{'$ref': f'#/$defs/{name}'} for name in sorted(set(stream_refs))]}],
-        }
-    merged = {'$defs': merged_definitions}
+    modes: dict[str, dict[str, set[str]]] = {}
+    shells = {f'{COMMON_URN}#/$defs/{mode}SuccessEnvelope': mode for mode in ('aggregate', 'stream')}
+    for command, schema in commands.items():
+        path = f'{OUTPUT_SCHEMA_DIR}/{command}.v1.schema.json'
+        try:
+            for variant in schema.get('allOf', [{}])[-1].get('oneOf', []):
+                envelope_ref, payloads = variant['allOf']
+                mode = shells[envelope_ref['$ref']]
+                for payload in payloads['oneOf']:
+                    ref = payload['$ref']
+                    uri, separator, name = ref.partition('#/$defs/')
+                    owner = common if uri == COMMON_URN else schema
+                    if not separator or uri not in ('', COMMON_URN) or name not in owner.get('$defs', {}):
+                        raise CheckError(f'{path}: unknown payload definition {ref!r}')
+                    modes.setdefault(name, {}).setdefault(command, set()).add(mode)
+        except (AttributeError, IndexError, KeyError, TypeError, ValueError) as error:
+            raise CheckError(f'{path}: invalid success branch: {error}') from error
 
     def standalone(schema):
         localized = _localize_common_refs(schema)
@@ -256,7 +254,7 @@ def load_schema_set(root: Path, identity: Identity) -> SchemaSet:
 
     required = (COMMON_SCHEMA,
                 *(f'{OUTPUT_SCHEMA_DIR}/{path.name}' for path in command_paths))
-    return SchemaSet(envelope, common, commands, Validator(), merged, required)
+    return SchemaSet(envelope, Validator(), RegistrySchema(merged_definitions, modes), required)
 
 
 def document_problems(validator: Any, label: str, document: Any) -> list[str]:
@@ -413,23 +411,6 @@ def read_registry(source: str) -> list[PublishedRow]:
     return rows
 
 
-def _refs(node: Any) -> list[str]:
-    if isinstance(node, dict):
-        found = []
-        for key, value in node.items():
-            if key == '$ref':
-                found.append(value.split('/')[-1])
-            else:
-                found += _refs(value)
-        return found
-    if isinstance(node, list):
-        found = []
-        for value in node:
-            found += _refs(value)
-        return found
-    return []
-
-
 def _consts(node: Any, key: str) -> list[str]:
     if isinstance(node, dict):
         found = []
@@ -496,7 +477,7 @@ def _source_types(sources: dict[Path, str]) -> tuple[set[str], set[str]]:
     return declared, streams
 
 
-def registry_problems(root: Path, schema: Any, jsonschema: Any, published: set[str],
+def registry_problems(root: Path, schema: RegistrySchema, jsonschema: Any, published: set[str],
                       sources: dict[Path, str]) -> list[str]:
     """The contract registry must agree with the schema, sources, and examples."""
     problems: list[str] = []
@@ -505,7 +486,7 @@ def registry_problems(root: Path, schema: Any, jsonschema: Any, published: set[s
     rows = read_registry('\n'.join(sources.values()))
     if not rows:
         return [f'{REGISTRY}: no PublishedType rows found']
-    definitions = schema.get('$defs', {})
+    definitions = schema.definitions
     examples: dict[str, list[Any]] = {}
     output_examples = set(output_example_paths(root))
 
@@ -550,21 +531,26 @@ def registry_problems(root: Path, schema: Any, jsonschema: Any, published: set[s
         if not (root / row.example).is_file():
             problems.append(f'{label}: example {row.example} does not exist')
             continue
+        modes = sorted(schema.modes.get(row.definition, {}).get(row.command, ()))
+        if not modes:
+            problems.append(f'{label}: no success branch for this command')
+            continue
         validator = jsonschema.Draft202012Validator(
             {'$ref': f'#/$defs/{row.definition}', '$defs': definitions})
-        if not any(validator.is_valid(record) for record in example_records(row.example)
-                   if isinstance(record, dict) and record.get('status') == 'success'):
-            problems.append(f'{label}: no record in {row.example} validates '
-                            f'against {row.definition}')
+        if not any(isinstance(record, dict) and record.get('status') == 'success'
+                   and record.get('command') == row.command and record.get('mode') in modes
+                   and validator.is_valid(record) for record in example_records(row.example)):
+            problems.append(f'{label}: {row.example} has no successful {"/".join(modes)} '
+                            f'record for {row.command!r} matching {row.definition}')
 
-    for root_name in ('aggregateSuccess', 'streamSuccess'):
-        for name in _refs(definitions.get(root_name, {})):
-            if name in ('baseEnvelope', 'aggregateSuccessEnvelope', 'streamSuccessEnvelope'):
-                continue
-            expected = set(_consts(definitions.get(name, {}), 'command'))
-            if claimed.get(name, set()) != expected:
-                problems.append(f'{REGISTRY}: {name} claims '
-                                f'{sorted(claimed.get(name, set()))}, schema pins {sorted(expected)}')
+    for name, by_command in sorted(schema.modes.items()):
+        referenced = set(by_command)
+        pinned = set(_consts(definitions.get(name, {}), 'command'))
+        if referenced != pinned:
+            problems.append(f'{REGISTRY}: {name} referenced by {sorted(referenced)}, schema pins {sorted(pinned)}')
+        actual = claimed.get(name, set())
+        if actual != referenced:
+            problems.append(f'{REGISTRY}: {name} claims {sorted(actual)}, schema references {sorted(referenced)}')
     for stream_type in sorted(streams - registered_types):
         problems.append(f'{REGISTRY}: stream record type {stream_type} is not registered')
     return problems
@@ -582,7 +568,7 @@ def check(root: Path, binary: Path | None = None) -> list[str]:
     sources = production_sources(root)
     published = published_codes(sources.values())
     try:
-        problems.extend(registry_problems(root, schema_set.merged_schema, load_jsonschema(), published, sources))
+        problems.extend(registry_problems(root, schema_set.registry, load_jsonschema(), published, sources))
     except CheckError as error:
         raise CheckError(f'{identity.schema_path}: {error}') from error
     problems.extend(example_problems(root, schema_set.validator, published))

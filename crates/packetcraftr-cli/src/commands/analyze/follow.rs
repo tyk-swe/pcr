@@ -28,7 +28,7 @@ impl crate::commands::Spec for Args {
             command: "follow",
             rust_types: &["crate::commands::analyze::follow::output::Report"],
             events: &[],
-            example: "examples/documents/output-follow-complete.json",
+            example: "examples/documents/output-follow-success.json",
         },
         PublishedType {
             definition: "followStreamSuccess",

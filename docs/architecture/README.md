@@ -72,6 +72,6 @@ The source scan follows explicit `crate`, `self`, and `super` references across 
 
 The coupling checker limits clock and entropy reads, dynamic field access, casts, cancellation polls, duplicate constants and codes, and crate root exports. Cargo prevents crate cycles and the current workflow checks schema examples, CLI output, native and portable builds, and selected critical mutations.
 
-The coupling and output-schema checks use the [same Rust source inventory](../../scripts/rust_source.py). Paths are relative to the repository. Test code and Cargo artifacts are excluded, but real modules named `target` remain in scope. The [output validator](../../scripts/check_output_schema.py) checks registered types against their defining modules and recognizes explicit stream implementations. It does not expand Rust macros or resolve arbitrary imports.
+The coupling and output-schema checks use the [same Rust source inventory](../../scripts/rust_source.py). Paths are relative to the repository. Test code and Cargo artifacts are excluded, but real modules named `target` remain in scope. The [output validator](../../scripts/check_output_schema.py) checks registered types against their defining modules and recognizes explicit stream implementations. Registry examples must match the row's command and success mode as well as the payload shape. It does not expand Rust macros or resolve arbitrary imports.
 
 The [task pool](tasks.md) tracks completed migrations, audited contracts, and proposals that need a compatibility review.

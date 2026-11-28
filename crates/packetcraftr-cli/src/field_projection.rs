@@ -17,6 +17,10 @@ use packetcraftr_core::{
     filter::{Context, FrameEvaluation, Projection, Requirements},
 };
 
+pub(crate) const DEFAULT_MAX_BYTES: usize = 16 * 1024 * 1024;
+pub(crate) const MAX_BYTES_HELP: &str =
+    "Maximum encoded projection data bytes across all rows (excluding envelopes)";
+
 pub(crate) struct Projector {
     projection: Projection,
     command: Command,

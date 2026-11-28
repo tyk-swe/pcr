@@ -6,6 +6,7 @@ use crate::command_options::{
     CaptureLimitsArgs, CompressionArgs, DecodeArgs, LongTimeoutArgs, ScopeArgs, TrafficBudgetArgs,
     TreeArgs,
 };
+use crate::field_projection;
 use packetcraftr_netio::capture::{TimestampPrecision, TimestampSource};
 
 pub(crate) const AFTER_LONG_HELP: &str = r"Live capture may require native features, dependencies, and privileges.
@@ -91,8 +92,7 @@ pub(crate) struct Args {
     /// Select a registered field per matched frame; repeat to preserve column order.
     #[arg(long = "field", value_name = "PATH", conflicts_with = "dissect")]
     pub(crate) fields: Vec<String>,
-    /// Maximum encoded projection data bytes across all rows (excluding envelopes).
-    #[arg(long, default_value_t = 16*1024*1024)]
+    #[arg(long, default_value_t = field_projection::DEFAULT_MAX_BYTES, help = field_projection::MAX_BYTES_HELP)]
     pub(crate) max_projection_bytes: usize,
     #[command(flatten)]
     pub(crate) decode: DecodeArgs,

@@ -7,6 +7,7 @@ use crate::command_options::{
     CompressionArgs, DecodeArgs, EpochBoundsArgs, FrameSelectionArgs, OfflineCaptureLimitsArgs,
     TreeArgs,
 };
+use crate::field_projection;
 
 pub(crate) const AFTER_LONG_HELP: &str = r"Examples:
   packetcraftr files read capture.pcapng --max-frames 100
@@ -44,8 +45,7 @@ pub(crate) struct Args {
     /// Select a registered field; repeat to preserve the requested column order.
     #[arg(long = "field", value_name = "PATH", conflicts_with_all = ["normalize", "dissect", "tree"])]
     pub(crate) fields: Vec<String>,
-    /// Maximum encoded projection data bytes across all rows (excluding envelopes).
-    #[arg(long, default_value_t = 16 * 1024 * 1024)]
+    #[arg(long, default_value_t = field_projection::DEFAULT_MAX_BYTES, help = field_projection::MAX_BYTES_HELP)]
     pub(crate) max_projection_bytes: usize,
 
     #[command(flatten)]

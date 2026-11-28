@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
 
+use crate::field::hex::decode_pairs;
+
 #[derive(Clone)]
 pub(super) struct Secret(pub(super) Vec<u8>);
 impl std::fmt::Debug for Secret {
@@ -95,14 +97,17 @@ impl KeyLog {
         let Some(label) = parts.next().and_then(Label::parse) else {
             return;
         };
-        let parsed = parts.next().and_then(unhex).and_then(|random| {
-            let random: [u8; 32] = random.try_into().ok()?;
-            let secret = parts.next().and_then(unhex)?;
-            if parts.next().is_some() || !matches!(secret.len(), 32 | 48) {
-                return None;
-            }
-            Some((random, Secret(secret)))
-        });
+        let parsed = parts
+            .next()
+            .and_then(|text| decode_pairs(text).ok())
+            .and_then(|random| {
+                let random: [u8; 32] = random.try_into().ok()?;
+                let secret = decode_pairs(parts.next()?).ok()?;
+                if parts.next().is_some() || !matches!(secret.len(), 32 | 48) {
+                    return None;
+                }
+                Some((random, Secret(secret)))
+            });
         let Some((random, secret)) = parsed else {
             result.rejected += 1;
             return;
@@ -133,32 +138,6 @@ impl KeyLog {
         self.bytes + self.partial.capacity()
     }
 }
-pub(super) fn unhex(input: &str) -> Option<Vec<u8>> {
-    if !input.len().is_multiple_of(2) {
-        return None;
-    }
-    input
-        .as_bytes()
-        .as_chunks::<2>()
-        .0
-        .iter()
-        .map(|b| {
-            let a = (b[0] as char).to_digit(16)?;
-            let c = (b[1] as char).to_digit(16)?;
-            Some((a * 16 + c) as u8)
-        })
-        .collect()
-}
-pub(super) fn hex(input: &[u8]) -> String {
-    use std::fmt::Write as _;
-    input
-        .iter()
-        .fold(String::with_capacity(input.len() * 2), |mut s, b| {
-            let _ = write!(s, "{b:02x}");
-            s
-        })
-}
-
 impl Default for KeyLog {
     fn default() -> Self {
         Self::new()

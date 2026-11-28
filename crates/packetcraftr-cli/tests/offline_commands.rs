@@ -217,6 +217,32 @@ fn raw_build_outputs_packet_bytes() {
 }
 
 #[test]
+fn raw_hex_accepts_separators_but_expression_hex_requires_digit_pairs() {
+    for recipe in [r#"raw(hex="0x00:80-Af")"#, r#"raw(bytes=hex("0080aF"))"#] {
+        let args = ["--output", "hex", "packet", "build", "--packet", recipe];
+        assert_eq!(assert_success(&run(&args), &args).trim(), "0080af");
+    }
+    let args = [
+        "--output",
+        "json",
+        "packet",
+        "build",
+        "--packet",
+        r#"raw(bytes=hex("00:80"))"#,
+    ];
+    let rejected = run(&args);
+    assert!(!rejected.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&rejected.stdout).unwrap();
+    assert!(
+        report["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("hex literal requires pairs"),
+        "{report}"
+    );
+}
+
+#[test]
 fn dns_capture_dissects_successfully() {
     let capture = capture_path("dns-response.pcap");
     let capture = capture.to_string_lossy().into_owned();

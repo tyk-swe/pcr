@@ -200,35 +200,10 @@ pub fn hex_digit_bytes(input: &str) -> usize {
 
 /// Parses hexadecimal raw bytes with optional `0x`, whitespace, colon, or dash separators.
 pub fn parse_hex(input: &str) -> Result<Bytes, crate::codec::Error> {
-    let protocol = Raw::ID;
     let compact = hex_digits(input).collect::<String>();
-    if compact.len() % 2 != 0 {
-        return Err(crate::codec::Error::invalid(
-            protocol,
-            "hex value must contain an even number of digits",
-        ));
-    }
-    let pairs = compact.as_bytes().as_chunks::<2>().0;
-    let mut bytes = Vec::with_capacity(pairs.len());
-    for (index, &[high, low]) in pairs.iter().enumerate() {
-        let (Some(high), Some(low)) = (hex_nibble(high), hex_nibble(low)) else {
-            return Err(crate::codec::Error::invalid(
-                protocol,
-                format!("invalid hex at byte {index}"),
-            ));
-        };
-        bytes.push((high << 4) | low);
-    }
-    Ok(Bytes::from(bytes))
-}
-
-fn hex_nibble(value: u8) -> Option<u8> {
-    match value {
-        b'0'..=b'9' => Some(value - b'0'),
-        b'a'..=b'f' => Some(value - b'a' + 10),
-        b'A'..=b'F' => Some(value - b'A' + 10),
-        _ => None,
-    }
+    field::hex::decode_pairs(&compact)
+        .map(Bytes::from)
+        .map_err(|error| crate::codec::Error::invalid(Raw::ID, error.to_string()))
 }
 
 #[derive(Clone, Copy, Debug, Default)]

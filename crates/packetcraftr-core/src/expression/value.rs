@@ -107,28 +107,11 @@ fn parse_byte_literal(
     if !hexadecimal {
         return Ok(field::Value::Bytes(text.into()));
     }
-    let bytes = decode_hex_pairs(&text).ok_or_else(|| Error::Syntax {
+    let bytes = field::hex::decode_pairs(&text).map_err(|_| Error::Syntax {
         offset: text_base,
         message: "hex literal requires pairs of hexadecimal digits".to_owned(),
     })?;
     Ok(field::Value::Bytes(bytes.into()))
-}
-
-fn decode_hex_pairs(text: &str) -> Option<Vec<u8>> {
-    let (pairs, remainder) = text.as_bytes().as_chunks::<2>();
-    if !remainder.is_empty() {
-        return None;
-    }
-    let digit = |byte: u8| {
-        char::from(byte)
-            .to_digit(16)
-            .and_then(|value| u8::try_from(value).ok())
-    };
-    let mut bytes = Vec::with_capacity(pairs.len());
-    for &[high, low] in pairs {
-        bytes.push((digit(high)? << 4) | digit(low)?);
-    }
-    Some(bytes)
 }
 
 fn parse_object(

@@ -24,3 +24,4 @@ The baseline is `d09e9091c`. The isolated worktree started from the current defa
 | Batch | Scope | Evidence |
 | --- | --- | --- |
 | Signed frame timestamps | Use the same Unix time split for filtering, capture writing, and CLI output. | `packetcraftr --output ndjson files read negative.pcapng` reported `(-1, 0)` and `(-1, 250000000)` for frames at -1 and -0.75 seconds. The NDJSON matched the baseline byte for byte. The read, rewrite, and normalization regression passed. |
+| Shared hexadecimal byte pairs | Centralize strict pair decoding and compact printing while raw input keeps prefixes and separators. | `packetcraftr --output hex packet build --packet 'raw(hex="0x00:80-Af")'` printed `0080af`, matching the compact expression form. `raw(bytes=hex("00:80"))` was rejected with `hex literal requires pairs of hexadecimal digits`. The QUIC analysis output matched the pre-change baseline byte for byte. Both focused tests passed. |

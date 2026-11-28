@@ -153,19 +153,13 @@ mod hex {
     }
 
     pub(super) fn decode(value: &str) -> Result<Bytes, &'static str> {
-        if value.len() > MAX_PAYLOAD_BYTES * 2
-            || !value.len().is_multiple_of(2)
-            || !value.bytes().all(|byte| byte.is_ascii_hexdigit())
-        {
-            return Err("expected bounded even-length hexadecimal bytes");
+        const INVALID: &str = "expected bounded even-length hexadecimal bytes";
+        if value.len() > MAX_PAYLOAD_BYTES * 2 {
+            return Err(INVALID);
         }
-        Ok((0..value.len())
-            .step_by(2)
-            .map(|index| {
-                u8::from_str_radix(&value[index..index + 2], 16).expect("validated hexadecimal")
-            })
-            .collect::<Vec<_>>()
-            .into())
+        crate::field::hex::decode_pairs(value)
+            .map(Bytes::from)
+            .map_err(|_| INVALID)
     }
 }
 

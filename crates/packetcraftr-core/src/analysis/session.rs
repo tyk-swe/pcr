@@ -207,6 +207,33 @@ pub struct SessionOptions<'a> {
     pub limits: super::Limits,
 }
 
+impl<'a> From<SessionOptions<'a>> for Options<'a> {
+    /// Uses the default pipeline plan without TCP events or source tracking.
+    fn from(options: SessionOptions<'a>) -> Self {
+        let SessionOptions {
+            deadline,
+            cancellation,
+            filter,
+            stream,
+            time_bounds,
+            ip_overlap,
+            limits,
+        } = options;
+        Self {
+            plan: Plan::default(),
+            track_sources: false,
+            tcp_events: false,
+            deadline,
+            cancellation,
+            filter,
+            stream,
+            time_bounds,
+            ip_overlap,
+            limits,
+        }
+    }
+}
+
 pub struct Session<'a, C> {
     collector: C,
     options: Options<'a>,
@@ -219,15 +246,9 @@ impl<'a, C: Collector> Session<'a, C> {
         let needs = collector.needs();
         let options = Options {
             plan: Plan::for_collector(needs, options.filter, options.stream),
-            deadline: options.deadline,
             track_sources: needs.track_sources,
-            cancellation: options.cancellation,
-            filter: options.filter,
-            stream: options.stream,
-            time_bounds: options.time_bounds,
             tcp_events: needs.tcp_events,
-            ip_overlap: options.ip_overlap,
-            limits: options.limits,
+            ..Options::from(options)
         };
         Self {
             collector,

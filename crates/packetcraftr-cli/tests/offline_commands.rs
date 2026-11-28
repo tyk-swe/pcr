@@ -2704,14 +2704,25 @@ mod stalled_inputs {
     fn piped_capture_publishes_each_frame_before_its_input_ends() {
         let capture =
             std::fs::read(super::capture_path("dns-response.pcap")).expect("read capture");
-        for format in ["ndjson", "text"] {
-            let args = ["--output", format, "files", "read", "-"];
+        for (format, options) in [
+            ("ndjson", [].as_slice()),
+            ("text", [].as_slice()),
+            ("text", ["--field", "frame.len"].as_slice()),
+        ] {
+            let mut args = vec!["--output", format, "files", "read", "-"];
+            args.extend_from_slice(options);
             let (mut child, mut stdin) = spawn_with_open_stdin(&args);
             let stdout = child.stdout.take().expect("piped stdout");
             let (lines, first) = std::sync::mpsc::channel();
+            let projected = !options.is_empty();
             let reader = std::thread::spawn(move || {
                 let mut stdout = BufReader::new(stdout);
                 let mut line = String::new();
+                if projected {
+                    stdout.read_line(&mut line).expect("read projection header");
+                    assert_eq!(line, "frame.len\n");
+                    line.clear();
+                }
                 stdout.read_line(&mut line).expect("read first record");
                 lines.send(line).expect("receive first record");
                 std::io::copy(&mut stdout, &mut std::io::sink()).expect("drain stdout");
@@ -2748,7 +2759,7 @@ mod stalled_inputs {
             &frame,
         ]
         .concat();
-        let frames = record.repeat(2000);
+        let frames = record.repeat(3000);
         let tail: &[u8] = if truncated { &record[..30] } else { &[] };
         [header.as_slice(), &frames, tail].concat()
     }
@@ -2801,9 +2812,21 @@ mod stalled_inputs {
         let file = tempfile::NamedTempFile::new().expect("create capture");
         std::fs::write(file.path(), synthetic_pcap(false)).expect("write capture");
         let path = file.path().to_string_lossy();
-        for format in ["text", "ndjson"] {
-            let writes = count_stdout_writes(&["--output", format, "files", "read", path.as_ref()]);
-            assert!((1..200).contains(&writes), "{format} took {writes} writes");
+        for (format, options) in [
+            ("text", [].as_slice()),
+            ("ndjson", [].as_slice()),
+            (
+                "text",
+                ["--field", "frame.number", "--field", "frame.len"].as_slice(),
+            ),
+        ] {
+            let mut args = vec!["--output", format, "files", "read", path.as_ref()];
+            args.extend_from_slice(options);
+            let writes = count_stdout_writes(&args);
+            assert!(
+                (1..200).contains(&writes),
+                "{options:?} {format} took {writes} writes"
+            );
         }
     }
 
@@ -2826,10 +2849,19 @@ mod stalled_inputs {
             let file = tempfile::NamedTempFile::new().expect("create capture");
             std::fs::write(file.path(), &capture).expect("write capture");
             let path = file.path().to_string_lossy();
-            for format in ["text", "ndjson"] {
-                let piped =
-                    read_piped(&["--output", format, "files", "read", "-"], capture.clone());
-                let regular = super::run(&["--output", format, "files", "read", path.as_ref()]);
+            for (format, options) in [
+                ("text", [].as_slice()),
+                ("ndjson", [].as_slice()),
+                (
+                    "text",
+                    ["--field", "frame.number", "--field", "frame.len"].as_slice(),
+                ),
+            ] {
+                let mut args = vec!["--output", format, "files", "read", "-"];
+                args.extend_from_slice(options);
+                let piped = read_piped(&args, capture.clone());
+                args[4] = path.as_ref();
+                let regular = super::run(&args);
                 assert_eq!(
                     String::from_utf8_lossy(&regular.stdout),
                     String::from_utf8_lossy(&piped.stdout),

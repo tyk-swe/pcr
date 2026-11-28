@@ -8,7 +8,7 @@ Candidates need a real caller and contract audit before implementation. Keep eac
 | Published command metadata | [Parser and output consume one command catalog](decisions/0003-share-command-declarations.md). The final CLI layer exception is gone. | Implemented, review pending |
 | Layer graph | [The layer checker rejects undocumented cycles](decisions/0004-enforce-module-cycle-boundaries.md) and exports the dependency graph from the same scan. | Implemented, review pending |
 | CLI input sources | [Input owns platform opening and both stdin rules](decisions/0005-centralize-cli-input-sources.md). Bounded readers share the capped read primitive and apply the relevant input contract. | Implemented, review pending |
-| CLI output channels | Compare text, JSON, NDJSON, and staged-file paths. Check format-specific byte budgets, deadlines, and persistence guarantees. | Next |
+| CLI output channels | [The terminal scopes capture text batching](decisions/0006-scope-text-output-batches.md). JSON, NDJSON, and staged files retain their separate publication contracts. | Implemented, review pending |
 | Offline analysis | Check how collectors apply a session, time and scope selection, provenance, and resource accounting. Review any collector-specific reimplementation before adopting a shared primitive. | Investigate |
 | Capture files | Trace selection, normalization, merge, and rewrite through record and metadata ownership. Keep original timestamp precision and section/interface scope where promised. | Investigate |
 | Native and workflow I/O | Inventory providers, timeout and retry loops, worker leases, cancellation boundaries, and the exact safeguards that own each path. Keep admission and spending with policy and operation owners. | Investigate |

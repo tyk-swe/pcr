@@ -195,7 +195,7 @@ fn emit_frame<W: io::Write>(
             return projector.emit(
                 source_frame,
                 &core::filter::Context::frame(&decoded, source_frame),
-                stream,
+                invocation,
             );
         }
         return match format {

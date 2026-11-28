@@ -147,7 +147,7 @@ pub(super) fn run(
             &invocation.control,
         );
     }
-    let mut run = || {
+    let mut run = |invocation: &crate::invocation::Invocation| {
         records::run(
             invocation,
             &mut reader,
@@ -161,7 +161,7 @@ pub(super) fn run(
     if format == Format::Text && stream.batches_records() {
         return crate::terminal::batched(invocation, run);
     }
-    run()
+    run(invocation)
 }
 
 fn validate_dissect_format(dissect: bool, format: Format) -> Result<(), CliError> {

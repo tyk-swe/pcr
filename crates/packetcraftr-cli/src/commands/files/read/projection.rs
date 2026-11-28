@@ -6,11 +6,10 @@ use packetcraftr_core as core;
 use super::arguments::Args;
 use crate::errors::CliError;
 use crate::field_projection::Projector;
-use crate::output::contract::Command;
+use crate::output::contract::{Command, Format};
 
 pub(super) fn run(invocation: &crate::invocation::Invocation, args: Args) -> Result<(), CliError> {
     let format = invocation.format;
-    let stream = &invocation.output;
     let limits = args.limits.limits()?;
     let bounds = args.epoch.resolve()?;
     let selection = args.selection.resolve()?;
@@ -36,12 +35,8 @@ pub(super) fn run(invocation: &crate::invocation::Invocation, args: Args) -> Res
         .transpose()?;
     let mut reader =
         crate::input::open_capture(&invocation.control, &invocation.output, &args.path, limits)?;
-    let batch =
-        invocation.format == crate::output::contract::Format::Text && stream.batches_records();
-    if batch {
-        projector.batch_text(invocation);
-    }
-    let run = || {
+    let batch = format == Format::Text && invocation.output.batches_records();
+    let run = |invocation: &crate::invocation::Invocation| {
         let mut frames = 0u64;
         let mut bytes = 0u64;
         if projector.requirements().stream_index
@@ -77,7 +72,7 @@ pub(super) fn run(invocation: &crate::invocation::Invocation, args: Args) -> Res
                         .unwrap_or(true);
                     if kept {
                         projector
-                            .emit(record.number, &context, stream)
+                            .emit(record.number, &context, invocation)
                             .map_err(CliError::into_boundary_error)?;
                     }
                     Ok(())
@@ -112,13 +107,13 @@ pub(super) fn run(invocation: &crate::invocation::Invocation, args: Args) -> Res
                 {
                     continue;
                 }
-                projector.emit_frame(frames, &evaluation, stream)?;
+                projector.emit_frame(frames, &evaluation, invocation)?;
             }
         }
-        projector.finish(invocation, frames, bytes, stream)
+        projector.finish(invocation, frames, bytes)
     };
     if batch {
         return crate::terminal::batched_raw(invocation, run);
     }
-    run()
+    run(invocation)
 }

@@ -149,14 +149,9 @@ pub(super) fn run(
     };
     if let Some(mut projector) = projector {
         if kept {
-            projector.emit(1, &context, stream)?;
+            projector.emit(1, &context, invocation)?;
         }
-        return projector.finish(
-            invocation,
-            1,
-            u64::from(decoded.frame.captured_length()),
-            stream,
-        );
+        return projector.finish(invocation, 1, u64::from(decoded.frame.captured_length()));
     }
     // An unmatched frame keeps byte-oriented stdout empty on success.
     if !kept && !matches!(format, Format::Json) {
